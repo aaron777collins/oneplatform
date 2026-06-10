@@ -19,9 +19,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@oneplatform/core": "workspace:*"
+    "@oneplatform/core": "workspace:*",
+    "hono": "^4.0.0",
+    "ioredis": "^5.0.0",
+    "pg": "^8.0.0",
+    "semver": "^7.6.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "typescript": "*"
+    "@types/node": "*",
+    "@types/pg": "*",
+    "@types/semver": "*",
+    "typescript": "*",
+    "vitest": "*"
   }
 }

@@ -90,10 +90,31 @@ importers:
       '@oneplatform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      hono:
+        specifier: ^4.0.0
+        version: 4.12.25
+      ioredis:
+        specifier: ^5.0.0
+        version: 5.11.1
+      pg:
+        specifier: ^8.0.0
+        version: 8.21.0
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
+      '@types/node':
+        specifier: '*'
+        version: 20.19.42
+      '@types/pg':
+        specifier: '*'
+        version: 8.20.0
       typescript:
         specifier: '*'
         version: 5.9.3
+      vitest:
+        specifier: '*'
+        version: 1.6.1(@types/node@20.19.42)
 
   services/auth:
     dependencies:
@@ -131,10 +152,31 @@ importers:
       '@oneplatform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      hono:
+        specifier: ^4.0.0
+        version: 4.12.25
+      lru-cache:
+        specifier: ^10.0.0
+        version: 10.4.3
+      pg:
+        specifier: ^8.0.0
+        version: 8.21.0
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
+      '@types/node':
+        specifier: '*'
+        version: 20.19.42
+      '@types/pg':
+        specifier: '*'
+        version: 8.20.0
       typescript:
         specifier: '*'
         version: 5.9.3
+      vitest:
+        specifier: '*'
+        version: 1.6.1(@types/node@20.19.42)
 
   services/gateway:
     dependencies:
@@ -277,20 +319,77 @@ importers:
       '@oneplatform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.78.0
+      cron-parser:
+        specifier: ^4.9.0
+        version: 4.9.0
+      hono:
+        specifier: ^4.0.0
+        version: 4.12.25
+      ioredis:
+        specifier: ^5.0.0
+        version: 5.11.1
+      jsonata:
+        specifier: ^2.0.0
+        version: 2.2.1
+      pg:
+        specifier: ^8.0.0
+        version: 8.21.0
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
+      '@types/node':
+        specifier: '*'
+        version: 20.19.42
+      '@types/pg':
+        specifier: '*'
+        version: 8.20.0
       typescript:
         specifier: '*'
         version: 5.9.3
+      vitest:
+        specifier: '*'
+        version: 1.6.1(@types/node@20.19.42)
 
   services/plugin:
     dependencies:
       '@oneplatform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      hono:
+        specifier: ^4.0.0
+        version: 4.12.25
+      ioredis:
+        specifier: ^5.0.0
+        version: 5.11.1
+      pg:
+        specifier: ^8.0.0
+        version: 8.21.0
+      semver:
+        specifier: ^7.6.0
+        version: 7.8.4
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
+      '@types/node':
+        specifier: '*'
+        version: 20.19.42
+      '@types/pg':
+        specifier: '*'
+        version: 8.20.0
+      '@types/semver':
+        specifier: '*'
+        version: 7.7.1
       typescript:
         specifier: '*'
         version: 5.9.3
+      vitest:
+        specifier: '*'
+        version: 1.6.1(@types/node@20.19.42)
 
 packages:
 
@@ -709,6 +808,9 @@ packages:
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
+
+  '@types/semver@7.7.1':
+    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
   '@types/uuid@11.0.0':
     resolution: {integrity: sha512-HVyk8nj2m+jcFRNazzqyVKiZezyhDKrGUA3jlEcg/nZ6Ms+qHwocba1Y/AaVaznJTAM9xpdFSh+ptbNrhOGvZA==}
@@ -1183,6 +1285,10 @@ packages:
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
 
+  jsonata@2.2.1:
+    resolution: {integrity: sha512-xd1uwUrKeIcJbsWhaoS3qAX4Ea8m0Mw0G5nlnAQvPT7TbZ5qaPdzBVTQia9KfyuyQm+nenfyjvzUDTRYHsC2sw==}
+    engines: {node: '>= 8'}
+
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
 
@@ -1209,6 +1315,9 @@ packages:
 
   loupe@2.3.7:
     resolution: {integrity: sha512-zSMINGVYkdpYSOBmLi0D1Uo7JU9nVdQKrHxC8eYlV+9YKK9WePqAlL7lSlorG/U2Fw1w0hTBmaa/jrQ3UbPHtA==}
+
+  lru-cache@10.4.3:
+    resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
   lru-cache@11.5.1:
     resolution: {integrity: sha512-RPimw/7aMdv2oqRrxKwvZXcPfwBrn/JZ2xYcY9Hus/6LaS3VOAKVWKWgNLCFSiOm1ESXinjsDlidVU7JlnCN2A==}
@@ -2015,6 +2124,8 @@ snapshots:
       pg-protocol: 1.14.0
       pg-types: 2.2.0
 
+  '@types/semver@7.7.1': {}
+
   '@types/uuid@11.0.0':
     dependencies:
       uuid: 11.1.1
@@ -2555,6 +2666,8 @@ snapshots:
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
+  jsonata@2.2.1: {}
+
   keyv@4.5.4:
     dependencies:
       json-buffer: 3.0.1
@@ -2582,6 +2695,8 @@ snapshots:
   loupe@2.3.7:
     dependencies:
       get-func-name: 2.0.2
+
+  lru-cache@10.4.3: {}
 
   lru-cache@11.5.1: {}
 
