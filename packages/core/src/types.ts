@@ -1,5 +1,3 @@
-import type { Context } from "hono";
-
 export interface ApiResponse<T> {
   data: T;
 }
@@ -69,7 +67,21 @@ export enum ServiceName {
   Plugin = "plugin-service",
 }
 
+export interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: number;
+  policy: "global" | "per-tenant" | "per-api-key" | "webhook";
+}
+
+export interface DeprecationInfo {
+  sunset: Date;
+  successorUrl: string;
+}
+
 export type AppVariables = {
   user: UserContext;
   requestId: string;
+  rateLimitInfo?: RateLimitInfo;
+  deprecationInfo?: DeprecationInfo;
 };

@@ -25,8 +25,10 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
     headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
     headers.set("Access-Control-Expose-Headers", EXPOSE_HEADERS);
     headers.set("Access-Control-Max-Age", MAX_AGE);
-    // Allow credentials (cookies) — only valid with a specific origin, never *
     headers.set("Access-Control-Allow-Credentials", "true");
+    // Vary: Origin required per RFC 7234 — without it, intermediary caches may
+    // serve a response with one origin's CORS headers to a different origin.
+    headers.set("Vary", "Origin");
   }
 
   return createMiddleware(async (c, next) => {

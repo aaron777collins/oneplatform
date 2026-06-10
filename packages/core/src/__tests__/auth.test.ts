@@ -207,3 +207,43 @@ describe("authMiddleware — public routes", () => {
     expect(body.error.code).toBe("UNAUTHORIZED");
   });
 });
+
+describe("authMiddleware — /internal/* bypass", () => {
+  it("skips user auth for /internal/* paths (service-to-service via serviceAuthMiddleware)", async () => {
+    const redis = makeMockRedis();
+    const validateApiKey = makeMockApiKeyValidator("", null);
+    const app = new Hono<{ Variables: { user: unknown; requestId: string } }>();
+    app.use("*", (c, next) => { c.set("requestId", "req-test"); return next(); });
+    app.use("*", authMiddleware({
+      jwtSecret: JWT_SECRET,
+      // @ts-expect-error mock
+      redis,
+      validateApiKey,
+      publicRoutes: [],
+    }));
+    app.get("/internal/auth/validate", (c) => c.json({ ok: true }));
+    const res = await app.request("/internal/auth/validate");
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("authMiddleware — jti enforcement", () => {
+  it("rejects JWT tokens without a jti claim", async () => {
+    const redis = makeMockRedis();
+    const validateApiKey = makeMockApiKeyValidator("", null);
+    const token = await new SignJWT({
+      sub: "user-123", tid: "tenant-abc", roles: ["viewer"], scopes: ["data:read"],
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime("15m")
+      .sign(secretBytes);
+    const app = buildApp({ jwtSecret: JWT_SECRET, redis, validateApiKey });
+    const res = await app.request("/protected", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.message).toContain("jti");
+  });
+});

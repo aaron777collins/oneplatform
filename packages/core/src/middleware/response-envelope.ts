@@ -13,6 +13,11 @@ export function responseEnvelopeMiddleware() {
   return createMiddleware(async (c, next) => {
     await next();
 
+    // Health endpoints return unwrapped JSON per spec §6 — Docker Compose
+    // probes and the Gateway parse these directly.
+    const path = new URL(c.req.url).pathname;
+    if (path === "/healthz" || path === "/readyz") return;
+
     // Only wrap JSON responses with a 2xx status
     const contentType = c.res.headers.get("Content-Type") ?? "";
     if (!contentType.includes("application/json")) return;

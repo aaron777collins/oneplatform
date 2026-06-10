@@ -1,37 +1,39 @@
 import { createMiddleware } from "hono/factory";
 import { randomBytes } from "crypto";
 
-// UUID v7 encodes a sortable millisecond timestamp in the first 48 bits.
-// This lets ops sort log lines by requestId chronologically without a separate
-// timestamp — critical when tracing distributed requests (spec §12, W3C Trace Context).
+// UUID v7 (RFC 9562): 48-bit Unix timestamp (ms) in the high bits followed by
+// random fill. Lexicographic sorting is chronological because the most
+// significant bits carry the most significant time bits.
 function uuidV7(): string {
-  const now = BigInt(Date.now());
-  const bytes = randomBytes(10);
+  const now = Date.now();
+  const rand = randomBytes(10);
 
-  // 48-bit timestamp (ms precision)
-  const timeLow = Number(now & BigInt(0xffffffff));
-  const timeMid = Number((now >> BigInt(32)) & BigInt(0xffff));
+  // Bytes 0-5: 48-bit timestamp (big-endian, most significant first)
+  const timeHigh = Math.floor(now / 0x100000000) & 0xffff;
+  const timeLow = now >>> 0;
 
-  // Version nibble = 7
-  const timeHighAndVersion = (Number((now >> BigInt(48)) & BigInt(0x0fff)) | 0x7000);
-
-  // variant bits: 10xx xxxx (RFC 4122 variant 1)
-  // Non-null assertions are safe: randomBytes(10) always returns exactly 10 bytes.
+  // Byte 6: version nibble (0111) + top 4 random bits
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const clockSeq = (bytes[0]! & 0x3f) | 0x80;
+  const ver = 0x70 | (rand[0]! & 0x0f);
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const clockSeqLow = bytes[1]!;
+  const randHigh = rand[1]!;
 
-  const node = bytes.subarray(2, 8);
+  // Byte 8: variant bits 10xx xxxx
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const variant = 0x80 | (rand[2]! & 0x3f);
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const randLow = rand[3]!;
 
-  const hex = (n: number, width: number) => n.toString(16).padStart(width, "0");
+  const node = rand.subarray(4, 10);
+
+  const hex = (n: number, w: number) => n.toString(16).padStart(w, "0");
   const nodeHex = Array.from(node).map((b) => hex(b ?? 0, 2)).join("");
 
   return [
-    hex(timeLow, 8),
-    hex(timeMid, 4),
-    hex(timeHighAndVersion, 4),
-    hex(clockSeq, 2) + hex(clockSeqLow, 2),
+    hex(timeHigh, 4) + hex(timeLow >>> 16, 4),
+    hex(timeLow & 0xffff, 4),
+    hex(ver, 2) + hex(randHigh, 2),
+    hex(variant, 2) + hex(randLow, 2),
     nodeHex,
   ].join("-");
 }

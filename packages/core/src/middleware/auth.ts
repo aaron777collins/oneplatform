@@ -42,6 +42,14 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       return;
     }
 
+    // /internal/* routes use service-to-service auth (Ed25519 JWT via
+    // serviceAuthMiddleware), not user auth. Service calls carry only
+    // X-Service-Token — no Bearer or X-API-Key.
+    if (path.startsWith("/internal/")) {
+      await next();
+      return;
+    }
+
     const requestId: string = c.var["requestId"] ?? "";
 
     // Try Bearer JWT first
@@ -60,15 +68,22 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
         );
       }
 
+      // Spec §4: all access tokens MUST carry jti. Reject tokens without jti
+      // to prevent irrevocable token bypass via the revocation blocklist.
+      if (!claims.jti) {
+        return c.json(
+          { error: { code: "UNAUTHORIZED", message: "Token missing required jti claim.", requestId } },
+          401
+        );
+      }
+
       // Check Redis revocation blocklist — every request, O(1) (spec §4 JWT Strategy)
-      if (claims.jti) {
-        const revoked = await config.redis.exists(`revocation:${claims.jti}`);
-        if (revoked) {
-          return c.json(
-            { error: { code: "UNAUTHORIZED", message: "Token has been revoked.", requestId } },
-            401
-          );
-        }
+      const revoked = await config.redis.exists(`revocation:${claims.jti}`);
+      if (revoked) {
+        return c.json(
+          { error: { code: "UNAUTHORIZED", message: "Token has been revoked.", requestId } },
+          401
+        );
       }
 
       // Unverified users: downgrade to viewer-only, preserve emailVerified=false flag

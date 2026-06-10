@@ -18,6 +18,8 @@ export type {
   PlatformEvent,
   DataEnvelope,
   AppVariables,
+  RateLimitInfo,
+  DeprecationInfo,
 } from "./types.js";
 export { ServiceName } from "./types.js";
 
@@ -29,6 +31,7 @@ export {
   UnauthorizedError,
   ForbiddenError,
   InsufficientScopeError,
+  PermissionDeniedError,
   NotFoundError,
   EntityNotFoundError,
   ConflictError,
@@ -113,7 +116,6 @@ export { serviceAuthMiddleware } from "./middleware/service-auth.js";
 export type { ServiceAuthConfig } from "./middleware/service-auth.js";
 export { responseEnvelopeMiddleware } from "./middleware/response-envelope.js";
 export { errorHandlerMiddleware } from "./middleware/error-handler.js";
+export type { ErrorHandlerConfig } from "./middleware/error-handler.js";
 export { rateLimitHeadersMiddleware } from "./middleware/rate-limit-headers.js";
-export type { RateLimitInfo } from "./middleware/rate-limit-headers.js";
 export { deprecationHeadersMiddleware } from "./middleware/deprecation-headers.js";
-export type { DeprecationInfo } from "./middleware/deprecation-headers.js";

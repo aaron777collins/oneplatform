@@ -49,6 +49,11 @@ export class InsufficientScopeError extends AppError {
   readonly statusCode = 403;
 }
 
+export class PermissionDeniedError extends AppError {
+  readonly code = "PERMISSION_DENIED" as const;
+  readonly statusCode = 403;
+}
+
 export class NotFoundError extends AppError {
   readonly code = "NOT_FOUND" as const;
   readonly statusCode = 404;

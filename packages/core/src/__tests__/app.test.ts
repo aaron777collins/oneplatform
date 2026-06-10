@@ -137,8 +137,8 @@ describe("createApp() integration", () => {
     const res = await app.request("/healthz");
     expect(res.status).toBe(200);
     const body = await res.json();
-    // Response envelope wraps successful JSON in { data: T }
-    expect(body.data.status).toBe("ok");
+    // Health endpoints are NOT wrapped in { data: T } — Docker probes parse them directly
+    expect(body.status).toBe("ok");
   });
 
   it("passes 204 No Content through without wrapping", async () => {

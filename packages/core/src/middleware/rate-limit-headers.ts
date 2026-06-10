@@ -1,22 +1,13 @@
 import { createMiddleware } from "hono/factory";
+import type { RateLimitInfo } from "../types.js";
 
-export interface RateLimitInfo {
-  limit: number;
-  remaining: number;
-  // Unix epoch seconds at which the window resets
-  reset: number;
-  policy: "global" | "per-tenant" | "per-api-key" | "webhook";
-}
+export type { RateLimitInfo };
 
-// rateLimitHeadersMiddleware appends X-RateLimit-* headers to every response.
-// The Gateway sets c.var.rateLimitInfo after running its sliding-window check.
-// Other services that don't rate-limit leave it unset, and no headers are added.
-// Retry-After is set when remaining=0 so clients know when to retry (spec §6).
 export function rateLimitHeadersMiddleware() {
   return createMiddleware(async (c, next) => {
     await next();
 
-    const info = (c.var as { rateLimitInfo?: RateLimitInfo }).rateLimitInfo;
+    const info = c.var["rateLimitInfo"] as RateLimitInfo | undefined;
     if (!info) return;
 
     c.header("X-RateLimit-Limit", String(info.limit));

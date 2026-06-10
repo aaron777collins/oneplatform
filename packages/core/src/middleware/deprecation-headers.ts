@@ -1,20 +1,13 @@
 import { createMiddleware } from "hono/factory";
+import type { DeprecationInfo } from "../types.js";
 
-export interface DeprecationInfo {
-  // Date when the endpoint will be removed (RFC 8594 Sunset)
-  sunset: Date;
-  // URL of the replacement endpoint (links to API docs for new version)
-  successorUrl: string;
-}
+export type { DeprecationInfo };
 
-// deprecationHeadersMiddleware appends RFC 8594 headers to responses for
-// deprecated endpoints. Routes set c.var.deprecationInfo to opt in.
-// Headers: Deprecation, Sunset, Link (spec §6 API Versioning and Deprecation).
 export function deprecationHeadersMiddleware() {
   return createMiddleware(async (c, next) => {
     await next();
 
-    const info = (c.var as { deprecationInfo?: DeprecationInfo }).deprecationInfo;
+    const info = c.var["deprecationInfo"] as DeprecationInfo | undefined;
     if (!info) return;
 
     // RFC 8594 Deprecation header — simple boolean value
