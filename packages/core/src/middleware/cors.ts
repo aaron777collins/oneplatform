@@ -1,0 +1,66 @@
+import { createMiddleware } from "hono/factory";
+import type { MiddlewareHandler } from "hono";
+
+export interface CorsConfig {
+  allowedOrigins: string[];
+}
+
+const ALLOWED_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+const ALLOWED_HEADERS = "Authorization, Content-Type, X-API-Key, X-Requested-With";
+// Expose rate-limit headers + request ID to browser apps (spec §6 CORS Policy)
+const EXPOSE_HEADERS =
+  "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-RateLimit-Policy, X-OnePlatform-Request-ID";
+const MAX_AGE = "86400";
+
+// corsMiddleware enforces the OP_ALLOWED_ORIGINS allowlist.
+// Requests from unknown origins return 403 ORIGIN_NOT_ALLOWED rather than a
+// normal CORS failure. This prevents leaking endpoint existence to attackers
+// who probe from untrusted origins (spec §6 CORS Policy).
+export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
+  const originSet = new Set(config.allowedOrigins);
+
+  function setCorsHeaders(origin: string, headers: Headers): void {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Methods", ALLOWED_METHODS);
+    headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
+    headers.set("Access-Control-Expose-Headers", EXPOSE_HEADERS);
+    headers.set("Access-Control-Max-Age", MAX_AGE);
+    // Allow credentials (cookies) — only valid with a specific origin, never *
+    headers.set("Access-Control-Allow-Credentials", "true");
+  }
+
+  return createMiddleware(async (c, next) => {
+    const origin = c.req.header("Origin");
+
+    // No Origin header = not a browser cross-origin request (CLI, server SDK, etc.)
+    if (!origin) {
+      await next();
+      return;
+    }
+
+    if (!originSet.has(origin)) {
+      return c.json(
+        {
+          error: {
+            code: "ORIGIN_NOT_ALLOWED",
+            message: `Origin '${origin}' is not permitted.`,
+            requestId: c.var["requestId"] ?? "",
+          },
+        },
+        403
+      );
+    }
+
+    if (c.req.method === "OPTIONS") {
+      // Preflight: respond with headers and terminate — no further processing
+      const res = new Response(null, { status: 204 });
+      setCorsHeaders(origin, res.headers);
+      return res;
+    }
+
+    await next();
+
+    // Set CORS headers on the actual response after route handler runs
+    setCorsHeaders(origin, c.res.headers);
+  });
+}
