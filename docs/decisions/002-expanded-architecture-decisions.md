@@ -115,6 +115,8 @@ The Gateway Service is the single subscriber to all event channels (`PSUBSCRIBE 
 
 **Why Gateway Service owns delivery:** The Gateway Service already has BullMQ access, is the external boundary, owns rate limiting, and is the appropriate service for outbound HTTP. Adding webhook delivery to the Gateway avoids adding a new service or giving another service external HTTP access. The service RBAC matrix (Decision 19) does not change — no new inter-service calls are introduced.
 
+**Redis ACL update:** The Gateway Service's Redis ACL must be extended to include: `~webhook:* &events:*` (key prefix for webhook delivery queues and pub/sub channel subscription for events). This extends the existing Gateway ACL from Decision 5 (`~ratelimit:* ~gateway:*`).
+
 #### Webhook Registration API
 
 ```
@@ -165,6 +167,15 @@ The webhook secret is stored as a bcrypt hash in Postgres (`gateway.webhooks` ta
 
 **URL validation:** On registration, the Gateway Service performs a connectivity check by sending a synthetic `POST` to the URL with a JSON body `{"test": true, "eventType": "webhook.registered"}`. If the URL returns anything other than a 2xx within 5 seconds, the registration fails with a descriptive error. The user must fix the endpoint before registration succeeds. This prevents accumulating dead webhooks silently.
 
+**SSRF Prevention:** Before any connectivity check or delivery, the Gateway validates the webhook URL against:
+1. Protocol MUST be HTTPS (HTTP allowed only when `OP_WEBHOOK_ALLOW_HTTP=true`, intended for local dev only)
+2. Hostname MUST NOT resolve to a private IP range: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+3. Hostname MUST NOT resolve to loopback: 127.0.0.0/8, ::1
+4. Hostname MUST NOT resolve to link-local: 169.254.0.0/16 (blocks AWS/GCP metadata endpoints)
+5. Hostname MUST NOT resolve to Docker internal networks: container names and Docker DNS are rejected
+6. DNS resolution is performed by the Gateway and the resolved IP is checked — not just the hostname string (prevents DNS rebinding)
+7. These checks apply to BOTH registration validation AND delivery — the IP is re-resolved and re-checked on every delivery attempt to prevent post-registration DNS changes
+
 **Pattern matching:** The `events` array supports exact strings (`"pipeline.completed"`) and prefix wildcards (`"pipeline.*"`, `"data.*"`). The `"*"` alone subscribes to all events. Pattern matching uses a trie at delivery time for O(1) lookup across large event catalogs.
 
 #### Delivery Mechanism and Guarantees
@@ -198,6 +209,8 @@ Delivery is at-least-once. The Gateway Service BullMQ worker sends HTTP POST req
 | 9 | 24h | ~31h |
 
 After attempt 9, the delivery is moved to the `webhook-delivery:dlq` BullMQ queue. A `dlq.job.added` event is emitted (which itself may trigger webhook deliveries to other endpoints — but NOT to the failed endpoint, preventing infinite loops). The failed delivery is also reflected in the webhook's stats.
+
+**Recursive DLQ prevention:** `dlq.job.added` events are delivered to registered webhooks, but if the delivery itself fails and creates a DLQ entry, the resulting secondary `dlq.job.added` event is NOT delivered to any webhook. The Gateway Service marks DLQ events originating from webhook delivery failures with an internal `_isWebhookDlq: true` flag and excludes them from further webhook fan-out. This prevents unbounded amplification.
 
 **Delivery log:** the last 100 deliveries per webhook are stored in Postgres (`gateway.webhook_deliveries` table) with: deliveryId, eventId, eventType, attempt, requestedAt, respondedAt, statusCode, responseBody (first 1KB), error. Retained for 7 days. Accessible via `GET /api/v1/webhooks/outbound/{id}/deliveries`.
 
@@ -252,6 +265,8 @@ retry: 5000
 ```
 
 **Replay:** On connection with `Last-Event-ID`, the Gateway Service scans its in-memory ring buffer for the tenant, finds events after the provided `eventId`, and emits them in order before switching to live. If the `eventId` is not found in the buffer (too old), the stream starts from the current position and includes a synthetic `replay.overflow` event to notify the client that some events were missed.
+
+**Multi-replica limitation:** The in-memory ring buffer is per-Gateway-instance. In multi-replica deployments, SSE reconnection with `Last-Event-ID` may miss events buffered by a different replica. When `replay.overflow` is received, the client should treat this as a potential gap and fall back to a full re-fetch of the subscribed entities. For guaranteed event delivery across replicas, use outbound webhooks (which are backed by BullMQ with persistent storage) instead of SSE.
 
 **Backpressure:** if the client reads slower than events arrive (detected by write buffer growing beyond 512KB), the Gateway Service begins dropping non-critical events (DEBUG-level) while preserving critical events. If the write buffer exceeds 1MB, the connection is closed with a `4001 buffer overflow` close code and the client must reconnect with `Last-Event-ID`.
 
@@ -664,11 +679,13 @@ interface AuthOptions {
 }
 
 interface CallbackParams {
-  code?: string;             // OAuth authorization code
-  state: string;
-  samlResponse?: string;     // SAML assertion (base64)
+  code: string;
   error?: string;
   errorDescription?: string;
+  // Note: `state` is NOT included here. The Auth Service validates the state parameter
+  // (CSRF check) internally BEFORE invoking handleCallback. The plugin never sees the
+  // raw state value, preventing accidental leakage or misuse.
+  // samlResponse is handled via a separate internal flow before this callback is invoked.
 }
 
 interface AuthContext {
@@ -755,7 +772,9 @@ interface Widget {
 }
 ```
 
-**Widget security model:** The iframe's `sandbox` attribute is set to `allow-scripts allow-same-origin` — `allow-forms`, `allow-top-navigation`, and `allow-popups` are NOT included. Widgets cannot navigate the top frame or open popups. The platform's CSP header for widget iframes is: `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src {platform-host}`. Widget HTML is sanitized through DOMPurify server-side before serving to strip any `<script src>` tags referencing external URLs not in the plugin's declared `requiredExternalUrls`.
+**Widget security model:** Widget iframes use a data URI with `sandbox="allow-scripts"` (no `allow-same-origin`). This creates a unique opaque origin for each iframe, preventing access to the parent dashboard's localStorage, cookies, or DOM regardless of routing configuration. The `postMessage` API works across origins. The CSP is injected via a `<meta>` tag in the data URI HTML. This approach requires no separate subdomain or DNS configuration and works with both path-based and subdomain routing.
+
+Widget iframe CSP uses a per-render nonce: `script-src 'nonce-{random}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; frame-src 'none'`. The App Service generates a unique nonce for each widget render. Plugin widget `render()` output is sanitized by DOMPurify (server-side) which strips ALL `<script>` tags. The nonce is used only for the platform-injected bootstrap script (the `<script nonce="{nonce}">` that sets up the `postMessage` listener). No plugin-authored inline scripts are permitted. `'unsafe-inline'` for `style-src` only is retained because inline styles are a common widget rendering pattern and do not execute code.
 
 #### Hook Stages
 
@@ -888,6 +907,14 @@ interface PluginManifest {
   // Platform internal URLs (http://*-service:*) cannot be declared here.
   // An admin must explicitly approve these on install.
   requiredExternalUrls: string[];
+  // URL matching implementation: The FetchProxy parses each URL using the WHATWG URL
+  // Standard before matching. Matching is done per-component: (1) protocol must match
+  // exactly, (2) hostname must match exactly (no substring or prefix matching —
+  // `api.shopify.com` does NOT match `api.shopify.com.attacker.com`), (3) path matching
+  // uses glob patterns on path segments only. The glob `**` matches zero or more path
+  // segments. Pattern `https://api.shopify.com/**` matches
+  // `https://api.shopify.com/admin/orders` but NOT `https://api.shopify.com.evil.com/`
+  // or `https://api.shopify.com:8443/`.
 
   // Platform API capabilities required by this plugin.
   // These map to PluginContext properties that will be non-null.
@@ -1025,7 +1052,7 @@ ENABLED ──→ DISABLED ─────────────────�
 - `INSTALLED → ENABLED`: Tenant admin calls `POST /api/v1/plugins/{id}/instances` with instance configuration. Validation runs the plugin's `metadata()` to confirm the entrypoint is callable. Event: `plugin.enabled`.
 - `ENABLED → DISABLED`: Tenant admin calls `PUT /api/v1/plugins/{id}/instances/{instanceId}` with `{enabled: false}`. Graceful drain begins (see below). Event: `plugin.disabled`.
 - `DISABLED → ENABLED`: Tenant admin re-enables. Event: `plugin.enabled`.
-- `DISABLED → UNINSTALLED` (or `INSTALLED → UNINSTALLED`): Platform admin calls `DELETE /api/v1/plugins/{id}`. Uninstall guard runs (see below). Event: `plugin.uninstalled`.
+- `DISABLED → UNINSTALLED` (or `INSTALLED → UNINSTALLED`): Platform admin calls `DELETE /api/v1/plugins/{id}`. Uninstall guard runs (see below). Event: `plugin.uninstalled`. The `INSTALLED → UNINSTALLED` transition is only valid when no tenant instances of the plugin are in `ENABLED` state. If any instance is enabled, the uninstall fails with `PluginInUseError`. The admin must disable all instances first.
 - `ENABLED → UNINSTALLED`: Not permitted directly. Tenant admin must disable first. Returns 422 with error `"Plugin must be disabled before uninstall."`
 
 #### Installation Flow
@@ -1103,11 +1130,9 @@ The Execution Service executes `connector.connect()` then iterates `connector.fe
 
 When a plugin instance is disabled:
 1. Plugin Service marks the instance `DISABLING` in Postgres.
-2. Plugin Service sets a Redis key `plugin:draining:{instanceId}` with TTL 60 seconds.
-3. The Execution Service checks this key before dispatching any hook execution for the instance. On cache hit (instance is draining), new hook executions for this instance return `PLUGIN_DISABLED` immediately (fail-open: the chain continues without the hook's result, as if the hook were advisory).
-4. In-flight hook executions are given up to 60 seconds to complete. The Pipeline Service polls the Plugin Service every 5 seconds for `{pipelineRunId}` completion.
-5. After 60 seconds (or all in-flight executions complete, whichever is first), Plugin Service marks the instance `DISABLED` and emits `plugin.disabled` event.
-6. Redis draining key is deleted.
+2. Plugin Service sends `POST /internal/execution/plugin-drain` with `{instanceId, graceSeconds: 60}` to the Execution Service. The Execution Service stores the draining state in an in-memory `Map<string, {drainingUntil: number}>`. Before dispatching any hook execution, the Execution Service checks the in-memory draining map. On a draining entry, new hook executions for this instance return `PLUGIN_DISABLED` immediately (fail-open: the chain continues without the hook's result, as if the hook were advisory). In-flight executions are allowed to complete. After the grace period expires, the entry is removed from the map. This avoids any Redis dependency for the Execution Service, consistent with Decision 5.
+3. In-flight hook executions are given up to 60 seconds to complete. The Pipeline Service polls the Plugin Service every 5 seconds for `{pipelineRunId}` completion.
+4. After 60 seconds (or all in-flight executions complete, whichever is first), Plugin Service marks the instance `DISABLED` and emits `plugin.disabled` event.
 
 **Edge case — execution after 60s grace:** If a hook execution is still running after 60 seconds, it is allowed to complete naturally (isolated-vm will kill it at its own 30s timeout). The instance is marked DISABLED regardless. The orphaned result is discarded.
 
@@ -1136,10 +1161,10 @@ The `--at` flag schedules a delayed activation. Without it, activation is immedi
 
 **Atomic swap procedure:**
 1. Mark old version as `DRAINING` (same 60-second grace as disable).
-2. Register new version hooks in `plugin.hooks`.
+2. Register new version hooks with `state: 'staged'` (not active). This prevents the new hooks from being dispatched before the pointer swap, eliminating the double-execution window.
 3. Publish cache invalidation for old version to Execution Service.
 4. Execution Service pre-fetches new version bundle (warm cache before cutover).
-5. After grace period, swap `active_version` pointer in `plugin.plugins` table atomically (single UPDATE).
+5. After grace period, in the same transaction as the pointer swap: update all new version hooks from `state: 'staged'` to `state: 'active'` and mark old version hooks as `state: 'disabled'`. Swap `active_version` pointer in `plugin.plugins` table atomically (single UPDATE). These three operations are committed together so hooks go live at exactly the same moment the pointer moves.
 6. Old version moved to `DISABLED` state, retained for 24 hours for rollback.
 7. Emit `plugin.upgraded` event.
 
@@ -1154,6 +1179,7 @@ The following entries are added to `@oneplatform/core/service-rbac.ts` (extendin
 | Ingestion Service | Plugin Service | `GET /internal/plugins/connectors` (list enabled connectors for tenant) |
 | Ingestion Service | Execution Service | `POST /internal/execution/connector-run` (run connector plugin) |
 | Plugin Service | Execution Service | `POST /internal/execution/run` (validate plugin entrypoint on install) |
+| Plugin Service | Execution Service | `POST /internal/execution/plugin-drain` (signal graceful drain for a plugin instance) |
 | App Service | Plugin Service | `GET /internal/plugins/widgets` (list enabled widget plugins for tenant) |
 | Execution Service | Plugin Service | `GET /internal/plugins/{pluginId}/bundle` (fetch plugin bundle) |
 
@@ -1270,7 +1296,7 @@ The decision to compile via `bun build --compile` rather than `pkg` or `nexe` is
 - `op dlq replay <job-id>`
 - `op dlq discard <job-id> [--confirm]`
 
-**`exec` — Direct code execution (requires `pipelines:trigger`):**
+**`exec` — Direct code execution (requires `execution:run`):**
 - `op exec run --lang js|ts|python --file <code.js> [--input '{"key":"value"}']`
 - `op exec history [--limit N]`
 - `op exec logs <execution-id>`
@@ -1623,8 +1649,11 @@ interface Page<T> {
 
 interface PaginatedResult<T> extends AsyncIterable<Page<T>> {
   // Convenience: collect ALL items across all pages into a single array.
-  // Use with caution — may fetch many pages for large datasets.
-  collect(): Promise<T[]>;
+  // If `maxItems` is provided, stops after collecting that many items.
+  // If omitted, defaults to 10,000 items maximum — exceeding this throws
+  // CollectionLimitError('Use async iteration for datasets larger than 10,000 items').
+  // This prevents accidental memory exhaustion on large datasets.
+  collect(maxItems?: number): Promise<T[]>;
   // Convenience: take first N items (fetches minimum necessary pages).
   take(n: number): Promise<T[]>;
 }
@@ -1646,7 +1675,7 @@ const allProducts = await client.data.Product.list().collect();
 const first200 = await client.data.Product.list().take(200);
 ```
 
-**Default page size:** 100 items per page (configurable via `?limit=` query param). Maximum 1000 per page.
+**Default page size:** 50 items (matching the API default from ADR-29). Maximum: 100.
 
 #### Auto-Retry Policy
 
@@ -1695,7 +1724,7 @@ sub.unsubscribe();
 
 **Browser PKCE integration:** In browser environments, `EventsClient` uses the access token from the OAuth session. Token refresh is handled automatically — when the access token expires (15 minutes per Decision 7), the SDK refreshes it before the SSE connection drops.
 
-**Node.js connection pooling:** In Node.js, `EventsClient` uses the `eventsource` package (MIT) with keep-alive settings. Multiple subscriptions from the same `client` instance are multiplexed over a single SSE connection — the client-side dispatcher routes events to the correct handler by event type.
+**SSE subscription multiplexing:** The `EventsClient` maintains one SSE connection per client instance. When a new subscription is added (`subscribe()` called while connected), the client CLOSES the current SSE connection and RECONNECTS with the updated `?events=...` filter that includes all active subscriptions. The server uses `Last-Event-ID` to replay missed events during the brief reconnection window. Subscription removal similarly reconnects with the reduced filter set. The reconnection is debounced (100ms) to batch multiple rapid subscribe/unsubscribe calls into a single reconnection. In Node.js, `EventsClient` uses the `eventsource` package (MIT) with keep-alive settings.
 
 ---
 
@@ -1735,6 +1764,7 @@ API keys are scoped to a minimum-privilege set of permissions. Every key has an 
 | `users:manage` | All user and role management |
 | `logs:read` | `GET /api/v1/logs/**` |
 | `webhooks:manage` | All outbound webhook CRUD |
+| `execution:run` | Direct code execution via sandbox (`POST /api/v1/exec/**`) |
 | `admin` | All of the above (full platform access) |
 
 **Key creation API:**
@@ -1857,6 +1887,8 @@ The Auth Service:
 4. Updates password hash in `auth.users` table.
 5. Revokes all existing refresh tokens for this user (forces re-login everywhere).
 
+**Redis ACL update:** The Auth Service's Redis ACL must be extended to include `~reset:*` for password reset token storage, in addition to the existing `~auth:* ~revocation:*` prefixes from Decision 5.
+
 **Email Verification:**
 
 On registration (`POST /api/v1/auth/register`), if `OP_REQUIRE_EMAIL_VERIFICATION=true` (default: `false`):
@@ -1865,6 +1897,8 @@ On registration (`POST /api/v1/auth/register`), if `OP_REQUIRE_EMAIL_VERIFICATIO
 3. Verification email sent (or link-copy mode).
 4. Unverified users can authenticate but receive a reduced-privilege access token with a `unverified: true` claim.
 5. The Gateway middleware downgrades unverified users to `viewer` role maximum and injects a `X-OnePlatform-Verify-Email: required` response header on every request.
+
+**Bootstrap exception:** The admin user created via the bootstrap wizard (ADR-24) is automatically marked as `email_verified = true` regardless of the `OP_REQUIRE_EMAIL_VERIFICATION` setting. This prevents the platform admin from being locked into a reduced-privilege state on a system that may not yet have SMTP configured.
 
 ```
 GET /api/v1/auth/verify-email/{token}
@@ -1879,7 +1913,7 @@ The platform ships with these built-in roles:
 |-----------|-------|-------------|
 | `platform-admin` | Global | Full access to all platform operations, all tenants, service administration |
 | `tenant-admin` | Per-tenant | Full access within their tenant: all data, pipelines, apps, plugins, users |
-| `developer` | Per-tenant | editor permissions + `apps:deploy` + `execution:run` + `plugins:read` |
+| `developer` | Per-tenant | editor permissions + `apps:deploy` + `execution:run` (requires `execution:run` scope on API keys) + `plugins:read` |
 | `editor` | Per-tenant | `data:write`, `ontology:read`, `pipelines:manage`, `apps:manage` (no deploy), `data:import` |
 | `viewer` | Per-tenant | `data:read`, `ontology:read`, `pipelines:read`, `apps:read`, `logs:read` (own actions only) |
 
@@ -2026,11 +2060,12 @@ The Gateway Service enforces CORS headers on all responses.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OP_ALLOWED_ORIGINS` | Comma-separated list of allowed origins | `*` |
+| `OP_ALLOWED_ORIGINS` | Comma-separated list of allowed origins | `http://localhost:3000` (development) |
 | `OP_ALLOWED_ORIGINS_PRODUCTION_WARNING` | `true` by default | `true` |
 
 **Behavior:**
-- In development (`NODE_ENV=development` or `OP_ALLOWED_ORIGINS=*`): all origins allowed. The Gateway logs a warning on startup: `"CORS: Wildcard origin (*) is configured. This is insecure in production. Set OP_ALLOWED_ORIGINS to your specific domains."` If `OP_ALLOWED_ORIGINS_PRODUCTION_WARNING=true` and `NODE_ENV=production` and `OP_ALLOWED_ORIGINS=*`, the Gateway refuses to start with error: `"FATAL: OP_ALLOWED_ORIGINS must be explicitly set in production. Wildcard origin is not permitted."` This prevents accidental production deployments with open CORS.
+- Default: `OP_ALLOWED_ORIGINS=http://localhost:3000` (development). For production deployments, this MUST be explicitly set to the platform's domain. If `NODE_ENV=production` and `OP_ALLOWED_ORIGINS` is unset, the Gateway logs a CRITICAL warning and defaults to the value of `OP_BASE_URL` (single origin). Wildcard `*` is rejected in production.
+- In development (`NODE_ENV=development`): all configured origins allowed. The Gateway logs a warning on startup if wildcard is used: `"CORS: Wildcard origin (*) is configured. This is insecure in production. Set OP_ALLOWED_ORIGINS to your specific domains."`
 - In production: only the listed origins are allowed. Requests from unlisted origins receive a 403 with no CORS headers.
 
 **Headers set by Gateway:**

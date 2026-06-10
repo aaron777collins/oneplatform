@@ -419,7 +419,7 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 **Init container (`op-init`):**
 - A one-shot container (`restart: no`) that runs before all platform services. It performs exactly three operations in order:
   1. **Key generation:** checks whether the Docker-managed secret `op_master_key` already exists (via the secrets volume at `/run/secrets/op_master_key`). If absent, generates `openssl rand -base64 32` and writes to a shared Docker volume at `/data/init/master.key` (permissions `0400`, owned by uid 1000). Services read from this path via a read-only volume mount.
-  2. **Bootstrap token generation:** generates a single-use `bootstrap_token` (`openssl rand -hex 32`), writes it to `/data/init/bootstrap.token` (permissions `0400`). This token is required to call `POST /api/v1/auth/bootstrap`. It is a one-time secret: the Auth Service reads it once at startup, holds it in memory (not Postgres), and erases `/data/init/bootstrap.token` immediately after reading. After the bootstrap endpoint is used, the in-memory token is nulled and the endpoint permanently disabled.
+  2. **Bootstrap token generation:** generates a single-use `bootstrap_token` (`openssl rand -hex 32`), writes it to `/data/init/bootstrap.token` (permissions `0400`). This token is required to call `POST /api/v1/auth/bootstrap`. It is a one-time secret: the Auth Service reads it once at startup, holds it in memory (not Postgres), and erases `/data/init/bootstrap.token` — but the erase is deferred until after `auth.bootstrap_completed = true` is committed to Postgres. If the Auth Service crashes before bootstrap completes, the token file persists on disk and is re-read on restart, allowing the operator to retry the bootstrap flow. After the bootstrap endpoint is used and the flag is committed, the file is erased and the in-memory token is nulled; the endpoint is permanently disabled.
   3. **Readiness signal:** writes `/data/init/ready` (empty file) to signal completion.
 - The init container exits with code 0 on success, non-zero on any failure. Other services will not start if the init container fails (Docker Compose `condition: service_completed_successfully`).
 - The init container image is a minimal Alpine with `openssl` only — no Node.js, no application code, no network access. Its attack surface is the smallest possible.
@@ -480,10 +480,13 @@ gateway-service:
   1. **Welcome screen:** platform name, version, "Let's get started." Single "Begin Setup" button.
   2. **Admin account:** email + password + confirm password. Password policy shown inline (min 12 chars, 1 uppercase, 1 number, 1 symbol). Email validation client-side.
   3. **Organization name:** `tenantName` input. Explains this is the name of the first workspace.
-  4. **Master key confirmation:** displays the generated `OP_MASTER_KEY` value in a read-only field with a copy button. Shows the security warning from Decision #11 verbatim. Checkbox: "I have saved this key securely." Blocks progression until checked.
+  4. **Master key confirmation:** displays the generated `OP_MASTER_KEY` value in a read-only field with a copy button. Shows the security warning from Decision #11 verbatim. Checkbox: "I have saved this key securely." Blocks progression until checked. **Security note:** the master key display screen auto-clears after 60 seconds and the key is never stored in browser history (the screen uses `history.replaceState` to prevent back-navigation). Operators should copy the key immediately and store it securely.
   5. **Review and create:** summary of inputs, "Create Platform" button. POST to `/api/v1/auth/bootstrap`.
   6. **Success screen:** "Platform ready. Your admin account is active." Link to dashboard. Shows first login instructions.
 - After wizard completion, `GET /api/v1/auth/bootstrap/status` returns `{ completed: true }` and all subsequent visits to the root URL render the normal login page.
+
+**How the wizard obtains the master key (wizard screen 4):**
+- The Auth Service reads the master key from the init volume at startup and exposes it via an internal-only endpoint `GET /internal/auth/master-key-display` (available only when `bootstrap_completed = false`, returns `404 Not Found` after bootstrap). The Frontend calls this endpoint during wizard screen 4 to display the key for operator confirmation. The endpoint is protected by the bootstrap rate limiter (3 attempts per 10 minutes per IP).
 
 **URL after `docker compose up`:**
 - Default: `http://localhost:3000`. The Gateway listens on port 3000 (host-mapped). If `OP_BASE_URL` is set, the wizard uses it for generated callback URLs and the success screen link.
@@ -508,23 +511,8 @@ gateway-service:
 
 **Implementation:**
 
-**MinIO addition to Docker Compose:**
-```yaml
-minio:
-  image: minio/minio:RELEASE.2024-06-13T22-53-53Z  # pinned version
-  command: server /data --console-address ":9001"
-  environment:
-    MINIO_ROOT_USER: ${OP_MINIO_ACCESS_KEY}
-    MINIO_ROOT_PASSWORD: ${OP_MINIO_SECRET_KEY}
-  volumes: [minio-data:/data]
-  healthcheck:
-    test: ["CMD", "mc", "ready", "local"]
-    interval: 10s
-    retries: 5
-  networks: [oneplatform-internal]
-  # NOT on oneplatform-public — MinIO console is internal-only
-```
-- Two buckets created on first platform startup by the `op-init` script: `op-app-artifacts` (build outputs) and `op-uploads` (user file uploads via ingestion). Bucket policies: private, accessible only via presigned URLs or service tokens. MinIO is not exposed to the public internet.
+**Object storage:** MinIO is configured as defined in ADR-36 (Supporting Infrastructure). App Service uses buckets `app-builds` for compiled bundles and `file-uploads` for user-uploaded assets. See ADR-36 for the full MinIO specification including version, IAM policies, and bucket configuration.
+
 - The App Service and Ingestion Service communicate with MinIO via the AWS SDK v3 for JavaScript (`@aws-sdk/client-s3`, Apache 2.0) using the MinIO endpoint URL. No MinIO-specific SDK is needed.
 
 **App code storage (virtual file system):**
@@ -558,7 +546,7 @@ minio:
 
 **Hot-reload preview:**
 - The preview pane is an `<iframe src="/apps/{slug}/preview">` rendered in the editor layout.
-- **Preview mode:** the App Service has a `preview` serving mode separate from `production`. In preview mode, the bundle is served from the latest build (including in-progress incremental builds), not `current_build_id`. This means the developer sees their unsaved/unbundled changes in near-real-time.
+- **Preview mode:** the App Service has a `preview` serving mode separate from `production`. In preview mode, the bundle is served from the latest build (including in-progress incremental builds), not `current_build_id`. This means the developer sees their unsaved/unbundled changes in near-real-time. Preview mode serves only builds with `status = 'success'`. Failed incremental builds are logged but do not update the preview. The editor displays build errors inline (esbuild error output mapped to source positions via source maps).
 - **Incremental compilation:** after the first full build, subsequent builds triggered by saves use esbuild's incremental API (`esbuild.context()` with `rebuild()`). The context is held in the sandbox between builds, reducing rebuild time from ~3s to ~200ms for incremental changes. The context is invalidated when the sandbox is recycled.
 - **Iframe refresh:** when a new incremental build completes, the App Service sends an SSE event to the preview iframe (`event: reload, data: { buildId }`). The iframe listens for this event and calls `window.location.reload()`. No WebSocket needed — SSE is sufficient and simpler.
 - **Preview isolation:** the preview iframe origin is `http://localhost:3000/apps/{slug}/preview`. It is served with `Content-Security-Policy: frame-ancestors 'self'` to prevent embedding outside the platform. Preview data uses real tenant data (not mocked) because apps need to display realistic content during development. Preview sessions use the developer's own session credentials.
@@ -689,9 +677,14 @@ function useAppStorage<T>(
 // SDK provider (must wrap app root)
 function AppProvider(props: {
   children: React.ReactNode;
-  appId: string;          // injected by App Service at build time
-  tenantId: string;       // injected by App Service at build time
+  appId: string;          // read from window.__OP_APP_CONFIG__.appId at initialization
+  tenantId: string;       // read from window.__OP_APP_CONFIG__.tenantId at initialization
 }): JSX.Element
+// The App Service injects appId and tenantId via a <script> tag in the HTML shell:
+//   window.__OP_APP_CONFIG__ = { appId, tenantId }
+// The AppProvider reads these from window.__OP_APP_CONFIG__ at initialization.
+// This allows the same build to be served across environments (preview, production)
+// without rebuild — runtime injection, not build-time.
 ```
 
 **Internal implementation of hooks:**
@@ -804,8 +797,8 @@ interface AppSDKError {
 
 **Redirect URI management:**
 - At registration, both path-based and subdomain redirect URIs are registered (see above). If `OP_WILDCARD_DOMAIN` is not set, only the path-based URI is registered.
-- Additional redirect URIs can be added via `PATCH /api/v1/apps/{id}/oauth` — this triggers an update call to the Auth Service. The developer cannot add arbitrary URIs — they must match one of the patterns: `{OP_BASE_URL}/apps/{slug}/*` or `{slug}.apps.{OP_WILDCARD_DOMAIN}/*`. The Auth Service validates this pattern constraint at registration.
-- For `op app dev` local development: `http://localhost:{port}/auth/callback` is automatically added to the redirect URI list when the developer starts `op app dev`. It is removed when the local dev server stops (the CLI sends `DELETE /api/v1/apps/{id}/oauth/dev-redirect-uris` on shutdown). This prevents dangling localhost redirect URIs in production configs.
+- Additional redirect URIs can be added via `PATCH /api/v1/apps/{id}/oauth` — this triggers an update call to the Auth Service. The developer cannot add arbitrary URIs. Redirect URIs are registered as exact paths: `{OP_BASE_URL}/apps/{slug}/auth/callback` (path-based) and `https://{slug}.apps.{domain}/auth/callback` (subdomain). No wildcards in redirect URIs. The Auth Service validates each URI against these exact-match patterns at registration.
+- For `op app dev` local development: `http://localhost:{port}/auth/callback` is automatically added to the redirect URI list when the developer starts `op app dev`. It is removed when the local dev server stops (the CLI sends `DELETE /api/v1/apps/{id}/oauth/dev-redirect-uris` on shutdown). Dev redirect URIs are stored with a `created_at` timestamp and a 24-hour TTL. The Auth Service runs a background cleanup every hour, removing dev redirect URIs older than 24 hours. This handles unclean CLI shutdowns where the cleanup `DELETE` call is never made. This prevents dangling localhost redirect URIs in production configs.
 
 **Two access modes:**
 
@@ -851,63 +844,10 @@ interface AppSDKError {
 
 **Implementation:**
 
-**Connector TypeScript interface (canonical, in `@oneplatform/plugin-sdk`):**
-```typescript
-interface ConnectorMetadata {
-  name: string;                    // e.g., "Postgres Source"
-  version: string;                 // semver
-  configSchema: JSONSchema7;       // JSON Schema for user-provided config
-  credentialSchema: JSONSchema7;   // JSON Schema for credential fields
-  capabilities: ConnectorCapabilities;
-}
+**Note:** The canonical `Connector` interface is defined in ADR-31 (Plugin Interface Specifications). ADR-28 describes the data flow that uses this interface.
 
-interface ConnectorCapabilities {
-  supportedSyncModes: Array<"full" | "incremental">;
-  supportsCDC: boolean;            // change data capture
-  supportsSchemaInference: boolean;
-  maxBatchSize: number;            // records per fetchBatch call
-}
-
-interface ConnectorHandle {
-  connectionId: string;
-  metadata: Record<string, unknown>; // connection state (e.g., active DB cursor)
-}
-
-interface BatchResult {
-  records: Record<string, unknown>[];
-  nextCursor: string | null;         // null = sync complete
-  hasMore: boolean;
-  inferredSchema?: SchemaInference;  // only if supportsSchemaInference
-}
-
-interface SchemaInference {
-  fields: Array<{
-    name: string;
-    inferredType: "string" | "number" | "boolean" | "date" | "json" | "unknown";
-    nullable: boolean;
-    sampleValues: unknown[];         // up to 5 sample values for preview
-  }>;
-  confidence: number;                // 0-1 confidence of inference
-}
-
-interface CredentialAccessor {
-  get(key: string): Promise<string>; // decrypts and returns credential field
-}
-
-interface Connector {
-  metadata(): ConnectorMetadata;
-  connect(
-    config: ConnectorConfig,
-    credentials: CredentialAccessor
-  ): Promise<ConnectorHandle>;
-  fetchBatch(
-    handle: ConnectorHandle,
-    cursor?: string
-  ): Promise<BatchResult>;
-  disconnect(handle: ConnectorHandle): Promise<void>;
-}
-```
 - The `CredentialAccessor` is injected by the Ingestion Service and calls the credential vault (Decision #11) to decrypt credentials. Connectors never receive raw credential values — they receive the `CredentialAccessor` and call `get()` per field. This prevents connectors from logging or serializing credentials inadvertently.
+- Connectors return `DataRecord[]` (per ADR-31); the Ingestion Service extracts the `data` field from each `DataRecord` for raw staging storage in `ingestion.raw_{connectorId}`.
 - Built-in connectors (REST API, PostgreSQL, MySQL, CSV, webhook receiver) are implemented in `services/ingestion/src/connectors/` as classes implementing `Connector`. They use the same interface as third-party connector plugins — no special access.
 
 **Data envelope (canonical JSON format for all raw records):**
@@ -942,7 +882,9 @@ interface DataEnvelope {
 *(Incremental sync):*
 - The Ingestion Service stores the last successful cursor per connector in `ingestion.sync_state`: `{ connector_id, last_cursor, last_sync_at, sync_mode }`.
 - `fetchBatch` is called with the stored `cursor`. The connector returns only records changed since that cursor.
-- After each batch completes successfully, `sync_state.last_cursor` is updated atomically (same Postgres transaction as the raw record insert). If the batch fails mid-way, the cursor is NOT updated, and the next sync retry re-fetches the same batch window.
+- **Cursor update and record insert atomicity (threshold-based):**
+  - For batch sizes ≤ 5,000 records: the Ingestion Service uses a single `BEGIN...COMMIT` transaction with `INSERT INTO ... SELECT unnest($1)` for the records and `UPDATE ingestion.connectors SET last_cursor = $2` for the cursor — both in the same transaction. If the batch fails mid-way, the cursor is NOT updated, and the next sync retry re-fetches the same batch window.
+  - For batch sizes > 5,000 records: the Ingestion Service uses `COPY` for the records (outside a transaction for performance), then updates the cursor in a separate transaction. In this case, a crash between COPY completion and cursor update causes the next sync to re-fetch the same batch. This is safe because records have `ON CONFLICT (_source_id) DO UPDATE` — re-ingesting the same records is idempotent.
 - **Cursor types:** connectors declare their cursor type in `ConnectorMetadata` (timestamp, sequence ID, or opaque string). The Ingestion Service does not interpret cursor values — it stores and passes them opaquely to the connector.
 
 **Batch processing and backpressure:**
@@ -954,7 +896,7 @@ interface DataEnvelope {
 **Ontology mapping (raw → tenant entity tables):**
 - After each batch is written to the raw table, the Ingestion Service enqueues an `ontology:map` job on the BullMQ queue `ontology:mapping` with `{ connectorId, batchId, tenantId }`.
 - The Ontology Service worker picks up the job, reads all records in the batch from `ingestion.raw_{connectorId}` WHERE `_batch_id = {batchId}`, and applies the user-defined mapping rules.
-- **Mapping rules** (stored in `ontology.mapping_rules`): each rule is `{ connector_id, source_field_path (JSONPath), target_entity, target_field, transform?: string (JS expression) }`. The Ontology Service evaluates transforms in the Execution Service sandbox for safety (transforms are user-supplied code).
+- **Mapping rules** (stored in `ontology.mapping_rules`): each rule is `{ connector_id, source_field_path (JSONPath), target_entity, target_field, transform_type: "rename" | "coerce" | "default" | "expression", transform?: string (JS expression for "expression" type) }`. The Ontology Service evaluates `expression` transforms in the Execution Service sandbox for safety (transforms are user-supplied code). **Transform execution performance:** mapping transforms are executed in BATCH mode — the Ontology Service sends the full batch of records and all mapping rules to the Execution Service sandbox in a single call; the sandbox applies all transforms to all records in one invocation (not per-record round-trips). For simple transforms (field renames, type coercions, static defaults), the Ontology Service handles them in-process without sandbox invocation — only `expression` type transforms require sandbox execution.
 - **Validation:** each mapped record is validated against the entity schema (Zod-generated from the ontology definition). Records that fail validation are written to `ontology.mapping_errors`: `{ connector_id, raw_id, entity_type, error_fields: string[], error_messages: string[], raw_data: jsonb }`. Validation errors do NOT stop the batch — partial success is allowed. The user sees a mapping error count in the UI.
 - **Write to tenant table:** valid mapped records are upserted into `tenant_{tenantId}.{entityType}`: `INSERT INTO ... ON CONFLICT (id) DO UPDATE`. The `id` field is derived from the mapping rules (typically the source primary key, mapped to the entity's `id` field).
 
@@ -971,6 +913,7 @@ interface DataEnvelope {
 
 **Security considerations:**
 - Raw tables are per-connector and have RLS policies enforcing `_tenant_id = current_setting('app.tenant_id')::uuid`. The Ingestion Service sets this session variable before executing queries.
+- Before each mapping batch query, the Ontology Service worker calls `SET LOCAL app.tenant_id = $1` within the transaction, ensuring RLS policies filter correctly per tenant. The `SET LOCAL` scope expires at transaction end, preventing cross-tenant leakage between batches.
 - The `CredentialAccessor` interface means connector code never receives plaintext credentials as function arguments — only a getter function. This means `JSON.stringify(handle)` or console logging the handle does not leak credentials.
 - Mapping transforms (user JS expressions) run through the Execution Service sandbox (no network, resource-limited). A malicious transform cannot read other tenants' data or make external requests.
 - Connector code (third-party plugins) runs in the plugin sandbox, not in the Ingestion Service process. The Ingestion Service invokes the connector via the Plugin Service + Execution Service chain. Built-in connectors run in-process (they are trusted code compiled into the service).
@@ -1053,7 +996,7 @@ interface DataEnvelope {
 - All collection endpoints support cursor-based pagination: `?cursor={base64-encoded-cursor}&limit={n}`.
 - Default `limit`: 50. Maximum `limit`: 100. Requests with `limit > 100` return `400 Bad Request` with `code: "PAGINATION_LIMIT_EXCEEDED"`.
 - The cursor is a base64-encoded JSON object containing the sort key values of the last returned item (e.g., `{ "id": "last-id", "createdAt": "2026-01-01T00:00:00Z" }`). Cursors are opaque to clients — their internal structure is not part of the API contract and may change between API versions.
-- Cursors are signed with an HMAC-SHA256 using the service's Ed25519 private key to prevent cursor tampering (injecting arbitrary values into the pagination query). An invalid cursor signature returns `400 Bad Request` with `code: "INVALID_CURSOR"`.
+- Cursor tokens are signed with an HMAC-SHA256 using a dedicated cursor-signing secret (`OP_CURSOR_SECRET`, auto-generated by `op-init` alongside `OP_MASTER_KEY`). This is separate from the Ed25519 service keypairs used for inter-service authentication. An invalid cursor signature returns `400 Bad Request` with `code: "INVALID_CURSOR"`.
 - **Cursor expiry:** cursors expire after 24 hours. An expired cursor returns `410 Gone` with `code: "CURSOR_EXPIRED"`, prompting the client to restart pagination from the beginning.
 - **Offset pagination:** explicitly NOT supported. Offset pagination (`?page=5&limit=50`) has O(n) database cost and inconsistent results under concurrent writes. All clients MUST use cursor pagination.
 
