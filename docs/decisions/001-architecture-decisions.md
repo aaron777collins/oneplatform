@@ -58,7 +58,13 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - DB 4: General caching (rate limit counters, session data)
 - This prevents BullMQ traffic from crowding out auth or ontology pub/sub operations
 - **Acknowledged limitation:** Redis logical databases share memory, CPU, and connection pool — they are namespaces, NOT isolation boundaries. A `FLUSHDB` on any DB or a memory-intensive operation on DB 0 (BullMQ) can still affect all other DBs. True isolation requires separate Redis instances, which is documented as the production HA upgrade path (Redis Sentinel per concern group). The logical DB separation is a development/small-deployment reasonable-default that reduces namespace collision, not a security boundary.
-- **Redis access control:** Redis is configured with ACL rules — each service authenticates with its own Redis user that has access ONLY to its assigned logical database(s). The Execution Service has NO Redis access at all (it communicates only via the Unix socket to sandbox-vm and via the internal service network to other services). This prevents a compromised service from issuing `FLUSHDB` on another service's database.
+- **Redis access control:** Redis is configured with ACL rules using key-prefix conventions rather than DB-number restrictions (since Redis ACLs control key patterns, not `SELECT` targets). Each service authenticates with its own Redis user:
+  - Auth Service user: `~auth:* ~revocation:* &auth:* &revocation:*` (only auth-prefixed keys + pub/sub channels)
+  - Pipeline Service user: `~queue:pipeline:* ~queue:execution:* &ontology:*` (pipeline queues + ontology pub/sub subscribe)
+  - Logging Service user: `~log:* ~audit:* &logs:* &audit:*` (log keys + log/audit pub/sub channels)
+  - Each service also has `+select` permission for its assigned DB number, and `-select` for all others
+  - The `-flushdb -flushall -keys -debug` commands are denied for ALL service users (admin-only)
+  - The Execution Service has NO Redis access at all (it communicates only via the Unix socket to sandbox-vm and via the internal service network to other services)
 
 ### 6. Code Execution Sandbox
 **Decision:** `isolated-vm` for JavaScript/TypeScript (fast path, ~1ms), Docker containers for other languages (Python, Go, etc.) accessed via a restricted Docker socket proxy.
@@ -76,7 +82,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - `isolated-vm` does NOT run inside the main Execution Service process — it runs in a dedicated, low-privilege child container (`op-sandbox-vm`) with no Docker socket access, no network access to internal services, and minimal filesystem
 - The Execution Service communicates with `op-sandbox-vm` via a Unix socket (mounted as a shared volume) using a simple JSON-RPC protocol: `{method: "execute", code: "...", context: {...}}`. The socket is unidirectional — the Execution Service is the ONLY writer; the sandbox-vm is the ONLY reader. The socket is implemented as a pair: one for requests (Execution→sandbox), one for responses (sandbox→Execution). The sandbox-vm cannot send unsolicited messages or execute arbitrary commands back through the socket. If the sandbox-vm is compromised, it can only send malformed responses to pending requests — it cannot initiate new executions or reach any other resource.
 - If a V8 engine vulnerability allows escape from `isolated-vm`, the attacker lands in a container with no capabilities, no Docker socket, no internal network, and read-only filesystem — the blast radius is contained to that single sandbox container
-- The `op-sandbox-vm` container is recycled (destroyed and recreated) every 1000 executions or every 1 hour (whichever comes first) to limit the window of any in-memory compromise
+- The `op-sandbox-vm` container is recycled (destroyed and recreated) every 1000 executions or every 1 hour (whichever comes first) to limit the window of any in-memory compromise. **Graceful recycling:** the Execution Service tracks in-flight executions via a counter. When the recycle threshold is reached, the Execution Service stops sending NEW executions to the current sandbox-vm and spins up a REPLACEMENT container. In-flight executions on the old container are given up to 60s to complete. After all in-flight executions finish (or the 60s grace period expires), the old container is destroyed. This ensures no mid-execution kills — there is always a brief overlap period where two sandbox-vm containers exist simultaneously.
 - Resource limits: 512MB memory, 1 CPU core, 30s execution timeout per invocation
 
 ### 7. Authentication Model
@@ -158,6 +164,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Generated code (API routes, TypeScript types, validation) is versioned alongside the schema — API endpoints support `?v=2` query parameter during migration window; old version is deprecated after migration completes
 - **Dual-schema query handling during migration:** while a migration is in progress, some rows are in the new schema and some in the old. The Ontology Service maintains a `migration_status` enum per entity (`idle`, `migrating`, `complete`). During `migrating` state, queries use a UNION view that normalizes both old-schema and new-schema rows into the new schema format (with defaults for missing fields). This ensures consistent query results across batch boundaries. The view is dropped when migration completes.
 - Rollback: if migration fails, old schema version is restored; partially migrated data is reverted using shadow tables (pre-migration snapshots of affected rows, created before each batch begins). Each batch creates its own shadow table (`shadow_{entity}_{batch_id}`), so a failure at batch 6 rolls back batches 1-6 individually in reverse order. Shadow tables are dropped after successful migration or used for restoration on failure.
+- **Orphaned shadow table cleanup:** the Ontology Service runs a background job every hour that scans for shadow tables with no active migration (the migration either completed, failed and was rolled back, or the service crashed mid-migration). Orphaned shadow tables older than 24 hours are logged as warnings and auto-dropped. A `shadow_table_registry` table in the `ontology` schema tracks all active shadow tables with their migration ID, batch ID, and creation timestamp — this is the authoritative list, not filesystem/table scanning.
 
 ### 15. App Routing and TLS
 **Decision:** User apps are served via path-based routing by default (`/apps/{app-slug}`), with optional subdomain routing (`{app-slug}.apps.yourdomain.com`) for users who configure wildcard DNS and TLS.
@@ -303,10 +310,10 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 **Implementation:**
 - **Persistence (always-on):** Redis is configured with `appendonly yes` and `appendfsync everysec` in Docker Compose — AOF persistence ensures job state and the revocation blocklist survive restarts with at most 1 second of data loss
 - **Graceful degradation per concern:**
-  - BullMQ queues: if Redis is down, producers buffer up to 100 jobs in-memory and retry connection every 2s; pipeline status shows "queuing paused" in the UI
+  - BullMQ queues: if Redis is down, producers buffer up to 100 jobs in-memory and retry connection every 2s; pipeline status shows "queuing paused" in the UI. **Data loss mitigation:** buffered jobs are also written to a local WAL (write-ahead log) file (`/data/job-buffer.wal`, max 50MB) so that if the producing service crashes during a Redis outage, jobs are recovered from the WAL on restart. The WAL is replayed into Redis when connectivity is restored, then truncated.
   - JWT revocation blocklist: if Redis is unreachable, auth middleware falls back to rejecting all requests with expired refresh tokens (fail-closed) and allowing access tokens until their 15-min expiry — conservative but safe
   - Refresh tokens: if Redis is down, new logins fail (cannot store refresh token) but existing access tokens continue working until expiry
-  - Ontology pub/sub: consumers fall back to polling the Ontology Service every 15s (configurable via `OP_ONTOLOGY_POLL_INTERVAL`, default 15s) instead of relying on pub/sub notifications — 15s is aggressive enough to catch schema changes quickly while not overloading the Ontology Service during Redis outages
+  - Ontology pub/sub: consumers fall back to polling the Ontology Service every 15s (configurable via `OP_ONTOLOGY_POLL_INTERVAL`, default 15s) instead of relying on pub/sub notifications. **Thundering herd prevention:** each consumer adds a random jitter of 0-5s to its poll interval (so 5 consumers poll at 15-20s intervals, spread out rather than synchronized). Additionally, the Ontology Service implements a polling endpoint with ETag/If-None-Match — if the schema hasn't changed, it returns 304 Not Modified with near-zero cost. A circuit breaker trips if the Ontology Service returns errors 3 times consecutively, backing off to 60s polls until it recovers.
   - Log delivery: the @oneplatform/core log helper buffers up to 10,000 events in-memory and flushes when Redis reconnects; audit events are additionally written to a local fallback file (max 100MB, rotated to `.1` suffix at cap — oldest rotated file is deleted) that the Logging Service picks up on recovery
 - **Production recommendation:** Docker Compose includes a commented-out Redis Sentinel configuration (1 master + 2 replicas) that users can enable for high availability; the architecture guide documents when and why to enable it
 - **Health monitoring:** the Gateway Service health check includes Redis connectivity; if Redis is unreachable for >30s, the health endpoint returns degraded status, allowing external load balancers or monitoring to alert
@@ -317,9 +324,10 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 **Rationale:** In a microservices architecture, any container on the Docker network can reach any other container. A compromised sandbox container, a malicious plugin, or a misconfigured service could call the Auth Service to issue tokens or the Ingestion Service to read credentials. Network adjacency is not trust.
 
 **Implementation:**
-- **Service tokens:** each service is issued a service-level JWT at startup, signed by a shared secret (`OP_SERVICE_SECRET` env var). This token contains the service name and a `role: "service"` claim. Services include this token in all inter-service requests via the `X-Service-Token` header.
+- **Service tokens:** each service is issued its OWN unique service-level JWT at startup, signed by a per-service secret (`OP_SERVICE_SECRET_{SERVICE_NAME}` env vars, e.g., `OP_SERVICE_SECRET_PIPELINE`, `OP_SERVICE_SECRET_AUTH`). This token contains the service name and a `role: "service"` claim. Services include this token in all inter-service requests via the `X-Service-Token` header.
+- **Per-service secrets:** each service has its own signing secret. If one service's environment is compromised, the attacker can only forge tokens for THAT service — they cannot impersonate other services. The secret rotation path: `op service rotate-secret --service pipeline` generates a new secret, restarts the service, and invalidates old tokens. All services validate incoming service tokens against a map of `{serviceName: publicKey/secret}` loaded from environment variables at startup.
 - **Validation:** the auth middleware in @oneplatform/core validates `X-Service-Token` on every request. Requests without a valid service token from within the Docker network are rejected with 403. The Gateway is the ONLY service that accepts external (user) requests without a service token.
-- **Service RBAC:** each service has a defined set of endpoints it's allowed to call on other services. For example, the Pipeline Service can call `Execution.execute()` and `Ontology.getSchema()` but NOT `Auth.createUser()` or `Ingestion.getCredentials()`. This is enforced via a service-level permission matrix in @oneplatform/core.
+- **Service RBAC:** each service has a defined set of endpoints it's allowed to call on other services. For example, the Pipeline Service can call `Execution.execute()` and `Ontology.getSchema()` but NOT `Auth.createUser()` or `Ingestion.getCredentials()`. The App Service can call `Ontology.getSchema()`, `Auth.validateToken()`, `Pipeline.trigger()`, `Execution.execute()`, and `Logging.query()` — it has broad permissions because it acts as a BFF for user apps. This is enforced via a service-level permission matrix in @oneplatform/core.
 - **Sandbox containers:** the `op-sandbox-vm` container and Docker sandbox containers are on the `oneplatform-sandbox` network, which has NO access to the internal service network (`oneplatform-internal`). They can only communicate with the Execution Service via the Unix socket (sandbox-vm) or the outbound proxy (Docker containers). Lateral movement to other services is network-impossible.
 - **Docker network topology:**
   - `oneplatform-internal`: all 9 services + PgBouncer + Redis (services talk to each other here)
@@ -342,7 +350,7 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **Redis outage behavior:** rate limiting falls back to a LOCAL in-memory sliding window counter per Gateway instance with conservative limits (50% of normal limits). This prevents both extremes: complete no-limit (security hole for multi-tenant) and complete blocking (availability disaster). The in-memory counter is approximate and per-process (not shared across Gateway replicas), so it's less precise but still protective. When Redis reconnects, counters are re-synced.
 - **Burst allowance:** each limit allows a 2x burst for 5 seconds to handle legitimate traffic spikes
 
-### 20. Observability Stack
+### 21. Observability Stack
 **Decision:** OpenTelemetry (OTEL) is the standard for distributed tracing and metrics. All services are instrumented with OTEL SDK. Traces and metrics are exported to a configurable backend (default: Prometheus for metrics, Jaeger for traces, both optional).
 
 **Rationale:** A 9-service system is impossible to debug in production without distributed tracing and metrics. Logs alone are insufficient — you need to trace a request across service boundaries and correlate it with resource metrics.
@@ -355,7 +363,7 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **Frontend:** the dashboard includes a basic trace viewer (search by trace ID, see the full service call chain) and a metrics dashboard (queue depths, error rates, pipeline throughput) backed by the Logging Service query API. Full Grafana-level dashboards available by connecting the optional Prometheus/Jaeger endpoints.
 - **Correlation:** the existing `traceId` in log events (Decision #17) IS the OTEL trace ID — logs, traces, and metrics all share the same correlation identifier
 
-### 21. SDK, CLI, and API as First-Class Citizens
+### 22. SDK, CLI, and API as First-Class Citizens
 **Decision:** The platform is API-first. Every operation available in the UI is available via the REST API. The CLI and SDKs are thin wrappers around the API. All three (API, CLI, SDKs) are first-class, fully documented, and tested as rigorously as the services themselves.
 
 **Rationale:** An integration platform must be programmable. If users can only interact through the UI, the platform fails its core purpose. The API is the product; the UI is one client of many.
@@ -370,7 +378,7 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **API versioning:** the API is versioned via URL prefix (`/api/v1/...`). Breaking changes increment the version. Old versions are supported for 6 months after deprecation.
 - **SDK generation:** SDK methods are auto-generated from the OpenAPI spec using a code generator that produces fully-typed TypeScript. When a new API endpoint is added, the SDK updates automatically.
 
-### 22. Auto-Generated Documentation
+### 23. Auto-Generated Documentation
 **Decision:** All documentation is generated from the actual codebase and kept in sync automatically. There is no separately-maintained documentation that can drift from reality.
 
 **Rationale:** Documentation that drifts from code is worse than no documentation — it actively misleads. In a platform with auto-generated APIs, types, and SDKs, the documentation must be generated from the same source of truth.
