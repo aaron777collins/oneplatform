@@ -43,6 +43,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 **Rationale:** Postgres handles structured platform metadata and dynamic user data (JSONB). PgBouncer prevents connection pool exhaustion across 9 services sharing one Postgres instance — critical for stability. Redis is needed for BullMQ job queues regardless.
 
 **Postgres connection pool sizing:**
+- PgBouncer pooling mode: `transaction` mode for all services EXCEPT the Ontology Service and Pipeline Service, which use `session` mode via a separate PgBouncer pool. This is because: (1) transaction mode breaks `LISTEN/NOTIFY` and advisory locks, which the Ontology Service uses for schema migration coordination and the Pipeline Service uses for distributed lock acquisition; (2) session-mode pools for these two services are sized smaller (Ontology: 15, Pipeline: 15) since each connection is held longer
 - PgBouncer `max_client_conn`: 200 (total across all services)
 - PgBouncer `default_pool_size`: 20 per service (9 services × 20 = 180 server connections max)
 - Postgres `max_connections`: 200 (headroom for PgBouncer + direct admin access)
@@ -56,6 +57,8 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - DB 3: Log/audit delivery pub/sub
 - DB 4: General caching (rate limit counters, session data)
 - This prevents BullMQ traffic from crowding out auth or ontology pub/sub operations
+- **Acknowledged limitation:** Redis logical databases share memory, CPU, and connection pool — they are namespaces, NOT isolation boundaries. A `FLUSHDB` on any DB or a memory-intensive operation on DB 0 (BullMQ) can still affect all other DBs. True isolation requires separate Redis instances, which is documented as the production HA upgrade path (Redis Sentinel per concern group). The logical DB separation is a development/small-deployment reasonable-default that reduces namespace collision, not a security boundary.
+- **Redis access control:** Redis is configured with ACL rules — each service authenticates with its own Redis user that has access ONLY to its assigned logical database(s). The Execution Service has NO Redis access at all (it communicates only via the Unix socket to sandbox-vm and via the internal service network to other services). This prevents a compromised service from issuing `FLUSHDB` on another service's database.
 
 ### 6. Code Execution Sandbox
 **Decision:** `isolated-vm` for JavaScript/TypeScript (fast path, ~1ms), Docker containers for other languages (Python, Go, etc.) accessed via a restricted Docker socket proxy.
@@ -71,7 +74,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 
 **isolated-vm process isolation:**
 - `isolated-vm` does NOT run inside the main Execution Service process — it runs in a dedicated, low-privilege child container (`op-sandbox-vm`) with no Docker socket access, no network access to internal services, and minimal filesystem
-- The Execution Service communicates with `op-sandbox-vm` via a Unix socket (mounted as a shared volume) using a simple JSON-RPC protocol: `{method: "execute", code: "...", context: {...}}`
+- The Execution Service communicates with `op-sandbox-vm` via a Unix socket (mounted as a shared volume) using a simple JSON-RPC protocol: `{method: "execute", code: "...", context: {...}}`. The socket is unidirectional — the Execution Service is the ONLY writer; the sandbox-vm is the ONLY reader. The socket is implemented as a pair: one for requests (Execution→sandbox), one for responses (sandbox→Execution). The sandbox-vm cannot send unsolicited messages or execute arbitrary commands back through the socket. If the sandbox-vm is compromised, it can only send malformed responses to pending requests — it cannot initiate new executions or reach any other resource.
 - If a V8 engine vulnerability allows escape from `isolated-vm`, the attacker lands in a container with no capabilities, no Docker socket, no internal network, and read-only filesystem — the blast radius is contained to that single sandbox container
 - The `op-sandbox-vm` container is recycled (destroyed and recreated) every 1000 executions or every 1 hour (whichever comes first) to limit the window of any in-memory compromise
 - Resource limits: 512MB memory, 1 CPU core, 30s execution timeout per invocation
@@ -87,6 +90,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Token revocation: Redis SET of revoked token JTIs checked on every request via auth middleware in @oneplatform/core — O(1) lookup
 - API keys: hashed with bcrypt, stored in Postgres, never expire but can be revoked instantly via the revocation set
 - On compromise: revoke refresh token in Redis → access token expires within 15 minutes max; or add access token JTI to revocation set for immediate invalidation
+- **Emergency revocation (Redis outage):** if Redis is down and a compromised token cannot be added to the blocklist, operators can trigger an emergency re-key via `op auth emergency-rotate` (CLI) or the admin API. This rotates the JWT signing secret, immediately invalidating ALL access tokens platform-wide. All users must re-authenticate. This is a last-resort nuclear option documented in the ops guide for the combined scenario of Redis outage + active token compromise.
 
 ### 8. License
 **Decision:** Business Source License (BSL) — source-available, free to self-host, converts to Apache 2.0 after 4 years.
@@ -152,7 +156,8 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Breaking changes (remove field, rename field, narrow type, change relationship): Ontology Service generates a migration plan showing affected data count, dependent pipelines, and dependent apps; user must review and confirm
 - On confirmation: a migration job is queued to the Pipeline Service that transforms existing data from old schema to new schema in batches; the old schema version remains active until migration completes
 - Generated code (API routes, TypeScript types, validation) is versioned alongside the schema — API endpoints support `?v=2` query parameter during migration window; old version is deprecated after migration completes
-- Rollback: if migration fails, old schema version is restored; partially migrated data is reverted using shadow tables (pre-migration snapshots of affected rows, created before migration begins, capped at configurable batch size of 10,000 rows per batch); shadow tables are dropped after successful migration or used for restoration on failure — this is more reliable than audit-trail replay at scale
+- **Dual-schema query handling during migration:** while a migration is in progress, some rows are in the new schema and some in the old. The Ontology Service maintains a `migration_status` enum per entity (`idle`, `migrating`, `complete`). During `migrating` state, queries use a UNION view that normalizes both old-schema and new-schema rows into the new schema format (with defaults for missing fields). This ensures consistent query results across batch boundaries. The view is dropped when migration completes.
+- Rollback: if migration fails, old schema version is restored; partially migrated data is reverted using shadow tables (pre-migration snapshots of affected rows, created before each batch begins). Each batch creates its own shadow table (`shadow_{entity}_{batch_id}`), so a failure at batch 6 rolls back batches 1-6 individually in reverse order. Shadow tables are dropped after successful migration or used for restoration on failure.
 
 ### 15. App Routing and TLS
 **Decision:** User apps are served via path-based routing by default (`/apps/{app-slug}`), with optional subdomain routing (`{app-slug}.apps.yourdomain.com`) for users who configure wildcard DNS and TLS.
@@ -175,6 +180,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - When a stage runs, the Pipeline Service asks the Plugin Service for the ordered list of hooks registered for that stage
 - The Plugin Service returns a flat, ordered array of hook references (sorted by priority)
 - The Pipeline Service passes each hook to the Execution Service sequentially; each hook receives the current data payload and returns a (possibly modified) payload
+- **All plugin hook code runs through the Execution Service sandbox** — plugin hooks are user-supplied or third-party code and MUST be sandboxed. JS/TS hooks run in the `op-sandbox-vm` container via isolated-vm; hooks in other languages run in Docker sandbox containers. Plugins NEVER execute in the Plugin Service process itself — the Plugin Service only manages lifecycle and registry; the Execution Service handles all code execution.
 - Hooks run with a `hookDepth=1` flag in the execution context; any attempt to enqueue a job or trigger a pipeline stage from within a hook is rejected with `HookRecursionError`
 - Hook timeout: 30s default per hook; exceeded hooks are killed
 - Hook criticality: each hook declares `criticality: 'critical' | 'advisory'` at registration time; `advisory` hooks are fail-open (chain continues with pre-hook payload on timeout/error); `critical` hooks are fail-closed (chain aborts and the pipeline stage returns an error) — this prevents security-sensitive hooks (e.g., data masking, compliance filters) from being silently skipped
@@ -192,6 +198,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Log retention: configurable per-level (ERROR: 90 days, INFO: 30 days, DEBUG: 7 days); audit logs: 1 year minimum
 - The Logging Service exposes a query API for the frontend log viewer with filtering by trace ID, service, level, time range
 - **Acknowledged tradeoff:** non-audit logs use Redis pub/sub (fire-and-forget, no acknowledgement). If the Logging Service restarts while the in-memory buffer has events, those non-audit log events are lost. This is an accepted tradeoff for performance — audit events use BullMQ with guaranteed delivery and are never lost
+- **Horizontal scaling path:** the Logging Service is the highest-write-volume service. Scaling path: (1) table partitioning by time (monthly partitions for `logging.events`, auto-created) — enables fast range queries and efficient partition drops for retention; (2) read replica for the log query API (log viewer reads from replica, writes go to primary); (3) cold storage: partitions older than 30 days are compressed and moved to a `logging.archive` table with reduced indexes; audit logs are never archived until retention expires; (4) at extreme scale, split Logging to its own Postgres instance (first service to split per Decision #5)
 
 ## Services
 
@@ -304,7 +311,23 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **Production recommendation:** Docker Compose includes a commented-out Redis Sentinel configuration (1 master + 2 replicas) that users can enable for high availability; the architecture guide documents when and why to enable it
 - **Health monitoring:** the Gateway Service health check includes Redis connectivity; if Redis is unreachable for >30s, the health endpoint returns degraded status, allowing external load balancers or monitoring to alert
 
-### 19. Rate Limiting
+### 19. Service-to-Service Authentication
+**Decision:** All inter-service communication is authenticated using mutual TLS (mTLS) or shared service tokens. No service trusts another service based solely on network proximity.
+
+**Rationale:** In a microservices architecture, any container on the Docker network can reach any other container. A compromised sandbox container, a malicious plugin, or a misconfigured service could call the Auth Service to issue tokens or the Ingestion Service to read credentials. Network adjacency is not trust.
+
+**Implementation:**
+- **Service tokens:** each service is issued a service-level JWT at startup, signed by a shared secret (`OP_SERVICE_SECRET` env var). This token contains the service name and a `role: "service"` claim. Services include this token in all inter-service requests via the `X-Service-Token` header.
+- **Validation:** the auth middleware in @oneplatform/core validates `X-Service-Token` on every request. Requests without a valid service token from within the Docker network are rejected with 403. The Gateway is the ONLY service that accepts external (user) requests without a service token.
+- **Service RBAC:** each service has a defined set of endpoints it's allowed to call on other services. For example, the Pipeline Service can call `Execution.execute()` and `Ontology.getSchema()` but NOT `Auth.createUser()` or `Ingestion.getCredentials()`. This is enforced via a service-level permission matrix in @oneplatform/core.
+- **Sandbox containers:** the `op-sandbox-vm` container and Docker sandbox containers are on the `oneplatform-sandbox` network, which has NO access to the internal service network (`oneplatform-internal`). They can only communicate with the Execution Service via the Unix socket (sandbox-vm) or the outbound proxy (Docker containers). Lateral movement to other services is network-impossible.
+- **Docker network topology:**
+  - `oneplatform-internal`: all 9 services + PgBouncer + Redis (services talk to each other here)
+  - `oneplatform-sandbox`: Execution Service + sandbox-vm + Docker sandbox containers (isolated from internal)
+  - `oneplatform-public`: Gateway + Frontend (exposed to external traffic)
+  - The Execution Service is on BOTH `internal` and `sandbox` networks — it's the bridge. No other service touches the sandbox network.
+
+### 20. Rate Limiting
 **Decision:** The Gateway Service implements multi-tier rate limiting using Redis-backed sliding window counters. Rate limits are enforced at three levels: global, per-tenant, and per-API-key.
 
 **Rationale:** OnePlatform exposes webhook ingestion endpoints and auto-generated REST APIs to the public internet. Without rate limiting, a single misbehaving client can exhaust resources for all tenants.
@@ -315,7 +338,8 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **Per-API-key rate limit:** 500 requests/minute per API key (configurable per key at creation time). Allows fine-grained control for machine clients.
 - **Webhook ingestion rate limit:** 100 requests/second per webhook endpoint (separate from API rate limits, since webhooks are often bursty)
 - **Rate limit headers:** all responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers
-- **Storage:** sliding window counters in Redis DB 4 (general caching). Counter keys expire automatically. Zero overhead when Redis is down (rate limiting degrades to no-limit rather than blocking all traffic — fail-open for availability)
+- **Storage:** sliding window counters in Redis DB 4 (general caching). Counter keys expire automatically.
+- **Redis outage behavior:** rate limiting falls back to a LOCAL in-memory sliding window counter per Gateway instance with conservative limits (50% of normal limits). This prevents both extremes: complete no-limit (security hole for multi-tenant) and complete blocking (availability disaster). The in-memory counter is approximate and per-process (not shared across Gateway replicas), so it's less precise but still protective. When Redis reconnects, counters are re-synced.
 - **Burst allowance:** each limit allows a 2x burst for 5 seconds to handle legitimate traffic spikes
 
 ### 20. Observability Stack
@@ -340,7 +364,7 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **REST API:** the Gateway exposes a fully documented REST API. Every endpoint is auto-documented via OpenAPI 3.1 spec generated from Hono route definitions + Zod schemas. The spec is always in sync with the actual code — it's generated, not manually maintained.
 - **CLI (`@oneplatform/cli`):** a Node.js CLI tool (`npx @oneplatform/cli` or `op` when installed globally) that wraps the REST API. Covers all operations: manage ontologies, trigger pipelines, deploy apps, view logs, manage users/roles, import/export configurations. Supports JSON and table output formats. Auth via API key or interactive login.
 - **SDKs:**
-  - `@oneplatform/sdk` — TypeScript/JavaScript SDK for external apps. Handles auth, real-time subscriptions (SSE/WS), ontology-typed data access, pipeline triggers. Works in Node.js and browsers.
+  - `@oneplatform/sdk` — TypeScript/JavaScript SDK for external apps. Handles auth, real-time subscriptions (SSE/WS), ontology-typed data access, pipeline triggers. Works in Node.js and browsers. **Browser security:** browser clients NEVER receive raw API keys. Browser apps authenticate via OAuth flow (authorization code + PKCE) and receive short-lived access tokens. The SDK detects the browser environment and automatically uses the OAuth flow instead of API key auth. For platform-hosted apps, the App Service acts as a BFF (backend-for-frontend) — the browser app calls the App Service, which calls internal APIs with service tokens. API keys are server-side only.
   - `@oneplatform/app-sdk` — SDK for apps built inside the platform. Same as above plus platform-specific APIs: access to the current user, app storage, inter-app communication, UI component library bindings.
   - `@oneplatform/plugin-sdk` — SDK for plugin developers. Provides interfaces (`Connector`, `Transformer`, `Destination`, `AuthProvider`, `Widget`), hook registration helpers, and a local development server for testing plugins.
 - **API versioning:** the API is versioned via URL prefix (`/api/v1/...`). Breaking changes increment the version. Old versions are supported for 6 months after deprecation.
