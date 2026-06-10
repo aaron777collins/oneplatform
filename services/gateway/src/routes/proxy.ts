@@ -18,7 +18,10 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
   });
 
   routes.all("/*", async (c) => {
-    const path = new URL(c.req.url).pathname;
+    const parsedUrl = new URL(c.req.url);
+    const path = parsedUrl.pathname;
+    // Preserve query string so upstream receives the full request URL
+    const pathWithSearch = path + parsedUrl.search;
     const resolved = proxyService.resolveUpstreamUrl(path);
     if (!resolved) {
       return c.json({
@@ -31,7 +34,7 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
 
     const user = c.var.user;
     const doProxy = () =>
-      proxyService.proxyRequest(c, resolved.serviceUrl + path, {
+      proxyService.proxyRequest(c, resolved.serviceUrl + pathWithSearch, {
         timeoutMs: proxyService.getServiceTimeout(resolved.serviceName),
         serviceName: resolved.serviceName,
         ...(serviceToken ? { serviceToken } : {}),

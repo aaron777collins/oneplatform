@@ -52,9 +52,11 @@ async function handleDataRoute(
     }, 404);
   }
 
-  const path = new URL(c.req.url).pathname;
+  const parsedUrl = new URL(c.req.url);
+  // Preserve query string so upstream receives the full request URL
+  const pathWithSearch = parsedUrl.pathname + parsedUrl.search;
   const doProxy = () =>
-    deps.proxyService.proxyRequest(c, deps.ingestionServiceUrl + path, {
+    deps.proxyService.proxyRequest(c, deps.ingestionServiceUrl + pathWithSearch, {
       timeoutMs: 10_000,
       serviceName: "ingestion",
       tenantId: user.tenantId,

@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS gateway.webhook_deliveries (
   error           TEXT,                  -- error message if no HTTP response
   duration_ms     INTEGER,
   success         BOOLEAN     NOT NULL GENERATED ALWAYS AS (
-                    status_code >= 200 AND status_code < 300
+                    COALESCE(status_code, 0) >= 200 AND COALESCE(status_code, 0) < 300
                   ) STORED,
 
   CONSTRAINT webhook_deliveries_attempt_positive CHECK (attempt >= 1 AND attempt <= 9)
@@ -103,10 +103,11 @@ CREATE TABLE IF NOT EXISTS gateway.webhook_deliveries (
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook_id_requested_at
   ON gateway.webhook_deliveries(webhook_id, requested_at DESC);
 
--- Retention job: delete deliveries older than 7 days
+-- Retention job: plain index on requested_at lets the cleanup query do a fast
+-- range scan. A WHERE clause referencing now() would be non-immutable and
+-- cannot be used as a partial index predicate in PostgreSQL.
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_requested_at
-  ON gateway.webhook_deliveries(requested_at)
-  WHERE requested_at < now() - INTERVAL '7 days';
+  ON gateway.webhook_deliveries(requested_at);
 
 -- Idempotency lookup: has this event_id + webhook already been successfully delivered?
 CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_deliveries_event_delivery

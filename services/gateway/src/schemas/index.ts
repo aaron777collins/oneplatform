@@ -1,6 +1,43 @@
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
+// Webhook custom header validation
+//
+// Callers must not be able to inject platform headers (signature, delivery ID,
+// etc.) via custom_headers — those are always set by the delivery worker.
+// This denylist is case-insensitive to match HTTP header semantics.
+// ---------------------------------------------------------------------------
+
+// Headers that the delivery worker always sets and must not be overridden by
+// caller-supplied custom_headers. Checked case-insensitively.
+const DENIED_HEADER_KEYS = new Set([
+  "x-oneplatform-signature",
+  "x-oneplatform-event",
+  "x-oneplatform-delivery",
+  "x-oneplatform-timestamp",
+  "content-type",
+  "content-length",
+  "host",
+  "connection",
+]);
+
+function isDeniedHeaderKey(key: string): boolean {
+  return DENIED_HEADER_KEYS.has(key.toLowerCase());
+}
+
+const customHeadersSchema = z.record(z.string()).superRefine((headers, ctx) => {
+  for (const key of Object.keys(headers)) {
+    if (isDeniedHeaderKey(key)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Custom header key "${key}" is reserved and cannot be overridden.`,
+        path: [key],
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Webhook endpoints
 // ---------------------------------------------------------------------------
 
@@ -8,7 +45,7 @@ export const createWebhookRequest = z.object({
   url: z.string().url().min(1),
   events: z.array(z.string().min(1)).min(1).max(50),
   description: z.string().max(512).optional(),
-  headers: z.record(z.string()).optional(),
+  headers: customHeadersSchema.optional(),
   enabled: z.boolean().default(true),
 });
 
@@ -16,7 +53,7 @@ export const updateWebhookRequest = z.object({
   url: z.string().url().optional(),
   events: z.array(z.string().min(1)).min(1).max(50).optional(),
   description: z.string().max(512).nullable().optional(),
-  headers: z.record(z.string()).nullable().optional(),
+  headers: customHeadersSchema.nullable().optional(),
   enabled: z.boolean().optional(),
 });
 

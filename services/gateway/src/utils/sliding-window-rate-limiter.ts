@@ -58,6 +58,13 @@ export interface RateLimiter {
 //   allowed=0 → denied;  allowed=1 → permitted
 // ---------------------------------------------------------------------------
 
+// ARGV[1] = windowStart (ms) — used for elapsed fraction and reset timestamp
+// ARGV[2] = window duration (ms)
+// ARGV[3] = effective limit (already multiplied by burst factor)
+//
+// Passing windowStart rather than now() means the reset timestamp is always
+// exactly the end of the current window boundary, not now+windowMs which
+// would return a value one full window too far in the future.
 const SLIDING_WINDOW_LUA = `
 local current  = tonumber(redis.call('GET', KEYS[1])) or 0
 local previous = tonumber(redis.call('GET', KEYS[2])) or 0
@@ -77,13 +84,45 @@ return {1, remaining, reset}
 // In-memory fallback window
 // ---------------------------------------------------------------------------
 
+// Maximum number of unique rate-limit keys tracked in memory. Prevents
+// unbounded growth when many distinct keys are seen during a Redis outage.
+const IN_MEMORY_MAX_ENTRIES = 10_000;
+// Entries that have not been accessed for longer than this are eligible for
+// eviction when the map hits the size limit.
+const IN_MEMORY_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
 interface InMemoryWindow {
   // Sorted array of request timestamps (ms). Entries older than windowMs are
   // pruned on each check to bound memory usage.
   timestamps: number[];
+  // Last time this entry was accessed — used for LRU eviction.
+  lastAccessedAt: number;
 }
 
 const inMemoryWindows = new Map<string, InMemoryWindow>();
+
+function evictStaleInMemoryEntries(now: number): void {
+  // First pass: remove entries past the TTL (stale regardless of pressure).
+  for (const [k, w] of inMemoryWindows) {
+    if (now - w.lastAccessedAt > IN_MEMORY_TTL_MS) {
+      inMemoryWindows.delete(k);
+    }
+  }
+  // Second pass: if still over limit, evict the least-recently-used entry.
+  if (inMemoryWindows.size >= IN_MEMORY_MAX_ENTRIES) {
+    let oldestKey: string | undefined;
+    let oldestTime = Infinity;
+    for (const [k, w] of inMemoryWindows) {
+      if (w.lastAccessedAt < oldestTime) {
+        oldestTime = w.lastAccessedAt;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey !== undefined) {
+      inMemoryWindows.delete(oldestKey);
+    }
+  }
+}
 
 function inMemoryCheck(
   key: string,
@@ -93,11 +132,17 @@ function inMemoryCheck(
   const now = Date.now();
   const windowStart = now - windowMs;
 
+  if (inMemoryWindows.size >= IN_MEMORY_MAX_ENTRIES) {
+    evictStaleInMemoryEntries(now);
+  }
+
   let window = inMemoryWindows.get(key);
   if (window === undefined) {
-    window = { timestamps: [] };
+    window = { timestamps: [], lastAccessedAt: now };
     inMemoryWindows.set(key, window);
   }
+
+  window.lastAccessedAt = now;
 
   // Remove timestamps outside the current window.
   // Using a while loop instead of filter to mutate in place and avoid GC churn.
@@ -165,12 +210,15 @@ export function createSlidingWindowLimiter(config: RateLimiterConfig): RateLimit
     try {
       // The Lua script returns [allowed, remaining, reset] as a Redis array.
       // ioredis types eval() as returning unknown so we cast after the await.
+      // Pass windowStart (not now) so the Lua's reset = windowStart + windowMs
+      // gives the exact end of the current window boundary rather than
+      // now + windowMs which overshoots by the elapsed time within the window.
       const raw = await redis.eval(
         SLIDING_WINDOW_LUA,
         2,
         currentKey,
         prevKey,
-        String(now),
+        String(windowStart),
         String(windowMs),
         String(effectiveLimit)
       );

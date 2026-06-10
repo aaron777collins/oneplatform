@@ -9,11 +9,11 @@ export interface SseRouteDeps {
   maxConnectionsPerKey: number;
 }
 
-const activeConnectionsByKey = new Map<string, number>();
-
 export function createSseRoutes(deps: SseRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { sseService, maxConnectionsPerKey } = deps;
+  // Moved inside factory (W10) so each Hono router instance has its own map.
+  const activeConnectionsByKey = new Map<string, number>();
 
   routes.get("/", async (c) => {
     const user = c.var.user;
@@ -38,7 +38,6 @@ export function createSseRoutes(deps: SseRouteDeps): Hono<{ Variables: AppVariab
         },
       }, 429);
     }
-
     const patterns = query.data.events.split(",").map((s) => s.trim()).filter(Boolean);
     if (patterns.length === 0) {
       return c.json({
@@ -46,14 +45,17 @@ export function createSseRoutes(deps: SseRouteDeps): Hono<{ Variables: AppVariab
       }, 400);
     }
 
+    // Increment immediately after all validation passes, closing the TOCTOU
+    // window — concurrent requests that pass the limit check simultaneously
+    // must not both be allowed to open connections past the cap.
+    activeConnectionsByKey.set(connectionKey, currentConnections + 1);
+
     const lastEventId = query.data["Last-Event-ID"] ?? c.req.header("Last-Event-ID");
 
     c.header("Content-Type", "text/event-stream");
     c.header("Cache-Control", "no-cache");
     c.header("Connection", "keep-alive");
     c.header("X-Accel-Buffering", "no");
-
-    activeConnectionsByKey.set(connectionKey, currentConnections + 1);
 
     return stream(c, async (streamInstance) => {
       let unsubscribe: (() => void) | null = null;

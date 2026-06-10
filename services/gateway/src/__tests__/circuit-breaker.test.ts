@@ -396,19 +396,24 @@ describe("concurrent calls in half-open state", () => {
     vi.useRealTimers();
   });
 
-  it("allows multiple concurrent calls when state enters half-open (both succeed, closes once)", async () => {
+  it("blocks concurrent probes in half-open state — only the first probe runs, second is rejected", async () => {
     const cb = makeBreakerWith(1, 1000);
     await expect(cb.execute(rejects())).rejects.toThrow();
     vi.advanceTimersByTime(1000);
 
-    // Concurrently launch two probes. The implementation does not gate the
-    // second call — both run. The first success closes the breaker.
-    const [r1, r2] = await Promise.all([
+    // Only the first concurrent caller is allowed to probe. The second sees
+    // the probeInFlight sentinel and is immediately rejected as if open.
+    // This prevents a thundering herd when the upstream recovers.
+    const results = await Promise.allSettled([
       cb.execute(resolves("a")),
       cb.execute(resolves("b")),
     ]);
-    expect(r1).toBe("a");
-    expect(r2).toBe("b");
+
+    // First probe succeeds and closes the breaker
+    expect(results[0]).toMatchObject({ status: "fulfilled", value: "a" });
+    // Second concurrent call is rejected while the probe is in-flight
+    expect(results[1]).toMatchObject({ status: "rejected" });
+    expect((results[1] as PromiseRejectedResult).reason).toBeInstanceOf(CircuitBreakerOpenError);
     expect(cb.getState()).toBe("closed");
   });
 });

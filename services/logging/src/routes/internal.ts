@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, serviceAuthMiddleware } from "@oneplatform/core";
 import type { LogEventRepository } from "../repositories/index.js";
@@ -56,6 +57,19 @@ export function createInternalRoutes(
 
     const { services, ...rest } = parsed.data;
 
+    // Cursor-based pagination is incompatible with multi-service fan-out because
+    // the fan-out merges results from independent queries — there is no single
+    // monotonic cursor that maps back to a deterministic position across all
+    // of them. Reject the combination so the caller gets a clear error instead
+    // of silently getting stale/repeated results.
+    if (services !== undefined && services.length > 0 && rest.cursor !== undefined) {
+      throw new ValidationError(
+        "Cursor pagination cannot be combined with a multi-service fan-out query. " +
+          "Remove 'cursor' or remove 'services' from the request.",
+        []
+      );
+    }
+
     const params: LogQueryParams = {
       limit: rest.limit,
       ...(rest.service !== undefined ? { service: rest.service } : {}),
@@ -111,8 +125,14 @@ export function createInternalRoutes(
   routes.post("/internal/logging/ingest", async (c) => {
     const body: unknown = await c.req.json();
 
-    // Accept either a single event object or an array of events
-    const items = Array.isArray(body) ? body : [body];
+    // Accept either a single event object or an array of events, bounded to
+    // prevent a single request from exhausting memory or DB write capacity.
+    const rawItems = Array.isArray(body) ? body : [body];
+    const itemsResult = z.array(z.unknown()).max(1000).safeParse(rawItems);
+    if (!itemsResult.success) {
+      throw new ValidationError("Request body exceeds maximum of 1000 events", itemsResult.error.issues);
+    }
+    const items = itemsResult.data;
     const events: CreateLogEventData[] = [];
 
     for (const item of items) {

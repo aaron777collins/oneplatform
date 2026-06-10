@@ -79,6 +79,10 @@ export function createCircuitBreaker(
   // Timestamp (ms) at which the breaker entered the open state.
   // Used to determine when to transition to half-open.
   let openedAt: number | null = null;
+  // Sentinel: true while the single half-open probe is in-flight.
+  // Additional callers see the breaker as open so only one probe races
+  // at a time — preventing a thundering herd when the upstream recovers.
+  let probeInFlight = false;
 
   function transitionToOpen(): void {
     state = "open";
@@ -93,6 +97,7 @@ export function createCircuitBreaker(
 
   function transitionToHalfOpen(): void {
     state = "half-open";
+    probeInFlight = false;
     // Reset failure count so the single probe is judged on its own merits.
     consecutiveFailures = 0;
   }
@@ -117,13 +122,25 @@ export function createCircuitBreaker(
       );
     }
 
-    // In half-open state, exactly one probe is allowed. The state stays
-    // half-open during the probe — only the outcome changes it.
+    // In half-open state, exactly one probe is allowed at a time.
+    // probeInFlight prevents concurrent requests from all racing through
+    // before the first probe result is known.
+    if (state === "half-open" && probeInFlight) {
+      throw new CircuitBreakerOpenError(
+        "The upstream service is temporarily unavailable. The circuit breaker is open."
+      );
+    }
+
+    if (state === "half-open") {
+      probeInFlight = true;
+    }
+
     try {
       const result = await fn();
 
       if (state === "half-open") {
         // Probe succeeded: upstream recovered, close the breaker.
+        probeInFlight = false;
         transitionToClosed();
       } else {
         // Success in closed state: reset consecutive failure counter.
@@ -136,6 +153,7 @@ export function createCircuitBreaker(
 
       if (state === "half-open") {
         // Probe failed: upstream still down, re-open immediately.
+        probeInFlight = false;
         transitionToOpen();
       } else if (consecutiveFailures >= failureThreshold) {
         // Threshold reached in closed state: open the breaker.

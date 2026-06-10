@@ -13,62 +13,78 @@ export interface MigrationResult {
   skipped: string[];
 }
 
+// Advisory lock key — must be a stable integer shared by all instances of this
+// service. Chosen to be memorable and unlikely to collide with other services.
+const MIGRATION_ADVISORY_LOCK_KEY = 7_001_001;
+
 export async function runMigrations(pool: pg.Pool): Promise<MigrationResult> {
-  // Bootstrap the migration tracking table under the logging schema.
-  // The logging schema itself is created by the first migration SQL file,
-  // but we need a place to record which migrations have run — create it here
-  // before executing any SQL files.
-  await pool.query(`
-    CREATE SCHEMA IF NOT EXISTS logging;
+  // Acquire a session-level advisory lock so that concurrent pod startups
+  // (e.g. a rolling deploy) do not race on the version-check/apply loop.
+  // pg_advisory_lock blocks until the lock is available; it is released
+  // automatically when the client connection is returned to the pool.
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
 
-    CREATE TABLE IF NOT EXISTS logging.schema_migrations (
-      version    TEXT PRIMARY KEY,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    // Bootstrap the migration tracking table under the logging schema.
+    // The logging schema itself is created by the first migration SQL file,
+    // but we need a place to record which migrations have run — create it here
+    // before executing any SQL files.
+    await client.query(`
+      CREATE SCHEMA IF NOT EXISTS logging;
+
+      CREATE TABLE IF NOT EXISTS logging.schema_migrations (
+        version    TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
+
+    const appliedResult = await client.query<{ version: string }>(
+      "SELECT version FROM logging.schema_migrations ORDER BY version"
     );
-  `);
+    const appliedVersions = new Set(appliedResult.rows.map((r) => r["version"]));
 
-  const appliedResult = await pool.query<{ version: string }>(
-    "SELECT version FROM logging.schema_migrations ORDER BY version"
-  );
-  const appliedVersions = new Set(appliedResult.rows.map((r) => r["version"]));
+    const allFiles = await readdir(MIGRATIONS_DIR);
+    const migrationFiles = allFiles
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
 
-  const allFiles = await readdir(MIGRATIONS_DIR);
-  const migrationFiles = allFiles
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+    const applied: string[] = [];
+    const skipped: string[] = [];
 
-  const applied: string[] = [];
-  const skipped: string[] = [];
+    for (const filename of migrationFiles) {
+      const version = filename.replace(/\.sql$/, "");
 
-  for (const filename of migrationFiles) {
-    const version = filename.replace(/\.sql$/, "");
+      if (appliedVersions.has(version)) {
+        skipped.push(version);
+        continue;
+      }
 
-    if (appliedVersions.has(version)) {
-      skipped.push(version);
-      continue;
+      const sql = await readFile(join(MIGRATIONS_DIR, filename), "utf-8");
+
+      try {
+        await client.query("BEGIN");
+        await client.query(sql);
+        await client.query(
+          "INSERT INTO logging.schema_migrations (version) VALUES ($1)",
+          [version]
+        );
+        await client.query("COMMIT");
+        applied.push(version);
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw new Error(
+          `Migration "${version}" failed — rolling back. Original error: ${String(err)}`
+        );
+      }
     }
 
-    const sql = await readFile(join(MIGRATIONS_DIR, filename), "utf-8");
-
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(sql);
-      await client.query(
-        "INSERT INTO logging.schema_migrations (version) VALUES ($1)",
-        [version]
-      );
-      await client.query("COMMIT");
-      applied.push(version);
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw new Error(
-        `Migration "${version}" failed — rolling back. Original error: ${String(err)}`
-      );
-    } finally {
-      client.release();
-    }
+    return { applied, skipped };
+  } finally {
+    // pg_advisory_unlock is implicit on connection release, but calling it
+    // explicitly is clearer and ensures the lock is freed even if the connection
+    // is reused rather than closed.
+    await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {});
+    client.release();
   }
-
-  return { applied, skipped };
 }

@@ -77,7 +77,7 @@ export function createOntologyCache(deps: OntologyCacheDeps): OntologyCache {
     }
 
     const response = await fetch(
-      `${ontologyServiceUrl}/internal/ontology/schema?tenantId=${tenantId}`,
+      `${ontologyServiceUrl}/internal/ontology/schema?tenantId=${encodeURIComponent(tenantId)}`,
       { headers, signal: AbortSignal.timeout(10_000) },
     );
 

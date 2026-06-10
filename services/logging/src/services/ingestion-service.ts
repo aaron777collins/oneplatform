@@ -134,8 +134,17 @@ export class BatchAccumulator extends EventEmitter {
     const batchSize = getBatchSizeLimit();
     try {
       while (this.memoryBuffer.length > 0) {
+        // Remove the chunk first so a concurrent drain cannot pick it up,
+        // but re-prepend it on failure so events are never silently discarded.
         const chunk = this.memoryBuffer.splice(0, batchSize);
-        await this.writeBatch(chunk);
+        try {
+          await this.writeBatch(chunk);
+        } catch (err: unknown) {
+          // Re-prepend the failed chunk before re-throwing so the outer catch
+          // can schedule a retry with all events still in the buffer.
+          this.memoryBuffer.unshift(...chunk);
+          throw err;
+        }
       }
       // Reset backoff on successful drain
       this.retryBackoffMs = 2_000;
@@ -147,7 +156,13 @@ export class BatchAccumulator extends EventEmitter {
   }
 
   /**
-   * Stop timers and flush remaining buffer. Called during graceful shutdown.
+   * Stop timers and flush all remaining events. Called during graceful shutdown.
+   *
+   * Two buffers must be drained in order:
+   *   1. `this.buffer` — events queued but not yet attempted
+   *   2. `this.memoryBuffer` — events that failed a previous DB write
+   *
+   * Both are best-effort: errors are swallowed so the shutdown always completes.
    */
   async stop(): Promise<void> {
     if (this.timer !== null) {
@@ -158,11 +173,24 @@ export class BatchAccumulator extends EventEmitter {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    // Best-effort final flush — do not throw; shutdown must complete.
+
+    // Flush the primary buffer.
     const batch = this.buffer.splice(0, this.buffer.length);
     if (batch.length > 0) {
       try {
         await this.writeBatch(batch);
+      } catch {
+        // Silently discard on shutdown — the service is going away.
+      }
+    }
+
+    // Drain the memory fallback buffer. Without this, events that previously
+    // failed a DB write would be silently discarded on shutdown even if the
+    // DB has since recovered.
+    if (this.memoryBuffer.length > 0) {
+      const pending = this.memoryBuffer.splice(0, this.memoryBuffer.length);
+      try {
+        await this.writeBatch(pending);
       } catch {
         // Silently discard on shutdown — the service is going away.
       }

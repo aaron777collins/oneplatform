@@ -7,7 +7,7 @@
 // All tests use fake repos (simple objects implementing the repo interface) and
 // control env vars so no real Redis or Postgres connection is needed.
 
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vitest";
 import { BatchAccumulator } from "../services/ingestion-service.js";
 
 // ---------------------------------------------------------------------------
@@ -15,6 +15,15 @@ import { BatchAccumulator } from "../services/ingestion-service.js";
 // ---------------------------------------------------------------------------
 
 type InsertBatchFn = (events: unknown[]) => Promise<void>;
+
+// Typed mock factory — gives TypeScript enough information to resolve
+// `mock.calls` as `[unknown[]][]` rather than the zero-element tuple it
+// infers from `vi.fn(async () => {})`. The explicit overload is needed
+// because Vitest 1.x infers parameter types from the implementation
+// function, which is `() => Promise<void>` when the body does nothing.
+function mockInsertBatch(impl?: InsertBatchFn): Mock<[unknown[]], Promise<void>> {
+  return vi.fn<[unknown[]], Promise<void>>(impl ?? (async () => {}));
+}
 
 function makeRepo(insertBatch: InsertBatchFn = async () => {}) {
   return { insertBatch } as unknown as ConstructorParameters<
@@ -92,7 +101,7 @@ describe("BatchAccumulator", () => {
 
   describe("push() — size-based flush trigger", () => {
     it("does not flush before reaching the size limit", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
       // OP_LOG_BATCH_SIZE is 3 — push 2 events (below threshold)
       acc.push({ ...EVENT });
@@ -103,7 +112,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("flushes exactly when the buffer reaches the size limit", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
       // Push 3 events — should flush immediately on the 3rd push
       acc.push({ ...EVENT });
@@ -117,7 +126,7 @@ describe("BatchAccumulator", () => {
     it("emits the 'batch' event before the DB write on size flush", async () => {
       let batchEmittedBeforeInsert = false;
       let insertCalled = false;
-      const insertBatch = vi.fn(async () => {
+      const insertBatch = mockInsertBatch(async () => {
         insertCalled = true;
       });
       const acc = new BatchAccumulator(makeRepo(insertBatch));
@@ -137,7 +146,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("clears the buffer after flush so the next push starts fresh", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       // First batch flush (3 events)
@@ -157,7 +166,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("passes correct row shape to insertBatch", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       const specificEvent = {
@@ -195,7 +204,7 @@ describe("BatchAccumulator", () => {
 
   describe("push() — timer-based flush trigger", () => {
     it("sets a timer on the first push when buffer is below size limit", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.push({ ...EVENT });
@@ -208,7 +217,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("does not set a second timer if one is already pending", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       // Push two events without reaching the size limit
@@ -221,7 +230,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("resets the timer after a size-triggered flush", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       // Fill to size limit — flushes synchronously and clears timer
@@ -245,7 +254,7 @@ describe("BatchAccumulator", () => {
 
   describe("flush() — explicit flush call", () => {
     it("does nothing when buffer is empty", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.flush();
@@ -254,7 +263,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("flushes whatever is in the buffer immediately", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.push({ ...EVENT });
@@ -267,7 +276,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("cancels the pending timer when flushing explicitly", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.push({ ...EVENT });
@@ -301,7 +310,7 @@ describe("BatchAccumulator", () => {
 
   describe("stop() — graceful shutdown", () => {
     it("flushes the remaining buffer on stop", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.push({ ...EVENT });
@@ -313,7 +322,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("stop on an empty buffer does not call insertBatch", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       await acc.stop();
@@ -321,7 +330,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("stop does not throw even if insertBatch rejects", async () => {
-      const insertBatch = vi.fn(async () => {
+      const insertBatch = mockInsertBatch(async () => {
         throw new Error("DB unavailable");
       });
       const acc = new BatchAccumulator(makeRepo(insertBatch));
@@ -332,7 +341,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("cancels the pending timer during stop", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.push({ ...EVENT });
@@ -344,7 +353,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("stop is idempotent — calling it twice does not double-flush", async () => {
-      const insertBatch = vi.fn(async () => {});
+      const insertBatch = mockInsertBatch();
       const acc = new BatchAccumulator(makeRepo(insertBatch));
 
       acc.push({ ...EVENT });
@@ -390,7 +399,7 @@ describe("BatchAccumulator", () => {
     });
 
     it("batch event fires even when insertBatch will later fail", async () => {
-      const insertBatch = vi.fn(async () => {
+      const insertBatch = mockInsertBatch(async () => {
         throw new Error("Insert failed");
       });
       const batchHandler = vi.fn();
@@ -415,7 +424,7 @@ describe("BatchAccumulator", () => {
       // Verify that a failed insertBatch causes the error to be logged and
       // the events to be moved to the memory buffer (evidenced by the
       // "Batch insert failed" log message, which only fires from handleInsertFailure).
-      const insertBatch = vi.fn(async () => {
+      const insertBatch = mockInsertBatch(async () => {
         throw new Error("Transient DB failure");
       });
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -446,7 +455,7 @@ describe("BatchAccumulator", () => {
       // Set memory buffer max to 0 so there is no room to buffer failed events
       process.env["OP_LOG_MEMORY_BUFFER_MAX"] = "0";
 
-      const insertBatch = vi.fn(async () => {
+      const insertBatch = mockInsertBatch(async () => {
         throw new Error("DB down");
       });
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

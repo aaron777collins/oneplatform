@@ -25,15 +25,14 @@ function makeDb(overrides: { query?: (text: string, values?: unknown[]) => Promi
   const calls: QueryCall[] = [];
 
   const query = overrides.query ?? (async (text: string, values?: unknown[]) => {
-    calls.push({ text, values });
-    // Return empty result for partition queries; simulate no partitions to drop
+    calls.push({ text, ...(values !== undefined ? { values } : {}) });
     return { rows: [] };
   });
 
   return {
     query: vi.fn(query),
     _calls: calls,
-  } as unknown as import("pg").Pool & { _calls: QueryCall[] };
+  } as unknown as import("pg").Pool & { _calls: QueryCall[]; query: ReturnType<typeof vi.fn> };
 }
 
 // ---------------------------------------------------------------------------

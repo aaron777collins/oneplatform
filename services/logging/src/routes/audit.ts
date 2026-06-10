@@ -52,11 +52,20 @@ export function createAuditRoutes(
       throw new ValidationError("Invalid query parameters", parsed.error.issues);
     }
 
+    const isAdmin = user.scopes.includes("admin");
+
+    // Non-admin callers may only query their own tenant's audit events. The
+    // tenantId from the validated JWT is authoritative — callers cannot escalate
+    // by passing a different tenantId in the query string.
+    const effectiveTenantId: string | undefined = isAdmin
+      ? parsed.data.tenantId
+      : user.tenantId;
+
     const params: AuditQueryParams = {
       limit: parsed.data.limit,
       ...(parsed.data.actorId !== undefined ? { actorId: parsed.data.actorId } : {}),
       ...(parsed.data.actorType !== undefined ? { actorType: parsed.data.actorType } : {}),
-      ...(parsed.data.tenantId !== undefined ? { tenantId: parsed.data.tenantId } : {}),
+      ...(effectiveTenantId !== undefined ? { tenantId: effectiveTenantId } : {}),
       ...(parsed.data.action !== undefined ? { action: parsed.data.action } : {}),
       ...(parsed.data.resourceType !== undefined ? { resourceType: parsed.data.resourceType } : {}),
       ...(parsed.data.resourceId !== undefined ? { resourceId: parsed.data.resourceId } : {}),

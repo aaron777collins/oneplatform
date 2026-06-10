@@ -7,6 +7,14 @@ const DELIVERY_COLUMNS = `
   error, duration_ms, success
 `;
 
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
+
+export interface DeliveryListOptions {
+  cursor?: string;
+  limit?: number;
+}
+
 export class WebhookDeliveryRepository {
   constructor(private readonly pool: pg.Pool) {}
 
@@ -41,17 +49,55 @@ export class WebhookDeliveryRepository {
 
   // Returns deliveries in reverse chronological order (newest first) so the
   // API can surface the most recent attempts at the top of the list.
+  // Pagination uses a base64url-encoded compound cursor { requestedAt, id }
+  // so results are stable even for rows with identical timestamps.
   async findByWebhookId(
     webhookId: string,
-    limit = 50
+    limit = DEFAULT_LIMIT
   ): Promise<WebhookDeliveryRow[]> {
+    return this.listByWebhookId(webhookId, { limit });
+  }
+
+  async listByWebhookId(
+    webhookId: string,
+    options?: DeliveryListOptions
+  ): Promise<WebhookDeliveryRow[]> {
+    const pageSize = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+    const cursor = options?.cursor;
+
+    if (cursor !== undefined) {
+      // Cursor is base64url-encoded JSON: { requestedAt: string; id: string }
+      let afterRequestedAt: string;
+      let afterId: string;
+      try {
+        const decoded = JSON.parse(
+          Buffer.from(cursor, "base64url").toString("utf8")
+        ) as { requestedAt: string; id: string };
+        afterRequestedAt = decoded.requestedAt;
+        afterId = decoded.id;
+      } catch {
+        throw new Error("Invalid cursor: could not decode delivery pagination cursor");
+      }
+
+      const result = await this.pool.query<WebhookDeliveryRow>(
+        `SELECT ${DELIVERY_COLUMNS}
+           FROM gateway.webhook_deliveries
+          WHERE webhook_id = $1
+            AND (requested_at, id) < ($2::timestamptz, $3::uuid)
+          ORDER BY requested_at DESC, id DESC
+          LIMIT $4`,
+        [webhookId, afterRequestedAt, afterId, pageSize]
+      );
+      return result.rows;
+    }
+
     const result = await this.pool.query<WebhookDeliveryRow>(
       `SELECT ${DELIVERY_COLUMNS}
          FROM gateway.webhook_deliveries
         WHERE webhook_id = $1
-        ORDER BY requested_at DESC
+        ORDER BY requested_at DESC, id DESC
         LIMIT $2`,
-      [webhookId, limit]
+      [webhookId, pageSize]
     );
     return result.rows;
   }

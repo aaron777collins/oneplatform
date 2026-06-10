@@ -1,16 +1,14 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import dns from "node:dns";
 import { encrypt, decrypt } from "@oneplatform/core";
 import { NotFoundError, ForbiddenError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import type { WebhookRow } from "../repositories/types.js";
 import type { WebhookRepository } from "../repositories/webhook-repository.js";
 import type { WebhookDeliveryRepository } from "../repositories/webhook-delivery-repository.js";
-import {
-  WebhookSsrfBlockedError,
-  WebhookConnectivityFailedError,
-  WebhookInvalidUrlError,
-} from "./errors.js";
+import { WebhookConnectivityFailedError } from "./errors.js";
+// SSRF validation is centralised in ssrf-guard.ts — import from there rather
+// than duplicating the blocked-range logic in this file.
+import { validateWebhookUrl } from "../utils/ssrf-guard.js";
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -51,136 +49,6 @@ export interface TestWebhookResult {
   latencyMs: number;
   success: boolean;
   error?: string;
-}
-
-// ---------------------------------------------------------------------------
-// SSRF-blocked IP range checks (L2 §11.1)
-// ---------------------------------------------------------------------------
-
-// IPv4 CIDR ranges that must never receive webhook deliveries.
-// Link-local (169.254.x.x) covers cloud metadata endpoints on all major
-// providers (AWS IMDSv1, GCP metadata, Azure IMDS).
-const BLOCKED_IPV4_RANGES: Array<{ base: number; mask: number }> = [
-  { base: ip4ToInt("10.0.0.0"), mask: prefixToMask(8) },    // RFC 1918 class A
-  { base: ip4ToInt("172.16.0.0"), mask: prefixToMask(12) },  // RFC 1918 class B
-  { base: ip4ToInt("192.168.0.0"), mask: prefixToMask(16) }, // RFC 1918 class C
-  { base: ip4ToInt("127.0.0.0"), mask: prefixToMask(8) },    // Loopback
-  { base: ip4ToInt("169.254.0.0"), mask: prefixToMask(16) }, // Link-local / metadata
-  { base: ip4ToInt("0.0.0.0"), mask: prefixToMask(8) },      // "This" network
-  { base: ip4ToInt("100.64.0.0"), mask: prefixToMask(10) },  // Carrier-grade NAT
-];
-
-function ip4ToInt(ip: string): number {
-  const parts = ip.split(".");
-  return (
-    ((parseInt(parts[0] ?? "0", 10) << 24) |
-      (parseInt(parts[1] ?? "0", 10) << 16) |
-      (parseInt(parts[2] ?? "0", 10) << 8) |
-      parseInt(parts[3] ?? "0", 10)) >>>
-    0
-  );
-}
-
-function prefixToMask(prefix: number): number {
-  return (0xffffffff << (32 - prefix)) >>> 0;
-}
-
-function isBlockedIpv4(ip: string): boolean {
-  const ipInt = ip4ToInt(ip);
-  return BLOCKED_IPV4_RANGES.some(
-    ({ base, mask }) => (ipInt & mask) === base
-  );
-}
-
-// IPv6 addresses that are blocked (loopback and link-local).
-// We do not enumerate all private IPv6 ranges exhaustively because most
-// production deployments run IPv4; block what matters most.
-function isBlockedIpv6(ip: string): boolean {
-  const normalized = ip.toLowerCase().replace(/^\[|\]$/g, "");
-  // ::1 — loopback
-  if (normalized === "::1") return true;
-  // fe80::/10 — link-local
-  if (/^fe[89ab][0-9a-f]:/i.test(normalized)) return true;
-  // fc00::/7 — unique local (private IPv6)
-  if (/^f[cd][0-9a-f]{2}:/i.test(normalized)) return true;
-  return false;
-}
-
-// Hostnames that are rejected before DNS resolution to give clear errors
-// rather than a confusing "SSRF blocked" for what is obviously a local address.
-const BLOCKED_HOSTNAME_PATTERNS: RegExp[] = [
-  /^localhost$/i,
-  /\.local$/i,
-  /.*-service$/i, // Docker Compose service names (e.g. auth-service)
-];
-
-function isBlockedHostname(hostname: string): boolean {
-  return BLOCKED_HOSTNAME_PATTERNS.some((re) => re.test(hostname));
-}
-
-// ---------------------------------------------------------------------------
-// DNS resolution + SSRF check (L2 §11.1 and §11.2)
-// ---------------------------------------------------------------------------
-
-async function validateWebhookUrl(url: string): Promise<void> {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new WebhookInvalidUrlError(
-      `The webhook URL "${url}" is malformed and cannot be parsed.`,
-      { url }
-    );
-  }
-
-  const allowHttp = process.env["OP_WEBHOOK_ALLOW_HTTP"] === "true";
-  if (parsed.protocol !== "https:" && !(allowHttp && parsed.protocol === "http:")) {
-    throw new WebhookInvalidUrlError(
-      `The webhook URL must use the https:// protocol. Got: ${parsed.protocol}`,
-      { url, protocol: parsed.protocol }
-    );
-  }
-
-  const hostname = parsed.hostname;
-  if (isBlockedHostname(hostname)) {
-    throw new WebhookSsrfBlockedError(
-      `The webhook hostname "${hostname}" is not permitted.`,
-      { url, hostname }
-    );
-  }
-
-  // Resolve all A and AAAA records and block on any match.
-  const [ipv4Addresses, ipv6Addresses] = await Promise.all([
-    dns.promises.resolve4(hostname).catch(() => [] as string[]),
-    dns.promises.resolve6(hostname).catch(() => [] as string[]),
-  ]);
-
-  const allAddresses = [...ipv4Addresses, ...ipv6Addresses];
-
-  if (allAddresses.length === 0) {
-    throw new WebhookSsrfBlockedError(
-      `The webhook hostname "${hostname}" could not be resolved to any IP address.`,
-      { url, hostname }
-    );
-  }
-
-  for (const ip of ipv4Addresses) {
-    if (isBlockedIpv4(ip)) {
-      throw new WebhookSsrfBlockedError(
-        `The webhook URL resolves to a private IP address (${ip}) and cannot be registered.`,
-        { url, resolvedIp: ip }
-      );
-    }
-  }
-
-  for (const ip of ipv6Addresses) {
-    if (isBlockedIpv6(ip)) {
-      throw new WebhookSsrfBlockedError(
-        `The webhook URL resolves to a private IPv6 address (${ip}) and cannot be registered.`,
-        { url, resolvedIp: ip }
-      );
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +95,9 @@ async function checkConnectivity(url: string): Promise<void> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ test: true, eventType: "webhook.registered" }),
         signal: controller.signal,
+        // Disable redirect-following: a redirect could point at an internal
+        // IP that was not present at registration time, bypassing SSRF checks.
+        redirect: "error",
       });
       statusCode = response.status;
     } finally {
@@ -268,7 +139,7 @@ export interface WebhookServiceDeps {
 export interface WebhookService {
   // registerWebhook — name expected by the webhooks route handler
   registerWebhook(input: RegisterWebhookInput): Promise<{ webhook: WebhookRow; secret: string }>;
-  listWebhooks(tenantId: string): Promise<WebhookRow[]>;
+  listWebhooks(tenantId: string, options?: { cursor?: string; limit?: number }): Promise<WebhookRow[]>;
   getWebhook(tenantId: string, id: string): Promise<WebhookRow>;
   // updateWebhook(id, data) — route pre-validates ownership before calling service
   updateWebhook(id: string, data: UpdateWebhookInput): Promise<WebhookRow>;
@@ -330,8 +201,11 @@ export function createWebhookService(deps: WebhookServiceDeps): WebhookService {
   // listWebhooks
   // -------------------------------------------------------------------------
 
-  async function listWebhooks(tenantId: string): Promise<WebhookRow[]> {
-    return webhookRepo.findByTenantId(tenantId);
+  async function listWebhooks(
+    tenantId: string,
+    options?: { cursor?: string; limit?: number },
+  ): Promise<WebhookRow[]> {
+    return webhookRepo.findByTenantId(tenantId, options);
   }
 
   // -------------------------------------------------------------------------
@@ -435,13 +309,16 @@ export function createWebhookService(deps: WebhookServiceDeps): WebhookService {
       Object.assign(extraHeaders, webhook.custom_headers);
     }
 
+    // extraHeaders spreads first so platform signature headers always win —
+    // a caller-supplied custom header must never be able to forge or suppress
+    // the HMAC signature, delivery ID, or timestamp.
     const headers: Record<string, string> = {
+      ...extraHeaders,
       "Content-Type": "application/json",
       "X-OnePlatform-Signature": `sha256=${signature}`,
       "X-OnePlatform-Event": "webhook.test",
       "X-OnePlatform-Delivery": deliveryId,
       "X-OnePlatform-Timestamp": String(Math.floor(Date.now() / 1000)),
-      ...extraHeaders,
     };
 
     const startMs = Date.now();
@@ -459,6 +336,9 @@ export function createWebhookService(deps: WebhookServiceDeps): WebhookService {
           body,
           headers,
           signal: controller.signal,
+          // Disable redirect-following: a redirect target may resolve to an
+          // internal IP after registration (DNS rebinding), bypassing SSRF guards.
+          redirect: "error",
         });
         statusCode = response.status;
         responseBody = (await response.text()).slice(0, 1024);

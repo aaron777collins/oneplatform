@@ -185,6 +185,14 @@ async function main(): Promise<void> {
       const url = `http://${req.headers["host"] ?? "localhost"}${req.url ?? "/"}`;
 
       const chunks: Buffer[] = [];
+
+      // Guard against aborted/malformed connections; without this handler Node
+      // would emit an unhandled 'error' event and crash the process.
+      req.on("error", (err: Error) => {
+        console.error("HTTP request stream error", { error: err.message });
+        res.destroy();
+      });
+
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
         const body =
@@ -237,6 +245,14 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   process.on("SIGTERM", () => {
     console.info("SIGTERM received — starting graceful shutdown");
+
+    // Hard kill after 30 s so the container orchestrator does not have to wait
+    // for its own SIGKILL timeout. The timer is unreffed so it does not keep
+    // the event loop alive if everything shuts down before the deadline.
+    setTimeout(() => {
+      console.error("Graceful shutdown timed out — forcing exit");
+      process.exit(1);
+    }, 30_000).unref();
 
     // Stop schedulers first so no new jobs are triggered during shutdown
     retentionService.stop();

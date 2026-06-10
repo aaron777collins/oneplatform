@@ -332,7 +332,7 @@ describe("LogQueryParams", () => {
   });
 
   it("level union is the same four values as in LogEventRow", () => {
-    const levels: Array<LogQueryParams["level"]> = ["debug", "info", "warn", "error"];
+    const levels = ["debug", "info", "warn", "error"] as const;
     for (const level of levels) {
       const p: LogQueryParams = { limit: 10, level };
       expect(p.level).toBe(level);
@@ -375,7 +375,7 @@ describe("AuditQueryParams", () => {
   });
 
   it("actorType union accepts 'user', 'service', 'system'", () => {
-    const types: Array<AuditQueryParams["actorType"]> = ["user", "service", "system"];
+    const types = ["user", "service", "system"] as const;
     for (const actorType of types) {
       const p: AuditQueryParams = { limit: 10, actorType };
       expect(p.actorType).toBe(actorType);
@@ -383,7 +383,7 @@ describe("AuditQueryParams", () => {
   });
 
   it("result union accepts 'success' and 'failure'", () => {
-    const results: Array<AuditQueryParams["result"]> = ["success", "failure"];
+    const results = ["success", "failure"] as const;
     for (const result of results) {
       const p: AuditQueryParams = { limit: 10, result };
       expect(p.result).toBe(result);

@@ -129,6 +129,17 @@ export class RetentionService {
 
       for (const row of oldPartitions.rows) {
         const partitionName = row["partition_name"];
+
+        // Validate the partition name before interpolating it into DDL.
+        // The registry is trusted but a corrupted row must never produce
+        // an arbitrary DDL injection. The expected format is events_YYYY_MM.
+        if (!/^events_\d{4}_\d{2}$/.test(partitionName)) {
+          console.error("Skipping drop for unexpected partition name", {
+            partitionName,
+          });
+          continue;
+        }
+
         await this.db.query(
           `DROP TABLE IF EXISTS logging.${partitionName}`
         );
@@ -175,11 +186,22 @@ export class RetentionService {
     const scheduleNext = (): void => {
       const msUntilNext = msUntilNextUtcHour(2);
       this.retentionTimer = setTimeout(() => {
-        this.runRetention().catch((err: unknown) => {
-          const error = err instanceof Error ? err : new Error(String(err));
-          console.error("Scheduled retention job failed", { error: error.message });
-        });
-        scheduleNext();
+        // scheduleNext() is called inside the completion callback so the next
+        // timer is only set after the current run finishes (or errors). Calling
+        // it immediately after the promise would start the next timer before
+        // the job completes, risking overlap when the job runs long.
+        this.runRetention()
+          .catch((err: unknown) => {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error("Scheduled retention job failed", { error: error.message });
+          })
+          .then(() => {
+            scheduleNext();
+          })
+          .catch(() => {
+            // scheduleNext itself does not throw, but .then chains must be caught
+            // to satisfy the no-floating-promises lint rule.
+          });
       }, msUntilNext);
     };
 
@@ -194,11 +216,17 @@ export class RetentionService {
     const scheduleNext = (): void => {
       const msUntilNext = msUntilFirstOfMonthAt0005Utc();
       this.partitionTimer = setTimeout(() => {
-        this.ensurePartitions().catch((err: unknown) => {
-          const error = err instanceof Error ? err : new Error(String(err));
-          console.error("Partition pre-creation failed", { error: error.message });
-        });
-        scheduleNext();
+        // Same reasoning as startRetentionScheduler: schedule the next run
+        // only after the current one completes to avoid overlap.
+        this.ensurePartitions()
+          .catch((err: unknown) => {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error("Partition pre-creation failed", { error: error.message });
+          })
+          .then(() => {
+            scheduleNext();
+          })
+          .catch(() => {});
       }, msUntilNext);
     };
 

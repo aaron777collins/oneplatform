@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { z } from "zod";
 import { encodeCursor, decodeCursor } from "@oneplatform/core";
 import type {
   AuditEventRow,
@@ -11,6 +12,14 @@ function getCursorSecret(): string {
   if (!secret) throw new Error("OP_CURSOR_SECRET is required");
   return secret;
 }
+
+// Validated shape of a decoded pagination cursor. Casting the raw decoded
+// object directly to string fields is unsafe — a tampered or malformed cursor
+// must fail loudly rather than produce a SQL type error at query time.
+const CursorPayloadSchema = z.object({
+  createdAt: z.string().datetime(),
+  id: z.string().uuid(),
+});
 
 export class AuditEventRepository {
   constructor(private readonly db: pg.Pool) {}
@@ -119,9 +128,10 @@ export class AuditEventRepository {
 
     let cursorClause = "";
     if (params.cursor !== undefined) {
-      const decoded = await decodeCursor(params.cursor, getCursorSecret());
+      const raw = await decodeCursor(params.cursor, getCursorSecret());
+      const cursor = CursorPayloadSchema.parse(raw);
       cursorClause = `AND (created_at, id) < ($${n++}::timestamptz, $${n++}::uuid)`;
-      args.push(decoded["createdAt"] as string, decoded["id"] as string);
+      args.push(cursor.createdAt, cursor.id);
     }
 
     const fetchLimit = params.limit + 1;

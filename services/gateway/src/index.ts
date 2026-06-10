@@ -83,6 +83,10 @@ async function main(): Promise<void> {
   const rateLimitConfigRepo = new RateLimitConfigRepository(db);
 
   // Step 6: Services
+  // serviceToken is read before createOntologyCache so the cache can include
+  // it in outbound requests to the ontology service from the very first call.
+  const serviceToken = process.env["OP_SERVICE_TOKEN"];
+
   const webhookService = createWebhookService({
     webhookRepo,
     deliveryRepo,
@@ -94,6 +98,7 @@ async function main(): Promise<void> {
   const ontologyCache = createOntologyCache({
     logger,
     ontologyServiceUrl,
+    ...(serviceToken ? { serviceToken } : {}),
   });
 
   const proxyService = createProxyService();
@@ -109,7 +114,24 @@ async function main(): Promise<void> {
   // Step 8: Circuit breakers (one per upstream service)
   const failureThreshold = parseInt(process.env["OP_CIRCUIT_BREAKER_THRESHOLD"] ?? "5", 10);
   const resetTimeoutMs = parseInt(process.env["OP_CIRCUIT_BREAKER_RESET_MS"] ?? "10000", 10);
-  const serviceNames = ["auth", "ingestion", "ontology", "pipeline", "execution", "app", "logging", "plugin"];
+  // Names must match SERVICE_MAP keys in proxy-service.ts exactly so that
+  // circuitBreakers.get(resolved.serviceName) finds the correct breaker.
+  const serviceNames = [
+    "auth",
+    "connectors",
+    "webhooks/inbound",
+    "uploads",
+    "ontology",
+    "pipelines",
+    "pipeline-runs",
+    "schedules",
+    "exec",
+    "apps",
+    "logs",
+    "audit-events",
+    "plugins",
+    "roles",
+  ];
   const circuitBreakers = new Map(
     serviceNames.map((name) => [
       name,
@@ -121,8 +143,6 @@ async function main(): Promise<void> {
   const servicePublicKeys = await loadServicePublicKeys();
 
   // Step 10: Create Hono app
-  const serviceToken = process.env["OP_SERVICE_TOKEN"];
-
   const app = createApp({
     serviceName: "gateway-service",
     version: "0.0.0",
@@ -138,6 +158,42 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
+  // Step 10.5: Wire rate limiter as middleware on all routes.
+  // Health check endpoints are excluded so liveness probes never get throttled.
+  const rateLimitPerMinute = parseInt(process.env["OP_RATE_LIMIT_PER_MIN"] ?? "1000", 10);
+  app.use("*", async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    // Skip rate limiting for health probes to prevent probe self-throttling
+    if (path === "/healthz" || path === "/readyz") {
+      await next();
+      return;
+    }
+
+    // Key per tenant; falls back to IP so unauthenticated paths
+    // (e.g. auth login) still receive basic protection.
+    const user = c.var.user;
+    const key = user?.tenantId ?? c.req.header("x-forwarded-for") ?? "anonymous";
+    const result = await rateLimiter.check(`gateway:${key}`, rateLimitPerMinute);
+
+    if (!result.allowed) {
+      return c.json(
+        { error: { code: "RATE_LIMIT_EXCEEDED", message: "Rate limit exceeded. Please slow down and retry." } },
+        429,
+        {
+          "Retry-After": String(result.resetAt - Math.floor(Date.now() / 1000)),
+          "X-RateLimit-Limit": String(rateLimitPerMinute),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(result.resetAt),
+        },
+      );
+    }
+
+    c.header("X-RateLimit-Limit", String(rateLimitPerMinute));
+    c.header("X-RateLimit-Remaining", String(result.remaining));
+    c.header("X-RateLimit-Reset", String(result.resetAt));
+    await next();
+  });
+
   // Step 11: Register routes
   const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt });
   app.route("/", healthRoutes);
@@ -151,7 +207,8 @@ async function main(): Promise<void> {
   });
   app.route("/api/v1/events", sseRoutes);
 
-  const ingestionBreaker = circuitBreakers.get("ingestion");
+  // "connectors" is the SERVICE_MAP key for the ingestion service
+  const ingestionBreaker = circuitBreakers.get("connectors");
   const dataRoutes = createDataRoutes({
     ontologyCache,
     proxyService,
@@ -183,6 +240,17 @@ async function main(): Promise<void> {
     (req: IncomingMessage, res: ServerResponse): void => {
       const url = `http://${req.headers["host"] ?? "localhost"}${req.url ?? "/"}`;
 
+      // Surface request-level errors (e.g. client abort, socket reset) so
+      // they appear in logs rather than crashing the process with an uncaught
+      // exception that Node emits when an 'error' event has no listener.
+      req.on("error", (err) => {
+        logger.warn("Inbound request error", { error: err.message });
+        if (!res.headersSent) {
+          res.writeHead(400);
+        }
+        res.end();
+      });
+
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
@@ -213,9 +281,29 @@ async function main(): Promise<void> {
             response.status,
             Object.fromEntries(response.headers.entries()),
           );
-          void response.arrayBuffer().then((buf: ArrayBuffer) => {
-            res.end(Buffer.from(buf));
-          });
+
+          // SSE and other streaming responses have a ReadableStream body.
+          // Buffering the entire stream via arrayBuffer() would block until
+          // the stream closes (never, for SSE) so we pipe chunk-by-chunk.
+          if (response.body instanceof ReadableStream) {
+            const reader = response.body.getReader();
+            const pump = (): void => {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  res.end();
+                  return;
+                }
+                res.write(value, () => pump());
+              }).catch(() => {
+                res.end();
+              });
+            };
+            pump();
+          } else {
+            void response.arrayBuffer().then((buf: ArrayBuffer) => {
+              res.end(Buffer.from(buf));
+            });
+          }
         };
 
         if (responseOrPromise instanceof Promise) {
@@ -231,14 +319,38 @@ async function main(): Promise<void> {
     logger.info("Gateway service started", { port });
   });
 
-  // Graceful shutdown
+  // Surface server-level socket / bind errors so they appear in logs
+  // rather than causing an unhandled 'error' event crash.
+  server.on("error", (err) => {
+    logger.error("HTTP server error", { error: err.message });
+  });
+
+  // Graceful shutdown: stop accepting new connections, wait up to 10 s for
+  // in-flight requests to complete before force-closing, then tear down
+  // backing resources (pub/sub, DB pool, Redis).
   process.on("SIGTERM", () => {
+    logger.info("SIGTERM received — starting graceful shutdown");
     ontologyCache.stopSafetyPoll();
     ontologyCache.stopPubSubListener();
     sseService.stopPubSubListener();
-    server.close();
-    void db.end();
-    void redis.quit();
+
+    const DRAIN_TIMEOUT_MS = parseInt(
+      process.env["OP_SHUTDOWN_DRAIN_MS"] ?? "10000",
+      10,
+    );
+
+    const drainTimeout = setTimeout(() => {
+      logger.warn("Drain timeout reached — forcing shutdown");
+      void db.end();
+      void redis.quit();
+      process.exit(1);
+    }, DRAIN_TIMEOUT_MS);
+
+    server.close(() => {
+      clearTimeout(drainTimeout);
+      void db.end();
+      void redis.quit();
+    });
   });
 }
 

@@ -51,7 +51,17 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
       return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
     }
 
-    const webhooks = await webhookService.listWebhooks(user.tenantId);
+    const query = listWebhooksQuery.safeParse(c.req.query());
+    if (!query.success) {
+      return c.json({
+        error: { code: "VALIDATION_ERROR", message: "Invalid query parameters.", details: query.error.flatten() },
+      }, 400);
+    }
+
+    const webhooks = await webhookService.listWebhooks(user.tenantId, {
+      ...(query.data.cursor ? { cursor: query.data.cursor } : {}),
+      limit: query.data.limit,
+    });
     return c.json({ data: webhooks.map(sanitizeWebhook) });
   });
 
@@ -86,9 +96,11 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     const updated = await webhookService.updateWebhook(c.req.param("webhookId"), {
       ...(d.url !== undefined ? { url: d.url } : {}),
       ...(d.events !== undefined ? { events: d.events } : {}),
-      ...(d.description !== undefined && d.description !== null ? { description: d.description } : {}),
+      // null is passed through explicitly to clear the column; undefined means no-op
+      ...(d.description !== undefined ? { description: d.description } : {}),
       ...(d.enabled !== undefined ? { enabled: d.enabled } : {}),
-      ...(d.headers !== undefined && d.headers !== null ? { headers: d.headers } : {}),
+      // null clears custom_headers; undefined leaves them unchanged
+      ...(d.headers !== undefined ? { headers: d.headers } : {}),
     });
     return c.json({ data: sanitizeWebhook(updated) });
   });

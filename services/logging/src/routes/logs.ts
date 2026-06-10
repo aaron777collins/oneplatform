@@ -74,29 +74,11 @@ export function createLogRoutes(
   });
 
   // ---------------------------------------------------------------------------
-  // GET /api/v1/logs/:id — single log event by ID
-  // ---------------------------------------------------------------------------
-  routes.get("/api/v1/logs/:id", async (c) => {
-    const user = c.var.user;
-    if (
-      !user.scopes.includes("logs:read") &&
-      !user.scopes.includes("admin")
-    ) {
-      throw new ForbiddenError("logs:read scope is required");
-    }
-
-    const id = c.req.param("id");
-    const row = await logEventRepository.findById(id);
-
-    if (row === null) {
-      throw new NotFoundError(`Log event ${id} not found`);
-    }
-
-    return c.json({ data: mapRow(row) });
-  });
-
-  // ---------------------------------------------------------------------------
   // GET /api/v1/logs/export — JSONL or CSV streaming export
+  //
+  // Registered BEFORE /:id so Hono matches the static segment "export" first.
+  // Hono v4 matches routes in registration order; a parameterized segment
+  // registered earlier would capture "export" as an id value.
   // ---------------------------------------------------------------------------
   routes.get("/api/v1/logs/export", async (c) => {
     const user = c.var.user;
@@ -163,14 +145,19 @@ export function createLogRoutes(
           controller.enqueue(encoder.encode(CSV_HEADER + "\n"));
         }
 
-        // Stream rows in pages to keep memory flat regardless of export size
-        let offset = 0;
+        // Stream rows in pages using keyset pagination. OFFSET is avoided
+        // because it scans and skips all prior rows, which degrades at scale
+        // and can skip rows inserted mid-export on a busy table.
+        let afterCreatedAt: string | undefined;
+        let afterId: string | undefined;
         let hasMore = true;
 
         while (hasMore) {
           const rows = await logEventRepository.exportPage({
             ...exportOpts,
-            offset,
+            ...(afterCreatedAt !== undefined && afterId !== undefined
+              ? { afterCreatedAt, afterId }
+              : {}),
           });
 
           for (const row of rows) {
@@ -193,7 +180,15 @@ export function createLogRoutes(
           }
 
           hasMore = rows.length === exportChunkSize;
-          offset += rows.length;
+
+          // Advance keyset anchor to the last row of this page
+          if (rows.length > 0) {
+            const lastRow = rows[rows.length - 1];
+            if (lastRow !== undefined) {
+              afterCreatedAt = lastRow.created_at.toISOString();
+              afterId = lastRow.id;
+            }
+          }
         }
 
         controller.close();
@@ -201,6 +196,30 @@ export function createLogRoutes(
     });
 
     return c.body(stream);
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /api/v1/logs/:id — single log event by ID
+  //
+  // Registered AFTER /export so the static "export" segment wins on overlap.
+  // ---------------------------------------------------------------------------
+  routes.get("/api/v1/logs/:id", async (c) => {
+    const user = c.var.user;
+    if (
+      !user.scopes.includes("logs:read") &&
+      !user.scopes.includes("admin")
+    ) {
+      throw new ForbiddenError("logs:read scope is required");
+    }
+
+    const id = c.req.param("id");
+    const row = await logEventRepository.findById(id);
+
+    if (row === null) {
+      throw new NotFoundError(`Log event ${id} not found`);
+    }
+
+    return c.json({ data: mapRow(row) });
   });
 
   return routes;
