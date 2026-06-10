@@ -171,10 +171,25 @@ importers:
       '@oneplatform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.78.0
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.42
+      '@types/pg':
+        specifier: ^8.11.6
+        version: 8.20.0
       typescript:
         specifier: '*'
         version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.42)
 
   services/pipeline:
     dependencies:
