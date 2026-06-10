@@ -7,26 +7,30 @@ This document tracks the current state of development. Read this FIRST when resu
 ### Completed
 - [x] Initial brainstorming and requirements gathering
 - [x] 23 architecture decisions documented in `docs/decisions/001-architecture-decisions.md`
-- [x] 5 architecture review cycles completed
-- [x] All blocking issues from reviews 1-5 resolved
+- [x] 11 architecture review cycles completed — CLEAN APPROVED
+- [x] All blocking issues resolved across 11 review cycles
 - [x] README.md created
 - [x] DEVELOPMENT-PROCESS.md created (full team flow documented)
 - [x] GitHub repo created and all work pushed: https://github.com/aaron777collins/oneplatform
+- [x] HANDOFF.md created (comprehensive project context)
+- [x] User stories walkthrough completed — 108 friction points identified
+- [x] 13 new ADR decisions required (ADR 24-36) identified and documented
 
 ### In Progress
-- [ ] Final (6th) architecture review — expecting clean APPROVED
-- [ ] Writing comprehensive design spec
+- [ ] Writing new ADR decisions (24-36) to address user story friction points
+- [ ] Architecture review of new ADR decisions
 
 ### Pending (in order)
-1. Walk through user stories (build app, build plugin, use API/CLI) — find friction, fix it
-2. Write comprehensive test strategy into architecture
-3. Write full design spec and commit
-4. Create detailed implementation plan (invoke writing-plans skill)
-5. Write DEVELOPMENT-PROCESS.md with full team flow (DONE)
-6. Granular sub-designs for each of the 9 services + core library
+1. ~~Walk through user stories~~ (DONE — see `docs/USER-STORIES-ANALYSIS.md`)
+2. Write new ADR decisions 24-36 into architecture document
+3. Architecture review of decisions 24-36 (propose → review → revise loop)
+4. Write comprehensive test strategy into architecture
+5. Write full design spec and commit
+6. Create detailed implementation plan (invoke writing-plans skill)
+7. Granular sub-designs for each of the 9 services + core library + SDKs + CLI
    - Each goes through: propose → review → test → code review (R/Y/G) → revise → review loop
-7. Full implementation using structured agent teams
-8. Comprehensive test suites — unit, integration, contract, e2e, security
+8. Full implementation using structured agent teams
+9. Comprehensive test suites — unit, integration, contract, e2e, security
 
 ## Architecture Summary (23 Decisions)
 
