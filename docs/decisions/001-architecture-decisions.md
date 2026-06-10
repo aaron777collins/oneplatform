@@ -33,9 +33,9 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 **Rationale:** Single `docker compose up` for easy adoption. Clean service boundaries allow splitting into hosted SaaS later if monetized.
 
 ### 4. Tech Stack
-**Decision:** Full TypeScript monorepo — React + Tailwind v4 + shadcn/ui frontend, Fastify/Hono backend services.
+**Decision:** Full TypeScript monorepo — React + Tailwind v4 + shadcn/ui frontend, Hono backend services.
 
-**Rationale:** Same language front and back, shared types, huge ecosystem. Code generation is central to the platform — generating TypeScript that runs natively in the same runtime is the most cohesive approach.
+**Rationale:** Same language front and back, shared types, huge ecosystem. Code generation is central to the platform — generating TypeScript that runs natively in the same runtime is the most cohesive approach. Hono chosen over Fastify for its lighter footprint, cleaner TypeScript-first API, and runtime portability (Node, Bun, edge). MIT licensed.
 
 ### 5. Database Strategy
 **Decision:** PostgreSQL + PgBouncer + Redis. Postgres for persistent storage with PgBouncer for connection pooling, Redis for job queues (BullMQ), caching, and real-time pipeline state.
@@ -129,7 +129,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Breaking changes (remove field, rename field, narrow type, change relationship): Ontology Service generates a migration plan showing affected data count, dependent pipelines, and dependent apps; user must review and confirm
 - On confirmation: a migration job is queued to the Pipeline Service that transforms existing data from old schema to new schema in batches; the old schema version remains active until migration completes
 - Generated code (API routes, TypeScript types, validation) is versioned alongside the schema — API endpoints support `?v=2` query parameter during migration window; old version is deprecated after migration completes
-- Rollback: if migration fails, old schema version is restored; partially migrated data is reverted via the audit trail
+- Rollback: if migration fails, old schema version is restored; partially migrated data is reverted using shadow tables (pre-migration snapshots of affected rows, created before migration begins, capped at configurable batch size of 10,000 rows per batch); shadow tables are dropped after successful migration or used for restoration on failure — this is more reliable than audit-trail replay at scale
 
 ### 15. App Routing and TLS
 **Decision:** User apps are served via path-based routing by default (`/apps/{app-slug}`), with optional subdomain routing (`{app-slug}.apps.yourdomain.com`) for users who configure wildcard DNS and TLS.
@@ -168,6 +168,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Audit events (user actions, permission checks, data access) are a separate channel `audit:*` with guaranteed delivery via a BullMQ queue (not pub/sub) — audit trails must not be lost
 - Log retention: configurable per-level (ERROR: 90 days, INFO: 30 days, DEBUG: 7 days); audit logs: 1 year minimum
 - The Logging Service exposes a query API for the frontend log viewer with filtering by trace ID, service, level, time range
+- **Acknowledged tradeoff:** non-audit logs use Redis pub/sub (fire-and-forget, no acknowledgement). If the Logging Service restarts while the in-memory buffer has events, those non-audit log events are lost. This is an accepted tradeoff for performance — audit events use BullMQ with guaranteed delivery and are never lost
 
 ## Services
 
@@ -238,7 +239,7 @@ oneplatform/
 | Layer | Technology | License |
 |-------|-----------|---------|
 | Frontend | React 18, TypeScript, Tailwind v4, shadcn/ui | MIT |
-| Backend Framework | Fastify or Hono | MIT |
+| Backend Framework | Hono | MIT |
 | Database | PostgreSQL 16 | PostgreSQL License (permissive) |
 | Connection Pooler | PgBouncer | ISC (permissive) |
 | Cache/Queue | Redis 7 + BullMQ | BSD-3 / MIT |
@@ -265,6 +266,6 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
   - JWT revocation blocklist: if Redis is unreachable, auth middleware falls back to rejecting all requests with expired refresh tokens (fail-closed) and allowing access tokens until their 15-min expiry — conservative but safe
   - Refresh tokens: if Redis is down, new logins fail (cannot store refresh token) but existing access tokens continue working until expiry
   - Ontology pub/sub: consumers fall back to polling the Ontology Service every 60s instead of relying on pub/sub notifications
-  - Log delivery: the @oneplatform/core log helper buffers up to 10,000 events in-memory and flushes when Redis reconnects; audit events are additionally written to a local fallback file that the Logging Service picks up on recovery
+  - Log delivery: the @oneplatform/core log helper buffers up to 10,000 events in-memory and flushes when Redis reconnects; audit events are additionally written to a local fallback file (max 100MB, rotated to `.1` suffix at cap — oldest rotated file is deleted) that the Logging Service picks up on recovery
 - **Production recommendation:** Docker Compose includes a commented-out Redis Sentinel configuration (1 master + 2 replicas) that users can enable for high availability; the architecture guide documents when and why to enable it
 - **Health monitoring:** the Gateway Service health check includes Redis connectivity; if Redis is unreachable for >30s, the health endpoint returns degraded status, allowing external load balancers or monitoring to alert
