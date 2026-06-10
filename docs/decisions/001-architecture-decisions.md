@@ -90,7 +90,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Master encryption key: loaded from `OP_MASTER_KEY` environment variable (generated on first setup)
 - Key derivation: HKDF-SHA256 from master key + per-credential salt
 - Storage: `encrypted_blob` (AES-256-GCM ciphertext) + `key_version` (integer) + `salt` (random bytes) in the `ingestion.credentials` table
-- Key rotation: new key version bumps `key_version`; background job re-encrypts all credentials with new key; old key retained until migration completes
+- Key rotation: new key version bumps `key_version`; background job re-encrypts all credentials with new key; old key retained until migration completes; job is idempotent — it checks `key_version` before re-encrypting each row, so a crash mid-rotation can be safely re-run without double-encrypting already-migrated rows
 - In-memory: decrypted credentials are held only in the Ingestion Service memory for the duration of the connection; never logged, never serialized to Redis
 
 ### 12. Ontology Resilience
@@ -153,7 +153,8 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - The Plugin Service returns a flat, ordered array of hook references (sorted by priority)
 - The Pipeline Service passes each hook to the Execution Service sequentially; each hook receives the current data payload and returns a (possibly modified) payload
 - Hooks run with a `hookDepth=1` flag in the execution context; any attempt to enqueue a job or trigger a pipeline stage from within a hook is rejected with `HookRecursionError`
-- Hook timeout: 30s default per hook; exceeded hooks are killed and the chain continues with the pre-hook payload (fail-open for non-critical hooks, fail-closed configurable per hook)
+- Hook timeout: 30s default per hook; exceeded hooks are killed
+- Hook criticality: each hook declares `criticality: 'critical' | 'advisory'` at registration time; `advisory` hooks are fail-open (chain continues with pre-hook payload on timeout/error); `critical` hooks are fail-closed (chain aborts and the pipeline stage returns an error) — this prevents security-sensitive hooks (e.g., data masking, compliance filters) from being silently skipped
 
 ### 17. Logging Architecture
 **Decision:** All log/audit writes from services to the Logging Service are asynchronous and non-blocking via Redis pub/sub. The Logging Service subscribes to log channels and persists to Postgres in batches.
@@ -188,7 +189,7 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 |-----------|-------|---------|
 | PostgreSQL 16 | `postgres:16-alpine` | Persistent storage (per-service schemas) |
 | PgBouncer | `pgbouncer/pgbouncer` | Connection pooling for Postgres |
-| Redis 7 | `redis:7-alpine` | Job queues (BullMQ), pub/sub, caching |
+| Redis 7 | `redis:7-alpine` | Job queues (BullMQ), pub/sub, caching — configured with `appendonly yes` for AOF persistence; restart-safe for JWT revocation blocklist and BullMQ job state |
 | Docker Socket Proxy | `tecnativa/docker-socket-proxy` | Restricted Docker API access for Execution Service |
 | Frontend | Custom (Nginx) | React dashboard SPA |
 
@@ -251,3 +252,19 @@ oneplatform/
 | Containerization | Docker, Docker Compose | Apache 2.0 |
 
 All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use under BSL.
+
+### 18. Redis Resilience
+**Decision:** Redis is configured for persistence and graceful degradation. For production deployments, Redis Sentinel or a replica is documented as the recommended setup.
+
+**Rationale:** Redis serves 5 critical functions: BullMQ job queues, JWT revocation blocklist, refresh token storage, ontology pub/sub invalidation, and async log delivery. A Redis failure without mitigation would cascade across the entire platform — pipelines halt, auth degrades, schemas go stale, and audit events are lost. This is the single most critical infrastructure dependency after Postgres.
+
+**Implementation:**
+- **Persistence (always-on):** Redis is configured with `appendonly yes` and `appendfsync everysec` in Docker Compose — AOF persistence ensures job state and the revocation blocklist survive restarts with at most 1 second of data loss
+- **Graceful degradation per concern:**
+  - BullMQ queues: if Redis is down, producers buffer up to 100 jobs in-memory and retry connection every 2s; pipeline status shows "queuing paused" in the UI
+  - JWT revocation blocklist: if Redis is unreachable, auth middleware falls back to rejecting all requests with expired refresh tokens (fail-closed) and allowing access tokens until their 15-min expiry — conservative but safe
+  - Refresh tokens: if Redis is down, new logins fail (cannot store refresh token) but existing access tokens continue working until expiry
+  - Ontology pub/sub: consumers fall back to polling the Ontology Service every 60s instead of relying on pub/sub notifications
+  - Log delivery: the @oneplatform/core log helper buffers up to 10,000 events in-memory and flushes when Redis reconnects; audit events are additionally written to a local fallback file that the Logging Service picks up on recovery
+- **Production recommendation:** Docker Compose includes a commented-out Redis Sentinel configuration (1 master + 2 replicas) that users can enable for high availability; the architecture guide documents when and why to enable it
+- **Health monitoring:** the Gateway Service health check includes Redis connectivity; if Redis is unreachable for >30s, the health endpoint returns degraded status, allowing external load balancers or monitoring to alert
