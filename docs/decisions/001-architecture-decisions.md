@@ -38,9 +38,24 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 **Rationale:** Same language front and back, shared types, huge ecosystem. Code generation is central to the platform — generating TypeScript that runs natively in the same runtime is the most cohesive approach. Hono chosen over Fastify for its lighter footprint, cleaner TypeScript-first API, and runtime portability (Node, Bun, edge). MIT licensed.
 
 ### 5. Database Strategy
-**Decision:** PostgreSQL + PgBouncer + Redis. Postgres for persistent storage with PgBouncer for connection pooling, Redis for job queues (BullMQ), caching, and real-time pipeline state.
+**Decision:** PostgreSQL + PgBouncer + Redis. Postgres for persistent storage with PgBouncer for connection pooling, Redis for job queues (BullMQ), caching, and real-time pipeline state. Redis uses logical databases to separate concerns.
 
 **Rationale:** Postgres handles structured platform metadata and dynamic user data (JSONB). PgBouncer prevents connection pool exhaustion across 9 services sharing one Postgres instance — critical for stability. Redis is needed for BullMQ job queues regardless.
+
+**Postgres connection pool sizing:**
+- PgBouncer `max_client_conn`: 200 (total across all services)
+- PgBouncer `default_pool_size`: 20 per service (9 services × 20 = 180 server connections max)
+- Postgres `max_connections`: 200 (headroom for PgBouncer + direct admin access)
+- Per-service allocation: Gateway (15), Auth (20), Ingestion (25), Ontology (15), Pipeline (25), Execution (10), App (15), Logging (30), Plugin (10) — weighted by expected write volume
+- **Scaling wall documentation:** at approximately 500 concurrent pipeline jobs or 50 concurrent ontology migrations, the shared Postgres becomes a write bottleneck on the Logging and Pipeline schemas; at this point, the documented upgrade path is to split Logging to its own Postgres instance (highest write volume), then Pipeline, leaving the remaining 7 services on the shared instance
+
+**Redis logical database separation:**
+- DB 0: BullMQ job queues (highest traffic)
+- DB 1: JWT revocation blocklist + refresh tokens (auth-critical)
+- DB 2: Ontology cache invalidation pub/sub
+- DB 3: Log/audit delivery pub/sub
+- DB 4: General caching (rate limit counters, session data)
+- This prevents BullMQ traffic from crowding out auth or ontology pub/sub operations
 
 ### 6. Code Execution Sandbox
 **Decision:** `isolated-vm` for JavaScript/TypeScript (fast path, ~1ms), Docker containers for other languages (Python, Go, etc.) accessed via a restricted Docker socket proxy.
@@ -53,6 +68,13 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 - Sandbox containers run with `--network=oneplatform-sandbox` (isolated network), `--read-only` filesystem, no capabilities (`--cap-drop=ALL`), memory/CPU limits, and a hard timeout enforced by the Execution Service
 - The `fetch()` API injected into isolated-vm routes through a platform proxy that enforces an outbound allowlist — internal service URLs (`http://*-service:*`) are blocked by default; only user-configured external URLs are permitted
 - Sandbox containers get the same outbound proxy with the same allowlist
+
+**isolated-vm process isolation:**
+- `isolated-vm` does NOT run inside the main Execution Service process — it runs in a dedicated, low-privilege child container (`op-sandbox-vm`) with no Docker socket access, no network access to internal services, and minimal filesystem
+- The Execution Service communicates with `op-sandbox-vm` via a Unix socket (mounted as a shared volume) using a simple JSON-RPC protocol: `{method: "execute", code: "...", context: {...}}`
+- If a V8 engine vulnerability allows escape from `isolated-vm`, the attacker lands in a container with no capabilities, no Docker socket, no internal network, and read-only filesystem — the blast radius is contained to that single sandbox container
+- The `op-sandbox-vm` container is recycled (destroyed and recreated) every 1000 executions or every 1 hour (whichever comes first) to limit the window of any in-memory compromise
+- Resource limits: 512MB memory, 1 CPU core, 30s execution timeout per invocation
 
 ### 7. Authentication Model
 **Decision:** Built-in email/password auth + optional OAuth (GitHub, Google). API keys for programmatic access. Short-lived access tokens + refresh tokens with Redis-backed revocation.
@@ -87,7 +109,8 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 **Rationale:** Connector credentials are the most sensitive data in the platform. Relying on Postgres-level encryption alone is insufficient — if the database is compromised, all credentials are exposed. Application-level encryption ensures credentials are encrypted in the column itself.
 
 **Implementation:**
-- Master encryption key: loaded from `OP_MASTER_KEY` environment variable (generated on first setup)
+- Master encryption key: loaded from `OP_MASTER_KEY` environment variable (generated on first setup via `openssl rand -base64 32`)
+- **CRITICAL SECURITY NOTE (documented in ops guide + first-run setup wizard):** `OP_MASTER_KEY` is the single key protecting ALL connector credentials. In a Docker Compose deployment, this key lives in the `.env` file on the host. Compromise of the compose host exposes all credentials. Operators MUST: (1) restrict `.env` file permissions to root/docker group only (`chmod 600`), (2) in production, use Docker secrets or an external secrets manager (HashiCorp Vault, AWS Secrets Manager) instead of `.env`, (3) back up the key securely — loss means all credentials become unrecoverable. The setup wizard generates the key and displays these warnings prominently.
 - Key derivation: HKDF-SHA256 from master key + per-credential salt
 - Storage: `encrypted_blob` (AES-256-GCM ciphertext) + `key_version` (integer) + `salt` (random bytes) in the `ingestion.credentials` table
 - Key rotation: new key version bumps `key_version`; background job re-encrypts all credentials with new key; old key retained until migration completes; job is idempotent — it checks `key_version` before re-encrypting each row, so a crash mid-rotation can be safely re-run without double-encrypting already-migrated rows
@@ -198,10 +221,11 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 
 | Package | Purpose |
 |---------|---------|
-| `@oneplatform/core` | DB clients, auth middleware, queue helpers, shared types, logging/tracing, error handling, config loader, health checks, encryption utilities |
-| `@oneplatform/sdk` | External app SDK — connect to OnePlatform from outside |
-| `@oneplatform/app-sdk` | Platform app SDK — for apps built inside OnePlatform |
-| `@oneplatform/plugin-sdk` | Plugin development SDK — interfaces for connectors, transformers, destinations, auth providers |
+| `@oneplatform/core` | DB clients, auth middleware, queue helpers, shared types, logging/tracing, OTEL instrumentation, error handling, config loader, health checks, encryption utilities, rate limit helpers |
+| `@oneplatform/sdk` | External app SDK — connect to OnePlatform from outside. Auto-generated from OpenAPI spec. Handles auth, real-time subscriptions, ontology-typed data access. |
+| `@oneplatform/app-sdk` | Platform app SDK — for apps built inside OnePlatform. Extends SDK with platform-specific APIs (user context, app storage, inter-app comms). |
+| `@oneplatform/plugin-sdk` | Plugin development SDK — interfaces (Connector, Transformer, Destination, AuthProvider, Widget), hook registration, local dev server. |
+| `@oneplatform/cli` | CLI tool (`op`) — wraps REST API for all operations. JSON + table output. Auth via API key or interactive login. |
 
 ## Monorepo Structure
 
@@ -209,11 +233,12 @@ It aims to be a free, open-source alternative to tools like Fivetran, n8n, and R
 oneplatform/
 ├── packages/
 │   ├── core/                  # @oneplatform/core — shared engine library
-│   ├── sdk/                   # @oneplatform/sdk — external app SDK
+│   ├── sdk/                   # @oneplatform/sdk — external app SDK (auto-generated)
 │   ├── app-sdk/               # @oneplatform/app-sdk — platform app SDK
-│   └── plugin-sdk/            # @oneplatform/plugin-sdk — plugin development
+│   ├── plugin-sdk/            # @oneplatform/plugin-sdk — plugin development
+│   └── cli/                   # @oneplatform/cli — CLI tool (op)
 ├── services/
-│   ├── gateway/               # API Gateway
+│   ├── gateway/               # API Gateway + rate limiting
 │   ├── auth/                  # Auth & RBAC
 │   ├── ingestion/             # Data ingestion + credential vault
 │   ├── ontology/              # Schema & mapping engine + code generation
@@ -225,10 +250,12 @@ oneplatform/
 ├── frontend/                  # React dashboard (from websitetemplate)
 ├── docker/
 │   ├── Dockerfile.service     # Multi-stage build for all services
+│   ├── Dockerfile.sandbox     # Low-privilege isolated-vm container
 │   ├── Dockerfile.frontend    # Nginx + React build
 │   └── docker-compose.yml     # Full stack orchestration
 ├── docs/
-│   └── decisions/             # Architecture Decision Records
+│   ├── decisions/             # Architecture Decision Records
+│   └── generated/             # Auto-generated API, SDK, CLI, ontology docs
 ├── turbo.json                 # Turborepo config
 ├── pnpm-workspace.yaml
 └── package.json
@@ -251,6 +278,13 @@ oneplatform/
 | Testing | Vitest, Playwright, Supertest | MIT |
 | Monorepo | Turborepo + pnpm workspaces | MIT |
 | Containerization | Docker, Docker Compose | Apache 2.0 |
+| Tracing | OpenTelemetry SDK | Apache 2.0 |
+| Metrics | Prometheus (optional) | Apache 2.0 |
+| Trace Viewer | Jaeger (optional) | Apache 2.0 |
+| API Docs | Scalar or Stoplight Elements | MIT |
+| SDK Docs | TypeDoc | MIT |
+| OpenAPI | Generated from Hono + Zod | N/A (generated) |
+| CLI | Commander.js | MIT |
 
 All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use under BSL.
 
@@ -265,7 +299,63 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
   - BullMQ queues: if Redis is down, producers buffer up to 100 jobs in-memory and retry connection every 2s; pipeline status shows "queuing paused" in the UI
   - JWT revocation blocklist: if Redis is unreachable, auth middleware falls back to rejecting all requests with expired refresh tokens (fail-closed) and allowing access tokens until their 15-min expiry — conservative but safe
   - Refresh tokens: if Redis is down, new logins fail (cannot store refresh token) but existing access tokens continue working until expiry
-  - Ontology pub/sub: consumers fall back to polling the Ontology Service every 60s instead of relying on pub/sub notifications
+  - Ontology pub/sub: consumers fall back to polling the Ontology Service every 15s (configurable via `OP_ONTOLOGY_POLL_INTERVAL`, default 15s) instead of relying on pub/sub notifications — 15s is aggressive enough to catch schema changes quickly while not overloading the Ontology Service during Redis outages
   - Log delivery: the @oneplatform/core log helper buffers up to 10,000 events in-memory and flushes when Redis reconnects; audit events are additionally written to a local fallback file (max 100MB, rotated to `.1` suffix at cap — oldest rotated file is deleted) that the Logging Service picks up on recovery
 - **Production recommendation:** Docker Compose includes a commented-out Redis Sentinel configuration (1 master + 2 replicas) that users can enable for high availability; the architecture guide documents when and why to enable it
 - **Health monitoring:** the Gateway Service health check includes Redis connectivity; if Redis is unreachable for >30s, the health endpoint returns degraded status, allowing external load balancers or monitoring to alert
+
+### 19. Rate Limiting
+**Decision:** The Gateway Service implements multi-tier rate limiting using Redis-backed sliding window counters. Rate limits are enforced at three levels: global, per-tenant, and per-API-key.
+
+**Rationale:** OnePlatform exposes webhook ingestion endpoints and auto-generated REST APIs to the public internet. Without rate limiting, a single misbehaving client can exhaust resources for all tenants.
+
+**Implementation:**
+- **Global rate limit:** 10,000 requests/minute across the entire platform (configurable via `OP_GLOBAL_RATE_LIMIT`). Protects against DDoS. Returns HTTP 429 with `Retry-After` header.
+- **Per-tenant rate limit:** 1,000 requests/minute per tenant (configurable per-tier in the Auth Service). Prevents one tenant from starving others.
+- **Per-API-key rate limit:** 500 requests/minute per API key (configurable per key at creation time). Allows fine-grained control for machine clients.
+- **Webhook ingestion rate limit:** 100 requests/second per webhook endpoint (separate from API rate limits, since webhooks are often bursty)
+- **Rate limit headers:** all responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers
+- **Storage:** sliding window counters in Redis DB 4 (general caching). Counter keys expire automatically. Zero overhead when Redis is down (rate limiting degrades to no-limit rather than blocking all traffic — fail-open for availability)
+- **Burst allowance:** each limit allows a 2x burst for 5 seconds to handle legitimate traffic spikes
+
+### 20. Observability Stack
+**Decision:** OpenTelemetry (OTEL) is the standard for distributed tracing and metrics. All services are instrumented with OTEL SDK. Traces and metrics are exported to a configurable backend (default: Prometheus for metrics, Jaeger for traces, both optional).
+
+**Rationale:** A 9-service system is impossible to debug in production without distributed tracing and metrics. Logs alone are insufficient — you need to trace a request across service boundaries and correlate it with resource metrics.
+
+**Implementation:**
+- **Tracing:** every inbound request to the Gateway generates a trace ID (W3C Trace Context format). The trace ID propagates through all inter-service communication (Redis queue job metadata, pub/sub message headers). Each service creates spans for its operations. Trace data is exported via OTLP to a configurable endpoint.
+- **Metrics:** each service exports standard metrics via OTEL: request latency (p50/p95/p99), request count by status code, queue depth, active connections, memory/CPU usage, pipeline execution duration, sandbox execution time. Metrics are exposed on a `/metrics` endpoint (Prometheus-compatible) on each service.
+- **Default stack (Docker Compose):** includes optional Prometheus (`prom/prometheus:latest`, Apache 2.0) and Jaeger (`jaegertracing/all-in-one:latest`, Apache 2.0) containers, commented-out by default. Users enable with `docker compose --profile observability up`.
+- **@oneplatform/core integration:** the core library auto-instruments all Hono routes, BullMQ workers, and Redis/Postgres clients with OTEL spans. Services get tracing for free by importing core — zero per-service instrumentation code needed.
+- **Frontend:** the dashboard includes a basic trace viewer (search by trace ID, see the full service call chain) and a metrics dashboard (queue depths, error rates, pipeline throughput) backed by the Logging Service query API. Full Grafana-level dashboards available by connecting the optional Prometheus/Jaeger endpoints.
+- **Correlation:** the existing `traceId` in log events (Decision #17) IS the OTEL trace ID — logs, traces, and metrics all share the same correlation identifier
+
+### 21. SDK, CLI, and API as First-Class Citizens
+**Decision:** The platform is API-first. Every operation available in the UI is available via the REST API. The CLI and SDKs are thin wrappers around the API. All three (API, CLI, SDKs) are first-class, fully documented, and tested as rigorously as the services themselves.
+
+**Rationale:** An integration platform must be programmable. If users can only interact through the UI, the platform fails its core purpose. The API is the product; the UI is one client of many.
+
+**Implementation:**
+- **REST API:** the Gateway exposes a fully documented REST API. Every endpoint is auto-documented via OpenAPI 3.1 spec generated from Hono route definitions + Zod schemas. The spec is always in sync with the actual code — it's generated, not manually maintained.
+- **CLI (`@oneplatform/cli`):** a Node.js CLI tool (`npx @oneplatform/cli` or `op` when installed globally) that wraps the REST API. Covers all operations: manage ontologies, trigger pipelines, deploy apps, view logs, manage users/roles, import/export configurations. Supports JSON and table output formats. Auth via API key or interactive login.
+- **SDKs:**
+  - `@oneplatform/sdk` — TypeScript/JavaScript SDK for external apps. Handles auth, real-time subscriptions (SSE/WS), ontology-typed data access, pipeline triggers. Works in Node.js and browsers.
+  - `@oneplatform/app-sdk` — SDK for apps built inside the platform. Same as above plus platform-specific APIs: access to the current user, app storage, inter-app communication, UI component library bindings.
+  - `@oneplatform/plugin-sdk` — SDK for plugin developers. Provides interfaces (`Connector`, `Transformer`, `Destination`, `AuthProvider`, `Widget`), hook registration helpers, and a local development server for testing plugins.
+- **API versioning:** the API is versioned via URL prefix (`/api/v1/...`). Breaking changes increment the version. Old versions are supported for 6 months after deprecation.
+- **SDK generation:** SDK methods are auto-generated from the OpenAPI spec using a code generator that produces fully-typed TypeScript. When a new API endpoint is added, the SDK updates automatically.
+
+### 22. Auto-Generated Documentation
+**Decision:** All documentation is generated from the actual codebase and kept in sync automatically. There is no separately-maintained documentation that can drift from reality.
+
+**Rationale:** Documentation that drifts from code is worse than no documentation — it actively misleads. In a platform with auto-generated APIs, types, and SDKs, the documentation must be generated from the same source of truth.
+
+**Implementation:**
+- **API docs:** generated from OpenAPI 3.1 spec (which itself is generated from Hono routes + Zod schemas). Rendered as an interactive API explorer in the platform UI (using Scalar or Stoplight Elements, both MIT-licensed). Hosted at `/docs/api`.
+- **SDK docs:** generated from TypeScript source using TypeDoc (MIT). Published alongside the npm packages and embedded in the platform UI at `/docs/sdk`.
+- **Ontology docs:** when a user defines an ontology, the platform auto-generates documentation for their specific data model — entity descriptions, field types, relationships, permission rules, API endpoints for that entity. Accessible per-tenant at `/docs/ontology`.
+- **CLI docs:** generated from the CLI command definitions (each command has a description, arguments, examples). Rendered as a man-page-style reference at `/docs/cli` and available via `op --help`.
+- **Architecture docs:** the ADR (this document) and design specs are committed to `docs/` in the repo and rendered in the platform UI at `/docs/architecture`.
+- **Doc generation pipeline:** a Turborepo task (`turbo run docs:generate`) regenerates all documentation. This runs as part of CI — if a code change would cause a doc drift, the CI check fails. Docs are built artifacts, not manually written files.
+- **Versioning:** docs are versioned alongside the API (`/docs/api/v1`, `/docs/api/v2`). Users can view docs for their current API version.
