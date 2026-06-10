@@ -124,8 +124,12 @@ describe("isServiceCallAllowed", () => {
     expect(isServiceCallAllowed("plugin-service", "ingestion-service", "POST", "/internal/ingestion/connectors")).toBe(true);
   });
 
-  it("allows plugin-service to call DELETE /internal/ingestion/connectors/{id}", () => {
-    expect(isServiceCallAllowed("plugin-service", "ingestion-service", "DELETE", "/internal/ingestion/connectors/abc-123")).toBe(true);
+  it("allows plugin-service to call DELETE /internal/ingestion/connectors/instance/{id}", () => {
+    expect(isServiceCallAllowed("plugin-service", "ingestion-service", "DELETE", "/internal/ingestion/connectors/instance/abc-123")).toBe(true);
+  });
+
+  it("allows plugin-service to call DELETE /internal/ingestion/connectors/plugin/{id}", () => {
+    expect(isServiceCallAllowed("plugin-service", "ingestion-service", "DELETE", "/internal/ingestion/connectors/plugin/abc-123")).toBe(true);
   });
 
   it("denies plugin-service from calling auth-service", () => {

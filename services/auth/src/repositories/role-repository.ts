@@ -94,4 +94,25 @@ export class RoleRepository {
     }
     return row;
   }
+
+  async delete(id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `DELETE FROM auth.roles
+        WHERE id = $1
+          AND is_predefined = false`,
+      [id]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async findById(tenantId: string, id: string): Promise<Role | null> {
+    const result = await this.pool.query<Role>(
+      `SELECT ${ROLE_COLUMNS}
+         FROM auth.roles
+        WHERE id = $1
+          AND (tenant_id = $2 OR tenant_id IS NULL)`,
+      [id, tenantId]
+    );
+    return result.rows[0] ?? null;
+  }
 }

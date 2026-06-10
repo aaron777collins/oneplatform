@@ -68,8 +68,8 @@ export const bootstrapRequest = z.object({
   adminEmail: z.string().email().max(254),
   adminPassword: z.string().min(12).max(128),
   tenantName: z.string().min(1).max(100).trim(),
-  // 32 bytes hex-encoded = exactly 64 characters
-  bootstrapToken: z.string().length(64),
+  // 32 bytes hex-encoded = exactly 64 hex characters
+  bootstrapToken: z.string().length(64).regex(/^[0-9a-f]{64}$/i, "Bootstrap token must be 64 hex characters"),
 });
 
 export const bootstrapResponse = z.object({

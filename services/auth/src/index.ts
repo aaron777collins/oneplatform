@@ -250,6 +250,8 @@ async function main(): Promise<void> {
     userRepository,
     oauthClientRepository,
     entityPermissionRepository,
+    // Service-to-service auth keys for /internal/* routes
+    servicePublicKeys,
   });
 
   // Step 12: Start the server.

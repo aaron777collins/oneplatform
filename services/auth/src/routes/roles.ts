@@ -94,11 +94,7 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
     const id = c.req.param("id");
     const user = c.var.user;
 
-    // findByTenantId returns all visible roles; we filter to find the one by ID.
-    // This ensures the caller can only see roles that belong to their tenant
-    // or are platform-wide predefined roles.
-    const roles = await roleRepository.findByTenantId(user.tenantId);
-    const role = roles.find((r) => r.id === id);
+    const role = await roleRepository.findById(user.tenantId, id);
 
     if (!role) {
       throw new NotFoundError(`Role ${id} not found.`);
@@ -130,9 +126,7 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
       throw new ValidationError("Invalid role update request", parsed.error.issues);
     }
 
-    // Verify the role exists and belongs to this tenant before attempting update.
-    const roles = await roleRepository.findByTenantId(user.tenantId);
-    const existing = roles.find((r) => r.id === id);
+    const existing = await roleRepository.findById(user.tenantId, id);
     if (!existing) {
       throw new NotFoundError(`Role ${id} not found.`);
     }
@@ -167,8 +161,7 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
     }
 
     const id = c.req.param("id");
-    const roles = await roleRepository.findByTenantId(user.tenantId);
-    const existing = roles.find((r) => r.id === id);
+    const existing = await roleRepository.findById(user.tenantId, id);
 
     if (!existing) {
       throw new NotFoundError(`Role ${id} not found.`);
@@ -179,11 +172,10 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
       );
     }
 
-    // RoleRepository does not expose a delete method — roles are logically
-    // deleted by clearing permissions and marking with a tombstone convention.
-    // For now, update clears permissions which effectively defangs the role.
-    // TODO(OP-XXX): Add a proper soft-delete column to auth.roles.
-    await roleRepository.update(id, { permissions: [] });
+    const deleted = await roleRepository.delete(id);
+    if (!deleted) {
+      throw new NotFoundError(`Role ${id} not found or could not be deleted.`);
+    }
 
     return new Response(null, { status: 204 });
   });
@@ -193,15 +185,11 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
     const id = c.req.param("id");
     const user = c.var.user;
 
-    const roles = await roleRepository.findByTenantId(user.tenantId);
-    const role = roles.find((r) => r.id === id);
+    const role = await roleRepository.findById(user.tenantId, id);
     if (!role) {
       throw new NotFoundError(`Role ${id} not found.`);
     }
 
-    // Entity permissions are stored per (tenant_id, entity_type, role_name) —
-    // we aggregate all entity types for this role name across the tenant.
-    // Using a wildcard entity type query to get all entities.
     const allPerms = await entityPermissionRepository.findByTenantAndEntity(
       user.tenantId,
       "*",
@@ -240,8 +228,7 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
       throw new ValidationError("Invalid permissions request", parsed.error.issues);
     }
 
-    const roles = await roleRepository.findByTenantId(user.tenantId);
-    const role = roles.find((r) => r.id === id);
+    const role = await roleRepository.findById(user.tenantId, id);
     if (!role) {
       throw new NotFoundError(`Role ${id} not found.`);
     }

@@ -427,16 +427,16 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     await tokenService.revokeAccessToken(accessTokenJti, accessTokenExp);
 
     if (all) {
-      // Revoke ALL sessions for this user
-      const sessionsResult = await db.query<{ refresh_token_jti: string; id: string }>(
-        `SELECT id, refresh_token_jti FROM auth.sessions
-         WHERE user_id = $1 AND revoked_at IS NULL`,
-        [userId]
-      );
-
-      for (const session of sessionsResult.rows) {
-        await redis.del(`auth:refresh:${session.refresh_token_jti}`);
+      // Revoke ALL sessions for this user.
+      // We cannot map session rows back to Redis refresh token keys because
+      // the DB stores the JTI (UUID) while the Redis key is the raw hex token.
+      // Instead, scan the Redis user-sessions set which tracks active token keys.
+      const tokenKeys = await redis.smembers(`auth:user-sessions:${userId}`);
+      for (const tokenKey of tokenKeys) {
+        await redis.del(`auth:refresh:${tokenKey}`);
+        await redis.del(`auth:token-family:${tokenKey}`);
       }
+      await redis.del(`auth:user-sessions:${userId}`);
 
       await db.query(
         `UPDATE auth.sessions
@@ -448,8 +448,10 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       // 2. Revoke specific refresh token and its session
       const rawPayload = await redis.get(`auth:refresh:${refreshToken}`);
       if (rawPayload !== null) {
-        const payload = JSON.parse(rawPayload) as { sessionId: string };
+        const payload = JSON.parse(rawPayload) as { sessionId: string; userId: string };
         await redis.del(`auth:refresh:${refreshToken}`);
+        await redis.del(`auth:token-family:${refreshToken}`);
+        await redis.srem(`auth:user-sessions:${payload.userId}`, refreshToken);
         await db.query(
           `UPDATE auth.sessions
            SET revoked_at = now(), revoked_reason = 'logout'
@@ -558,8 +560,8 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       });
       payload = result.payload as typeof payload;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "";
-      if (message.includes("expired")) {
+      const code = (err as { code?: string }).code;
+      if (code === "ERR_JWT_EXPIRED") {
         throw new ResetTokenExpiredError("Password reset token has expired.");
       }
       throw new ResetTokenInvalidError(
@@ -581,16 +583,16 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       throw new ResetTokenInvalidError("Token is missing required claims.");
     }
 
-    // 3. Atomic Redis pipeline: GET then DEL to prevent TOCTOU race
-    const pipeline = redis.pipeline();
-    pipeline.get(`reset:${jti}`);
-    pipeline.del(`reset:${jti}`);
-    const results = await pipeline.exec();
+    // 3. Atomic single-use gate via Lua script (GETDEL is atomic in Redis 6.2+,
+    // but Lua is universally supported and eliminates TOCTOU between GET and DEL)
+    const luaScript = `
+      local val = redis.call('GET', KEYS[1])
+      if val then redis.call('DEL', KEYS[1]) end
+      return val
+    `;
+    const getVal = await redis.eval(luaScript, 1, `reset:${jti}`) as string | null;
 
-    const getVal = results?.[0]?.[1] as string | null;
-    const delCount = results?.[1]?.[1] as number;
-
-    if (getVal === null || delCount === 0) {
+    if (getVal === null) {
       throw new ResetTokenUsedError(
         "Password reset token has already been used."
       );
@@ -615,20 +617,24 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       );
 
       // Revoke all active sessions — user must re-login after password reset
-      const sessionResult = await client.query<{ refresh_token_jti: string }>(
+      await client.query(
         `UPDATE auth.sessions
          SET revoked_at = now(), revoked_reason = 'password_reset'
-         WHERE user_id = $1 AND revoked_at IS NULL
-         RETURNING refresh_token_jti`,
+         WHERE user_id = $1 AND revoked_at IS NULL`,
         [userId]
       );
 
       await client.query("COMMIT");
 
-      // 6. Delete all refresh tokens from Redis for revoked sessions
-      for (const row of sessionResult.rows) {
-        await redis.del(`auth:refresh:${row.refresh_token_jti}`);
+      // 6. Delete all refresh tokens from Redis via the user-sessions set
+      // (refresh_token_jti is a UUID, not the Redis key — the actual key is
+      // the hex token string tracked in auth:user-sessions:{userId})
+      const tokenKeys = await redis.smembers(`auth:user-sessions:${userId}`);
+      for (const tokenKey of tokenKeys) {
+        await redis.del(`auth:refresh:${tokenKey}`);
+        await redis.del(`auth:token-family:${tokenKey}`);
       }
+      await redis.del(`auth:user-sessions:${userId}`);
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -658,8 +664,8 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       });
       payload = result.payload as typeof payload;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "";
-      if (message.includes("expired")) {
+      const code = (err as { code?: string }).code;
+      if (code === "ERR_JWT_EXPIRED") {
         throw new VerifyTokenExpiredError(
           "Email verification token has expired."
         );
@@ -682,16 +688,15 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       throw new VerifyTokenInvalidError("Token is missing required claims.");
     }
 
-    // 2. Atomic Redis pipeline — single-use gate
-    const pipeline = redis.pipeline();
-    pipeline.get(`auth:verify:${jti}`);
-    pipeline.del(`auth:verify:${jti}`);
-    const results = await pipeline.exec();
+    // 2. Atomic single-use gate via Lua script (prevents TOCTOU race on concurrent requests)
+    const luaScript = `
+      local val = redis.call('GET', KEYS[1])
+      if val then redis.call('DEL', KEYS[1]) end
+      return val
+    `;
+    const getVal = await redis.eval(luaScript, 1, `auth:verify:${jti}`) as string | null;
 
-    const getVal = results?.[0]?.[1] as string | null;
-    const delCount = results?.[1]?.[1] as number;
-
-    if (getVal === null || delCount === 0) {
+    if (getVal === null) {
       throw new VerifyTokenUsedError(
         "Email verification token has already been used."
       );

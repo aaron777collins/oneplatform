@@ -207,6 +207,11 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       "EX",
       ttl
     );
+    // Secondary index: token → familyId for replay detection.
+    // Same TTL as the refresh token so it expires naturally.
+    await redis.set(`auth:token-family:${token}`, familyId, "EX", ttl);
+    // Track active tokens per user for logout-all (SADD has no TTL; cleaned on logout)
+    await redis.sadd(`auth:user-sessions:${userId}`, token);
     return { token, jti };
   }
 
@@ -343,18 +348,35 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       jti: newJti,
     };
 
+    // Step 4: DB transaction — update session JTI atomically, then write new
+    // token to Redis only after the DB commit succeeds.
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE auth.sessions SET refresh_token_jti = $1, last_used_at = now() WHERE id = $2",
+        [newJti, payload.sessionId]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Write new refresh token to Redis AFTER DB commit
     await redis.set(
       `auth:refresh:${newToken}`,
       JSON.stringify(newPayload),
       "EX",
       remainingSeconds
     );
-
-    // Step 4: Update session record with new JTI
-    await db.query(
-      "UPDATE auth.sessions SET refresh_token_jti = $1, last_used_at = now() WHERE id = $2",
-      [newJti, payload.sessionId]
-    );
+    // Secondary index for replay detection
+    await redis.set(`auth:token-family:${newToken}`, payload.familyId, "EX", remainingSeconds);
+    // Update user-sessions set: remove old, add new
+    await redis.srem(`auth:user-sessions:${payload.userId}`, oldToken);
+    await redis.sadd(`auth:user-sessions:${payload.userId}`, newToken);
 
     // Step 5: Fetch user for token issuance
     const userResult = await db.query<{
@@ -391,37 +413,53 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
   // -------------------------------------------------------------------------
 
   async function detectAndHandleReplay(oldToken: string): Promise<void> {
-    // We cannot look up a token by its raw value in Postgres because the DB
-    // only stores the current JTI, not the full token history. Replay
-    // detection works by checking if any session in the family has active
-    // sessions that don't match the current JTI.
-    //
-    // When an already-rotated token arrives, it's no longer in Redis but its
-    // familyId can be determined only if we stored it separately. In practice
-    // the family check must use a different route.
-    //
-    // Strategy (per spec): The token is NOT in Redis. If the session family
-    // still has active (non-revoked) sessions, this means the token was
-    // rotated once and is now being replayed. Revoke the entire family.
-    //
-    // We identify the family by storing the token prefix in a separate index
-    // OR by scanning sessions — but since we don't have the JTI of the old
-    // token (it's the raw hex token not a JTI), we conservatively log and
-    // let the UNAUTHORIZED flow proceed. The definitive replay path happens
-    // when a token IS found in Redis and we detect concurrent rotation via
-    // DEL returning 0.
-    //
-    // The full family-revocation on Postgres-detected replay requires the
-    // familyId, which we don't have at this point without the JTI→familyId
-    // lookup. This is a known limitation: we surface UNAUTHORIZED for
-    // expired/used tokens rather than TOKEN_REPLAY_DETECTED. Full replay
-    // detection requires the token index (out of scope for the service layer
-    // — the route layer should implement the JTI→session→family lookup before
-    // calling rotateRefreshToken). See also L2 design §6.4 note.
-    //
-    // If the caller needs full replay detection, it should call
-    // detectReplayByJti() directly with a decoded JTI.
-    return;
+    // The token is NOT in Redis — it was already rotated. Look up the
+    // family via a secondary Redis index (auth:token-family:{token} → familyId)
+    // that we store at issuance time.
+    const familyId = await redis.get(`auth:token-family:${oldToken}`);
+    if (!familyId) {
+      // No family index — token was never issued or TTL expired naturally.
+      // Cannot determine family; fall through to UNAUTHORIZED.
+      return;
+    }
+
+    // Revoke ALL sessions in this family — a replay means the attacker has
+    // a prior token while the legitimate user has a newer one.
+    const sessionsResult = await db.query<{ id: string }>(
+      `UPDATE auth.sessions
+       SET revoked_at = now(), revoked_reason = 'token_replay_detected'
+       WHERE family_id = $1 AND revoked_at IS NULL
+       RETURNING id`,
+      [familyId]
+    );
+
+    // Scan Redis for all refresh tokens in this family and delete them.
+    // The family index keys also get cleaned up.
+    const scanPattern = `auth:refresh:*`;
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", scanPattern, "COUNT", 100);
+      cursor = nextCursor;
+      for (const key of keys) {
+        const raw = await redis.get(key);
+        if (raw !== null) {
+          try {
+            const payload = JSON.parse(raw) as RefreshTokenPayload;
+            if (payload.familyId === familyId) {
+              await redis.del(key);
+            }
+          } catch {
+            // Skip malformed entries
+          }
+        }
+      }
+    } while (cursor !== "0");
+
+    if (sessionsResult.rowCount !== null && sessionsResult.rowCount > 0) {
+      throw new TokenReplayDetectedError(
+        `Token replay detected — ${sessionsResult.rowCount} session(s) in family revoked.`
+      );
+    }
   }
 
   // -------------------------------------------------------------------------

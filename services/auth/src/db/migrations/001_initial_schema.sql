@@ -8,6 +8,11 @@
 -- ============================================================
 
 -- ============================================================
+-- Schema setup (must precede all auth.* table creation)
+-- ============================================================
+CREATE SCHEMA IF NOT EXISTS auth;
+
+-- ============================================================
 -- schema_migrations tracking table
 -- Must be created first so the migration runner can record this
 -- migration after applying it.
@@ -16,11 +21,6 @@ CREATE TABLE IF NOT EXISTS auth.schema_migrations (
     version     TEXT PRIMARY KEY,
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- ============================================================
--- Schema setup
--- ============================================================
-CREATE SCHEMA IF NOT EXISTS auth;
 
 -- ============================================================
 -- auth.tenants

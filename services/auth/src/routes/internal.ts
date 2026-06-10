@@ -8,12 +8,11 @@
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { ValidationError, NotFoundError } from "@oneplatform/core";
+import { ValidationError, NotFoundError, serviceAuthMiddleware } from "@oneplatform/core";
 import type { TokenService } from "../services/token-service.js";
 import type { GuestSessionService } from "../services/index.js";
 import type { OAuthClientRepository } from "../repositories/index.js";
 import {
-  validateQuery,
   guestSessionRequest,
   oauthClientRequest,
 } from "../schemas/index.js";
@@ -22,23 +21,33 @@ export interface InternalRouteDeps {
   tokenService: TokenService;
   guestSessionService: GuestSessionService;
   oauthClientRepository: OAuthClientRepository;
+  servicePublicKeys: Record<string, string>;
 }
 
 export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { tokenService, guestSessionService, oauthClientRepository } = deps;
+  const { tokenService, guestSessionService, oauthClientRepository, servicePublicKeys } = deps;
 
-  // GET /internal/auth/validate — token introspection
-  // Called by the Gateway and other services to validate access tokens.
+  // All /internal/* routes require service-to-service Ed25519 JWT auth
+  routes.use("*", serviceAuthMiddleware({
+    servicePublicKeys,
+    targetService: "auth-service",
+  }));
+
+  // POST /internal/auth/validate — token introspection
+  // Changed from GET+query-param to POST+body to prevent access tokens from
+  // appearing in server logs, proxy logs, and URL history.
   // Always returns 200; callers check the `valid` field rather than the HTTP status.
-  routes.get("/internal/auth/validate", async (c) => {
-    const rawQuery = c.req.query();
-    const parsed = validateQuery.safeParse(rawQuery);
-    if (!parsed.success) {
-      throw new ValidationError("Invalid validate query", parsed.error.issues);
+  routes.post("/internal/auth/validate", async (c) => {
+    const body = await c.req.json();
+    const token = typeof body === "object" && body !== null && "token" in body
+      ? String(body["token"])
+      : null;
+    if (!token) {
+      throw new ValidationError("Missing 'token' field in request body");
     }
 
-    const claims = await tokenService.verifyAccessToken(parsed.data.token);
+    const claims = await tokenService.verifyAccessToken(token);
 
     if (claims === null) {
       return c.json({
