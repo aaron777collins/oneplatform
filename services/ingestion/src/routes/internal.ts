@@ -1,0 +1,146 @@
+import { Hono } from "hono";
+import type { AppVariables } from "@oneplatform/core";
+import type { ConnectorService, SyncService, CredentialService } from "../services/index.js";
+import {
+  registerConnectorPluginRequest,
+  internalSyncRequest,
+} from "../schemas/index.js";
+
+export interface InternalRouteDeps {
+  connectorService: ConnectorService;
+  credentialService: CredentialService;
+  syncService: SyncService;
+  masterKey: Buffer;
+}
+
+export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables: AppVariables }> {
+  const routes = new Hono<{ Variables: AppVariables }>();
+  const { connectorService, credentialService, syncService, masterKey } = deps;
+
+  routes.post("/ingestion/connectors", async (c) => {
+    const user = c.var.user;
+    if (!user?.isService) {
+      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+    }
+
+    const body = await c.req.json();
+    const parsed = registerConnectorPluginRequest.safeParse(body);
+    if (!parsed.success) {
+      return c.json({
+        error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() },
+      }, 400);
+    }
+
+    const d = parsed.data;
+    await connectorService.createConnector(d.tenantId, d.tenantId, {
+      pluginId: d.pluginId,
+      name: d.displayName,
+      config: d.metadata,
+      credentials: {},
+      syncMode: "incremental",
+      isEnabled: true,
+    }, masterKey);
+
+    return c.json({ registered: true });
+  });
+
+  routes.delete("/ingestion/connectors/instance/:instanceId", async (c) => {
+    const user = c.var.user;
+    if (!user?.isService) {
+      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+    }
+
+    const instanceId = c.req.param("instanceId");
+    await connectorService.deleteConnector("*", instanceId, masterKey);
+    return c.json({ disabledCount: 1 });
+  });
+
+  routes.delete("/ingestion/connectors/plugin/:pluginId", async (c) => {
+    const user = c.var.user;
+    if (!user?.isService) {
+      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+    }
+
+    const pluginId = c.req.param("pluginId");
+    const list = await connectorService.listConnectors("*", {
+      limit: 1000,
+      filterPluginId: pluginId,
+      sort: "-createdAt",
+    });
+
+    let disabledCount = 0;
+    for (const item of list.data) {
+      await connectorService.updateConnector(item.connector.tenant_id, item.connector.id, { isEnabled: false }, masterKey);
+      disabledCount++;
+    }
+
+    return c.json({ disabledCount });
+  });
+
+  routes.get("/ingestion/credentials/:credentialBundleId/field/:key", async (c) => {
+    const user = c.var.user;
+    if (!user?.isService) {
+      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+    }
+
+    const connectorId = c.req.param("credentialBundleId");
+    const fieldName = c.req.param("key");
+
+    const value = await credentialService.getDecryptedCredential(connectorId, fieldName, masterKey);
+    return c.json({ value });
+  });
+
+  routes.post("/ingestion/sync", async (c) => {
+    const user = c.var.user;
+    if (!user?.isService) {
+      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+    }
+
+    const body = await c.req.json();
+    const parsed = internalSyncRequest.safeParse(body);
+    if (!parsed.success) {
+      return c.json({
+        error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() },
+      }, 400);
+    }
+
+    const d = parsed.data;
+    const result = await syncService.triggerSync(d.connectorInstanceId, d.tenantId, {
+      ...(d.syncMode ? { mode: d.syncMode } : {}),
+    });
+
+    if (d.waitForCompletion) {
+      const pollInterval = 2000;
+      const maxWait = 600_000;
+      const startTime = Date.now();
+
+      let progress = await syncService.getSyncProgress(result.syncJobId);
+      while (
+        progress &&
+        !["success", "failed", "cancelled"].includes(progress.status) &&
+        Date.now() - startTime < maxWait
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        progress = await syncService.getSyncProgress(result.syncJobId);
+      }
+
+      return c.json({
+        syncJobId: result.syncJobId,
+        status: progress?.status ?? "queued",
+        ...(progress?.processedRecords !== undefined ? { rowsIngested: progress.processedRecords } : {}),
+        ...(progress?.completedAt && progress.startedAt
+          ? { durationMs: new Date(progress.completedAt).getTime() - new Date(progress.startedAt).getTime() }
+          : {}),
+        ...(progress && progress.errors.length > 0 ? { error: progress.errors[0]?.message ?? null } : { error: null }),
+      });
+    }
+
+    return c.json({
+      syncJobId: result.syncJobId,
+      status: "queued" as const,
+      error: null,
+    });
+  });
+
+  return routes;
+}
