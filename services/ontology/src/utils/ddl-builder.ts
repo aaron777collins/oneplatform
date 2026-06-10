@@ -196,8 +196,11 @@ export function buildUnionViewDDL(
   const viewName = buildUnionViewName(entitySlug, migrationId);
   const qualifiedView = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(viewName)}`;
 
+  // System columns start with "_" so they are not valid inputs for
+  // quotePgIdentifier (which requires identifiers starting with [a-z]).
+  // They are fixed, known-safe names so we quote them directly.
   const systemCols = ["_id", "_created_at", "_updated_at", "_version", "_source_id", "_ingested_by"];
-  const systemSelect = systemCols.map((c) => quotePgIdentifier(c)).join(", ");
+  const systemSelect = systemCols.map((c) => `"${c}"`).join(", ");
 
   const activeFields = fields.filter((f) => !f.isRemoved);
 
