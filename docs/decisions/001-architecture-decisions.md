@@ -405,3 +405,796 @@ All dependencies are MIT/Apache/BSD/ISC/permissive — safe for commercial use u
 - **Architecture docs:** the ADR (this document) and design specs are committed to `docs/` in the repo and rendered in the platform UI at `/docs/architecture`.
 - **Doc generation pipeline:** a Turborepo task (`turbo run docs:generate`) regenerates all documentation. This runs as part of CI — if a code change would cause a doc drift, the CI check fails. Docs are built artifacts, not manually written files.
 - **Versioning:** docs are versioned alongside the API (`/docs/api/v1`, `/docs/api/v2`). Users can view docs for their current API version.
+
+---
+
+### 24. First-Run Experience and Bootstrap
+
+**Decision:** The platform resolves the bootstrap problem — creating the first admin user when no users exist, and generating the master encryption key before any service that needs it starts — through a dedicated `op-init` container that runs to completion before all other services, combined with a single-use `POST /api/v1/auth/bootstrap` endpoint and a setup wizard served at the platform root URL on first access.
+
+**Rationale:** The first-run experience is a critical gap. Without it, `docker compose up` produces 9 running services but no clear entry point, no admin user, and no `OP_MASTER_KEY`. Two problems must be solved in order: (1) the master encryption key must exist before the Ingestion Service (and any other service using AES-256-GCM) starts; (2) the first admin user must be created before the regular auth endpoints are reachable, because regular auth requires an existing user. A dedicated init container solves (1) by running first via Docker Compose `depends_on` + `condition: service_completed_successfully`. Problem (2) is solved by a hardened bootstrap endpoint that only accepts the first call, auto-disables itself, and is protected by the init token generated during init. The entire flow is deterministic, secure, and requires no prior knowledge from the operator.
+
+**Implementation:**
+
+**Init container (`op-init`):**
+- A one-shot container (`restart: no`) that runs before all platform services. It performs exactly three operations in order:
+  1. **Key generation:** checks whether the Docker-managed secret `op_master_key` already exists (via the secrets volume at `/run/secrets/op_master_key`). If absent, generates `openssl rand -base64 32` and writes to a shared Docker volume at `/data/init/master.key` (permissions `0400`, owned by uid 1000). Services read from this path via a read-only volume mount.
+  2. **Bootstrap token generation:** generates a single-use `bootstrap_token` (`openssl rand -hex 32`), writes it to `/data/init/bootstrap.token` (permissions `0400`). This token is required to call `POST /api/v1/auth/bootstrap`. It is a one-time secret: the Auth Service reads it once at startup, holds it in memory (not Postgres), and erases `/data/init/bootstrap.token` immediately after reading. After the bootstrap endpoint is used, the in-memory token is nulled and the endpoint permanently disabled.
+  3. **Readiness signal:** writes `/data/init/ready` (empty file) to signal completion.
+- The init container exits with code 0 on success, non-zero on any failure. Other services will not start if the init container fails (Docker Compose `condition: service_completed_successfully`).
+- The init container image is a minimal Alpine with `openssl` only — no Node.js, no application code, no network access. Its attack surface is the smallest possible.
+
+**Docker Compose startup ordering (complete dependency chain):**
+```yaml
+op-init:
+  image: alpine:3.19
+  restart: "no"
+  command: ["/bin/sh", "/scripts/init.sh"]
+  volumes: [init-data:/data/init]
+  healthcheck: { test: ["CMD", "test", "-f", "/data/init/ready"], interval: 2s, retries: 15 }
+
+postgres:
+  depends_on:
+    op-init: { condition: service_completed_successfully }
+  healthcheck: { test: ["CMD-SHELL", "pg_isready -U op"], interval: 5s, retries: 10 }
+
+redis:
+  depends_on:
+    op-init: { condition: service_completed_successfully }
+  healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10 }
+
+auth-service:
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  volumes: [init-data:/data/init:ro]
+
+ingestion-service:
+  depends_on:
+    postgres: { condition: service_healthy }
+    auth-service: { condition: service_healthy }
+  volumes: [init-data:/data/init:ro]
+
+# All other services depend on postgres+redis healthy; services that call auth
+# also depend on auth-service healthy. Gateway depends on all 9 services healthy.
+gateway-service:
+  depends_on:
+    auth-service: { condition: service_healthy }
+    ontology-service: { condition: service_healthy }
+    # ... all other services
+```
+- Services read `OP_MASTER_KEY` from `/data/init/master.key` via `@oneplatform/core`'s `loadMasterKey()` helper. In production, operators replace the init-volume mechanism with Docker Secrets (`docker secret create op_master_key`) and services read from `/run/secrets/op_master_key` instead — the same helper supports both paths, checked in order.
+
+**Bootstrap endpoint (`POST /api/v1/auth/bootstrap`):**
+- Accepts: `{ adminEmail: string, adminPassword: string, tenantName: string, bootstrapToken: string }`
+- The Auth Service validates `bootstrapToken` against the in-memory value read from `/data/init/bootstrap.token` at startup. Constant-time comparison (`crypto.timingSafeEqual`) to prevent timing attacks.
+- On success: creates the first tenant row in `auth.tenants`; creates the first admin user in `auth.users` with role `platform_admin`; issues a session for the admin; returns `{ data: { tenantId, adminUserId, sessionToken } }`.
+- After first use: the in-memory `bootstrapToken` is zeroed; the endpoint handler checks a Postgres flag `auth.bootstrap_completed = true` and returns `410 Gone` on all subsequent calls. **The flag is set in the same database transaction as user creation** — there is no window between user creation and flag set.
+- Rate limit: 3 attempts per 10 minutes per IP (independent of standard rate limiting), enforced in the Auth Service itself without Redis (in-memory sliding window per process). This prevents brute-forcing the bootstrap token before the admin configures rate limiting.
+- **Re-bootstrap scenario:** if an operator needs to reset the platform (e.g., corrupted admin), they run `op service reset-bootstrap` (admin CLI command) which: requires direct database access to confirm intent, deletes all users and tenants, regenerates the bootstrap token, and restarts the auth service. This is a destructive operation and documented as such.
+
+**Setup wizard flow:**
+- The Frontend (Nginx container) detects whether bootstrap has been completed by calling `GET /api/v1/auth/bootstrap/status` (public endpoint, returns `{ completed: boolean }`).
+- If `completed: false`, the frontend renders the setup wizard instead of the login page at the root URL.
+- **Wizard screens (in order):**
+  1. **Welcome screen:** platform name, version, "Let's get started." Single "Begin Setup" button.
+  2. **Admin account:** email + password + confirm password. Password policy shown inline (min 12 chars, 1 uppercase, 1 number, 1 symbol). Email validation client-side.
+  3. **Organization name:** `tenantName` input. Explains this is the name of the first workspace.
+  4. **Master key confirmation:** displays the generated `OP_MASTER_KEY` value in a read-only field with a copy button. Shows the security warning from Decision #11 verbatim. Checkbox: "I have saved this key securely." Blocks progression until checked.
+  5. **Review and create:** summary of inputs, "Create Platform" button. POST to `/api/v1/auth/bootstrap`.
+  6. **Success screen:** "Platform ready. Your admin account is active." Link to dashboard. Shows first login instructions.
+- After wizard completion, `GET /api/v1/auth/bootstrap/status` returns `{ completed: true }` and all subsequent visits to the root URL render the normal login page.
+
+**URL after `docker compose up`:**
+- Default: `http://localhost:3000`. The Gateway listens on port 3000 (host-mapped). If `OP_BASE_URL` is set, the wizard uses it for generated callback URLs and the success screen link.
+- The setup wizard is served by the Frontend container (Nginx). The Gateway proxies `/*` to the frontend for all non-API paths. No special routing is needed.
+
+**Service readiness coordination:**
+- Every service exposes `GET /healthz` (liveness — "am I alive?") and `GET /readyz` (readiness — "am I ready to accept traffic?"). Per Decision #29 (API Contract Standard). Docker Compose health checks call `/healthz` since Docker's health model is liveness-based; the Gateway waits for `/readyz` on its downstream services before accepting external traffic, using a startup probe loop in the Gateway's own startup sequence.
+- **Startup timeout:** if any service fails to become healthy within 120s, Docker Compose marks it as failed and dependent services do not start. The operator sees the failed container log output directly. No silent partial-startup states.
+
+**Security considerations:**
+- The bootstrap token is single-use, short-lived (erased from disk immediately by the Auth Service at startup), and never logged or included in error responses.
+- `/data/init/master.key` is `chmod 0400` and only readable by the service UID. Operators are warned in documentation that the Docker volume backing `/data/init` must be protected with the same care as the `.env` file (Decision #11).
+- The bootstrap endpoint is not listed in the OpenAPI spec served at `/api/v1/openapi.json` after `bootstrap_completed = true`. It does not appear in the interactive API docs. This reduces its surface area for exploration attacks.
+
+---
+
+### 25. App Platform Design
+
+**Decision:** User apps are stored as versioned source-file trees in MinIO (S3-compatible object storage, MIT), built by esbuild running inside the Execution Service sandbox (because user app code is untrusted), and served as static bundles by the App Service. The in-browser editor uses Monaco Editor (MIT, VS Code engine). Build artifacts are versioned in MinIO and linked from Postgres; rollback is a pointer change to a prior version ID. Hot-reload preview uses esbuild incremental compilation feeding an iframe. External IDE support is provided by `op app dev --app <slug>`.
+
+**Rationale:** App code is user-supplied and potentially malicious. Building it in the main App Service process would allow arbitrary code execution during the build step. Running esbuild inside the Execution Service sandbox (the same sandbox already hardened for user pipeline code) eliminates this risk. MinIO is added to Docker Compose (MIT license, S3-compatible) to provide object storage for build artifacts and file uploads without a cloud dependency. Monaco Editor is chosen for the in-browser editor because it is the same engine as VS Code (MIT, maintained by Microsoft), supports TypeScript intellisense, and has a React wrapper (`@monaco-editor/react`, MIT) for easy integration. Rollback via pointer change is the simplest correct design: no data is ever deleted, and reverting is an O(1) metadata update.
+
+**Implementation:**
+
+**MinIO addition to Docker Compose:**
+```yaml
+minio:
+  image: minio/minio:RELEASE.2024-06-13T22-53-53Z  # pinned version
+  command: server /data --console-address ":9001"
+  environment:
+    MINIO_ROOT_USER: ${OP_MINIO_ACCESS_KEY}
+    MINIO_ROOT_PASSWORD: ${OP_MINIO_SECRET_KEY}
+  volumes: [minio-data:/data]
+  healthcheck:
+    test: ["CMD", "mc", "ready", "local"]
+    interval: 10s
+    retries: 5
+  networks: [oneplatform-internal]
+  # NOT on oneplatform-public — MinIO console is internal-only
+```
+- Two buckets created on first platform startup by the `op-init` script: `op-app-artifacts` (build outputs) and `op-uploads` (user file uploads via ingestion). Bucket policies: private, accessible only via presigned URLs or service tokens. MinIO is not exposed to the public internet.
+- The App Service and Ingestion Service communicate with MinIO via the AWS SDK v3 for JavaScript (`@aws-sdk/client-s3`, Apache 2.0) using the MinIO endpoint URL. No MinIO-specific SDK is needed.
+
+**App code storage (virtual file system):**
+- Each app has a source file tree stored in Postgres in the `app.files` table: `{ app_id, path, content (text), content_hash (sha256), updated_at, updated_by }`. The path is a normalized POSIX path (e.g., `/src/App.tsx`, `/src/components/Chart.tsx`, `/package.json`).
+- This virtual file system (VFS) is managed entirely by the App Service. The in-browser editor and the `op app dev` CLI both read/write through the App Service VFS API (`GET /api/v1/apps/{id}/files/{path}`, `PUT /api/v1/apps/{id}/files/{path}`, `DELETE /api/v1/apps/{id}/files/{path}`, `GET /api/v1/apps/{id}/files` for directory listing).
+- App source files are stored in Postgres (not MinIO) because they are small text files that benefit from transactional updates and are queried frequently by the editor. MinIO stores only build artifacts (compiled bundles, typically 50KB–5MB gzipped).
+
+**Build pipeline:**
+- Trigger: `POST /api/v1/apps/{id}/builds` (or automatically on each save in preview mode).
+- The App Service assembles all source files from the VFS into a temporary in-memory archive and submits a build job to the Execution Service with `executionType: "app-build"`.
+- The Execution Service runs esbuild in the `op-sandbox-vm` container. The build context is passed via the existing Unix socket protocol as a JSON-encoded file map: `{ method: "app-build", files: { "/src/App.tsx": "...", ... }, entrypoint: "/src/index.tsx", target: "es2020", format: "esm" }`. The sandbox runs `esbuild.build()` using the `esbuild` npm package (MIT) bundled into the sandbox image.
+- **Why esbuild in sandbox:** during the build, esbuild evaluates module resolution. A malicious `package.json` or custom resolver could be crafted to exfiltrate files or make network requests during the build step. Running inside the existing sandbox (no network, read-only filesystem, resource limits) prevents this.
+- **Allowed imports:** the sandbox image pre-bundles `react`, `react-dom`, `@oneplatform/app-sdk`, `@oneplatform/core` (UI utilities only), and `recharts` (charting). User code may import any of these. Imports of other modules result in a build error (`ExternalModuleNotAllowedError`) with a clear message listing available packages. The allowed module list is configurable per-tenant by platform admin via `app.allowed_modules` config.
+- **Build output:** a single ESM bundle (`bundle.js`) + source map (`bundle.js.map`) + a manifest (`build-manifest.json`: `{ buildId, appId, entrypoint, bundleSizeBytes, buildDurationMs, externalDependencies[] }`). These three files are uploaded to MinIO at `op-app-artifacts/{tenantId}/{appId}/builds/{buildId}/`.
+- Build duration target: < 3 seconds for a typical 500-line app. esbuild is fast enough; the sandbox startup is the dominant cost (~200ms on first use, ~10ms subsequent with warm sandbox).
+- Build logs are streamed back to the browser via SSE (`GET /api/v1/apps/{id}/builds/{buildId}/logs/stream`).
+
+**Build artifact versioning and rollback:**
+- Each build creates a row in `app.builds`: `{ id (uuid), app_id, version_number (integer, auto-increment per app), status (pending|building|success|failed), bundle_path (MinIO key), build_manifest (JSONB), built_at, built_by }`.
+- The `app.apps` table has a `current_build_id` foreign key pointing to the active build.
+- **Rollback:** `POST /api/v1/apps/{id}/rollback` with body `{ buildId: string }` — the App Service updates `current_build_id` to the specified prior build ID. This is an atomic Postgres UPDATE. Zero downtime: the App Service reads `current_build_id` on each request; the next request after the UPDATE serves the prior bundle. No rebuild needed.
+- Old build artifacts are retained in MinIO indefinitely until the user explicitly purges them (`DELETE /api/v1/apps/{id}/builds/{buildId}`, only allowed for non-current builds). A platform-wide retention policy (configurable, default: keep last 20 builds per app) is enforced by a background cleanup job in the App Service running every 24 hours.
+- **Build failure isolation:** if the build fails (esbuild error, timeout, sandbox crash), the `app.builds` row is marked `failed` with the error message. `current_build_id` is NOT changed. The app continues serving the last successful build. Build errors are surfaced in the editor as an inline error panel.
+
+**In-browser editor (Monaco Editor):**
+- Component: `@monaco-editor/react` v4+ (MIT). Rendered in the frontend as a full-height split-pane layout: file tree (left), editor (center), preview iframe (right).
+- **TypeScript intellisense:** the App Service generates a `tsconfig.json` and type declaration files for the app's available imports (`react`, `react-dom`, `@oneplatform/app-sdk` types) and injects them into Monaco's `monaco.languages.typescript.typescriptDefaults.addExtraLib()`. This gives the editor full type checking and autocompletion without a TypeScript server process.
+- **Ontology-typed completions:** the Ontology Service's code generation (Decision #14) produces TypeScript interfaces for all tenant entities. These interfaces are injected into Monaco as extra libs, giving app developers typed access to `useQuery<Customer>()`, `useMutation<Order>()`, etc.
+- **File operations:** every editor save triggers a `PUT /api/v1/apps/{id}/files/{path}` call to the App Service (debounced 500ms). File creation/deletion/rename go through the VFS API. The file tree panel is driven by `GET /api/v1/apps/{id}/files`.
+- **Diff view:** clicking any file in the build history shows a Monaco diff view between the current file and the file content at that build time.
+
+**Hot-reload preview:**
+- The preview pane is an `<iframe src="/apps/{slug}/preview">` rendered in the editor layout.
+- **Preview mode:** the App Service has a `preview` serving mode separate from `production`. In preview mode, the bundle is served from the latest build (including in-progress incremental builds), not `current_build_id`. This means the developer sees their unsaved/unbundled changes in near-real-time.
+- **Incremental compilation:** after the first full build, subsequent builds triggered by saves use esbuild's incremental API (`esbuild.context()` with `rebuild()`). The context is held in the sandbox between builds, reducing rebuild time from ~3s to ~200ms for incremental changes. The context is invalidated when the sandbox is recycled.
+- **Iframe refresh:** when a new incremental build completes, the App Service sends an SSE event to the preview iframe (`event: reload, data: { buildId }`). The iframe listens for this event and calls `window.location.reload()`. No WebSocket needed — SSE is sufficient and simpler.
+- **Preview isolation:** the preview iframe origin is `http://localhost:3000/apps/{slug}/preview`. It is served with `Content-Security-Policy: frame-ancestors 'self'` to prevent embedding outside the platform. Preview data uses real tenant data (not mocked) because apps need to display realistic content during development. Preview sessions use the developer's own session credentials.
+
+**External IDE support (`op app dev`):**
+- `op app dev --app <slug>` starts a local development server on `http://localhost:4000` (configurable via `--port`).
+- The CLI syncs files bidirectionally: local filesystem changes are `PUT` to the App Service VFS; remote VFS changes (e.g., from another team member) are pulled and written locally. Sync is file-hash-based (no diff needed — full content per file).
+- The local dev server proxies all `@oneplatform/app-sdk` calls to the platform (configured via `OP_PLATFORM_URL` env var or `--platform-url` flag). This means the developer's app runs locally but data comes from the real platform.
+- **Conflict resolution:** if the same file is modified locally AND remotely between sync cycles, the CLI surfaces a conflict prompt (or uses `--prefer-local` / `--prefer-remote` flags for non-interactive mode). Conflicts are rare because the platform editor locks files per-session via an optimistic `file_version` integer on each VFS row.
+- `op app dev` streams build logs from the platform to the terminal and opens the preview URL in the default browser.
+
+**Auto-generated starter app from ontology:**
+- When a user's ontology has at least one entity with at least one field, the App Service can generate a starter app: `POST /api/v1/apps/generate` with body `{ tenantId, appName, entityTypes: string[] }`.
+- The Ontology Service provides entity metadata (fields, types, relationships) to the App Service. The App Service renders a template (stored in the App Service codebase, not in MinIO) by substituting entity names, field names, and types into a React component scaffold.
+- **Generated starter includes:** (1) a data table component showing all records for each selected entity using `useQuery`; (2) a create/edit form with field inputs matching each entity's field types (string → text input, number → number input, boolean → toggle, enum → select); (3) basic routing (entity list → entity detail); (4) `useUser()` to show the current user in a header.
+- The generated code is written to the app's VFS as editable source files — it is a starting point, not a locked template. The developer can edit everything in Monaco immediately after generation.
+- **Non-expert path (Casey persona):** upload CSV → Ingestion Service auto-infers schema (Decision #28) → Ontology Service generates draft ontology → user reviews in a simplified "table view" mode (field names, types, toggle nullable) → confirm → `POST /api/v1/apps/generate` → starter app deployed in preview → developer edits or publishes as-is. Target: < 5 minutes from CSV upload to running app.
+
+**App environment variables:**
+- Apps may need runtime configuration (API keys for third-party services, feature flags). App environment variables are stored in `app.env_vars`: `{ app_id, key, value (AES-256-GCM encrypted using OP_MASTER_KEY), is_secret (boolean) }`.
+- Secret env vars are never returned in API responses — only their key names are returned (value masked as `"***"`). Non-secret env vars are returned in plaintext.
+- At build time, non-secret env vars are inlined into the bundle by esbuild's `define` option. Secret env vars are injected at runtime by the App Service BFF (not at build time) — they are passed to the app via a `GET /api/v1/apps/{id}/runtime-config` endpoint that the app-sdk calls during initialization, authenticated by the user's session cookie.
+
+**Security considerations:**
+- All app code (source files and build artifacts) is tenant-scoped. The App Service enforces tenant isolation on every VFS and MinIO operation by verifying the requesting user's `tenantId` against the app's `tenantId`.
+- Build artifacts in MinIO have server-side encryption enabled (`SSE-S3` mode via MinIO's built-in AES-256 at rest). MinIO itself is not exposed to the public network.
+- The Monaco editor does not execute user code in the browser during editing — code is only executed by the Execution Service sandbox when a build is triggered. There is no client-side `eval()` at any point in the app platform.
+
+---
+
+### 26. App-SDK and BFF Design
+
+**Decision:** `@oneplatform/app-sdk` exposes a React hooks-based API that mirrors common data patterns (query, mutation, subscription, user context, permissions, app storage). The App Service acts as a Backend-for-Frontend (BFF), intercepting all SDK calls from the browser, forwarding them to the appropriate internal services with service tokens, and enforcing RBAC before forwarding. Authentication state is carried in httpOnly Secure SameSite=Strict cookies set exclusively by the App Service — the browser never holds a token in JavaScript-accessible storage.
+
+**Rationale:** A React hooks API is the most natural surface for a code-first app platform — developers use the same patterns they already know from React Query and SWR. The BFF pattern is necessary for security: the browser cannot hold service tokens (they would be exposed via XSS), and internal services cannot be directly exposed to browser apps (they lack the CORS and session handling needed for browser clients, and exposing them directly would bypass service RBAC). Centralizing token and RBAC logic in the App Service BFF gives a single auditable enforcement point. httpOnly cookies are the correct browser token storage — they are immune to XSS token theft (the #1 browser authentication vulnerability).
+
+**Implementation:**
+
+**Complete `@oneplatform/app-sdk` API surface:**
+
+```typescript
+// Query — read data from an ontology entity
+function useQuery<T = unknown>(
+  entity: string,
+  options?: QueryOptions
+): QueryResult<T>
+
+interface QueryOptions {
+  filter?: Record<string, FilterValue>;   // { field: { eq: value } }
+  sort?: string[];                         // ["name", "-createdAt"]
+  fields?: string[];                       // field selection
+  cursor?: string;                         // pagination cursor
+  limit?: number;                          // default 50, max 100
+  enabled?: boolean;                       // conditional fetch (default true)
+  staleTime?: number;                      // ms before refetch (default 30_000)
+  onError?: (error: AppSDKError) => void;
+}
+
+interface QueryResult<T> {
+  data: T[] | null;
+  pagination: { nextCursor: string | null; total: number } | null;
+  isLoading: boolean;
+  isError: boolean;
+  error: AppSDKError | null;
+  refetch: () => Promise<void>;
+  fetchNextPage: () => Promise<void>;      // appends to data[]
+}
+
+// Mutation — create, update, or delete records
+function useMutation<T = unknown>(
+  entity: string
+): MutationResult<T>
+
+interface MutationResult<T> {
+  create: (data: Partial<T>) => Promise<T>;
+  update: (id: string, data: Partial<T>) => Promise<T>;
+  replace: (id: string, data: T) => Promise<T>;
+  remove: (id: string) => Promise<void>;
+  bulkCreate: (items: Partial<T>[]) => Promise<BulkResult<T>>;
+  isLoading: boolean;
+  isError: boolean;
+  error: AppSDKError | null;
+}
+
+// Subscription — real-time updates for an entity
+function useSubscription<T = unknown>(
+  entity: string,
+  options?: SubscriptionOptions
+): SubscriptionResult<T>
+
+interface SubscriptionOptions {
+  filter?: Record<string, FilterValue>;
+  events?: Array<"created" | "updated" | "deleted">;  // default: all
+  onEvent?: (event: EntityEvent<T>) => void;
+}
+
+interface SubscriptionResult<T> {
+  lastEvent: EntityEvent<T> | null;
+  isConnected: boolean;
+  reconnectAttempts: number;
+}
+
+// User context — current authenticated user
+function useUser(): UserContext
+
+interface UserContext {
+  id: string;
+  email: string;
+  displayName: string;
+  tenantId: string;
+  roles: string[];
+  isGuest: boolean;
+}
+
+// Permission check — returns boolean synchronously from cached ontology
+function usePermission(action: string, resource: string): boolean
+// action: "create" | "read" | "update" | "delete" | "admin"
+// resource: entity name or "*" for any
+
+// App storage — per-app, per-user key-value store
+function useAppStorage<T>(
+  key: string,
+  defaultValue: T
+): [T, (value: T) => Promise<void>]
+// Stored in app.user_storage: { app_id, user_id, key, value (JSONB) }
+// Key max length: 128 chars. Value max size: 64KB.
+
+// SDK provider (must wrap app root)
+function AppProvider(props: {
+  children: React.ReactNode;
+  appId: string;          // injected by App Service at build time
+  tenantId: string;       // injected by App Service at build time
+}): JSX.Element
+```
+
+**Internal implementation of hooks:**
+- All hooks call the App Service BFF endpoints (not internal services directly). The App Service proxies requests to the appropriate internal service using its service token.
+- `useQuery` and `useMutation` call `GET|POST|PATCH|DELETE /bff/data/{entity}[/{id}]` on the App Service.
+- `useSubscription` opens an SSE connection to `GET /bff/data/{entity}/subscribe` on the App Service (which in turn subscribes to the appropriate Redis pub/sub channel and fans out events to connected browsers).
+- `useUser` reads from `GET /bff/me` on the App Service, which extracts user identity from the session cookie.
+- `usePermission` is evaluated client-side against a cached permissions snapshot (`GET /bff/permissions`) fetched once at `AppProvider` mount and refreshed every 5 minutes. No network call per check.
+- `useAppStorage` reads/writes `GET|PUT /bff/storage/{key}` on the App Service.
+- All BFF calls include the session cookie automatically (same-origin, no explicit auth header needed).
+
+**BFF mechanics (request flow):**
+```
+Browser App
+  │  fetch("/bff/data/customers?filter[status][eq]=active")
+  │  Cookie: op_session=<httpOnly>
+  ▼
+App Service (port 3006) — BFF layer
+  │  1. Extract session cookie → validate with Auth Service
+  │     GET /internal/auth/validate → { userId, tenantId, roles }
+  │  2. Check permission: can userId read "customers" in tenantId?
+  │     Ontology cache lookup → permission: ALLOW
+  │  3. Rewrite request with service token + user context header
+  │     GET /internal/data/customers?filter[status][eq]=active
+  │     X-Service-Token: <App Service Ed25519 JWT>
+  │     X-User-Context: { userId, tenantId, roles } (base64-encoded JSON)
+  ▼
+Gateway (internal routing — note: for inter-service calls, App Service calls
+the target service directly on the internal network, not via the public Gateway)
+  ▼
+Ontology Service (resolves entity "customers" to tenant_abc.customers table)
+  │  SELECT * FROM tenant_abc.customers WHERE status = 'active'
+  ▼
+App Service — BFF layer (response path)
+  │  Strip internal headers, apply field-level permissions from ontology
+  │  (hide fields the user's role cannot read)
+  ▼
+Browser App — receives { data: [...], pagination: {...} }
+```
+
+**Token handling:**
+- Session cookies are set by the App Service on login: `Set-Cookie: op_session=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800` (7-day expiry matching refresh token TTL).
+- The `op_session` value is the user's refresh token reference (an opaque string). The App Service exchanges it for a short-lived internal access JWT on each BFF request (or uses a cached access JWT until its 15-minute expiry). The browser never sees the access JWT.
+- **CSRF protection:** because `SameSite=Strict` cookies are used, cross-site requests cannot include the session cookie. This eliminates CSRF without requiring additional CSRF tokens for same-site apps. For apps served on custom subdomains where `SameSite=Strict` may not apply across subdomains, the App Service additionally checks the `Origin` header against the app's registered origin.
+- **Token refresh:** the App Service transparently refreshes the access JWT when it expires. If the refresh token itself expires, the App Service returns `401` to the BFF endpoint, and the `AppProvider` redirects the user to the login page.
+
+**User identity propagation:**
+- The App Service extracts `{ userId, tenantId, roles }` from the validated session and passes it downstream as the `X-User-Context` header (base64-encoded JSON). Internal services trust this header only when the request also carries a valid `X-Service-Token` (enforced by the service RBAC middleware in `@oneplatform/core`).
+- Internal services NEVER accept `X-User-Context` without a valid `X-Service-Token`. The two headers are validated together — one without the other is rejected with `403`.
+
+**RBAC enforcement at the BFF layer:**
+- The App Service performs RBAC checks before forwarding any request. It uses the ontology permission rules (cached locally per Decision #12) to determine whether the requesting user's roles permit the requested action on the requested entity.
+- Field-level RBAC is enforced on the RESPONSE path: after receiving data from an internal service, the App Service removes fields that the user's roles cannot read before returning the response to the browser.
+- Row-level RBAC is enforced by injecting filter conditions into the request before forwarding: if the ontology defines `row_filter: { ownerId: "$userId" }` for a role, the App Service appends `filter[ownerId][eq]={userId}` to the query. Internal services cannot be bypassed because they require service token authentication.
+- Permission check failures return `403 Forbidden` with `{ error: { code: "PERMISSION_DENIED", ... } }` to the browser app. The App Service logs a WARN-level audit event for every permission denial.
+
+**Error handling in SDK:**
+```typescript
+interface AppSDKError {
+  code: string;           // e.g., "PERMISSION_DENIED", "ENTITY_NOT_FOUND"
+  message: string;
+  statusCode: number;
+  isRetryable: boolean;   // true for 429, 503; false for 403, 404
+  requestId: string;      // for support/debugging
+}
+```
+- The SDK wraps all BFF errors into `AppSDKError` instances. Network errors (fetch failed) produce an `AppSDKError` with `code: "NETWORK_ERROR"` and `isRetryable: true`.
+- `useMutation` operations reject their promise with `AppSDKError` on failure. `useQuery` sets `error` and `isError` on failure without throwing.
+
+**Security considerations:**
+- The BFF layer is the single point of trust enforcement for all browser app interactions. No internal service is reachable directly from the browser.
+- The session cookie scope is `Path=/` on the App Service origin only. App Service and the main platform share the same origin (`/apps/{slug}` under `localhost:3000`), so the session cookie is valid for both the platform login flow and the app BFF.
+- XSS mitigation: the app bundle is served with `Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self'`. No inline scripts. No `eval`. These CSP headers are set by the App Service on every `GET /apps/{slug}/*` response.
+
+---
+
+### 27. App Access Control and OAuth Client Lifecycle
+
+**Decision:** Each deployed app automatically receives an OAuth 2.0 client registration (deterministic client ID scheme `app:{appId}:{tenantId}`) created by the App Service calling the Auth Service at deploy time. Apps default to Platform-User Only access (requires an authenticated platform session). Apps can optionally be configured for Public/Guest Access (anonymous sessions with a guest role). App-level custom roles are defined by the developer and mapped to ontology permissions. Apps are tenant-scoped by default; cross-tenant sharing requires an explicit admin allowlist.
+
+**Rationale:** Without a well-defined OAuth client lifecycle, the question "how does a deployed app identify itself to the auth system?" has no answer. Deterministic client IDs eliminate race conditions and idempotency issues — creating the OAuth client for app `xyz` in tenant `abc` always produces the same client ID `app:xyz:abc`, so re-deploys are safe (upsert, not create). The two-mode access model covers 100% of use cases: most apps are internal tools for platform users; some (customer-facing portals, public dashboards) need external access. Modeling these as two explicit modes with different security properties prevents accidental exposure.
+
+**Implementation:**
+
+**OAuth client auto-registration:**
+- Trigger: `POST /api/v1/apps/{id}/deploy` → App Service calls Auth Service: `POST /internal/oauth/clients` with:
+  ```json
+  {
+    "clientId": "app:{appId}:{tenantId}",
+    "clientType": "public",
+    "redirectUris": [
+      "http://localhost:3000/apps/{slug}/auth/callback",
+      "http://{slug}.apps.{domain}/auth/callback"
+    ],
+    "allowedScopes": ["openid", "profile", "data:read", "data:write"],
+    "tenantId": "{tenantId}",
+    "appId": "{appId}",
+    "accessMode": "platform-user"
+  }
+  ```
+- This call is idempotent: the Auth Service uses `INSERT ... ON CONFLICT (client_id) DO UPDATE` — re-deploying an app updates the redirect URIs but does not rotate the client ID or invalidate existing sessions.
+- The App Service holds the registration response in `app.oauth_registrations`: `{ app_id, client_id, client_secret_hash (bcrypt), access_mode, created_at, updated_at }`. The client secret (if applicable — public clients don't need one) is generated by the Auth Service and returned once; subsequent requests cannot retrieve it.
+
+**Client ID scheme:**
+- Format: `app:{appId}:{tenantId}` where `appId` and `tenantId` are UUID v4 values.
+- Example: `app:550e8400-e29b-41d4-a716-446655440000:6ba7b810-9dad-11d1-80b4-00c04fd430c8`
+- Deterministic: the App Service can always compute the client ID without a database lookup during request validation.
+- Collision-free: UUIDs are globally unique. The `app:` prefix distinguishes app clients from service tokens and user-created OAuth clients.
+- The Auth Service enforces that client IDs matching the `app:*:*` pattern may only be created by the App Service (checked via service RBAC). No other service or user can register an `app:` prefixed client.
+
+**Redirect URI management:**
+- At registration, both path-based and subdomain redirect URIs are registered (see above). If `OP_WILDCARD_DOMAIN` is not set, only the path-based URI is registered.
+- Additional redirect URIs can be added via `PATCH /api/v1/apps/{id}/oauth` — this triggers an update call to the Auth Service. The developer cannot add arbitrary URIs — they must match one of the patterns: `{OP_BASE_URL}/apps/{slug}/*` or `{slug}.apps.{OP_WILDCARD_DOMAIN}/*`. The Auth Service validates this pattern constraint at registration.
+- For `op app dev` local development: `http://localhost:{port}/auth/callback` is automatically added to the redirect URI list when the developer starts `op app dev`. It is removed when the local dev server stops (the CLI sends `DELETE /api/v1/apps/{id}/oauth/dev-redirect-uris` on shutdown). This prevents dangling localhost redirect URIs in production configs.
+
+**Two access modes:**
+
+**(1) Platform-User Only (default):**
+- The App Service checks for a valid `op_session` cookie on every request to the app. If absent or invalid, the user is redirected to the platform login page (`/login?redirect=/apps/{slug}`). After login, they are redirected back to the app.
+- Only users who are members of the app's tenant can authenticate. Cross-tenant logins are rejected.
+- The session check uses the Auth Service validation endpoint (`GET /internal/auth/validate`). The result is cached by the App Service for up to 15 seconds (to avoid a validation call on every SDK operation) using the session token as cache key.
+
+**(2) Public/Guest Access:**
+- Configured by setting `app.access_mode = "public"` via `PATCH /api/v1/apps/{id}` (requires tenant admin role).
+- When a request arrives with no `op_session` cookie, the App Service issues a guest session: calls `POST /internal/auth/guest-sessions` → Auth Service creates a short-lived (24-hour) guest session token and returns it. The App Service sets an `op_guest_session` httpOnly cookie.
+- Guest sessions are associated with the `guest` role in the ontology RBAC. The `guest` role is defined in the tenant ontology (Decision #12) and defaults to read-only access on entities the tenant admin has explicitly marked `public: true`. By default, no entities are public.
+- Guest sessions do NOT have access to `useUser().email` (it returns `null`) or any personal user data. `useUser().isGuest` returns `true`.
+- **Rate limiting for guest sessions:** guest requests are rate-limited more aggressively: 100 requests/minute per IP (vs. 500/minute for authenticated users). The Gateway applies this via a separate rate limit tier keyed on IP address when the `op_guest_session` cookie is present.
+- **Preventing abuse:** guest sessions are ephemeral and not tied to any identity. The App Service monitors guest session creation rate per app and alerts if >1000 guest sessions/hour are created (possible scraping). Platform admin can disable guest access for a specific app via `PATCH /api/v1/apps/{id}` without affecting other apps.
+
+**App-level roles:**
+- Developers can define custom roles for their app: `POST /api/v1/apps/{id}/roles` with body `{ name: string, permissions: { entity: string, actions: Action[] }[] }`.
+- These app-level roles are stored in `app.roles` and registered with the Ontology Service as role definitions scoped to `{ appId, tenantId }`. They follow the same permission inheritance model as platform roles (defined in the ontology RBAC layer).
+- At runtime, the App Service resolves a user's effective roles as: `platform_roles UNION app_roles`. A user with platform role `viewer` and app role `dashboard_editor` gets the combined permission set of both.
+- App-level roles are visible only within the app context. They do not affect the user's access to other platform resources.
+
+**Cross-tenant sharing:**
+- Apps are tenant-scoped by default. A user from tenant B cannot access an app belonging to tenant A, even if they know the app URL.
+- **Explicit sharing:** tenant admin can add tenants to an allowlist: `POST /api/v1/apps/{id}/share` with body `{ tenantId: string, roles: string[] }`. This creates an entry in `app.tenant_shares`. The App Service checks this table during session validation for cross-tenant requests.
+- The sharing allowlist maps external tenants to specific app-level roles. Users from the external tenant authenticate against their own tenant's auth and receive the mapped role within the shared app.
+- Platform admin (not tenant admin) can disable cross-tenant sharing globally via the platform config. The default is disabled.
+- **App slug uniqueness:** app slugs are unique per tenant, not globally. Two tenants can have apps with the same slug. The Gateway routes `/apps/{slug}` in the context of the requesting user's tenant (determined from their session). For unauthenticated access to public apps, the slug must be globally unique within public apps — enforced by a partial unique index: `CREATE UNIQUE INDEX ON app.apps (slug) WHERE access_mode = 'public'`.
+
+**Security considerations:**
+- OAuth clients for apps are public clients (PKCE flow, no client secret in the browser). The `clientType: "public"` flag in the Auth Service disables client secret validation and requires PKCE with code verifier.
+- The Auth Service logs every OAuth authorization attempt (success and failure) to the audit trail.
+- Guest sessions use a cryptographically random token (32 bytes, hex-encoded). They are stored in Redis with a `guest-session:` key prefix. When a guest session expires, all associated data (app storage writes within the session) is preserved but the session token is invalidated.
+- **Tenant isolation invariant:** the App Service enforces on every request that `session.tenantId === app.tenantId OR app.tenant_shares contains(session.tenantId)`. This check happens before any BFF forwarding, in the App Service's request middleware.
+
+---
+
+### 28. End-to-End Data Flow
+
+**Decision:** The canonical data path is: Connector → Ingestion Service (normalize to a standard envelope, write to raw staging table `ingestion.raw_{connectorId}`) → BullMQ batch job → Ontology Service (validate and map fields to entity schema, write to `tenant_{id}.{entity}` table) → queryable by all platform services. Raw data is retained separately from ontology-mapped data, allowing re-mapping when ontologies change. The `Connector` interface is a typed TypeScript interface (not an abstract class) defined in `@oneplatform/plugin-sdk`, implemented by both built-in connectors and third-party plugins. Auto-inference generates draft ontology suggestions from source schemas.
+
+**Rationale:** The data flow is the #1 value proposition of the platform. Without a fully specified canonical path, each connector will implement its own storage strategy, making re-mapping impossible and data lineage untraceable. Two-stage storage (raw → mapped) is critical because ontologies change: if mapping is destructive (only keeping mapped fields), a schema change means re-ingesting all data. Keeping raw data makes re-mapping a pure read-then-write operation. The `Connector` interface must be defined before any connector is built — it is the contract that makes built-in and third-party connectors interchangeable.
+
+**Implementation:**
+
+**Connector TypeScript interface (canonical, in `@oneplatform/plugin-sdk`):**
+```typescript
+interface ConnectorMetadata {
+  name: string;                    // e.g., "Postgres Source"
+  version: string;                 // semver
+  configSchema: JSONSchema7;       // JSON Schema for user-provided config
+  credentialSchema: JSONSchema7;   // JSON Schema for credential fields
+  capabilities: ConnectorCapabilities;
+}
+
+interface ConnectorCapabilities {
+  supportedSyncModes: Array<"full" | "incremental">;
+  supportsCDC: boolean;            // change data capture
+  supportsSchemaInference: boolean;
+  maxBatchSize: number;            // records per fetchBatch call
+}
+
+interface ConnectorHandle {
+  connectionId: string;
+  metadata: Record<string, unknown>; // connection state (e.g., active DB cursor)
+}
+
+interface BatchResult {
+  records: Record<string, unknown>[];
+  nextCursor: string | null;         // null = sync complete
+  hasMore: boolean;
+  inferredSchema?: SchemaInference;  // only if supportsSchemaInference
+}
+
+interface SchemaInference {
+  fields: Array<{
+    name: string;
+    inferredType: "string" | "number" | "boolean" | "date" | "json" | "unknown";
+    nullable: boolean;
+    sampleValues: unknown[];         // up to 5 sample values for preview
+  }>;
+  confidence: number;                // 0-1 confidence of inference
+}
+
+interface CredentialAccessor {
+  get(key: string): Promise<string>; // decrypts and returns credential field
+}
+
+interface Connector {
+  metadata(): ConnectorMetadata;
+  connect(
+    config: ConnectorConfig,
+    credentials: CredentialAccessor
+  ): Promise<ConnectorHandle>;
+  fetchBatch(
+    handle: ConnectorHandle,
+    cursor?: string
+  ): Promise<BatchResult>;
+  disconnect(handle: ConnectorHandle): Promise<void>;
+}
+```
+- The `CredentialAccessor` is injected by the Ingestion Service and calls the credential vault (Decision #11) to decrypt credentials. Connectors never receive raw credential values — they receive the `CredentialAccessor` and call `get()` per field. This prevents connectors from logging or serializing credentials inadvertently.
+- Built-in connectors (REST API, PostgreSQL, MySQL, CSV, webhook receiver) are implemented in `services/ingestion/src/connectors/` as classes implementing `Connector`. They use the same interface as third-party connector plugins — no special access.
+
+**Data envelope (canonical JSON format for all raw records):**
+```typescript
+interface DataEnvelope {
+  _id: string;              // UUID v7 (time-sortable)
+  _source: string;          // connector name (from ConnectorMetadata.name)
+  _ingestedAt: string;      // ISO 8601 UTC timestamp
+  _connectorId: string;     // UUID of the connector instance in Postgres
+  _batchId: string;         // UUID of the BullMQ batch job
+  _tenantId: string;        // tenant isolation
+  _syncMode: "full" | "incremental";
+  _cursor: string | null;   // the cursor value at ingestion time (for tracing)
+  data: Record<string, unknown>; // raw source fields, unmodified
+}
+```
+- `_id` is UUID v7 (time-sortable) to allow time-based queries on the raw table without a secondary index.
+- The `data` field contains the raw source record exactly as returned by the connector, with no transformation. String, number, boolean, null, nested objects, and arrays are all preserved.
+
+**Raw staging table:**
+- Table: `ingestion.raw_{connectorId}` — one table per connector instance, created dynamically when a connector is first activated. Schema: `{ _id uuid PK, _source text, _ingested_at timestamptz, _batch_id uuid, _sync_mode text, _cursor text, data jsonb }`. The `_tenant_id` is enforced via row-level security (RLS) policy on the table.
+- JSONB `data` column has a GIN index for field-level JSON queries: `CREATE INDEX ON ingestion.raw_{connectorId} USING GIN (data)`.
+- Table creation: `CREATE TABLE IF NOT EXISTS ingestion.raw_{connectorId} (...)` executed by the Ingestion Service with the connector's service credentials. The table name is sanitized: connector ID is a UUID, so `raw_550e8400_e29b_41d4_a716_446655440000` (dashes replaced with underscores) — no SQL injection possible.
+
+**Sync modes:**
+
+*(Full sync):*
+- Pull every record from the source using `fetchBatch` in a loop until `hasMore: false`.
+- Each batch of 1000 records (configurable via `OP_INGESTION_BATCH_SIZE`, default 1000, max 10000) is inserted into `ingestion.raw_{connectorId}` in a single `INSERT ... ON CONFLICT (_id) DO UPDATE` (upsert based on `_id`).
+- After all batches complete, records in the raw table that do NOT appear in the current sync's `_batch_id` are marked as soft-deleted (`deleted_at = now()`). Full sync thus handles source deletions.
+
+*(Incremental sync):*
+- The Ingestion Service stores the last successful cursor per connector in `ingestion.sync_state`: `{ connector_id, last_cursor, last_sync_at, sync_mode }`.
+- `fetchBatch` is called with the stored `cursor`. The connector returns only records changed since that cursor.
+- After each batch completes successfully, `sync_state.last_cursor` is updated atomically (same Postgres transaction as the raw record insert). If the batch fails mid-way, the cursor is NOT updated, and the next sync retry re-fetches the same batch window.
+- **Cursor types:** connectors declare their cursor type in `ConnectorMetadata` (timestamp, sequence ID, or opaque string). The Ingestion Service does not interpret cursor values — it stores and passes them opaquely to the connector.
+
+**Batch processing and backpressure:**
+- Each sync job is a BullMQ job on the `ingestion:sync` queue. Large syncs (more than one batch) spawn child batch jobs on the `ingestion:batch` queue — one job per batch of 1000 records.
+- The `ingestion:batch` queue has `maxLength: 50_000` (50,000 pending batch jobs maximum). If the queue is full, the sync job raises `QueueFullError` and retries after 30s. The user sees "ingestion backlogged" in the UI.
+- Each batch job is processed by a worker with concurrency 10 (configurable via `OP_INGESTION_WORKER_CONCURRENCY`, default 10). This means up to 10,000 records are being processed simultaneously.
+- **Progress tracking:** the sync job stores progress in Redis: `ingestion:sync:{syncJobId}:progress = { totalBatches, completedBatches, failedBatches, totalRecords, processedRecords }`. The frontend polls `GET /api/v1/ingestion/syncs/{syncJobId}/progress` which reads from Redis. Progress updates are also streamed via SSE to the UI.
+
+**Ontology mapping (raw → tenant entity tables):**
+- After each batch is written to the raw table, the Ingestion Service enqueues an `ontology:map` job on the BullMQ queue `ontology:mapping` with `{ connectorId, batchId, tenantId }`.
+- The Ontology Service worker picks up the job, reads all records in the batch from `ingestion.raw_{connectorId}` WHERE `_batch_id = {batchId}`, and applies the user-defined mapping rules.
+- **Mapping rules** (stored in `ontology.mapping_rules`): each rule is `{ connector_id, source_field_path (JSONPath), target_entity, target_field, transform?: string (JS expression) }`. The Ontology Service evaluates transforms in the Execution Service sandbox for safety (transforms are user-supplied code).
+- **Validation:** each mapped record is validated against the entity schema (Zod-generated from the ontology definition). Records that fail validation are written to `ontology.mapping_errors`: `{ connector_id, raw_id, entity_type, error_fields: string[], error_messages: string[], raw_data: jsonb }`. Validation errors do NOT stop the batch — partial success is allowed. The user sees a mapping error count in the UI.
+- **Write to tenant table:** valid mapped records are upserted into `tenant_{tenantId}.{entityType}`: `INSERT INTO ... ON CONFLICT (id) DO UPDATE`. The `id` field is derived from the mapping rules (typically the source primary key, mapped to the entity's `id` field).
+
+**Auto-inference:**
+- When a connector has `supportsSchemaInference: true`, the Ingestion Service calls `fetchBatch` once (just the first batch), inspects the `inferredSchema` from the `BatchResult`, and sends a `SchemaSuggestion` event to the Ontology Service: `POST /internal/ontology/infer` with `{ tenantId, connectorId, inferredSchema }`.
+- For CSV uploads: the Ingestion Service parses the first 200 rows, infers field types using heuristics (ISO date patterns, numeric patterns, boolean strings), and produces a `SchemaSuggestion`.
+- The Ontology Service generates a draft ontology from the suggestion: one entity with the inferred field names and types, all fields nullable, no relationships. The draft is written to `ontology.draft_ontologies` and surfaced to the user as "Review suggested schema" in the UI.
+- **Non-destructive:** the draft is never applied automatically. The user reviews, edits field names/types, and confirms. Only on confirmation does the Ontology Service promote the draft to a live entity definition and generate the tenant table.
+
+**Large dataset handling:**
+- Datasets over 1 million records are treated as "large syncs". The Ingestion Service automatically lowers concurrency for large sync jobs (`OP_LARGE_SYNC_CONCURRENCY`, default 3) to avoid overwhelming Postgres.
+- Memory pressure: the Ingestion Service processes each batch by streaming records from the connector into the raw table using Postgres COPY (for bulk inserts). It does NOT hold the entire batch in memory — records are streamed via a Node.js `Transform` stream from the connector's batch response to the Postgres COPY stream. Peak memory for a batch worker is bounded at approximately 50MB per batch.
+- **Estimated time remaining:** the sync job calculates ETA based on `(completedRecords / elapsedSeconds) * remainingRecords`. The ETA is included in the progress response and displayed in the UI.
+
+**Security considerations:**
+- Raw tables are per-connector and have RLS policies enforcing `_tenant_id = current_setting('app.tenant_id')::uuid`. The Ingestion Service sets this session variable before executing queries.
+- The `CredentialAccessor` interface means connector code never receives plaintext credentials as function arguments — only a getter function. This means `JSON.stringify(handle)` or console logging the handle does not leak credentials.
+- Mapping transforms (user JS expressions) run through the Execution Service sandbox (no network, resource-limited). A malicious transform cannot read other tenants' data or make external requests.
+- Connector code (third-party plugins) runs in the plugin sandbox, not in the Ingestion Service process. The Ingestion Service invokes the connector via the Plugin Service + Execution Service chain. Built-in connectors run in-process (they are trusted code compiled into the service).
+
+---
+
+### 29. API Contract Standard
+
+**Decision:** All platform services expose a uniform API contract: RESTful resource URLs under `/api/v1/`, consistent request/response envelopes, cursor-based pagination, a structured filter/sort DSL, standard error format with typed error codes, OpenAPI 3.1 spec at a well-known URL, RFC 8594 deprecation headers, and health check endpoints. This contract is enforced by shared middleware and Zod schema generators in `@oneplatform/core`. No service may deviate from this contract.
+
+**Rationale:** Without a standard API contract, each of 9 services will implement its own URL scheme, error format, and pagination strategy. This makes the SDK impossible to generate correctly, makes the CLI error handling inconsistent, and makes every new service a UX surprise. Defining the contract in `@oneplatform/core` shared middleware means compliance is automatic for any service that imports core. The contract also resolves concrete friction points: APP-H01 (API spec URL), API-H06 (pagination), API-H07 (error format), API-H09 (deprecation headers), API-H10 (bulk operations).
+
+**Implementation:**
+
+**URL convention:**
+- Single resource: `GET /api/v1/{resource}/{id}`
+- Collection: `GET /api/v1/{resource}`
+- Create: `POST /api/v1/{resource}`
+- Partial update: `PATCH /api/v1/{resource}/{id}`
+- Full replace: `PUT /api/v1/{resource}/{id}`
+- Delete: `DELETE /api/v1/{resource}/{id}`
+- Sub-resource: `GET /api/v1/{resource}/{id}/{sub-resource}`
+- Sub-resource item: `GET /api/v1/{resource}/{id}/{sub-resource}/{subId}`
+- Bulk operation: `POST /api/v1/{resource}/bulk`
+- Entity data (ontology-typed): `GET /api/v1/data/{entityType}` and `GET /api/v1/data/{entityType}/{id}`
+- Resource names are plural, lowercase, hyphenated (e.g., `/api/v1/connector-instances`, `/api/v1/pipeline-runs`, `/api/v1/api-keys`).
+- The keyword `bulk` is reserved and cannot be used as a resource ID. Validated by `@oneplatform/core` route registration.
+
+**Request/response envelope:**
+
+*Single resource response (success):*
+```json
+{
+  "data": { "id": "...", "name": "...", ... }
+}
+```
+
+*Collection response (success):*
+```json
+{
+  "data": [ { "id": "...", ... }, ... ],
+  "pagination": {
+    "nextCursor": "eyJpZCI6IjEyMyJ9",
+    "total": 1543
+  }
+}
+```
+- `total` reflects the total matching count (before pagination). For large collections (>100k rows), `total` may be `null` (the query would be too expensive). Services declare which collections support exact totals in their OpenAPI spec.
+- `nextCursor` is `null` when there are no more pages.
+
+*Error response (all 4xx and 5xx):*
+```json
+{
+  "error": {
+    "code": "ENTITY_NOT_FOUND",
+    "message": "Customer with id '123' does not exist in this tenant.",
+    "details": {
+      "entityType": "customer",
+      "id": "123"
+    },
+    "requestId": "01J4WZJHK8GN9..."
+  }
+}
+```
+- `code` is a SCREAMING_SNAKE_CASE string. The full error code registry is defined in `@oneplatform/core/errors.ts`. Services may add their own codes to the registry (following the `{SERVICE}_{ERROR}` naming convention, e.g., `INGESTION_CONNECTOR_TIMEOUT`).
+- `message` is human-readable and safe to display in a UI. It does NOT include stack traces, internal paths, or implementation details.
+- `details` is optional and contains structured key-value data relevant to the error (e.g., validation field errors). Field validation errors use `details.fields: { fieldName: [errorMessages] }`.
+- `requestId` is the W3C trace ID from the request (Decision #21). Every error response includes it. Users can provide this to support for log correlation.
+- **Stack traces:** NEVER included in API error responses. Logged internally (DEBUG level) by the Logging Service, accessible only to platform admins via `GET /api/v1/logs?filter[traceId][eq]={requestId}`.
+
+**HTTP method semantics:**
+- `GET`: read-only, idempotent, safe. No request body. Query parameters for filtering/sorting.
+- `POST`: create a new resource. Request body: JSON. Response: `201 Created` with the created resource.
+- `PATCH`: partial update. Request body: only the fields to change. Response: `200 OK` with the full updated resource.
+- `PUT`: full replace. Request body: complete resource representation. Response: `200 OK`. Rarely used — prefer `PATCH`.
+- `DELETE`: remove. No request body. Response: `204 No Content`. Soft deletes return `200 OK` with the soft-deleted state.
+- `HEAD`: same as `GET` but no response body. Used for existence checks (e.g., `HEAD /api/v1/apps/{slug}` to check if a slug is taken).
+
+**Pagination:**
+- All collection endpoints support cursor-based pagination: `?cursor={base64-encoded-cursor}&limit={n}`.
+- Default `limit`: 50. Maximum `limit`: 100. Requests with `limit > 100` return `400 Bad Request` with `code: "PAGINATION_LIMIT_EXCEEDED"`.
+- The cursor is a base64-encoded JSON object containing the sort key values of the last returned item (e.g., `{ "id": "last-id", "createdAt": "2026-01-01T00:00:00Z" }`). Cursors are opaque to clients — their internal structure is not part of the API contract and may change between API versions.
+- Cursors are signed with an HMAC-SHA256 using the service's Ed25519 private key to prevent cursor tampering (injecting arbitrary values into the pagination query). An invalid cursor signature returns `400 Bad Request` with `code: "INVALID_CURSOR"`.
+- **Cursor expiry:** cursors expire after 24 hours. An expired cursor returns `410 Gone` with `code: "CURSOR_EXPIRED"`, prompting the client to restart pagination from the beginning.
+- **Offset pagination:** explicitly NOT supported. Offset pagination (`?page=5&limit=50`) has O(n) database cost and inconsistent results under concurrent writes. All clients MUST use cursor pagination.
+
+**Filter DSL:**
+- Syntax: `?filter[{field}][{op}]={value}` where `op` is one of:
+  - `eq` — exact match
+  - `neq` — not equal
+  - `gt` — greater than
+  - `gte` — greater than or equal
+  - `lt` — less than
+  - `lte` — less than or equal
+  - `like` — SQL ILIKE pattern (% and _ wildcards)
+  - `in` — comma-separated list of values (e.g., `filter[status][in]=active,pending`)
+  - `null` — value is `filter[field][null]=true` (IS NULL) or `filter[field][null]=false` (IS NOT NULL)
+- Multiple filters on different fields are ANDed. Multiple values for `in` are treated as OR within that field.
+- **Filter injection protection:** filter field names are validated against the entity's known field list (from the ontology schema). Unknown field names return `400 Bad Request` with `code: "UNKNOWN_FILTER_FIELD"`. Values are parameterized in all SQL queries — no string interpolation of filter values into SQL.
+- **Deep field filters:** for JSONB fields, dot notation is supported: `filter[data.address.city][eq]=London`. Depth is limited to 3 levels to prevent unbounded JSONB extraction.
+
+**Sorting:**
+- Syntax: `?sort=field1,-field2` where a `-` prefix means descending.
+- Multiple sort fields are comma-separated.
+- Default sort: `createdAt DESC` (newest first) unless the endpoint specifies otherwise.
+- Sort fields must be in the entity's indexed column list (enforced by the service to prevent unindexed sort queries). Requesting a sort on a non-indexed field returns `400 Bad Request` with `code: "UNSORTABLE_FIELD"` and a `hint` field listing valid sort fields.
+
+**Field selection:**
+- Syntax: `?fields=id,name,status` — only the listed fields are returned in the response.
+- Relationships (e.g., `fields=id,name,owner.email`) resolve the `owner` relationship and include only `email` from it. Relationship depth is limited to 1 level (no nested relationships via field selection — use sub-resource endpoints for deeper traversal).
+- Unknown field names in `?fields` are silently ignored (not an error) to allow forward-compatible clients that specify fields from a newer API version.
+
+**Bulk operations:**
+- Endpoint: `POST /api/v1/{resource}/bulk`
+- Request body:
+  ```json
+  {
+    "operation": "create" | "update" | "delete",
+    "items": [
+      { ...resource fields... },
+      ...
+    ]
+  }
+  ```
+- Response (always `207 Multi-Status`):
+  ```json
+  {
+    "results": [
+      { "index": 0, "id": "created-id", "status": "success" },
+      { "index": 1, "status": "error", "error": { "code": "...", "message": "..." } }
+    ],
+    "summary": {
+      "total": 100,
+      "succeeded": 98,
+      "failed": 2
+    }
+  }
+  ```
+- Maximum bulk items: 500 per request. Exceeding returns `400 Bad Request` with `code: "BULK_LIMIT_EXCEEDED"`.
+- Bulk operations are NOT transactional by default — each item is processed independently. If transactional behavior is needed, add `"transactional": true` to the request body. Only services that support it will honor this flag; others return `400 Bad Request` with `code: "TRANSACTIONAL_BULK_NOT_SUPPORTED"`.
+- Each item in a bulk request is validated independently before any are executed. If ANY item fails validation, the entire request returns `400 Bad Request` with per-item validation errors in `results`. No items are processed if validation fails (fail-all-or-none for the validation pass, fail-per-item for execution).
+
+**OpenAPI spec:**
+- URL: `GET /api/v1/openapi.json` — returns the full OpenAPI 3.1 spec for the requesting tenant's API surface.
+- Tenant-aware: the spec includes auto-generated routes for all ontology-defined entity types belonging to the requesting tenant (e.g., `/api/v1/data/customer`, `/api/v1/data/order`). These are generated at request time from the ontology cache — the spec reflects the tenant's current schema.
+- The spec is generated by `@oneplatform/core/openapi-generator.ts` which introspects all registered Hono routes and their Zod schemas. No manual spec maintenance.
+- **Spec caching:** the generated spec is cached in Redis with a TTL of 5 minutes, keyed by `{tenantId}:{schemaVersion}`. Ontology changes (which bump `schemaVersion`) automatically invalidate the cache. The 5-minute TTL is a safety net.
+- The spec is also served as a rendered interactive API explorer at `GET /docs/api` (Scalar or Stoplight Elements, per Decision #23).
+
+**Rate limit headers (all responses):**
+All API responses include the following headers (per Decision #20 and friction point API-H11):
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 987
+X-RateLimit-Reset: 1735689600
+X-RateLimit-Policy: per-tenant
+```
+- `X-RateLimit-Reset` is a Unix timestamp (seconds) when the current window resets.
+- `X-RateLimit-Policy` is one of `global`, `per-tenant`, `per-api-key`, `webhook` — indicates which limit was applied (the most restrictive active limit).
+- When a rate limit is hit (`429 Too Many Requests`), the response also includes `Retry-After: {seconds}`.
+
+**Deprecation headers (RFC 8594):**
+- Deprecated endpoints include:
+  ```
+  Deprecation: true
+  Sunset: Sat, 01 Jan 2028 00:00:00 GMT
+  Link: <https://docs.oneplatform.dev/api/v2/endpoint>; rel="successor-version"
+  ```
+- The `Sunset` date is the date after which the endpoint will return `410 Gone`. Clients that receive `Deprecation: true` MUST update before the `Sunset` date.
+- The API versioning SLA is: deprecated endpoints are supported for minimum 6 months after the `Deprecation` header first appears (Decision #22).
+- `@oneplatform/core` provides a route decorator `@deprecated({ sunset: Date, successorUrl: string })` that automatically adds these headers to responses.
+
+**Health check endpoints:**
+- Every service exposes:
+  - `GET /healthz` (liveness): returns `200 OK` with `{ status: "ok", service: "{name}", version: "{semver}" }` as long as the process is running. Returns `503` only if the process is in a fatal state (e.g., crashed event loop, OOM). Docker Compose health checks use this endpoint.
+  - `GET /readyz` (readiness): returns `200 OK` with `{ status: "ready", checks: { postgres: "ok", redis: "ok", ... } }` when the service is ready to handle traffic. Returns `503` with `{ status: "not-ready", checks: { postgres: "degraded", ... } }` if any dependency is unhealthy. The Gateway waits for this endpoint before routing traffic to a service.
+  - Both endpoints are NOT rate-limited and are excluded from auth middleware — they must always be reachable.
+  - Health check responses include `X-Response-Time: {ms}` for the Gateway's readiness probe timeout calculation.
+
+**CORS policy:**
+- Configured via `OP_ALLOWED_ORIGINS` environment variable (comma-separated list of origins).
+- Default (development): `OP_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:4000`
+- Production: set to the platform's base URL and any registered app domains.
+- The Gateway enforces CORS for all public-facing endpoints. Internal service endpoints (on `oneplatform-internal` network) are not exposed externally and do not have CORS headers.
+- CORS headers added to all responses: `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, `Access-Control-Max-Age: 86400` (24-hour preflight cache).
+- Requests from origins not in `OP_ALLOWED_ORIGINS` receive `403 Forbidden` (not a CORS error, a proper 403) with `code: "ORIGIN_NOT_ALLOWED"`. This prevents leaking information via CORS error messages.
+- **Credentials mode:** `Access-Control-Allow-Credentials: true` is set when the origin is in the allowlist. This is required for the session cookie to be included in cross-origin requests from the app editor (frontend on `:3000` calling app BFF on `:3000` — same origin; but `op app dev` local server on `:4000` calling platform on `:3000` — cross-origin, needs credentials mode).
+
+**Error code registry (partial, defined in `@oneplatform/core/errors.ts`):**
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `UNAUTHORIZED` | 401 | Missing or invalid authentication |
+| `FORBIDDEN` / `PERMISSION_DENIED` | 403 | Authenticated but insufficient permissions |
+| `NOT_FOUND` / `ENTITY_NOT_FOUND` | 404 | Resource does not exist |
+| `CONFLICT` | 409 | Unique constraint violation |
+| `VALIDATION_ERROR` | 422 | Request body failed Zod validation |
+| `RATE_LIMIT_EXCEEDED` | 429 | Rate limit hit |
+| `INTERNAL_ERROR` | 500 | Unexpected server error (safe message, trace ID only) |
+| `SERVICE_UNAVAILABLE` | 503 | Dependency unavailable (Postgres, Redis down) |
+| `PAGINATION_LIMIT_EXCEEDED` | 400 | `limit` exceeds max |
+| `INVALID_CURSOR` | 400 | Cursor signature invalid |
+| `CURSOR_EXPIRED` | 410 | Cursor older than 24 hours |
+| `BULK_LIMIT_EXCEEDED` | 400 | Bulk items exceeds 500 |
+| `ORIGIN_NOT_ALLOWED` | 403 | CORS origin not in allowlist |
+| `UNKNOWN_FILTER_FIELD` | 400 | Filter on non-existent field |
+| `UNSORTABLE_FIELD` | 400 | Sort on non-indexed field |
+
+- Services add service-specific codes with the `{SERVICE}_` prefix. All codes are registered in `@oneplatform/core/errors.ts` — unregistered codes are rejected by the linter.
+
+**Middleware enforcement in `@oneplatform/core`:**
+- `@oneplatform/core` exports a `createApp(config)` factory that returns a pre-configured Hono app with the following middleware stack (in order):
+  1. `requestId` — generates W3C trace ID if not present in incoming headers
+  2. `otelInstrumentation` — starts OTEL span per request
+  3. `cors` — enforces `OP_ALLOWED_ORIGINS`
+  4. `rateLimit` — delegates to Gateway rate limiter via Redis (internal calls skip this)
+  5. `auth` — validates session cookie or API key, sets `c.var.user`
+  6. `serviceAuth` — on internal routes, validates `X-Service-Token` and service RBAC
+  7. `responseEnvelope` — wraps all route responses in `{ data: T }` envelope
+  8. `errorHandler` — catches all thrown errors and formats them as `{ error: {...} }` envelope
+  9. `rateLimitHeaders` — adds `X-RateLimit-*` headers to all responses
+  10. `deprecationHeaders` — adds deprecation headers if route is marked deprecated
+- Services compose their route handlers into this stack. A service that calls `createApp()` and registers its routes is automatically compliant with the API contract. Compliance cannot be accidentally bypassed because the envelope and error handling are middleware, not opt-in per-route.
+
+**Testing the contract:**
+- `@oneplatform/core` exports a `testApiContract(app, spec)` utility that takes a Hono app and an OpenAPI spec and runs contract tests: every path in the spec has a corresponding route; every response matches its declared schema; every error response uses the standard envelope. This runs in CI for all 9 services.
+- Pact contract tests (consumer-driven) are maintained for the three most critical service-to-service contracts: App Service ↔ Auth Service, Gateway ↔ Auth Service, Ingestion ↔ Ontology Service.
