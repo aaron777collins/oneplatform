@@ -440,8 +440,9 @@ Called by Plugin Service when a plugin is being disabled or updated. Signals the
 
 ```typescript
 const PluginDrainRequestSchema = z.object({
-  tenantId: z.string().uuid(),
-  pluginId: z.string().uuid(),
+  pluginId:      z.string(),             // Plugin manifest_id (e.g. "com.example.my-plugin")
+  tenantId:      z.string().uuid().nullable(),  // null = platform-wide drain (upgrade path)
+  instanceId:    z.string().uuid().optional(),  // if provided, scope drain to specific instance only
   gracePeriodMs: z.number().int().min(1000).max(120_000).default(60_000),
 });
 ```
@@ -467,7 +468,42 @@ const PluginDrainResponseSchema = z.object({
 - The plugin's bundle is evicted from the LRU cache.
 - Returns 200 regardless of whether force-kills were necessary; `killedExecutions` reports which were not clean.
 
-### 4.7 `POST /internal/execution/plugin-cache-invalidate` — Bundle cache invalidation
+### 4.7 `POST /internal/execution/plugin-cache-prefetch` — Bundle cache pre-warming
+
+Called by Plugin Service during the upgrade procedure (step 2 of §10.2 in plugin-service.md) to proactively fetch and cache a staged plugin bundle before cutover. This eliminates cold-start latency for executions immediately after an upgrade.
+
+**Request Zod schema:**
+
+```typescript
+const CachePrefetchRequestSchema = z.object({
+  pluginId: z.string().uuid(),
+  tenantId: z.string().uuid().optional(),  // if absent, warms for all tenants (platform-wide plugin)
+  version:  z.string(),                    // the staged version to pre-warm
+});
+```
+
+**Response (200 OK):**
+
+```typescript
+const CachePrefetchResponseSchema = z.object({
+  data: z.object({
+    pluginId:     z.string().uuid(),
+    version:      z.string(),
+    cached:       z.boolean(),          // true if bundle was fetched and cached successfully
+    bundleSizeBytes: z.number().int(),
+    fetchDurationMs: z.number().int(),
+  }),
+});
+```
+
+**Behavior:**
+- Fetches the bundle from Plugin Service at `GET /internal/plugins/{pluginId}/bundle?version={version}`.
+- Verifies the bundle hash.
+- Stores in the LRU cache keyed by `{tenantId}:{pluginId}:{version}` (or a platform-wide entry if `tenantId` is absent).
+- Returns 200 with `cached: false` if the Plugin Service returned an error (caller should proceed with upgrade anyway; the cache will warm on first real request).
+- Times out after 30 seconds — the Plugin Service treats a timeout as a non-fatal prefetch failure.
+
+### 4.8 `POST /internal/execution/plugin-cache-invalidate` — Bundle cache invalidation
 
 Called by Plugin Service when a plugin bundle is updated and the cached version must be evicted.
 
@@ -475,8 +511,8 @@ Called by Plugin Service when a plugin bundle is updated and the cached version 
 
 ```typescript
 const CacheInvalidateRequestSchema = z.object({
-  pluginId: z.string().uuid(),
-  tenantId: z.string().uuid(),
+  pluginId:         z.string(),          // Plugin manifest_id (e.g. "com.example.my-plugin")
+  tenantId:         z.string().uuid().nullable(),  // null = invalidate across all tenants (platform-wide)
   newBundleVersion: z.string(),
 });
 ```
@@ -1066,8 +1102,8 @@ interface ContextCallResponse {
 
 The Execution Service handles `contextCall` messages and fulfills them by:
 - `fetch`: proxies the request through the platform's outbound allowlist proxy. Internal service URLs are blocked. The allowlist is configured per-tenant.
-- `credentials.get`: calls the Ingestion Service credential vault via the internal service network (the Execution Service is on `oneplatform-internal`): `GET /internal/ingestion/credentials/{credentialBundleId}/field/{key}`. The Ingestion Service decrypts and returns the value. The value is NEVER logged by the Execution Service — it is passed immediately to the sandbox response and no copy is retained.
-- `cache.get/set/delete`: calls the Plugin Service cache API: `GET/PUT/DELETE /internal/plugins/cache/{tenantId}/{pluginId}/{key}`. The Plugin Service manages plugin cache storage in Redis (the Execution Service has no direct Redis access).
+- `credentials.get`: calls the Ingestion Service credential vault via the internal service network (the Execution Service is on `oneplatform-internal`): `GET /internal/ingestion/credentials/:credentialBundleId/field/:key`. The Ingestion Service decrypts and returns the value. The value is NEVER logged by the Execution Service — it is passed immediately to the sandbox response and no copy is retained.
+- `cache.get/set/delete`: calls the Plugin Service cache API: `GET/PUT/DELETE /internal/plugins/cache/:tenantId/:pluginId/:key`. The Plugin Service manages plugin cache storage in Redis under `plugin:cache:{tenantId}:{pluginId}:{key}` (the Execution Service has no direct Redis access per ADR-5).
 - `pipeline.trigger`: blocked if `hookContext = true` (see §12). Otherwise, calls the Pipeline Service: `POST /internal/pipeline/trigger`.
 - `ontology.getEntity`: served from the local ontology snapshot passed into the execution context at request time. No network call needed.
 

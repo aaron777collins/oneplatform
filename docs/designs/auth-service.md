@@ -109,11 +109,11 @@ All tables live in the `auth` schema. The Auth Service Postgres role is `auth_se
 
 ### 2.1 Row-Level Security
 
-All tables with tenant-scoped data have RLS enabled. The `auth_service_role` connects via PgBouncer in transaction mode, so the session variable `app.current_user_id` and `app.current_tenant_id` are set within each transaction using `SET LOCAL`.
+All tables with tenant-scoped data have RLS enabled. The `auth_service_role` connects via PgBouncer in transaction mode, so the session variable `app.tenant_id` is set within each transaction using `SET LOCAL` (consistent with all other services — `app.tenant_id` is the platform-standard variable name per ADR-5).
 
 ```sql
 -- Set at the start of every tenant-scoped transaction:
-SET LOCAL app.current_tenant_id = '<uuid>';
+SET LOCAL app.tenant_id = '<uuid>';
 ```
 
 ### 2.2 Full Schema
@@ -180,7 +180,7 @@ CREATE INDEX idx_users_active ON auth.users (tenant_id) WHERE is_active = true;
 ALTER TABLE auth.users ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY users_tenant_isolation ON auth.users
-    USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid
            OR current_setting('app.bypass_rls', true) = 'true');
 
 -- ============================================================

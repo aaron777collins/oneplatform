@@ -57,7 +57,8 @@ Outbound calls:
   → Execution Service  :3005   POST /internal/execution/plugin-drain
   → Execution Service  :3005   POST /internal/execution/plugin-cache-invalidate
   → Ingestion Service  :3002   POST /internal/ingestion/connectors (connector register)
-  → Ingestion Service  :3002   DELETE /internal/ingestion/connectors/{instanceId}
+  → Ingestion Service  :3002   DELETE /internal/ingestion/connectors/instance/{instanceId}
+  → Ingestion Service  :3002   DELETE /internal/ingestion/connectors/plugin/{pluginId}
   → MinIO              :9000   S3 API (bundle upload / download)
 
 Inbound internal calls:
@@ -596,10 +597,10 @@ const PatchInstanceSchema = z.object({
 
 **Processing for `enabled: false` (disable):**
 1. Set instance `enabled = 'disabling'`.
-2. Call Execution Service `POST /internal/execution/plugin-drain` with `{ instanceId, graceSeconds: 60 }`.
+2. Call Execution Service `POST /internal/execution/plugin-drain` with `{ pluginId: instance.plugin_manifest_id, tenantId: instance.tenant_id, instanceId: instance.id, gracePeriodMs: 60000 }`.
 3. Set all instance hooks to `state = 'disabled'`.
 4. If plugin type is `connector`, call Ingestion Service deregistration.
-5. Send cache invalidation to Execution Service.
+5. Send cache invalidation to Execution Service: `POST /internal/execution/plugin-cache-invalidate` with `{ pluginId: instance.plugin_manifest_id, tenantId: instance.tenant_id, newBundleVersion: currentVersion }`.
 6. After drain acknowledgment (or 60s timeout), set instance `enabled = 'disabled'`.
 7. Emit `plugin.disabled` event.
 
@@ -989,7 +990,7 @@ SELECT
     h.stage,
     h.criticality,
     h.priority,
-    h.timeout_seconds,
+    h.timeout_seconds * 1000 AS timeout_ms,  -- convert to ms for ResolvedHook.timeoutMs
     h.entrypoint,
     p.manifest_id,
     p.bundle_key,
@@ -1027,7 +1028,7 @@ interface ResolvedHook {
   stage:          string;
   criticality:    "critical" | "advisory";
   priority:       number;
-  timeoutSeconds: number;
+  timeoutMs:      number;  // Milliseconds — consistent with Node.js timeout APIs (timeout_seconds * 1000)
   entrypoint:     string;
   pluginId:       string;
   manifestId:     string;
@@ -1138,7 +1139,74 @@ interface HookChainResponse {
 
 **Performance target:** P99 < 10ms on the internal Docker network for a typical chain (≤ 20 hooks per stage+tenant). The query is indexed on `(stage, tenant_id)` WHERE `state = 'active'`.
 
-### 8.4 Widget List
+### 8.4 Plugin Cache API
+
+These endpoints back the `context.cache.*` API available to plugin code in the Execution Service sandbox. The Execution Service (which has no direct Redis access) proxies all cache operations to the Plugin Service, which stores them in Redis under scoped keys.
+
+**Authorization:** Execution Service only (service token + RBAC matrix check).
+
+```
+GET    /internal/plugins/cache/:tenantId/:pluginId/:key
+PUT    /internal/plugins/cache/:tenantId/:pluginId/:key
+DELETE /internal/plugins/cache/:tenantId/:pluginId/:key
+```
+
+**Path parameters:**
+- `tenantId` — UUID of the tenant scoping the cache entry
+- `pluginId` — manifest ID of the plugin (e.g. `com.example.shopify-connector`)
+- `key` — cache key (max 256 chars, URL-safe characters only)
+
+**GET request:** Returns the cached value or 404 if not found.
+```typescript
+// Response: 200 OK
+interface CacheGetResponse { value: unknown; }
+// Response: 404 — key not found or expired
+```
+
+**PUT request:** Stores a value with optional TTL.
+```typescript
+const CachePutBodySchema = z.object({
+  value:      z.unknown(),
+  ttlSeconds: z.number().int().min(1).max(86400).optional().default(3600),
+});
+// Response: 200 OK — { stored: true }
+```
+
+**DELETE request:** Removes the key.
+```typescript
+// Response: 200 OK — { deleted: true }
+```
+
+**Redis key format:** `plugin:cache:{tenantId}:{pluginId}:{key}` — scoped to prevent cross-tenant and cross-plugin access. The Plugin Service Redis ACL (`~plugin:*`) covers these keys.
+
+### 8.5 Drain Complete Callback
+
+```
+POST /internal/plugins/:manifestId/drain-complete
+```
+
+**Authorization:** Execution Service only (service token + RBAC matrix check).
+
+Called by the Execution Service when a plugin drain initiated by the Plugin Service (step 3 of the upgrade procedure, §10.2) has completed — either all in-flight executions finished cleanly or the grace period expired and remaining executions were force-killed.
+
+**Path parameter:** `manifestId` — the plugin's manifest ID (e.g. `com.example.shopify-connector`).
+
+**Request body:**
+```typescript
+const DrainCompleteRequestSchema = z.object({
+  manifestId:            z.string(),
+  drainedAt:             z.string().datetime(),
+  inflightAtDrainStart:  z.number().int(),
+  inflightAtCompletion:  z.number().int(),  // 0 = clean drain; >0 = some were force-killed
+  killedExecutions:      z.array(z.string().uuid()),
+});
+```
+
+**Response:** `200 OK` with `{ received: true }`.
+
+**Behavior:** The Plugin Service uses this callback to advance the upgrade state machine from "waiting for drain" to the atomic swap step (step 4). The callback unblocks the upgrade flow. If the callback is not received within 65 seconds of sending the drain signal, the Plugin Service proceeds with the swap anyway (fail-safe — the Execution Service's own drain grace period expires at 60 seconds, so a 5-second buffer is adequate).
+
+### 8.5 Widget List
 
 ```
 GET /internal/plugins/widgets
@@ -1201,7 +1269,7 @@ If the Ingestion Service returns a 5xx or the request times out (10s timeout), t
 When an enabled connector instance is disabled:
 
 ```
-DELETE /internal/ingestion/connectors/{instanceId}
+DELETE /internal/ingestion/connectors/instance/{instanceId}
 X-Service-Token: {hmac-signed token}
 ```
 
@@ -1211,7 +1279,7 @@ Deregistration is best-effort. If the Ingestion Service returns 5xx or is unreac
 
 ### 9.3 Connector Deregistration on Uninstall
 
-During uninstall, the Plugin Service iterates all non-deleted instances of the plugin and issues a `DELETE /internal/ingestion/connectors/{instanceId}` for each. These calls are made sequentially with a 5-second timeout each. Partial failures are logged but do not block uninstall. The Ingestion Service reconciliation loop handles cleanup.
+During uninstall, the Plugin Service issues a single `DELETE /internal/ingestion/connectors/plugin/{manifestId}` call which bulk-disables all connector instances for that plugin. This is more efficient than iterating instances individually. The call is made with a 10-second timeout. Partial failures are logged but do not block uninstall. The Ingestion Service reconciliation loop handles cleanup.
 
 ---
 
@@ -1248,7 +1316,7 @@ The upgrade is initiated by `POST /api/v1/plugins/{manifestId}/upgrade`. The fol
 
 **Step 3 — Drain old version:**
 - Mark old version `plugin.plugins.status = 'draining'`.
-- Send drain signal to Execution Service: `POST /internal/execution/plugin-drain` with `{ pluginManifestId, version: oldVersion, graceSeconds: 60 }`.
+- Send drain signal to Execution Service: `POST /internal/execution/plugin-drain` with `{ pluginId: pluginManifestId, tenantId: null, gracePeriodMs: 60000 }` — `tenantId: null` signals a platform-wide drain for all tenants using this plugin.
 - Wait up to 60 seconds for in-flight executions to complete. The Execution Service signals completion via `POST /internal/plugins/{manifestId}/drain-complete` (a reverse internal callback).
 
 **Step 4 — Atomic pointer swap (single transaction):**
@@ -1286,7 +1354,7 @@ COMMIT;
 This transaction is the only write that changes which version is active. The unique partial index on `(manifest_id) WHERE status = 'active'` enforces that only one version can be active. The transaction either fully commits or fully rolls back — there is no window where both versions are active or neither is active.
 
 **Step 5 — Invalidate Execution Service cache for old version:**
-- `POST /internal/execution/plugin-cache-invalidate` with `{pluginManifestId, version: oldVersion}`.
+- `POST /internal/execution/plugin-cache-invalidate` with `{ pluginId: pluginManifestId, tenantId: null, newBundleVersion: stagedVersion }` — `tenantId: null` invalidates across all tenants. The Execution Service evicts all cache entries for any tenant that had the old bundle version cached.
 
 **Step 6 — Emit event:**
 - Emit `plugin.upgraded` event (extends the plugin event catalog from ADR-30).
@@ -1984,15 +2052,20 @@ From ADR-33, these entries are in `@oneplatform/core/service-rbac.ts`:
 | Caller | Target | Allowed Endpoints |
 |---|---|---|
 | Execution Service | Plugin Service | `GET /internal/plugins/{pluginId}/bundle` |
+| Execution Service | Plugin Service | `GET/PUT/DELETE /internal/plugins/cache/{tenantId}/{pluginId}/{key}` |
+| Execution Service | Plugin Service | `POST /internal/plugins/{manifestId}/drain-complete` |
+| Execution Service | Ingestion Service | `GET /internal/ingestion/credentials/{credentialBundleId}/field/{key}` |
 | App Service | Plugin Service | `GET /internal/plugins/widgets` |
 | Pipeline Service | Plugin Service | `GET /internal/plugins/hooks` |
+| Pipeline Service | Ingestion Service | `POST /internal/ingestion/sync` |
 | Ingestion Service | Plugin Service | `GET /internal/plugins/connectors` |
 | Plugin Service | Execution Service | `POST /internal/execution/run` (entrypoint validation) |
 | Plugin Service | Execution Service | `POST /internal/execution/plugin-drain` |
 | Plugin Service | Execution Service | `POST /internal/execution/plugin-cache-invalidate` |
 | Plugin Service | Execution Service | `POST /internal/execution/plugin-cache-prefetch` |
 | Plugin Service | Ingestion Service | `POST /internal/ingestion/connectors` |
-| Plugin Service | Ingestion Service | `DELETE /internal/ingestion/connectors/{instanceId}` |
+| Plugin Service | Ingestion Service | `DELETE /internal/ingestion/connectors/instance/{instanceId}` |
+| Plugin Service | Ingestion Service | `DELETE /internal/ingestion/connectors/plugin/{pluginId}` |
 
 ---
 

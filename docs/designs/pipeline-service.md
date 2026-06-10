@@ -83,7 +83,7 @@ pipeline-service:
 2. Run database migrations against the `pipeline` schema (idempotent, version-tracked via `@oneplatform/core` migration runner).
 3. Generate Ed25519 keypair if `/data/service.key` is absent; publish public key to `/data/service-keys/pipeline-service.pub`.
 4. Begin inotify watch on `/data/service-keys/` for hot-reloading peer public keys.
-5. Open session-mode PgBouncer connection pool (`DATABASE_SESSION_URL`, pool size 25). Verify advisory lock acquisition and release on a test lock key to confirm session-mode is active.
+5. Open session-mode PgBouncer connection pool (`DATABASE_URL`, pool size 25). Verify advisory lock acquisition and release on a test lock key to confirm session-mode is active.
 6. Connect to Redis using `op_pipeline` ACL user. Subscribe to ontology change channel (`ontology:*`) for schema cache invalidation.
 7. Initialize BullMQ workers: `pipeline:run` worker (step execution) and `pipeline:cron` worker (cron tick dispatch).
 8. Load all enabled schedules from `pipeline.schedules` into the in-memory cron scheduler; compute missed `next_run_at` values for schedules whose `next_run_at` is in the past (catch-up on restart).
@@ -425,7 +425,7 @@ CREATE POLICY run_logs_tenant_isolation ON pipeline.run_logs
 
 ## 3. Redis Key Inventory
 
-The Pipeline Service uses the `op_pipeline` Redis ACL user with key prefix access `~queue:pipeline:* ~queue:execution:*` and channel access `&ontology:*`.
+The Pipeline Service uses the `op_pipeline` Redis ACL user with key prefix access `~queue:pipeline:* ~queue:execution:*` and channel access `&ontology:* &events:* &logs:*`.
 
 | Key Pattern | Type | Purpose | TTL |
 |---|---|---|---|
@@ -931,13 +931,14 @@ ProcessPipelineRun(runId, tenantId):
    e. Set run_step.status='running', run_step.started_at=now().
    f. Execute the step by type:
       - code/transformer: POST /internal/execution/run → Execution Service
-      - connector: POST /internal/ingestion/connectors/{id}/sync (via Ingestion Service)
-        NOTE: Ingestion Service is NOT in the Pipeline Service's RBAC allow-list.
-        This is done by triggering an ingestion run, then polling the Ingestion Service
-        for job completion via the Gateway (proxied as a service-authenticated call).
-        IMPLEMENTATION NOTE: This flow needs clarification before implementation.
-        A simpler MVP approach is for connector steps to enqueue a BullMQ job that
-        the Ingestion Service picks up — consistent with the event-driven model.
+        Request body: { pluginId, entrypoint, input, timeoutMs, tenantId, runId, stepId, hookContext: false }
+        The Execution Service fetches the plugin bundle itself; Pipeline Service does NOT send bundleUrl.
+      - connector: POST /internal/ingestion/sync → Ingestion Service
+        Request body: { connectorInstanceId, syncMode, tenantId, runId, stepId, waitForCompletion }
+        The Ingestion Service enqueues the sync job and (when waitForCompletion=true) blocks until
+        the sync job reaches a terminal state before returning. See ingestion-service.md §4.5 for
+        the full endpoint specification. When waitForCompletion=false, the step completes immediately
+        after the sync is enqueued (fire-and-forget).
       - conditional: evaluate expression (synchronous, no network call)
       - parallel: fan out to all branches (Section 7.4)
       - webhook: perform HTTP request with SSRF check (Section 4.2)
@@ -987,11 +988,14 @@ For `code` and `transformer` steps, the Pipeline Service dispatches to the Execu
 ```typescript
 // POST /internal/execution/run
 interface ExecutionRequest {
-  language: 'javascript' | 'typescript' | 'python' | 'go';
-  code: string;
+  // For plugin-backed steps (transformer): provide pluginId; Execution Service fetches the bundle.
+  // For inline code steps: provide language + code directly.
+  pluginId?: string;        // Plugin manifest_id — used for transformer steps
+  language?: 'javascript' | 'typescript' | 'python' | 'go';  // Used for inline code steps
+  code?: string;            // Inline source code — used for code steps
   entrypoint: string;
   input: Record<string, unknown>;
-  timeout: number;          // Resolved step timeout (ms)
+  timeoutMs: number;        // Resolved step timeout in milliseconds
   tenantId: string;
   runId: string;            // For correlation in Execution Service logs
   stepId: string;           // For correlation
@@ -1107,7 +1111,7 @@ interface HookRef {
   pluginId: string;
   entrypoint: string;      // Named export in the plugin bundle
   criticality: 'critical' | 'advisory';
-  timeout: number;         // ms — set in plugin manifest, max 300000
+  timeoutMs: number;       // ms — set in plugin manifest, max 300000
   priority: number;        // lower = earlier
 }
 ```
@@ -1121,11 +1125,12 @@ Each hook in the chain is executed sequentially by calling the Execution Service
 ```typescript
 // POST /internal/execution/run (same endpoint as step execution)
 interface HookExecutionRequest {
-  language: 'javascript';   // All plugin hooks are JS/TS bundles (esbuild output)
-  bundleUrl: string;        // URL to the plugin bundle in MinIO (fetched by Execution Service)
+  // pluginId is the manifest_id; Execution Service fetches the bundle itself from Plugin Service.
+  // bundleUrl is NOT sent — the Execution Service is authoritative for bundle fetching (ADR-6).
+  pluginId: string;         // Plugin manifest_id (e.g. "com.example.my-plugin")
   entrypoint: string;       // The hook's declared entrypoint
   input: HookPayload;       // The data payload for this hook point
-  timeout: number;          // Hook-specific timeout (from HookRef)
+  timeoutMs: number;        // Hook-specific timeout in milliseconds (from HookRef.timeoutMs)
   tenantId: string;
   runId?: string;
   stepId?: string;
@@ -1151,7 +1156,7 @@ The Execution Service sets `hookContext: true` internally (strips it from user-v
 ```
 For each hook in the chain:
 
-1. Call Execution Service with hookContext: true and the hook's timeout.
+1. Call Execution Service with hookContext: true and the hook's timeoutMs.
 2. If execution succeeds:
    - Replace current payload with the hook's returned payload.
    - Continue to next hook.

@@ -364,7 +364,10 @@ All endpoints follow the ADR-29 API Contract Standard. Request validation uses Z
 | `POST /api/v1/uploads` | JWT or API key | `ingestion:write` |
 | `GET /api/v1/uploads/{id}/status` | JWT or API key | `ingestion:read` |
 | `POST /internal/ingestion/connectors` | Service token only | Plugin → Ingestion |
-| `DELETE /internal/ingestion/connectors/{id}` | Service token only | Plugin → Ingestion |
+| `DELETE /internal/ingestion/connectors/instance/:instanceId` | Service token only | Plugin → Ingestion |
+| `DELETE /internal/ingestion/connectors/plugin/:pluginId` | Service token only | Plugin → Ingestion |
+| `GET /internal/ingestion/credentials/:credentialBundleId/field/:key` | Service token only | Execution → Ingestion |
+| `POST /internal/ingestion/sync` | Service token only | Pipeline → Ingestion |
 
 ### 4.2 Connector Management
 
@@ -723,9 +726,12 @@ Called by the Plugin Service when a connector plugin is installed. Registers the
 
 ```typescript
 const RegisterConnectorBody = z.object({
-  pluginId:    z.string(),
-  instanceId:  z.string().uuid(),
-  metadata:    ConnectorMetadataSchema,  // from @oneplatform/plugin-sdk
+  pluginId:     z.string(),
+  instanceId:   z.string().uuid(),
+  tenantId:     z.string().uuid(),
+  displayName:  z.string().min(1).max(255),
+  version:      z.string().min(1),       // SemVer of the plugin being registered
+  metadata:     ConnectorMetadataSchema,  // from @oneplatform/plugin-sdk
 });
 
 // Response: 200 OK
@@ -734,15 +740,79 @@ interface RegisterConnectorResponse {
 }
 ```
 
-#### DELETE /internal/ingestion/connectors/{pluginId}
+#### DELETE /internal/ingestion/connectors/instance/:instanceId
 
-Called by the Plugin Service when a connector plugin is uninstalled. Disables all connectors using this plugin ID.
+Called by the Plugin Service when a specific connector instance is disabled. Removes the single connector instance from the Ingestion Service registry.
 
 ```typescript
 // Response: 200 OK
-interface UnregisterConnectorResponse {
-  disabledCount: number;
+interface UnregisterInstanceResponse {
+  disabledCount: 1;
 }
+```
+
+#### DELETE /internal/ingestion/connectors/plugin/:pluginId
+
+Called by the Plugin Service when a connector plugin is uninstalled platform-wide. Disables ALL connectors using this plugin ID across all tenants.
+
+```typescript
+// Response: 200 OK
+interface UnregisterPluginConnectorsResponse {
+  disabledCount: number;  // Number of connector instances disabled
+}
+```
+
+#### GET /internal/ingestion/credentials/:credentialBundleId/field/:key
+
+Called by the Execution Service during third-party connector sandbox execution when plugin code calls `context.credentials.get(key)`. The Execution Service does not hold the master key; it proxies credential requests to the Ingestion Service, which decrypts and returns the value.
+
+**Auth:** Service token only. Caller must be `execution-service` (validated by RBAC matrix).
+
+**Path parameters:**
+- `credentialBundleId` — UUID of the connector instance (`ingestion.connectors.id`) whose credentials to access
+- `key` — the credential field name (e.g. `api_key`, `password`)
+
+```typescript
+// Response: 200 OK
+const CredentialFieldResponseSchema = z.object({
+  value: z.string(),  // Decrypted plaintext credential value
+});
+
+// Errors:
+// 404 — credentialBundleId not found or field name not configured
+// 403 — RBAC: caller is not execution-service
+// 500 — CREDENTIAL_DECRYPT_FAILED (see §12.4)
+```
+
+**Security:** The decrypted value is returned only over the internal Docker network (`oneplatform-internal`), never logged, and the Execution Service passes it directly to the sandbox without retaining a copy.
+
+#### POST /internal/ingestion/sync
+
+Called by the Pipeline Service when a `connector` step executes. Triggers a sync run for the specified connector instance.
+
+**Auth:** Service token only. Caller must be `pipeline-service` (validated by RBAC matrix).
+
+```typescript
+const InternalSyncRequestSchema = z.object({
+  connectorInstanceId: z.string().uuid(),  // ingestion.connectors.id
+  syncMode:            z.enum(['full', 'incremental']).optional(),  // overrides connector default
+  tenantId:            z.string().uuid(),
+  runId:               z.string().uuid().optional(),   // pipeline run ID, for correlation
+  stepId:              z.string().optional(),           // pipeline step ID, for correlation
+  waitForCompletion:   z.boolean().default(true),
+  // When true: request blocks until the sync reaches a terminal state (success/failed/cancelled).
+  // When false: returns immediately after enqueuing; caller does not wait for result.
+});
+
+// Response: 200 OK
+const InternalSyncResponseSchema = z.object({
+  syncJobId:    z.string(),
+  status:       z.enum(['queued', 'success', 'failed', 'cancelled']),
+  // 'queued' is returned when waitForCompletion=false
+  rowsIngested: z.number().int().optional(),
+  durationMs:   z.number().int().optional(),
+  error:        z.string().nullable().optional(),
+});
 ```
 
 ---
@@ -1144,7 +1214,7 @@ Ingestion Service
     | 3. Returns { registered: true }
 ```
 
-The in-memory registry is populated at startup from the Plugin Service: `GET /internal/plugin/connectors` returns all installed connector plugins. This ensures the Ingestion Service survives restart without losing plugin registrations.
+The in-memory registry is populated at startup from the Plugin Service: `GET /internal/plugins/connectors` returns all installed connector plugins. This ensures the Ingestion Service survives restart without losing plugin registrations.
 
 ---
 
@@ -1375,7 +1445,7 @@ All inter-service calls use `X-Service-Token` (Ed25519 JWT per ADR-19). The serv
 | Ontology | Redis pub/sub `ontology:map` via BullMQ | After each batch upsert | Trigger Ontology Service to map raw batch to tenant entity tables |
 | Pipeline | `POST /internal/pipeline/trigger` | After sync completes (if connector has `triggerPipelineId` set) | Trigger pipeline on data arrival |
 | Execution | `POST /internal/execution/run` | During sync job, per-batch (for third-party connectors only) | Run third-party connector code in sandbox |
-| Plugin | `GET /internal/plugin/connectors` | At startup | Load known connector plugin types |
+| Plugin | `GET /internal/plugins/connectors` | At startup | Load known connector plugin types |
 | Logging | Redis pub/sub `logs:ingestion` | All operations | Non-blocking structured logging |
 | Auth | `GET /internal/auth/validate` | On every API request (via Gateway middleware) | JWT/API key validation (handled by core middleware) |
 
@@ -1384,8 +1454,10 @@ All inter-service calls use `X-Service-Token` (Ed25519 JWT per ADR-19). The serv
 | Caller | Endpoint | Purpose |
 |---|---|---|
 | Plugin Service | `POST /internal/ingestion/connectors` | Register new connector plugin type |
-| Plugin Service | `DELETE /internal/ingestion/connectors/{pluginId}` | Unregister removed connector plugin |
-| Execution Service | `GET /internal/ingestion/credentials/{connectorId}/{field}` | Fetch decrypted credential for third-party connector execution |
+| Plugin Service | `DELETE /internal/ingestion/connectors/instance/:instanceId` | Deregister a specific connector instance |
+| Plugin Service | `DELETE /internal/ingestion/connectors/plugin/:pluginId` | Deregister all connectors for an uninstalled plugin |
+| Execution Service | `GET /internal/ingestion/credentials/:credentialBundleId/field/:key` | Fetch decrypted credential for third-party connector execution |
+| Pipeline Service | `POST /internal/ingestion/sync` | Trigger a connector sync run from a pipeline connector step |
 | Ontology Service | Direct SQL reads on `ingestion.raw_*` tables | Mapping batch reads (cross-schema SQL, not HTTP) |
 
 ### 11.3 Ontology Version Cache
@@ -1585,7 +1657,7 @@ ingestion_upload_bytes_total
 |---|---|
 | `ingestion` schema | Full DML + DDL (owns schema) |
 | `ontology`, `auth`, `pipeline`, `execution`, `plugin`, `app`, `logging`, `gateway` schemas | No access |
-| Redis | `~queue:ingestion:* ~ingestion:sync:* &ontology:*` only |
+| Redis | `~queue:ingestion:* ~ingestion:sync:* &ontology:* &events:* &logs:*` only |
 | MinIO | `file-uploads` bucket: read/write. All other buckets: no access. |
 | External network | No direct external access. Connector fetch goes via Execution Service FetchProxy with allowlist. |
 | Docker socket | No access |
