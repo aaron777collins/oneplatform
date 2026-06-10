@@ -1,0 +1,152 @@
+# OnePlatform Docker Compose Stack
+# Ref: L1 Design Spec §2 "Docker Compose Stack"
+#
+# Startup order:
+#   Layer 0: op-init (one-shot, generates secrets)
+#   Layer 1: postgres, redis, minio, docker-socket-proxy
+#   Layer 2: pgbouncer (connection pooler)
+#   Layer 3-5: services (added in later phases)
+
+services:
+
+  # ─── Layer 0: Init ────────────────────────────────────────────────────────
+  op-init:
+    image: alpine:3.19
+    volumes:
+      - init-data:/data/init
+      - ./init/init.sh:/init.sh:ro
+    command: ["/bin/sh", "/init.sh"]
+    networks: []
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/data/init/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ─── Layer 1: Data Stores ─────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: oneplatform
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - oneplatform-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d oneplatform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      op-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "/etc/redis/redis.conf", "--aclfile", "/etc/redis/users.acl"]
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/users.acl:/etc/redis/users.acl:ro
+    networks:
+      - oneplatform-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "--user", "op_admin", "-a", "${REDIS_ADMIN_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      op-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${OP_MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${OP_MINIO_PASSWORD}
+    volumes:
+      - minio-data:/data
+    networks:
+      - oneplatform-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      op-init:
+        condition: service_healthy
+    restart: unless-stopped
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.2.0
+    environment:
+      CONTAINERS: 1
+      POST: 1
+      DELETE: 1
+      LOG: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - oneplatform-sandbox
+    restart: unless-stopped
+    depends_on:
+      op-init:
+        condition: service_healthy
+
+  # ─── Layer 2: Connection Pooler ───────────────────────────────────────────
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.22.1
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    networks:
+      - oneplatform-internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5433"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  init-data:
+  gateway-data:
+  auth-data:
+  ingestion-data:
+  ontology-data:
+  pipeline-data:
+  execution-data:
+  app-data:
+  logging-data:
+  plugin-data:
+  sandbox-socket:
+  shared-pubkeys:
+
+networks:
+  oneplatform-public:
+    driver: bridge
+  oneplatform-internal:
+    driver: bridge
+    internal: true
+  oneplatform-sandbox:
+    driver: bridge
+    internal: true

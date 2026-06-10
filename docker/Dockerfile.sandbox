@@ -1,0 +1,62 @@
+# docker/Dockerfile.sandbox
+#
+# Sandbox VM container for executing untrusted JavaScript/TypeScript code
+# via isolated-vm. This container runs with maximum isolation:
+#   - Node 20 (pinned): isolated-vm requires specific V8 ABI compatibility.
+#     Do NOT change the Node version without verifying isolated-vm compatibility.
+#   - Read-only root filesystem
+#   - No network access (sandbox network only, and no routes to internal)
+#   - No Linux capabilities (--cap-drop=ALL in compose)
+#   - Communication via Unix socket only (sandbox-socket volume)
+#
+# Ref spec §7.6 "Execution Service", §13 "Security Summary — Sandbox escape",
+# §2 "Docker Compose Stack Layer 4 op-sandbox-vm".
+
+# Node 20 pinned to a specific patch version for reproducible isolated-vm ABI.
+# Verify this version against isolated-vm's compatibility matrix before upgrading:
+# https://github.com/laverdet/isolated-vm#requirements
+FROM node:20.14.0-alpine AS sandbox-builder
+
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+WORKDIR /sandbox
+
+# isolated-vm requires node-gyp and build tools for native compilation.
+# These are only needed at build time (multi-stage removes them from runner).
+RUN apk add --no-cache python3 make g++ linux-headers
+
+# Install isolated-vm in isolation so its native module is compiled once
+# and cached as a Docker layer.
+COPY docker/sandbox/package.json ./package.json
+RUN pnpm install
+
+# Copy the sandbox runtime source.
+COPY docker/sandbox/src/ ./src/
+
+# ─── Runner stage ────────────────────────────────────────────────────────────
+FROM node:20.14.0-alpine AS runner
+
+# Security: dedicated non-root user for the sandbox process.
+RUN addgroup --system --gid 1002 sandbox && \
+    adduser --system --uid 1002 --ingroup sandbox sandbox
+
+WORKDIR /sandbox
+
+# Copy only the runtime — no build tools, no source maps.
+COPY --from=sandbox-builder --chown=sandbox:sandbox /sandbox/node_modules ./node_modules
+COPY --from=sandbox-builder --chown=sandbox:sandbox /sandbox/src/          ./src/
+COPY --from=sandbox-builder --chown=sandbox:sandbox /sandbox/package.json  ./package.json
+
+USER sandbox
+
+# No EXPOSE: this container communicates ONLY via Unix socket on the
+# sandbox-socket volume. No TCP ports are opened.
+# The socket path is /run/sandbox/op.sock — mounted from sandbox-socket volume.
+
+ENV NODE_ENV=production
+# Disable V8 optimizations that could be leveraged for sandbox escape.
+ENV NODE_OPTIONS=--max-old-space-size=512
+
+# Unix socket listener: accepts JSON-RPC requests from Execution Service.
+# The socket path must match what Execution Service dials.
+CMD ["node", "src/server.js", "--socket", "/run/sandbox/op.sock"]

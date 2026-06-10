@@ -1,0 +1,12 @@
+{
+  "name": "@oneplatform/sandbox-vm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "isolated-vm": "^4.7.2"
+  }
+}

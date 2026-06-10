@@ -1,0 +1,108 @@
+# docker/Dockerfile.service
+#
+# Multi-stage build for all 9 OnePlatform services.
+# Build any service by passing --build-arg SERVICE=<service-name>.
+# Example: docker build -f docker/Dockerfile.service --build-arg SERVICE=auth .
+#
+# Stage 1 (builder): installs all dependencies, runs turbo prune to create a
+# minimal workspace for the target service, then builds.
+# Stage 2 (runner): copies only the built artifacts and prod dependencies,
+# runs as a non-root user.
+
+ARG SERVICE
+ARG NODE_VERSION=22
+
+# ─── Stage 1: Builder ────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-alpine AS builder
+
+# Install pnpm via corepack (avoids a separate npm install step).
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+WORKDIR /build
+
+# Copy root workspace manifests first so Docker can cache the dependency
+# installation layer independently from source changes.
+COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY .npmrc ./
+
+# Copy all workspace package.json files. Docker layer caching: only re-runs
+# pnpm install when package.json files change, not on source code changes.
+COPY packages/core/package.json         ./packages/core/package.json
+COPY packages/sdk/package.json          ./packages/sdk/package.json
+COPY packages/app-sdk/package.json      ./packages/app-sdk/package.json
+COPY packages/plugin-sdk/package.json   ./packages/plugin-sdk/package.json
+COPY packages/cli/package.json          ./packages/cli/package.json
+COPY services/gateway/package.json      ./services/gateway/package.json
+COPY services/auth/package.json         ./services/auth/package.json
+COPY services/ingestion/package.json    ./services/ingestion/package.json
+COPY services/ontology/package.json     ./services/ontology/package.json
+COPY services/pipeline/package.json     ./services/pipeline/package.json
+COPY services/execution/package.json    ./services/execution/package.json
+COPY services/app/package.json          ./services/app/package.json
+COPY services/logging/package.json      ./services/logging/package.json
+COPY services/plugin/package.json       ./services/plugin/package.json
+
+# Install all workspace dependencies.
+RUN pnpm install --frozen-lockfile
+
+# Copy all source files and run turbo prune to reduce the build context
+# to only the files needed for the target service and its dependencies.
+COPY . .
+
+# turbo prune creates /build/out/ with only the packages and services
+# that the target service depends on. This dramatically reduces subsequent
+# layer sizes.
+RUN pnpm dlx turbo prune --scope="@oneplatform/${SERVICE}-service" --docker
+
+# ─── Stage 1b: Install pruned dependencies ───────────────────────────────────
+FROM node:${NODE_VERSION}-alpine AS pruned-installer
+
+ARG SERVICE
+
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+WORKDIR /build
+
+# Copy the pruned workspace from stage 1.
+COPY --from=builder /build/out/json/ .
+COPY --from=builder /build/out/pnpm-lock.yaml ./pnpm-lock.yaml
+
+# Install only the dependencies needed for the pruned workspace.
+RUN pnpm install --frozen-lockfile
+
+# Copy pruned source files.
+COPY --from=builder /build/out/full/ .
+
+# Build the target service and all its local dependencies.
+RUN pnpm dlx turbo run build --filter="@oneplatform/${SERVICE}-service"
+
+# ─── Stage 2: Runner ─────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-alpine AS runner
+
+ARG SERVICE
+
+# Security: run as non-root user. UID 1001 is a common convention for
+# application users in Alpine-based images.
+RUN addgroup --system --gid 1001 oneplatform && \
+    adduser --system --uid 1001 --ingroup oneplatform oneplatform
+
+WORKDIR /app
+
+# Copy node_modules and built artifacts from the installer stage.
+# Only production dependencies are included (turbo prune + pnpm install).
+COPY --from=pruned-installer --chown=oneplatform:oneplatform /build/node_modules ./node_modules
+COPY --from=pruned-installer --chown=oneplatform:oneplatform /build/services/${SERVICE}/dist ./dist
+COPY --from=pruned-installer --chown=oneplatform:oneplatform /build/services/${SERVICE}/package.json ./package.json
+
+# Copy built packages that the service depends on.
+COPY --from=pruned-installer --chown=oneplatform:oneplatform /build/packages ./packages
+
+USER oneplatform
+
+# Services listen on port 3000 within the container. The compose file maps
+# each service to its external port (3001–3008).
+EXPOSE 3000
+
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]
