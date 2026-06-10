@@ -17,20 +17,17 @@ This document tracks the current state of development. Read this FIRST when resu
 - [x] 13 new ADR decisions required (ADR 24-36) identified and documented
 
 ### In Progress
-- [ ] Writing new ADR decisions (24-36) to address user story friction points
-- [ ] Architecture review of new ADR decisions
+- [ ] Write full design spec
 
 ### Pending (in order)
 1. ~~Walk through user stories~~ (DONE — see `docs/USER-STORIES-ANALYSIS.md`)
-2. Write new ADR decisions 24-36 into architecture document
-3. Architecture review of decisions 24-36 (propose → review → revise loop)
-4. Write comprehensive test strategy into architecture
-5. Write full design spec and commit
-6. Create detailed implementation plan (invoke writing-plans skill)
-7. Granular sub-designs for each of the 9 services + core library + SDKs + CLI
+2. ~~Write new ADR decisions 24-36~~ (DONE — 13 new decisions, 2 review cycles, CLEAN APPROVED)
+3. Write full design spec and commit
+4. Create detailed implementation plan (invoke writing-plans skill)
+5. Granular sub-designs for each of the 9 services + core library + SDKs + CLI
    - Each goes through: propose → review → test → code review (R/Y/G) → revise → review loop
-8. Full implementation using structured agent teams
-9. Comprehensive test suites — unit, integration, contract, e2e, security
+6. Full implementation using structured agent teams
+7. Comprehensive test suites — unit, integration, contract, e2e, security
 
 ## Architecture Summary (23 Decisions)
 
