@@ -59,10 +59,14 @@ It aims to be a free, source-available alternative to tools like Fivetran, n8n, 
 - This prevents BullMQ traffic from crowding out auth or ontology pub/sub operations
 - **Acknowledged limitation:** Redis logical databases share memory, CPU, and connection pool — they are namespaces, NOT isolation boundaries. A `FLUSHDB` on any DB or a memory-intensive operation on DB 0 (BullMQ) can still affect all other DBs. True isolation requires separate Redis instances, which is documented as the production HA upgrade path (Redis Sentinel per concern group). The logical DB separation is a development/small-deployment reasonable-default that reduces namespace collision, not a security boundary.
 - **Redis access control:** Redis is configured with ACL rules using key-prefix conventions exclusively. The `SELECT` command is **denied for ALL service users** (`-select`) — all services operate on DB 0 only, and isolation is enforced entirely via key-prefix ACLs. The logical DB numbers described earlier (DB 0-4) are a conceptual grouping implemented via key prefixes, NOT via `SELECT` commands:
-  - Auth Service user: `~auth:* ~revocation:* &auth:* &revocation:*` (only auth-prefixed keys + pub/sub channels)
+  - Auth Service user: `~auth:* ~revocation:* ~reset:* &auth:* &revocation:*` (auth keys, revocation blocklist, password reset tokens + pub/sub channels)
   - Pipeline Service user: `~queue:pipeline:* ~queue:execution:* &ontology:*` (pipeline queues + ontology pub/sub subscribe)
   - Logging Service user: `~log:* ~audit:* &logs:* &audit:*` (log keys + log/audit pub/sub channels)
-  - Gateway Service user: `~ratelimit:* ~gateway:*` (rate limit counters + replica tracking)
+  - Gateway Service user: `~ratelimit:* ~gateway:* ~webhook:* &events:*` (rate limit counters, replica tracking, webhook delivery queues + event pub/sub channels)
+  - Ingestion Service user: `~queue:ingestion:* ~ingestion:sync:* &ontology:*` (ingestion job queues, sync progress keys + ontology pub/sub subscribe)
+  - Ontology Service user: `~ontology:* &ontology:*` (ontology cache keys + ontology change pub/sub publish/subscribe)
+  - App Service user: `~guest-session:* &events:*` (guest session tokens + event pub/sub subscribe)
+  - Plugin Service user: `~plugin:* &events:*` (plugin state keys + event pub/sub for cache invalidation)
   - The `-select -flushdb -flushall -keys -debug` commands are denied for ALL service users (admin-only)
   - The Execution Service has NO Redis access at all (it communicates only via the Unix socket to sandbox-vm and via the internal service network to other services)
   - This eliminates the logical DB isolation gap entirely — services cannot `SELECT` into other databases because `SELECT` is denied, and key-prefix ACLs prevent access to other services' keys within DB 0
@@ -449,11 +453,23 @@ auth-service:
     redis: { condition: service_healthy }
   volumes: [init-data:/data/init:ro]
 
+minio:
+  depends_on:
+    op-init: { condition: service_completed_successfully }
+  healthcheck: { test: ["CMD", "mc", "ready", "local"], interval: 5s, retries: 10 }
+
 ingestion-service:
   depends_on:
     postgres: { condition: service_healthy }
     auth-service: { condition: service_healthy }
+    minio: { condition: service_healthy }
   volumes: [init-data:/data/init:ro]
+
+app-service:
+  depends_on:
+    postgres: { condition: service_healthy }
+    auth-service: { condition: service_healthy }
+    minio: { condition: service_healthy }
 
 # All other services depend on postgres+redis healthy; services that call auth
 # also depend on auth-service healthy. Gateway depends on all 9 services healthy.
@@ -913,6 +929,7 @@ interface DataEnvelope {
 
 **Security considerations:**
 - Raw tables are per-connector and have RLS policies enforcing `_tenant_id = current_setting('app.tenant_id')::uuid`. The Ingestion Service sets this session variable before executing queries.
+- **Cross-schema Postgres access:** The Ontology Service needs to read from `ingestion.raw_*` tables during mapping. This is the only cross-schema read in the platform. It is granted via: `GRANT SELECT ON ALL TABLES IN SCHEMA ingestion TO ontology_service_role;` and `ALTER DEFAULT PRIVILEGES IN SCHEMA ingestion GRANT SELECT TO ontology_service_role;` — the Ontology Service gets read-only access to ingestion tables, and its mapping worker calls `SET LOCAL app.tenant_id = $1` within each transaction to activate RLS. The Ontology Service CANNOT write to the ingestion schema.
 - Before each mapping batch query, the Ontology Service worker calls `SET LOCAL app.tenant_id = $1` within the transaction, ensuring RLS policies filter correctly per tenant. The `SET LOCAL` scope expires at transaction end, preventing cross-tenant leakage between batches.
 - The `CredentialAccessor` interface means connector code never receives plaintext credentials as function arguments — only a getter function. This means `JSON.stringify(handle)` or console logging the handle does not leak credentials.
 - Mapping transforms (user JS expressions) run through the Execution Service sandbox (no network, resource-limited). A malicious transform cannot read other tenants' data or make external requests.

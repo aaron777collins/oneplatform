@@ -1072,7 +1072,7 @@ op plugin install <source>
 3. Plugin Service validates the tarball structure, manifest schema, and bundle checksum.
 4. Plugin Service verifies GPG signature if `gpgFingerprint` is present in manifest.
 5. Plugin Service presents approval prompt (external URLs, APIs, credentials required) — CLI interactive mode shows this; `--yes` flag auto-approves with a warning logged to audit.
-6. Admin approves. Plugin Service stores the manifest in `plugin.plugins` table (Postgres, Plugin Service schema) and the bundle on the plugin bundles volume (`/data/plugin-bundles/{pluginId}/{version}/bundle.js`).
+6. Admin approves. Plugin Service stores the manifest in `plugin.plugins` table (Postgres, Plugin Service schema) and uploads the bundle to MinIO bucket `plugin-bundles` at key `{pluginId}/{version}/bundle.js` (see ADR-36 for MinIO configuration). Postgres stores the S3 reference (`bucket + key`), not the bundle itself.
 7. Plugin Service registers any declared hooks in `plugin.hooks` table (state: `inactive` until enabled).
 8. Plugin Service emits `plugin.installed` event.
 9. CLI returns the plugin's ID and installation summary.
@@ -1092,7 +1092,7 @@ The Plugin Service returns the bundle as a binary stream. The Execution Service 
 - TTL: 1 hour (on disable, Plugin Service sends a cache invalidation via Redis pub/sub `events:plugin:cache-invalidate:{pluginId}:{version}`)
 - On cache miss: fetch from Plugin Service (P99 target: < 50ms on local Docker network)
 
-**Cache invalidation on disable:** When a plugin instance is disabled, the Plugin Service publishes to Redis `events:plugin:cache-invalidate:{pluginId}:{version}`. The Execution Service subscribes to this channel and removes the entry. New executions after invalidation will find a miss, re-fetch, and re-cache. This ensures that after a disable, no new executions use the cached bundle.
+**Cache invalidation on disable:** When a plugin instance is disabled, the Plugin Service sends `POST /internal/execution/plugin-cache-invalidate` with `{pluginId, version}` to the Execution Service (same HTTP-based communication pattern as the drain notification — the Execution Service has NO Redis access per Decision 5). The Execution Service removes the entry from its in-memory LRU cache. New executions after invalidation will find a miss, re-fetch from the Plugin Service, and re-cache.
 
 #### Connector Plugin Registration
 
@@ -1180,6 +1180,7 @@ The following entries are added to `@oneplatform/core/service-rbac.ts` (extendin
 | Ingestion Service | Execution Service | `POST /internal/execution/connector-run` (run connector plugin) |
 | Plugin Service | Execution Service | `POST /internal/execution/run` (validate plugin entrypoint on install) |
 | Plugin Service | Execution Service | `POST /internal/execution/plugin-drain` (signal graceful drain for a plugin instance) |
+| Plugin Service | Execution Service | `POST /internal/execution/plugin-cache-invalidate` (invalidate cached bundle on disable/update) |
 | App Service | Plugin Service | `GET /internal/plugins/widgets` (list enabled widget plugins for tenant) |
 | Execution Service | Plugin Service | `GET /internal/plugins/{pluginId}/bundle` (fetch plugin bundle) |
 
