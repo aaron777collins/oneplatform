@@ -1,52 +1,41 @@
 /**
- * WizardPage — rendered by BootstrapGatePage when bootstrap is incomplete.
+ * WizardPage — full-page bootstrap wizard rendered by BootstrapGatePage when
+ * bootstrap is not yet complete.
  *
- * This is the first-run setup experience (§9). The page has no AppShell,
- * sidebar, or nav — it is the only content on screen during bootstrap.
+ * There is no AppShell, sidebar, or nav — this is a standalone centered page.
+ * The bootstrapToken from the index route loader is threaded directly to
+ * WizardShell (and ultimately ReviewStep) so it is never stored in Zustand
+ * or shown to the user.
  *
- * The bootstrapToken is held in local state here (never in the Zustand wizard
- * store) and passed directly to POST /api/v1/auth/bootstrap. Sam never needs
- * to manually enter or copy this token — the API returns it automatically when
- * bootstrap is incomplete.
+ * The token is held in a React ref (not state) because it never needs to
+ * trigger a re-render — it only needs to be available when ReviewStep fires
+ * POST /api/v1/auth/bootstrap.
  */
 import React from "react";
-import { useWizardStore } from "@/stores/wizard.store.js";
+import { WizardShell } from "@/components/wizard/WizardShell.js";
 
-export default function WizardPage() {
-  const currentStep = useWizardStore((state) => state.currentStep);
+export interface WizardPageProps {
+  bootstrapToken: string | undefined;
+}
 
+export default function WizardPage({ bootstrapToken }: WizardPageProps) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-2xl p-8">
+    <main
+      className="flex min-h-screen items-center justify-center bg-[var(--color-background)] px-4 py-12"
+      aria-label="Platform setup wizard"
+    >
+      <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold">Welcome to OnePlatform</h1>
-          <p className="mt-2 text-muted-foreground">
-            Complete the setup to get started
+          <p className="text-sm font-medium uppercase tracking-widest text-[var(--color-muted-foreground)]">
+            OnePlatform
           </p>
+          <h1 className="mt-1 text-3xl font-bold text-[var(--color-foreground)]">
+            Initial setup
+          </h1>
         </div>
-        {/* Step indicator — aria-current="step" on active item per §9.5 */}
-        <ol
-          role="list"
-          className="mb-8 flex justify-center gap-2"
-          aria-label="Setup steps"
-        >
-          {([0, 1, 2, 3, 4, 5] as const).map((step) => (
-            <li
-              key={step}
-              aria-current={currentStep === step ? "step" : undefined}
-              className={`h-2 w-8 rounded-full transition-colors ${
-                currentStep === step
-                  ? "bg-primary"
-                  : currentStep > step
-                  ? "bg-primary/50"
-                  : "bg-border"
-              }`}
-            />
-          ))}
-        </ol>
-        {/* WizardShell renders the active step — implemented in Layer 2 */}
-        <div className="rounded-lg border border-border bg-card p-8">
-          <p className="text-muted-foreground">Step {currentStep + 1} of 6</p>
+
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-8 shadow-sm">
+          <WizardShell bootstrapToken={bootstrapToken} />
         </div>
       </div>
     </main>

@@ -11,13 +11,13 @@ import { useLoaderData } from "@tanstack/react-router";
 import type { IndexLoaderData } from "@/router.js";
 
 export function BootstrapGatePage() {
-  const { bootstrapComplete } = useLoaderData({ from: "/" }) as IndexLoaderData;
+  const { bootstrapComplete, bootstrapToken } = useLoaderData({ from: "/" }) as IndexLoaderData;
 
   if (!bootstrapComplete) {
     const WizardPage = React.lazy(() => import("./wizard/WizardPage.js"));
     return (
       <React.Suspense fallback={<FullPageSpinner />}>
-        <WizardPage />
+        <WizardPage bootstrapToken={bootstrapToken} />
       </React.Suspense>
     );
   }
