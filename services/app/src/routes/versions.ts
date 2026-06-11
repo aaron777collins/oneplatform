@@ -141,6 +141,14 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
           void sub.quit().then(() => writer.close());
         }, 5 * 60 * 1000);  // 5-minute SSE timeout
 
+        // W12: clean up Redis subscriber when the client disconnects so we
+        // don't leak subscriber connections for abandoned SSE streams.
+        c.req.raw.signal.addEventListener("abort", () => {
+          clearTimeout(timeout);
+          void sub.quit().catch(() => { /* best effort */ });
+          void writer.close().catch(() => { /* best effort */ });
+        });
+
         sub.on("message", (_channel: string, message: string) => {
           if (message.includes('"type":"done"')) {
             clearTimeout(timeout);

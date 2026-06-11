@@ -1,3 +1,4 @@
+import { createHash, createHmac } from "node:crypto";
 import type { Logger } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type pg from "pg";
@@ -12,6 +13,117 @@ import {
   AppNoFilesError,
   AppCannotDeleteActiveBuildError,
 } from "./errors.js";
+
+// ---------------------------------------------------------------------------
+// AWS Signature V4 helpers — same pattern as plugin/bundle-service.ts
+// We sign MinIO requests directly to avoid the heavy @aws-sdk/client-s3 dep.
+// ---------------------------------------------------------------------------
+
+function toHex(buf: Buffer): string {
+  return buf.toString("hex");
+}
+
+function hmacSha256(key: Buffer | string, data: string): Buffer {
+  return createHmac("sha256", key).update(data).digest();
+}
+
+function sha256Hex(data: string | Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+function formatDate(d: Date): string {
+  return d.toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 8);
+}
+
+function formatDatetime(d: Date): string {
+  return d.toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 15) + "Z";
+}
+
+function getDerivedKey(secretKey: string, date: string, region: string, service: string): Buffer {
+  const kDate    = hmacSha256("AWS4" + secretKey, date);
+  const kRegion  = hmacSha256(kDate, region);
+  const kService = hmacSha256(kRegion, service);
+  return hmacSha256(kService, "aws4_request");
+}
+
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+function buildSignedHeaders(params: {
+  method:       string;
+  url:          string;
+  region:       string;
+  accessKey:    string;
+  secretKey:    string;
+  payloadHash:  string;
+  extraHeaders?: Record<string, string>;
+}): Record<string, string> {
+  const { method, url, region, accessKey, secretKey, payloadHash, extraHeaders = {} } = params;
+  const parsed   = new URL(url);
+  const now      = new Date();
+  const date     = formatDate(now);
+  const datetime = formatDatetime(now);
+
+  const allHeaders: Record<string, string> = {
+    host:                   parsed.host,
+    "x-amz-date":           datetime,
+    "x-amz-content-sha256": payloadHash,
+    ...extraHeaders,
+  };
+
+  const sortedNames   = Object.keys(allHeaders).sort();
+  const canonicalHdrs = sortedNames.map((k) => `${k.toLowerCase()}:${allHeaders[k]!.trim()}`).join("\n") + "\n";
+  const signedHdrs    = sortedNames.map((k) => k.toLowerCase()).join(";");
+
+  const canonicalQS = parsed.search
+    ? parsed.search.slice(1).split("&").sort().join("&")
+    : "";
+
+  const canonicalRequest = [
+    method.toUpperCase(), parsed.pathname, canonicalQS, canonicalHdrs, signedHdrs, payloadHash,
+  ].join("\n");
+
+  const credScope = `${date}/${region}/s3/aws4_request`;
+  const strToSign = [
+    "AWS4-HMAC-SHA256", datetime, credScope, sha256Hex(canonicalRequest),
+  ].join("\n");
+
+  const signingKey = getDerivedKey(secretKey, date, region, "s3");
+  const signature  = toHex(hmacSha256(signingKey, strToSign));
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, ` +
+    `SignedHeaders=${signedHdrs}, Signature=${signature}`;
+
+  // Exclude 'host' — the fetch runtime sets it automatically
+  const { host: _host, ...withoutHost } = allHeaders;
+  return {
+    ...withoutHost,
+    Authorization: authorization,
+  };
+}
+
+// Fetch with AWS Sig V4 signing — reused for all MinIO calls in this service.
+async function minioFetch(
+  method:       string,
+  url:          string,
+  accessKey:    string,
+  secretKey:    string,
+  region:       string,
+  bodyBuffer?:  Buffer,
+  extraHeaders?: Record<string, string>
+): Promise<Response> {
+  const payloadHash = bodyBuffer ? sha256Hex(bodyBuffer) : EMPTY_SHA256;
+  const headers = buildSignedHeaders({
+    method, url, region, accessKey, secretKey, payloadHash,
+    extraHeaders: extraHeaders ?? {},
+  });
+
+  return fetch(url, {
+    method,
+    headers,
+    ...(bodyBuffer !== undefined ? { body: bodyBuffer } : {}),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Build manifest shape (matches Execution Service response + MinIO artifact)
@@ -95,6 +207,7 @@ export interface BuildServiceDeps {
   permRepo:              PermissionRepository;
   redis:                 Redis;
   executionServiceUrl:   string;
+  masterKey:             Buffer;
   logger:                Logger;
 }
 
@@ -108,20 +221,32 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
     redis, executionServiceUrl, logger,
   } = deps;
 
+  // MinIO credentials — read once at service creation, not on every call (W10)
+  const minioEndpoint  = process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000";
+  const minioAccessKey = process.env["MINIO_ACCESS_KEY"] ?? "minioadmin";
+  const minioSecretKey = process.env["MINIO_SECRET_KEY"] ?? "minioadmin";
+  const minioRegion    = process.env["MINIO_REGION"]     ?? "us-east-1";
+  const minioBucket    = "op-app-artifacts";
+
+  // Service token for inter-service calls (W3)
+  const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+
   // Acquire a Postgres transaction-scoped advisory lock keyed to the app ID.
   // This serialises concurrent build triggers for the same app without
   // requiring a distributed lock — the check + insert happen within one xact.
+  // All repo calls inside the lock callback receive the same `client` so they
+  // participate in the same transaction and are protected by the lock (B1 fix).
   async function withAppAdvisoryLock<T>(
     client: pg.PoolClient,
     appId: string,
-    fn: () => Promise<T>
+    fn: (client: pg.PoolClient) => Promise<T>
   ): Promise<T> {
     // pg_advisory_xact_lock is automatically released at transaction end
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtext($1))",
       [appId]
     );
-    return fn();
+    return fn(client);
   }
 
   async function triggerBuild(
@@ -136,21 +261,36 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
     }
 
     const client = await pool.connect();
-    let build: BuildRow;
+    let createdBuildId: string | undefined;
+
     try {
       await client.query("BEGIN");
 
-      await withAppAdvisoryLock(client, appId, async () => {
+      // All DB operations inside the lock use `client` so they are bound to
+      // the same transaction and protected by the advisory lock (B1).
+      await withAppAdvisoryLock(client, appId, async (txClient) => {
         // One build at a time per app
-        const inProgress = await buildRepo.countInProgress(appId);
-        if (inProgress.count > 0) {
+        const inProgress = await txClient.query<{ count: string; id: string | null }>(
+          `SELECT COUNT(*) AS count, MIN(id) AS id
+             FROM app.builds
+            WHERE app_id = $1
+              AND status IN ('pending', 'building')`,
+          [appId]
+        );
+        const inProgressRow = inProgress.rows[0];
+        const inProgressCount = parseInt(inProgressRow?.count ?? "0", 10);
+        if (inProgressCount > 0) {
           throw new AppBuildInProgressError(
             `App "${appId}" already has a build in progress.`,
-            { appId, activeBuildId: inProgress.buildId ?? undefined }
+            { appId, ...(inProgressRow?.id !== null && inProgressRow?.id !== undefined ? { activeBuildId: inProgressRow.id } : {}) }
           );
         }
 
-        const fileCount = await fileRepo.countByApp(appId);
+        const fileCountResult = await txClient.query<{ count: string }>(
+          "SELECT COUNT(*) AS count FROM app.files WHERE app_id = $1",
+          [appId]
+        );
+        const fileCount = parseInt(fileCountResult.rows[0]?.count ?? "0", 10);
         if (fileCount === 0) {
           throw new AppNoFilesError(
             `App "${appId}" has no files in the VFS. Add files before triggering a build.`,
@@ -158,14 +298,27 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
           );
         }
 
-        const versionNumber = await buildRepo.getNextVersionNumber(appId);
+        const versionResult = await txClient.query<{ next_version: string }>(
+          `SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
+             FROM app.builds
+            WHERE app_id = $1`,
+          [appId]
+        );
+        const versionNumber = parseInt(versionResult.rows[0]?.next_version ?? "1", 10);
 
-        build = await buildRepo.create({
-          app_id:         appId,
-          version_number: versionNumber,
-          status:         "pending",
-          built_by:       userId,
-        });
+        const buildResult = await txClient.query<BuildRow>(
+          `INSERT INTO app.builds
+             (app_id, version_number, status, built_by)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id, app_id, version_number, status, bundle_path, error_message,
+                     error_detail, build_manifest, built_at, built_by, created_at`,
+          [appId, versionNumber, "pending", userId]
+        );
+        const buildRow = buildResult.rows[0];
+        if (buildRow === undefined) {
+          throw new Error("INSERT INTO app.builds returned no rows");
+        }
+        createdBuildId = buildRow.id;
       });
 
       await client.query("COMMIT");
@@ -176,11 +329,13 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
       client.release();
     }
 
-    // build is set inside the lock callback; the TS compiler cannot prove it
-    // so we re-fetch to satisfy the strict checker
-    const createdBuild = await buildRepo.findById(build!.id);
+    if (createdBuildId === undefined) {
+      throw new Error("Build ID was not assigned during transaction");
+    }
+
+    const createdBuild = await buildRepo.findById(createdBuildId);
     if (createdBuild === null) {
-      throw new Error(`Build "${build!.id}" disappeared immediately after creation`);
+      throw new Error(`Build "${createdBuildId}" disappeared immediately after creation`);
     }
 
     // Dispatch the build job asynchronously so the HTTP response returns 202
@@ -259,10 +414,14 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         streaming:     true,
       };
 
+      // W3: include service token so Execution Service can verify the caller
       const response = await fetch(`${executionServiceUrl}/internal/execution/execute`, {
         method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload),
+        headers: {
+          "Content-Type":    "application/json",
+          "X-Service-Token": serviceToken,
+        },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok || response.body === null) {
@@ -385,37 +544,36 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      // Always send a done event so SSE subscribers can close
+      // Append done event to the Redis list BEFORE publishing so late-connecting
+      // SSE clients that replay the list will also see the terminal event (B6).
       const doneEvent = JSON.stringify({ type: "done", buildId: build.id });
+      await redis.rpush(LOG_KEY, doneEvent);
+      await redis.expire(LOG_KEY, 86_400);
       await redis.publish(LOG_CHANNEL, doneEvent);
     }
   }
 
-  // Uploads build artifacts to MinIO. MinIO endpoint is configured via
-  // MINIO_ENDPOINT env var. We use the S3-compatible PutObject API directly
-  // via fetch to avoid adding an AWS SDK dependency.
+  // Uploads build artifacts to MinIO using AWS Signature V4 (B2).
+  // Credentials are read from env vars MINIO_ACCESS_KEY / MINIO_SECRET_KEY.
+  // We use the S3-compatible PutObject API directly via fetch to avoid adding
+  // the heavy @aws-sdk/client-s3 dependency.
   async function uploadArtifacts(
     tenantId: string,
     appId: string,
     buildId: string,
     files: Record<string, Buffer>
   ): Promise<void> {
-    const endpoint = process.env["MINIO_ENDPOINT"] ?? "http://minio:9000";
-    const bucket = "op-app-artifacts";
-
     await Promise.all(
       Object.entries(files).map(async ([filename, content]) => {
-        const key = `${tenantId}/${appId}/builds/${buildId}/${filename}`;
-        const url = `${endpoint}/${bucket}/${key}`;
+        const key         = `${tenantId}/${appId}/builds/${buildId}/${filename}`;
+        const url         = `${minioEndpoint}/${minioBucket}/${key}`;
+        const contentType = filename.endsWith(".json") ? "application/json" : "application/javascript";
 
-        const response = await fetch(url, {
-          method:  "PUT",
-          headers: {
-            "Content-Type":   filename.endsWith(".json") ? "application/json" : "application/javascript",
-            "Content-Length": String(content.length),
-          },
-          body: content,
-        });
+        const response = await minioFetch(
+          "PUT", url, minioAccessKey, minioSecretKey, minioRegion,
+          content,
+          { "content-type": contentType }
+        );
 
         if (!response.ok) {
           throw new Error(

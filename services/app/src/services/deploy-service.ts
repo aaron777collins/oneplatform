@@ -254,10 +254,14 @@ export function createDeployService(deps: DeployServiceDeps): DeployService {
       accessMode:     app.access_mode,
     };
 
+    // W3: include service token so Auth Service can authenticate the caller
     const response = await fetch(`${authServiceUrl}/internal/oauth/clients`, {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
+      headers: {
+        "Content-Type":    "application/json",
+        "X-Service-Token": process.env["OP_SERVICE_TOKEN_SECRET"] ?? "",
+      },
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

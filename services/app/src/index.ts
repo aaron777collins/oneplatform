@@ -1,6 +1,7 @@
+import { createHash, createHmac } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import {
   loadConfig,
   createDbClient,
@@ -30,6 +31,101 @@ import {
   createDeploymentRoutes,
   createInternalRoutes,
 } from "./routes/index.js";
+import { createBffRoutes } from "./routes/bff.js";
+import type { AppRepository as AppRepositoryType } from "./repositories/app-repository.js";
+
+// ---------------------------------------------------------------------------
+// HTML escape — prevents XSS when app name is interpolated into <title> (W11)
+// ---------------------------------------------------------------------------
+
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ---------------------------------------------------------------------------
+// AWS Signature V4 helpers for MinIO — same pattern as plugin/bundle-service
+// Avoids the heavy @aws-sdk/client-s3 dependency.
+// ---------------------------------------------------------------------------
+
+function toHex(buf: Buffer): string {
+  return buf.toString("hex");
+}
+
+function hmacSha256(key: Buffer | string, data: string): Buffer {
+  return createHmac("sha256", key).update(data).digest();
+}
+
+function sha256Hex(data: string | Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+function formatDate(d: Date): string {
+  return d.toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 8);
+}
+
+function formatDatetime(d: Date): string {
+  return d.toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 15) + "Z";
+}
+
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+function buildMinioGetHeaders(params: {
+  url:       string;
+  accessKey: string;
+  secretKey: string;
+  region:    string;
+}): Record<string, string> {
+  const { url, accessKey, secretKey, region } = params;
+  const parsed   = new URL(url);
+  const now      = new Date();
+  const date     = formatDate(now);
+  const datetime = formatDatetime(now);
+
+  const allHeaders: Record<string, string> = {
+    host:                   parsed.host,
+    "x-amz-date":           datetime,
+    "x-amz-content-sha256": EMPTY_SHA256,
+  };
+
+  const sortedNames   = Object.keys(allHeaders).sort();
+  const canonicalHdrs = sortedNames.map((k) => `${k.toLowerCase()}:${allHeaders[k]!.trim()}`).join("\n") + "\n";
+  const signedHdrs    = sortedNames.map((k) => k.toLowerCase()).join(";");
+
+  const canonicalQS = parsed.search
+    ? parsed.search.slice(1).split("&").sort().join("&")
+    : "";
+
+  const canonicalRequest = [
+    "GET", parsed.pathname, canonicalQS, canonicalHdrs, signedHdrs, EMPTY_SHA256,
+  ].join("\n");
+
+  const credScope = `${date}/${region}/s3/aws4_request`;
+  const strToSign = [
+    "AWS4-HMAC-SHA256", datetime, credScope, sha256Hex(canonicalRequest),
+  ].join("\n");
+
+  const kDate     = hmacSha256("AWS4" + secretKey, date);
+  const kRegion   = hmacSha256(kDate, region);
+  const kService  = hmacSha256(kRegion, "s3");
+  const signingKey = hmacSha256(kService, "aws4_request");
+  const signature = toHex(hmacSha256(signingKey, strToSign));
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, ` +
+    `SignedHeaders=${signedHdrs}, Signature=${signature}`;
+
+  // Omit 'host' — the fetch runtime sets it automatically
+  return {
+    "x-amz-date":           datetime,
+    "x-amz-content-sha256": EMPTY_SHA256,
+    Authorization:          authorization,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Service public key loader — same pattern as pipeline service
@@ -37,7 +133,7 @@ import {
 
 async function loadServicePublicKeys(): Promise<Record<string, string>> {
   try {
-    const dir = process.env["SERVICE_KEYS_DIR"] ?? "/data/service-keys";
+    const dir   = process.env["SERVICE_KEYS_DIR"] ?? "/data/service-keys";
     const files = await readdir(dir);
     const keys: Record<string, string> = {};
 
@@ -58,16 +154,33 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
 }
 
 // ---------------------------------------------------------------------------
+// Guest session rate limiting — 20 requests per IP per minute via Redis (B5)
+// ---------------------------------------------------------------------------
+
+async function checkGuestRateLimit(
+  redis: ReturnType<typeof createRedisClient>,
+  ip: string
+): Promise<boolean> {
+  const key    = `rate:guest-session:${ip}`;
+  const count  = await redis.incr(key);
+  if (count === 1) {
+    // Set TTL on first request so the counter resets each minute
+    await redis.expire(key, 60);
+  }
+  return count <= 20;
+}
+
+// ---------------------------------------------------------------------------
 // Main startup sequence — design spec §1.3
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
   const serviceStartedAt = new Date();
 
-  // Step 1: Load config and master key
-  const config = loadConfig();
+  // Step 1: Load config and master key once at startup (W10 — never call
+  // loadMasterKey() per-request; it reads a file on each invocation).
+  const config    = loadConfig();
   const masterKey = loadMasterKey();
-  void masterKey;  // available for encryption calls in services
 
   const databaseUrl = process.env["DATABASE_URL"] ?? config.OP_DATABASE_URL;
   const redisUrl    = process.env["REDIS_URL"]    ?? config.OP_REDIS_URL;
@@ -75,6 +188,13 @@ async function main(): Promise<void> {
   const authServiceUrl      = process.env["AUTH_SERVICE_URL"]      ?? "http://auth-service:3001";
   const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
   const baseUrl             = process.env["OP_BASE_URL"]           ?? "http://localhost:3000";
+
+  // MinIO connection parameters — read once, used across multiple handlers
+  const minioEndpoint  = process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000";
+  const minioAccessKey = process.env["MINIO_ACCESS_KEY"] ?? "minioadmin";
+  const minioSecretKey = process.env["MINIO_SECRET_KEY"] ?? "minioadmin";
+  const minioRegion    = process.env["MINIO_REGION"]     ?? "us-east-1";
+  const minioBucket    = "op-app-artifacts";
 
   const buildRetentionCount = parseInt(
     process.env["APP_BUILD_RETENTION_COUNT"] ?? "20", 10
@@ -119,6 +239,7 @@ async function main(): Promise<void> {
     permRepo,
     redis,
     executionServiceUrl,
+    masterKey,
     logger,
   });
 
@@ -132,14 +253,33 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const permService = createPermissionService({ appRepo, permRepo, logger });
+  const permService = createPermissionService({ appRepo, permRepo, logger, masterKey });
 
   // Widget service — in-memory registry for plugin widget registration
   createWidgetService({ logger });
 
-  // Step 7: Start BullMQ retention worker (runs daily cleanup per design spec §5.7)
+  // Step 7: Start BullMQ retention worker AND enqueue repeating job (W1).
+  // The worker exists to consume jobs; we must also enqueue a repeating job
+  // otherwise the worker sits idle and retention never runs.
+  const retentionQueueName = "queue:app:retention";
+  const retentionQueue = new Queue(retentionQueueName, {
+    connection:        { url: redisUrl },
+    defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 5_000 } },
+  });
+
+  // Upsert the repeating job so restarts are idempotent (repeat key is stable)
+  await retentionQueue.upsertJobScheduler(
+    "daily-retention-cleanup",
+    { every: 24 * 60 * 60 * 1_000 },
+    {
+      name: "retention-cleanup",
+      data: { retentionCount: buildRetentionCount },
+      opts: { removeOnComplete: { count: 10 }, removeOnFail: { count: 100 } },
+    }
+  );
+
   const retentionWorker = new Worker(
-    "queue:app:retention",
+    retentionQueueName,
     async () => {
       await buildService.runRetentionCleanup(buildRetentionCount);
     },
@@ -195,8 +335,21 @@ async function main(): Promise<void> {
   honoApp.route("/api/v1/apps/:appId", deploymentRoutes);
 
   // Internal service-to-service routes (protected by service token middleware)
-  const internalRoutes = createInternalRoutes({ appService, permRepo });
+  const internalRoutes = createInternalRoutes({ appService, appRepo, permRepo });
   honoApp.route("/internal", internalRoutes);
+
+  // BFF routes — expose composite data endpoints for the in-app SDK (B3)
+  // Design spec §§3.9, 8
+  const bffRoutes = createBffRoutes({
+    appRepo,
+    permRepo,
+    permService,
+    authServiceUrl,
+    masterKey,
+    redis,
+    logger,
+  });
+  honoApp.route("/bff", bffRoutes);
 
   // ---------------------------------------------------------------------------
   // App serving routes — HTML shell + bundle proxy
@@ -204,17 +357,75 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   honoApp.get("/apps/:slug/*", async (c) => {
-    const slug  = c.req.param("slug");
+    const slug    = c.req.param("slug");
     const rawPath = c.req.url.split(`/apps/${slug}/`)[1] ?? "";
 
-    // Resolve app by slug — public apps first, then tenant-scoped
-    const tenantApp = await appRepo.findPublicBySlug(slug);
+    // Resolve app by slug — check public first, then require a validated
+    // session for platform-user apps (B4).
+    let tenantApp = await appRepo.findPublicBySlug(slug);
+
+    if (tenantApp === null) {
+      // Attempt to find a platform-user app with this slug.
+      // A session is required; resolve the tenant from the validated JWT user.
+      const user = c.var.user;
+      if (user === undefined) {
+        // No authenticated session — redirect to login with return_to parameter
+        const loginUrl = `${authServiceUrl}/login?return_to=${encodeURIComponent(c.req.url)}`;
+        return c.redirect(loginUrl, 302);
+      }
+      tenantApp = await (appRepo as AppRepositoryType).findByTenantAndSlug(user.tenantId, slug);
+    }
 
     if (tenantApp === null) {
       return c.json(
         { error: { code: "APP_NOT_FOUND", message: `App "${slug}" not found.` } },
         404
       );
+    }
+
+    // For public apps, issue or validate a guest session cookie (B5)
+    if (tenantApp.access_mode === "public") {
+      const existingGuestSession = c.req.header("cookie")
+        ?.split(";")
+        .find((part) => part.trim().startsWith("op_guest_session="));
+
+      if (existingGuestSession === undefined) {
+        // Rate-limit guest session issuance per IP to prevent abuse
+        const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+        const allowed = await checkGuestRateLimit(redis, ip);
+        if (!allowed) {
+          return c.json(
+            { error: { code: "GUEST_SESSION_RATE_LIMITED", message: "Too many guest session requests. Try again in a minute." } },
+            429
+          );
+        }
+
+        // Call Auth Service to issue a guest session token (W3 — include service token)
+        const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+        const guestResponse = await fetch(`${authServiceUrl}/internal/auth/guest-sessions`, {
+          method:  "POST",
+          headers: {
+            "Content-Type":    "application/json",
+            "X-Service-Token": serviceToken,
+          },
+          body: JSON.stringify({
+            appId:    tenantApp.id,
+            tenantId: tenantApp.tenant_id,
+          }),
+        });
+
+        if (guestResponse.ok) {
+          const guestData = await guestResponse.json() as { token?: string };
+          if (guestData.token !== undefined) {
+            // Set the guest session cookie; HttpOnly + SameSite=Lax
+            c.header(
+              "Set-Cookie",
+              `op_guest_session=${guestData.token}; Path=/apps/${slug}; HttpOnly; SameSite=Lax; Max-Age=86400`
+            );
+          }
+        }
+        // Non-fatal: serve the public app even if guest session issuance fails
+      }
     }
 
     if (tenantApp.current_build_id === null) {
@@ -234,13 +445,14 @@ async function main(): Promise<void> {
         bffOrigin: "",
       });
 
+      // W11: escape the app name to prevent XSS via injected HTML in the title tag
       const html = [
         `<!DOCTYPE html>`,
         `<html lang="en">`,
         `<head>`,
         `  <meta charset="UTF-8">`,
         `  <meta name="viewport" content="width=device-width, initial-scale=1.0">`,
-        `  <title>${tenantApp.name}</title>`,
+        `  <title>${escapeHtml(tenantApp.name)}</title>`,
         `</head>`,
         `<body>`,
         `  <div id="app"></div>`,
@@ -265,13 +477,19 @@ async function main(): Promise<void> {
       return new Response(null, { status: 304 });
     }
 
-    // Proxy bundle from MinIO (presigned URL never exposed to browser)
-    const endpoint = process.env["MINIO_ENDPOINT"] ?? "http://minio:9000";
-    const bucket   = "op-app-artifacts";
+    // Proxy bundle from MinIO with AWS Sig V4 authentication (B2).
+    // Presigned URLs are never exposed to the browser.
     const key      = `${tenantApp.tenant_id}/${tenantApp.id}/builds/${buildId}/${rawPath}`;
-    const minioUrl = `${endpoint}/${bucket}/${key}`;
+    const minioUrl = `${minioEndpoint}/${minioBucket}/${key}`;
 
-    const minioResp = await fetch(minioUrl).catch(() => null);
+    const signedHeaders = buildMinioGetHeaders({
+      url:       minioUrl,
+      accessKey: minioAccessKey,
+      secretKey: minioSecretKey,
+      region:    minioRegion,
+    });
+
+    const minioResp = await fetch(minioUrl, { headers: signedHeaders }).catch(() => null);
     if (minioResp === null || !minioResp.ok) {
       return c.json(
         { error: { code: "APP_NO_ACTIVE_BUILD", message: "Build artifact not available." } },
@@ -428,14 +646,16 @@ async function main(): Promise<void> {
     shutdownTimeout.unref();
 
     void retentionWorker.close().then(() => {
-      server.close(() => {
-        void Promise.all([
-          db.end(),
-          redis.quit(),
-        ]).then(() => {
-          clearTimeout(shutdownTimeout);
-          console.info("App service graceful shutdown complete");
-          process.exit(0);
+      void retentionQueue.close().then(() => {
+        server.close(() => {
+          void Promise.all([
+            db.end(),
+            redis.quit(),
+          ]).then(() => {
+            clearTimeout(shutdownTimeout);
+            console.info("App service graceful shutdown complete");
+            process.exit(0);
+          });
         });
       });
     });

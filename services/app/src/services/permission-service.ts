@@ -11,7 +11,7 @@ import {
   AppNotFoundError,
   AppCrossTenantSharingDisabledError,
 } from "./errors.js";
-import { encrypt, decrypt, loadMasterKey } from "@oneplatform/core";
+import { encrypt, decrypt } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // Service interface
@@ -66,9 +66,10 @@ export interface EnvVarResponse {
 }
 
 export interface PermissionServiceDeps {
-  appRepo:  AppRepository;
-  permRepo: PermissionRepository;
-  logger:   Logger;
+  appRepo:    AppRepository;
+  permRepo:   PermissionRepository;
+  logger:     Logger;
+  masterKey:  Buffer;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +77,7 @@ export interface PermissionServiceDeps {
 // ---------------------------------------------------------------------------
 
 export function createPermissionService(deps: PermissionServiceDeps): PermissionService {
-  const { appRepo, permRepo, logger } = deps;
+  const { appRepo, permRepo, logger, masterKey } = deps;
 
   async function assertAppAccess(tenantId: string, appId: string): Promise<void> {
     const app = await appRepo.findByTenantAndId(tenantId, appId);
@@ -180,7 +181,6 @@ export function createPermissionService(deps: PermissionServiceDeps): Permission
     await assertAppAccess(tenantId, appId);
 
     const rows = await permRepo.listEnvVarsByApp(appId);
-    const masterKey = loadMasterKey();
 
     return Promise.all(
       rows.map(async (row): Promise<EnvVarResponse> => {
@@ -213,7 +213,6 @@ export function createPermissionService(deps: PermissionServiceDeps): Permission
   ): Promise<EnvVarResponse> {
     await assertAppAccess(tenantId, appId);
 
-    const masterKey = loadMasterKey();
     const encryptedValue = await encrypt(input.value, masterKey);
 
     const row: EnvVarRow = await permRepo.upsertEnvVar({

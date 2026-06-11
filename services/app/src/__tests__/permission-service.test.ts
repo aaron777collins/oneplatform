@@ -172,9 +172,10 @@ function makeDeps(
   }>,
 ): PermissionServiceDeps {
   return {
-    appRepo:  (overrides?.appRepo  ?? makeAppRepo())  as unknown as AppRepository,
-    permRepo: (overrides?.permRepo ?? makePermRepo()) as unknown as PermissionRepository,
-    logger:   overrides?.logger ?? makeLogger(),
+    appRepo:   (overrides?.appRepo  ?? makeAppRepo())  as unknown as AppRepository,
+    permRepo:  (overrides?.permRepo ?? makePermRepo()) as unknown as PermissionRepository,
+    logger:    overrides?.logger ?? makeLogger(),
+    masterKey: Buffer.alloc(32),
   };
 }
 

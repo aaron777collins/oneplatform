@@ -192,6 +192,7 @@ function makeDeps(
     permRepo:           (overrides?.permRepo ?? makePermRepo()) as unknown as PermissionRepository,
     redis:              (overrides?.redis    ?? makeRedis())    as unknown as Redis,
     executionServiceUrl: "http://execution-service",
+    masterKey:          Buffer.alloc(32),
     logger:             overrides?.logger ?? makeLogger(),
   };
 }

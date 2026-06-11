@@ -12,3 +12,6 @@ export type { DeploymentRouteDeps } from "./deployments.js";
 
 export { createInternalRoutes } from "./internal.js";
 export type { InternalRouteDeps } from "./internal.js";
+
+export { createBffRoutes } from "./bff.js";
+export type { BffRouteDeps } from "./bff.js";
