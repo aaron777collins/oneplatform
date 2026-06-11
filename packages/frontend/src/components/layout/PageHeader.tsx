@@ -22,6 +22,8 @@ export interface BreadcrumbItem {
 
 export interface PageHeaderProps {
   title: string;
+  /** Optional subtitle shown below the title */
+  description?: string;
   breadcrumbs?: BreadcrumbItem[];
   /** Renders in the top-right corner — pass buttons or other actions here. */
   actions?: React.ReactNode;
@@ -34,6 +36,7 @@ export interface PageHeaderProps {
 
 export function PageHeader({
   title,
+  description,
   breadcrumbs,
   actions,
   className,
@@ -86,6 +89,9 @@ export function PageHeader({
         <h1 className="truncate text-2xl font-bold tracking-tight text-[var(--color-foreground)]">
           {title}
         </h1>
+        {description !== undefined && (
+          <p className="mt-0.5 text-sm text-[var(--color-muted-foreground)]">{description}</p>
+        )}
       </div>
 
       {/* Action slot */}
