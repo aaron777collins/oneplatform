@@ -8,10 +8,11 @@
  * This is registered as a pathless route in router.tsx so it wraps all
  * children without appearing in the URL.
  */
-import { Outlet, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import React, { useEffect } from "react";
 import { useAuthStore } from "@/stores/auth.store.js";
 import { useApiClient } from "@/lib/api-client.js";
+import { AppShell } from "@/components/layout/AppShell.js";
 import type { Session } from "@/stores/auth.store.js";
 import type { ApiResponse } from "@/lib/api-client.js";
 
@@ -59,10 +60,5 @@ export function AuthenticatedLayout() {
     return null;
   }
 
-  // AppShell (sidebar + topbar + main) will be implemented in Layer 2.
-  return (
-    <div className="flex min-h-screen flex-col">
-      <Outlet />
-    </div>
-  );
+  return <AppShell />;
 }
