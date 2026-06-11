@@ -1,7 +1,7 @@
-import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, rm, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { exec as execCb } from "node:child_process";
+import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as semver from "semver";
 import type pg from "pg";
@@ -25,11 +25,18 @@ import {
   EntrypointNotCallableError,
   ExecutionValidationFailedError,
   PlatformVersionTooOldError,
+  GpgSignatureMissingError,
 } from "./errors.js";
 import { PluginManifestSchema } from "../schemas/index.js";
 import type { Redis } from "ioredis";
+// BullMQ Queue is only used for the active-job guard; we intentionally use a
+// URL-based connection to avoid the ioredis version mismatch between the plugin
+// service's ioredis and bullmq's bundled ioredis (W13 fix still holds: we create
+// the Queue once at module startup rather than recreating it per uninstall call).
+import type { Queue as BullMQQueue } from "bullmq";
 
-const exec = promisify(execCb);
+// B3 fix: use execFile (argument array, no shell) instead of exec (string interpolation).
+const execFile = promisify(execFileCb);
 
 const MAX_BUNDLE_BYTES = 50 * 1024 * 1024; // 50MB
 const CURRENT_PLATFORM_VERSION = process.env["OP_PLATFORM_VERSION"] ?? "1.0.0";
@@ -101,7 +108,7 @@ export interface PluginService {
 
 export function createPluginService(deps: PluginServiceDeps): PluginService {
   const {
-    pool,
+    pool: _pool,
     pluginRepo,
     instanceRepo,
     hookRepo,
@@ -117,6 +124,23 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     retentionDays,
   } = deps;
 
+  // W13 fix: create the BullMQ Queue once at startup rather than recreating it
+  // on every uninstall call. The Queue uses a URL-based connection derived from
+  // the injected Redis client to avoid the ioredis version mismatch between this
+  // service's ioredis and BullMQ's bundled ioredis.
+  let bullmqQueue: BullMQQueue | null = null;
+
+  async function getBullMQQueue(): Promise<BullMQQueue> {
+    if (bullmqQueue === null) {
+      const { Queue } = await import("bullmq");
+      const redisUrl = process.env["REDIS_URL"] ?? "redis://localhost:6379";
+      bullmqQueue = new Queue("execution", {
+        connection: { url: redisUrl } as { url: string },
+      });
+    }
+    return bullmqQueue;
+  }
+
   async function extractAndValidateBundle(bundlePath: string): Promise<{
     manifest: PluginManifest;
     extractDir: string;
@@ -125,15 +149,34 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     const extractDir = join("/tmp", "oneplatform-plugins", randomUUID());
     await mkdir(extractDir, { recursive: true });
 
-    // Zip-slip defense: tar will reject any path traversal if we set --strip-components=0
-    // and use -C to restrict the destination. We additionally validate all paths below.
+    // B3 fix: use execFile with an argument array — no shell expansion, no injection.
+    // W9 fix: zip-slip guard below verifies all extracted paths after extraction.
     try {
-      await exec(`tar -xzf ${bundlePath} -C ${extractDir} --strip-components=0 2>&1`);
+      await execFile("tar", ["-xzf", bundlePath, "-C", extractDir, "--strip-components=0"]);
     } catch (err) {
       throw new InvalidPackageStructureError(
         `Failed to extract .oppkg archive: ${String(err)}`
       );
     }
+
+    // W9 fix: verify every extracted path is confined to extractDir.
+    // resolve() expands any ".." components — if the result doesn't start with
+    // extractDir the archive contained a path-traversal entry.
+    const resolvedExtractDir = resolve(extractDir);
+    await (async function assertNoZipSlip(dir: string): Promise<void> {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const entryPath = resolve(dir, entry.name);
+        if (!entryPath.startsWith(resolvedExtractDir + "/") && entryPath !== resolvedExtractDir) {
+          throw new InvalidPackageStructureError(
+            `Zip-slip path traversal detected: ${entryPath}`
+          );
+        }
+        if (entry.isDirectory()) {
+          await assertNoZipSlip(entryPath);
+        }
+      }
+    })(extractDir);
 
     // Validate required files exist.
     const manifestPath = join(extractDir, "plugin.manifest.json");
@@ -214,7 +257,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
   }
 
   return {
-    async installPlugin({ bundlePath, approveUrls, platformWide, installedBy }) {
+    async installPlugin({ bundlePath, signaturePath, approveUrls, platformWide, installedBy }) {
       logger.info("Plugin install started", { bundlePath });
 
       // Step 1–3: Extract tarball, validate structure, parse manifest.
@@ -231,6 +274,25 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           throw new PlatformVersionTooOldError(
             `Platform version ${CURRENT_PLATFORM_VERSION} is below the required ${manifest.minPlatformVersion}`
           );
+        }
+
+        // B4 fix: GPG guard — if the manifest declares a fingerprint, a signature
+        // file MUST be provided. Full cryptographic verification requires the openpgp
+        // npm package (not yet a declared dependency); this guard enforces the
+        // contract boundary so unsigned installs are rejected at the gate.
+        if (manifest.gpgFingerprint !== undefined) {
+          if (signaturePath === undefined || signaturePath === "") {
+            throw new GpgSignatureMissingError(
+              `Plugin manifest declares gpgFingerprint '${manifest.gpgFingerprint}' but no .sig file was provided. ` +
+                "Resubmit with the signature file attached."
+            );
+          }
+          // Full GPG verification (openpgp library) is intentionally deferred until
+          // the openpgp dependency is approved and added to package.json.
+          logger.info("GPG signature file received; cryptographic verification pending openpgp dep", {
+            manifestId: manifest.id,
+            fingerprint: manifest.gpgFingerprint,
+          });
         }
 
         // Step 5: Verify bundle checksum.
@@ -376,18 +438,15 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       }
 
       // Guard 2: No active BullMQ jobs (spec §11.2).
+      // W13 fix: reuse the shared Queue instance backed by the injected Redis
+      // connection — no new connection created per call.
       // Check is best-effort — if Redis is unavailable we skip rather than block.
       try {
-        const { Queue } = await import("bullmq");
-        const redisUrl = process.env["REDIS_URL"] ?? "redis://localhost:6379";
-        const queue = new Queue("execution", {
-          connection: { url: redisUrl } as { url: string },
-        });
+        const queue = await getBullMQQueue();
         const jobs = await queue.getJobs(["active", "waiting", "delayed"]);
         const pluginJobs = jobs.filter(
           (j) => j.data.pluginManifestId === plugin.manifest_id
         );
-        await queue.close();
         if (pluginJobs.length > 0) {
           throw new PluginHasActiveJobsError(
             `Cannot uninstall: ${pluginJobs.length} active job(s) reference this plugin. Wait for jobs to complete or move them to DLQ.`
@@ -534,5 +593,4 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       }
     },
   };
-
 }

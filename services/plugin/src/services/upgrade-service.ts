@@ -5,7 +5,10 @@ import type { InstanceRepository } from "../repositories/instance-repository.js"
 import type { HookRepository } from "../repositories/hook-repository.js";
 import type { HookService } from "./hook-service.js";
 import type { PluginRow } from "../repositories/types.js";
-import { PluginNotFoundError } from "./errors.js";
+import {
+  PluginNotFoundError,
+  ConfigMigrationRequiredError,
+} from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // UpgradeService — version upgrade and rollback (spec §10)
@@ -14,6 +17,11 @@ import { PluginNotFoundError } from "./errors.js";
 // hook states, and instance plugin_id pointers in a single DB transaction.
 // The unique partial index on (manifest_id) WHERE status='active' enforces
 // that exactly one version is active at any moment.
+//
+// W5/W10 fix: drain is now asynchronous. We store a per-manifestId resolve
+// function in drainResolvers. The drain-complete callback (signalDrainComplete)
+// resolves it immediately; a 62s timeout fires as a fallback so upgrades
+// never block the event loop indefinitely.
 // ---------------------------------------------------------------------------
 
 export interface UpgradeServiceDeps {
@@ -39,6 +47,13 @@ export interface UpgradeService {
     manifestId: string;
     rolledBackBy: string;
   }): Promise<{ fromVersion: string; toVersion: string }>;
+
+  /**
+   * Called by the internal drain-complete endpoint (spec §8.5).
+   * Resolves the pending drain promise for the given manifestId so the upgrade
+   * swap can proceed immediately rather than waiting for the full 62s timeout.
+   */
+  signalDrainComplete(manifestId: string): void;
 }
 
 export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
@@ -47,12 +62,34 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
     pluginRepo,
     instanceRepo,
     hookRepo,
-    hookService: _hookService,
+    hookService,
     executionServiceUrl,
     serviceToken,
     logger,
     eventPublisher,
   } = deps;
+
+  // W5/W10 fix: map from manifestId to the resolve function of the in-flight
+  // drain promise. signalDrainComplete() calls it to unblock the upgrade swap.
+  const drainResolvers = new Map<string, () => void>();
+
+  function waitForDrain(manifestId: string, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      drainResolvers.set(manifestId, resolve);
+
+      // Fallback timeout — upgrade proceeds regardless after gracePeriod + 2s buffer.
+      const timer = setTimeout(() => {
+        if (drainResolvers.has(manifestId)) {
+          logger.warn("Drain timeout expired — proceeding with version swap", { manifestId });
+          drainResolvers.delete(manifestId);
+          resolve();
+        }
+      }, timeoutMs);
+
+      // Allow the process to exit even if this timer is pending.
+      timer.unref?.();
+    });
+  }
 
   async function sendDrainSignal(manifestId: string, gracePeriodMs: number): Promise<void> {
     try {
@@ -168,22 +205,48 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
         );
       }
 
+      // B6 fix: pre-flight config re-validation — fetch all active instances and
+      // validate their configs against the new version's configSchema. If any fail,
+      // abort the upgrade so tenants are not silently broken by a schema change.
+      const newConfigSchema = stagedPlugin.manifest.configSchema;
+      const allInstances = await instanceRepo.findByPluginManifestId(manifestId);
+      const failingInstances: string[] = [];
+
+      for (const instance of allInstances) {
+        if (instance.enabled !== "enabled") continue;
+
+        // Validate required fields from the new schema.
+        const required = newConfigSchema["required"];
+        if (Array.isArray(required)) {
+          for (const key of required) {
+            if (typeof key === "string" && !(key in instance.config)) {
+              failingInstances.push(
+                `instance '${instance.id}' (tenant '${instance.tenant_id}'): missing required field '${key}'`
+              );
+            }
+          }
+        }
+      }
+
+      if (failingInstances.length > 0) {
+        throw new ConfigMigrationRequiredError(
+          `Upgrade to '${toVersion}' blocked: ${failingInstances.length} active instance(s) have configs that ` +
+            `are incompatible with the new configSchema. Migrate configs first, then retry. ` +
+            `Affected: ${failingInstances.slice(0, 5).join("; ")}${failingInstances.length > 5 ? " …" : ""}`,
+          { fieldErrors: { instances: failingInstances } }
+        );
+      }
+
       // Step 1: Pre-register new version hooks as 'staged' (not yet in active chain).
-      const instances = await instanceRepo.findByPluginManifestId(manifestId);
-      for (const instance of instances) {
+      for (const instance of allInstances) {
         if (instance.enabled === "enabled") {
-          const hookData = (await import("./hook-service.js")).createHookService({
-            hookRepo,
-            logger,
-          }).buildHookDataFromManifest(
+          const hookData = hookService.buildHookDataFromManifest(
             stagedPlugin.id,
             instance.id,
             instance.tenant_id,
             stagedPlugin.manifest
           );
-          await hookRepo.createMany(
-            hookData.map((h) => ({ ...h, state: "staged" as const }))
-          );
+          await hookRepo.createMany(hookData.map((h) => ({ ...h, state: "staged" as const })));
         }
       }
 
@@ -209,9 +272,11 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
       await pluginRepo.update(activePlugin.id, { status: "draining" });
       await sendDrainSignal(manifestId, 60_000);
 
-      // Wait up to 60s for drain (the Execution Service will call /drain-complete,
-      // but we proceed after the grace period regardless — spec §10.2).
-      await new Promise<void>((resolve) => setTimeout(resolve, 62_000));
+      // W5/W10 fix: await the drain asynchronously. The promise resolves either
+      // when the Execution Service calls /drain-complete (signalDrainComplete)
+      // or after the 62s fallback timeout — whichever comes first.
+      // This releases the event loop between ticks and does not block other requests.
+      await waitForDrain(manifestId, 62_000);
 
       // Step 4: Atomic swap.
       const client = await pool.connect();
@@ -287,7 +352,9 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
       // Drain the current active version.
       await pluginRepo.update(currentActive.id, { status: "draining" });
       await sendDrainSignal(manifestId, 60_000);
-      await new Promise<void>((resolve) => setTimeout(resolve, 62_000));
+
+      // W5/W10 fix: same async drain pattern as upgrade.
+      await waitForDrain(manifestId, 62_000);
 
       // Atomic swap — re-activate the previous version.
       const client = await pool.connect();
@@ -327,6 +394,18 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
         fromVersion: currentActive.version,
         toVersion: previousPlugin.version,
       };
+    },
+
+    signalDrainComplete(manifestId: string): void {
+      const resolve = drainResolvers.get(manifestId);
+      if (resolve !== undefined) {
+        logger.info("Drain-complete callback received — unblocking version swap", { manifestId });
+        drainResolvers.delete(manifestId);
+        resolve();
+      } else {
+        // No upgrade in flight for this manifestId — log and ignore.
+        logger.warn("drain-complete received but no pending upgrade found", { manifestId });
+      }
     },
   };
 }

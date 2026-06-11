@@ -12,3 +12,6 @@ export type { HookRouteDeps } from "./hooks.js";
 
 export { createInternalRoutes } from "./internal.js";
 export type { InternalRouteDeps } from "./internal.js";
+
+export { createUpgradeRoutes } from "./upgrade.js";
+export type { UpgradeRouteDeps } from "./upgrade.js";

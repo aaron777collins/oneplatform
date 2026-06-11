@@ -33,12 +33,22 @@ export function createInternalRoutes(
     cacheRepo,
     instanceRepo,
     pluginRepo,
-    upgradeService: _upgradeService,
+    upgradeService,
   } = deps;
 
+  // W3 fix: return 401 (not 403) when the service token is absent or invalid.
+  // 403 means "authenticated but not authorised"; 401 means "not authenticated".
+  // Internal callers that lack a valid service token are unauthenticated.
   function requireServiceToken(c: AppContext): boolean {
     const user = c.var.user;
     return user?.isService === true;
+  }
+
+  function unauthorizedResponse(c: AppContext): Response {
+    return c.json(
+      { error: { code: "UNAUTHORIZED", message: "Valid service token required.", requestId: c.var.requestId } },
+      401
+    ) as Response;
   }
 
   // ---------------------------------------------------------------------------
@@ -46,10 +56,7 @@ export function createInternalRoutes(
   // ---------------------------------------------------------------------------
   routes.get("/plugins/:pluginId/bundle", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const pluginId = c.req.param("pluginId");
@@ -97,10 +104,7 @@ export function createInternalRoutes(
   // ---------------------------------------------------------------------------
   routes.get("/plugins/connectors", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const tenantId = new URL(c.req.url).searchParams.get("tenantId");
@@ -138,10 +142,7 @@ export function createInternalRoutes(
   // ---------------------------------------------------------------------------
   routes.get("/plugins/hooks", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const params = new URL(c.req.url).searchParams;
@@ -167,10 +168,7 @@ export function createInternalRoutes(
   // ---------------------------------------------------------------------------
   routes.get("/plugins/cache/:tenantId/:pluginId/:key", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const tenantId = c.req.param("tenantId");
@@ -197,10 +195,7 @@ export function createInternalRoutes(
 
   routes.put("/plugins/cache/:tenantId/:pluginId/:key", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const tenantId = c.req.param("tenantId");
@@ -238,10 +233,7 @@ export function createInternalRoutes(
 
   routes.delete("/plugins/cache/:tenantId/:pluginId/:key", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const tenantId = c.req.param("tenantId");
@@ -257,10 +249,7 @@ export function createInternalRoutes(
   // ---------------------------------------------------------------------------
   routes.post("/plugins/:manifestId/drain-complete", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     let body: unknown;
@@ -281,9 +270,9 @@ export function createInternalRoutes(
       );
     }
 
-    // The drain-complete callback is used to advance the upgrade state machine.
-    // Current implementation acknowledges receipt — the upgrade timeout loop
-    // in UpgradeService will proceed regardless after 62s.
+    // W10 fix: signal the pending upgrade that drain is complete so the atomic
+    // swap can proceed immediately rather than waiting for the 62s fallback.
+    upgradeService.signalDrainComplete(parsed.data.manifestId);
     return c.json({ received: true });
   });
 
@@ -292,10 +281,7 @@ export function createInternalRoutes(
   // ---------------------------------------------------------------------------
   routes.get("/plugins/widgets", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json(
-        { error: { code: "FORBIDDEN", message: "Service token required.", requestId: c.var.requestId } },
-        403
-      );
+      return unauthorizedResponse(c);
     }
 
     const tenantId = new URL(c.req.url).searchParams.get("tenantId");

@@ -11,7 +11,52 @@ import {
   InstanceNotFoundError,
   PluginNotActiveError,
   ConnectorRegistrationFailedError,
+  ConfigValidationFailedError,
 } from "./errors.js";
+
+// ---------------------------------------------------------------------------
+// Minimal JSON Schema validator — avoids pulling in Ajv as a runtime dep that
+// hasn't been declared in package.json. Validates required + type constraints
+// from the manifest configSchema. Sufficient for the guard required by B5;
+// full JSON Schema 2020-12 can be added when Ajv is approved as a dependency.
+// ---------------------------------------------------------------------------
+function validateConfigAgainstSchema(
+  config: Record<string, unknown>,
+  schema: Record<string, unknown>
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  const required = schema["required"];
+  if (Array.isArray(required)) {
+    for (const key of required) {
+      if (typeof key === "string" && !(key in config)) {
+        errors.push(`Missing required config field: '${key}'`);
+      }
+    }
+  }
+
+  const properties = schema["properties"];
+  if (properties !== null && typeof properties === "object" && !Array.isArray(properties)) {
+    for (const [key, propSchema] of Object.entries(properties as Record<string, unknown>)) {
+      if (!(key in config)) continue;
+      const value = config[key];
+      if (propSchema !== null && typeof propSchema === "object" && !Array.isArray(propSchema)) {
+        const expectedType = (propSchema as Record<string, unknown>)["type"];
+        if (typeof expectedType === "string") {
+          const actualType =
+            value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+          if (actualType !== expectedType) {
+            errors.push(
+              `Config field '${key}' must be of type '${expectedType}', got '${actualType}'`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
 
 // ---------------------------------------------------------------------------
 // InstanceService — per-tenant plugin instance lifecycle (spec §6)
@@ -98,8 +143,10 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
       await client.query("BEGIN");
 
       // Create hook rows in inactive state, then immediately activate them.
+      // Pass the transactional client so hooks are enrolled in the same
+      // transaction and roll back with it on failure (B1 fix — prevents orphans).
       if (hookData.length > 0) {
-        await hookRepo.createMany(hookData);
+        await hookRepo.createMany(hookData, client);
         await hookRepo.updateStateByInstance(client, instance.id, "active");
       }
 
@@ -128,7 +175,12 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
             tenantId: instance.tenant_id,
             displayName: instance.display_name,
             version: plugin.version,
-            metadata: (plugin.manifest as Record<string, unknown>)["connectorMetadata"] as Record<string, unknown> ?? {},
+            metadata:
+              (
+                (plugin.manifest as Record<string, unknown>)[
+                  "connectorMetadata"
+                ] as Record<string, unknown>
+              ) ?? {},
           });
         } catch (err) {
           await client.query("ROLLBACK");
@@ -251,6 +303,16 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
         );
       }
 
+      // Validate config against the manifest's configSchema before persisting (B5 fix).
+      const configSchema = plugin.manifest.configSchema;
+      const validation = validateConfigAgainstSchema(config, configSchema);
+      if (!validation.valid) {
+        throw new ConfigValidationFailedError(
+          `Instance config does not match plugin configSchema: ${validation.errors.join("; ")}`,
+          { fieldErrors: { config: validation.errors } }
+        );
+      }
+
       // Insert instance row in disabled state first (atomicity guard, spec §6.4).
       const instance = await instanceRepo.create({
         plugin_manifest_id: plugin.manifest_id,
@@ -288,11 +350,26 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
         throw new InstanceNotFoundError(`Instance '${instanceId}' not found`);
       }
 
+      // Validate new config against the plugin's configSchema before persisting (B5 fix).
       if (config !== undefined) {
+        const plugin = await pluginRepo.findById(instance.plugin_id);
+        if (plugin !== null) {
+          const configSchema = plugin.manifest.configSchema;
+          const validation = validateConfigAgainstSchema(config, configSchema);
+          if (!validation.valid) {
+            throw new ConfigValidationFailedError(
+              `Instance config does not match plugin configSchema: ${validation.errors.join("; ")}`,
+              { fieldErrors: { config: validation.errors } }
+            );
+          }
+        }
         await instanceRepo.update(instanceId, { config, updated_by: updatedBy });
       }
       if (displayName !== undefined) {
-        await instanceRepo.update(instanceId, { display_name: displayName, updated_by: updatedBy });
+        await instanceRepo.update(instanceId, {
+          display_name: displayName,
+          updated_by: updatedBy,
+        });
       }
 
       if (enabled === false) {
@@ -357,7 +434,9 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
 
       return instanceRepo.findByPluginManifestId(
         manifestId,
-        ...(isPlatformAdmin ? [{}] : [{ tenantId }]) as [{ tenantId?: string; includeDeleted?: boolean }]
+        ...(isPlatformAdmin
+          ? [{}]
+          : [{ tenantId }]) as [{ tenantId?: string; includeDeleted?: boolean }]
       );
     },
 

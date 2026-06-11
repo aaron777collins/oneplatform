@@ -30,6 +30,7 @@ import {
   createInstanceRoutes,
   createHookRoutes,
   createInternalRoutes,
+  createUpgradeRoutes,
 } from "./routes/index.js";
 
 // ---------------------------------------------------------------------------
@@ -111,7 +112,15 @@ async function main(): Promise<void> {
     process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
   const ingestionServiceUrl =
     process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002";
-  const serviceToken = process.env["OP_SERVICE_TOKEN"] ?? "";
+  // B7 fix: spec requires OP_SERVICE_TOKEN_SECRET; guard against empty string so
+  // internal endpoints are not accidentally left open in misconfigured deploys.
+  const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+  if (serviceToken === "") {
+    console.error(
+      "FATAL: OP_SERVICE_TOKEN_SECRET is not set. Internal endpoints will reject all requests."
+    );
+    process.exit(1);
+  }
   const retentionDays = parseInt(
     process.env["OP_PLUGIN_BUNDLE_RETENTION_DAYS"] ?? "7",
     10
@@ -302,6 +311,10 @@ async function main(): Promise<void> {
 
   const hookRoutes = createHookRoutes({ hookService });
   app.route("/api/v1/plugins", hookRoutes);
+
+  // B2 fix: register upgrade and rollback endpoints.
+  const upgradeRoutes = createUpgradeRoutes({ upgradeService });
+  app.route("/api/v1/plugins", upgradeRoutes);
 
   const internalRoutes = createInternalRoutes({
     bundleService,

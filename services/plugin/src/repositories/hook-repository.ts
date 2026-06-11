@@ -10,7 +10,10 @@ const HOOK_COLUMNS = `
 export class HookRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async createMany(hooks: CreateHookData[]): Promise<HookRow[]> {
+  // Accepts an optional transactional client so callers inside a BEGIN/COMMIT
+  // block can insert hooks within the same transaction (B1 fix — prevents orphans
+  // if the surrounding transaction rolls back).
+  async createMany(hooks: CreateHookData[], client?: pg.PoolClient): Promise<HookRow[]> {
     if (hooks.length === 0) return [];
 
     // Build a bulk insert with parameterised values — never string-interpolated data.
@@ -30,7 +33,8 @@ export class HookRepository {
       h.state,
     ]);
 
-    const result = await this.pool.query<HookRow>(
+    const executor = client ?? this.pool;
+    const result = await executor.query<HookRow>(
       `INSERT INTO plugin.hooks
          (plugin_id, instance_id, tenant_id, stage, criticality, priority, timeout_seconds, entrypoint, state)
        VALUES ${valuePlaceholders.join(", ")}
