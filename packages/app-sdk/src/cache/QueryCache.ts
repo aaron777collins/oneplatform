@@ -204,12 +204,17 @@ export class QueryCache {
   }
 
   /**
-   * Cache keys are stable JSON strings of the form { "entity": "...", ... }.
-   * This check avoids a JSON.parse per-entry by using a reliable substring match
-   * on the serialised key format.
+   * Cache keys are stable JSON strings produced by buildCacheKey, which always
+   * serialises `entity` as the first field:
+   *   {"entity":"orders","filter":...}
+   *
+   * Using startsWith on the fixed prefix avoids false positives from entity names
+   * that are substrings of longer names (e.g. "order" matching "orderItems").
+   * JSON.stringify produces deterministic key order in V8, and buildCacheKey
+   * always puts `entity` first, so the prefix approach is reliable here.
    */
   private keyBelongsToEntity(key: string, entity: string): boolean {
-    return key.includes(`"entity":"${entity}"`);
+    return key.startsWith(`{"entity":"${entity}"`);
   }
 }
 

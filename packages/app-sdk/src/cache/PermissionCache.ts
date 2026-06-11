@@ -23,6 +23,10 @@ export class PermissionCache {
   // Background refresh timer (setInterval handle)
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Set to true by destroy(). Guards refresh() so an in-flight interval
+  // callback that races with unmount cannot write to a torn-down instance.
+  private destroyed = false;
+
   // 5-minute background refresh to catch permission changes while the app is open
   private static readonly REFRESH_INTERVAL_MS = 5 * 60 * 1_000;
 
@@ -43,8 +47,16 @@ export class PermissionCache {
    * to serve reads. The next scheduled interval will try again.
    */
   async refresh(bffClient: BffClient): Promise<void> {
+    // A background interval can fire just after AppProvider unmounts and calls
+    // destroy(). Bailing out here prevents writing to listeners that have already
+    // been cleared and avoids potential memory leaks from the snapshot allocation.
+    if (this.destroyed) return;
+
     try {
       const data = await bffClient.request<BffPermissionsResponse>("/bff/permissions");
+      // Check destroyed again after the async BFF call completes in case
+      // destroy() was called while the request was in-flight.
+      if (this.destroyed) return;
       this.applySnapshot(data.permissions);
       this.notifyListeners();
     } catch {
@@ -91,6 +103,7 @@ export class PermissionCache {
    * Called by AppProvider on unmount.
    */
   destroy(): void {
+    this.destroyed = true;
     if (this.refreshTimer !== null) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;

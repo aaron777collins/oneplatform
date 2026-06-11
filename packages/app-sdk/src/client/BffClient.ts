@@ -112,17 +112,24 @@ export class BffClient {
       appendQueryParams(url.searchParams, options.queryParams);
     }
 
+    const hasBody = options.body !== undefined;
+
+    // Content-Type is only meaningful when there is a request body. Sending it
+    // on bodyless requests (e.g. DELETE) causes some servers / proxies to reject
+    // the request or interpret the absent body as malformed.
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
+    };
+
     // Build fetch init without undefined optional fields to satisfy exactOptionalPropertyTypes
     const init: RequestInit = {
       method: options.method ?? "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+      headers,
       credentials: "include",
       redirect: "error", // C-5: never follow redirects automatically
     };
-    if (options.body !== undefined) {
+    if (hasBody) {
       init.body = JSON.stringify(options.body);
     }
     if (options.signal !== undefined) {

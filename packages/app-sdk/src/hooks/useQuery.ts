@@ -101,9 +101,16 @@ export function useQuery<T = unknown>(
   // Tracks the cursor chain for fetchNextPage across renders
   const cursorsRef = React.useRef<string[]>([]);
 
+  // Holds the AbortController for the currently active fetch so the cleanup
+  // function can abort it when the component unmounts or the effect re-runs.
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+
   const fetchPage = React.useCallback(
     async (cursor: string | undefined, append: boolean): Promise<void> => {
       const controller = new AbortController();
+      // Replace any previous controller; the old request is already settled or
+      // will be ignored because its abort signal fires independently.
+      abortControllerRef.current = controller;
       const params = buildQueryParams(options, cursor);
 
       try {
@@ -121,7 +128,7 @@ export function useQuery<T = unknown>(
           promise: null,
         });
       } catch (err) {
-        // AbortError means the hook unmounted — silently ignore
+        // AbortError means the hook unmounted or the effect was re-triggered — silently ignore
         if (err instanceof Error && err.name === "AbortError") return;
 
         const sdkError: AppSDKError = isAppSDKError(err) ? err : toAppSDKError(err);
@@ -150,6 +157,14 @@ export function useQuery<T = unknown>(
       cursorsRef.current = [];
       void fetchPage(undefined, false);
     }
+
+    // Abort the in-flight request when the effect cleanup runs (unmount or
+    // dependency change). This prevents a stale response from updating the
+    // cache after the component has navigated away.
+    return () => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    };
   }, [isReady, enabled, cacheKey, staleTime, fetchPage]);
 
   const refetch = React.useCallback((): Promise<void> => {

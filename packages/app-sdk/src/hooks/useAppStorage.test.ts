@@ -31,23 +31,24 @@ describe("useAppStorage", () => {
     vi.clearAllMocks();
   });
 
-  it("throws for invalid key", () => {
+  it("returns meta.error for invalid key instead of throwing", () => {
     const client = makeMockBffClient();
     mockUseAppContext.mockReturnValue({ bffClient: client, isReady: true } as ReturnType<typeof useAppContext>);
 
-    expect(() =>
-      renderHook(() => useAppStorage("invalid key!", "default")),
-    ).toThrow("[app-sdk] useAppStorage key");
+    // Must NOT throw — dynamic keys that are momentarily invalid should not crash the component
+    const { result } = renderHook(() => useAppStorage("invalid key!", "default"));
+    expect(result.current[2].error?.message).toMatch("[app-sdk] useAppStorage key");
+    // Setter must be a no-op
+    expect(result.current[0]).toBe("default");
   });
 
-  it("throws for key exceeding 128 characters", () => {
+  it("returns meta.error for key exceeding 128 characters", () => {
     const client = makeMockBffClient();
     mockUseAppContext.mockReturnValue({ bffClient: client, isReady: true } as ReturnType<typeof useAppContext>);
 
     const longKey = "a".repeat(129);
-    expect(() =>
-      renderHook(() => useAppStorage(longKey, "default")),
-    ).toThrow("[app-sdk] useAppStorage key");
+    const { result } = renderHook(() => useAppStorage(longKey, "default"));
+    expect(result.current[2].error?.message).toMatch("[app-sdk] useAppStorage key");
   });
 
   it("returns defaultValue before BFF response resolves", () => {

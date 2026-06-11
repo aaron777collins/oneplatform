@@ -22,6 +22,9 @@ import { AppContext } from "./AppContext.js";
 import type { AppProviderProps, OPAppConfig, AppProviderInitState } from "./types.js";
 import type { UserContext } from "../types/entities.js";
 
+// Injected by the build tool. Guards sensitive error detail from production bundles.
+declare const __OP_DEV__: boolean | undefined;
+
 // ─── Config reader ────────────────────────────────────────────────────────────
 
 /**
@@ -185,12 +188,23 @@ export function AppProvider({
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (initState.status === "error") {
+    // Only expose the raw error message in development builds. In production
+    // the message may contain internal service details (URL paths, auth config)
+    // that should not be surfaced to end users.
+    //
+    // __OP_DEV__ is injected by the build tool. When it is absent (e.g. in tests
+    // or unbuilt source) we default to showing the message so developers always
+    // see useful diagnostics. The production bundle always defines __OP_DEV__=false.
+    const isDev = typeof __OP_DEV__ !== "undefined" ? __OP_DEV__ : true;
+
     return (
       <div role="alert" style={{ padding: "1rem", color: "red" }}>
         <strong>[OnePlatform] Failed to initialise app SDK</strong>
-        <pre style={{ marginTop: "0.5rem", fontSize: "0.875rem" }}>
-          {initState.message}
-        </pre>
+        {isDev && (
+          <pre style={{ marginTop: "0.5rem", fontSize: "0.875rem" }}>
+            {initState.message}
+          </pre>
+        )}
       </div>
     );
   }

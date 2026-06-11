@@ -33,15 +33,18 @@ export const AppContext = React.createContext<AppContextValue | null>(null);
 // ─── No-op fallback for production mode outside provider ─────────────────────
 
 /**
- * Returns a no-op context used in production when a hook is called outside
- * AppProvider. We return safe fallback values rather than throwing so that
- * a misconfigured subtree does not crash the entire shell page.
+ * Module-level singleton for the no-op production fallback context.
  *
- * In development mode useAppContext() throws a descriptive error instead
- * (see below) to catch misconfiguration during development.
+ * Allocated lazily the first time a hook is called outside AppProvider in
+ * production. Kept as a singleton so repeated calls share the same
+ * BffClient / PermissionCache / WebSocketManager instances instead of
+ * spawning heavyweight new objects on every render.
  */
-function createNullContext(): AppContextValue {
-  return {
+let _nullContext: AppContextValue | null = null;
+
+function getNullContext(): AppContextValue {
+  // Initialise once; subsequent calls return the same object.
+  _nullContext ??= {
     appId: "",
     tenantId: "",
     bffClient: new BffClient(),
@@ -50,6 +53,7 @@ function createNullContext(): AppContextValue {
     user: null,
     isReady: false,
   };
+  return _nullContext;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -73,7 +77,7 @@ export function useAppContext(): AppContextValue {
       );
     }
     // Production: return safe no-op context rather than crashing the shell
-    return createNullContext();
+    return getNullContext();
   }
   return ctx;
 }

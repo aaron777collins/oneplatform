@@ -41,6 +41,9 @@ export class WebSocketManager {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private appSlug = "";
+  // Guards scheduleReconnect and connect after destroy() is called so that a
+  // close event racing with destroy() cannot resurrect the connection.
+  private destroyed = false;
 
   // Listeners subscribed to connection status changes (useSyncExternalStore)
   private readonly statusListeners = new Set<() => void>();
@@ -55,7 +58,19 @@ export class WebSocketManager {
    * URL is derived from window.location.origin only (C-6).
    */
   connect(slug: string): void {
+    if (this.destroyed) return;
+
     this.appSlug = slug;
+
+    // Remove listeners from any previous socket before creating the new one so
+    // stale close/error events from the old socket don't trigger a second reconnect.
+    if (this.socket !== null) {
+      this.socket.removeEventListener("open", this.handleOpen);
+      this.socket.removeEventListener("message", this.handleMessage);
+      this.socket.removeEventListener("close", this.handleClose);
+      this.socket.removeEventListener("error", this.handleError);
+    }
+
     // Replace http(s): with ws(s): to derive the WebSocket URL from the same origin
     const wsOrigin = window.location.origin.replace(/^http/, "ws");
     const url = `${wsOrigin}/apps/${encodeURIComponent(slug)}/ws`;
@@ -116,12 +131,24 @@ export class WebSocketManager {
    * Called by AppProvider on unmount.
    */
   destroy(): void {
+    this.destroyed = true;
+
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.socket?.close();
-    this.socket = null;
+
+    // Remove all event listeners before closing so the close event fired by
+    // socket.close() does not re-enter scheduleReconnect.
+    if (this.socket !== null) {
+      this.socket.removeEventListener("open", this.handleOpen);
+      this.socket.removeEventListener("message", this.handleMessage);
+      this.socket.removeEventListener("close", this.handleClose);
+      this.socket.removeEventListener("error", this.handleError);
+      this.socket.close();
+      this.socket = null;
+    }
+
     this.statusListeners.clear();
   }
 
@@ -178,6 +205,9 @@ export class WebSocketManager {
    * attempt 0 → 1s, 1 → 2s, 2 → 4s, 3 → 8s, 4 → 16s, 5+ → 30s (capped)
    */
   private scheduleReconnect(): void {
+    // Do not schedule a reconnect if destroy() has already been called.
+    if (this.destroyed) return;
+
     const delay = Math.min(
       WebSocketManager.BASE_RECONNECT_MS * 2 ** this.reconnectAttempts,
       WebSocketManager.MAX_RECONNECT_MS,

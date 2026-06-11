@@ -182,4 +182,38 @@ describe("BffClient.request", () => {
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(options.body).toBeUndefined();
   });
+
+  it("omits Content-Type header on DELETE with no body", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: makeHeaders(),
+      json: () => Promise.resolve({}),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = new BffClient();
+    await client.request("/bff/data/orders/o1", { method: "DELETE" });
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = options.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("includes Content-Type header when body is present", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: makeHeaders(),
+      json: () => Promise.resolve({ id: "new-id" }),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = new BffClient();
+    await client.request("/bff/data/orders", { method: "POST", body: { name: "test" } });
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = options.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
 });
