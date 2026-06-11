@@ -150,7 +150,8 @@ export const ConnectorRunResponseSchema = z.object({
 
 export const PluginDrainResponseSchema = z.object({
   data: z.object({
-    pluginId: UUIDSchema,
+    // pluginId is a manifest ID (arbitrary string), not a UUID — matches PluginDrainRequestSchema
+    pluginId: z.string(),
     drainedAt: z.string().datetime(),
     inflightAtDrainStart: z.number().int(),
     inflightAtCompletion: z.number().int(),

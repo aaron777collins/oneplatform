@@ -1,4 +1,5 @@
 import type { Logger } from "@oneplatform/core";
+import { ExecutionSandboxUnavailableError } from "./errors.js";
 import type { UnixSocketClient } from "./unix-socket-client.js";
 
 // ---------------------------------------------------------------------------
@@ -247,9 +248,6 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
 
   function getPrimary(): SandboxInstance {
     if (primary.state === "STARTING") {
-      const { ExecutionSandboxUnavailableError } = require("./errors.js") as {
-        ExecutionSandboxUnavailableError: new (msg: string) => Error;
-      };
       throw new ExecutionSandboxUnavailableError(
         "Sandbox is starting up or reconnecting — no healthy instance available.",
       );

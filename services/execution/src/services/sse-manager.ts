@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@oneplatform/core";
 
+// How long to retain the log buffer after execution completion.
+// Late subscribers (e.g. a UI that reconnects within 5 minutes) can still
+// replay all lines via Last-Event-ID without a full DB round-trip.
+const LOG_BUFFER_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 // ---------------------------------------------------------------------------
 // SseManager — fan-out SSE log streaming for in-progress executions
 // Design spec §4.3
@@ -74,8 +79,13 @@ export function createSseManager(deps: SseManagerDeps): SseManager {
   // execution ID → set of active subscribers
   const subscriptions = new Map<string, Map<string, Subscriber>>();
 
-  // Buffered log lines per execution (for Last-Event-ID replay)
+  // Buffered log lines per execution (for Last-Event-ID replay).
+  // Entries survive for LOG_BUFFER_TTL_MS after closeAllSubscribers() so that
+  // late subscribers connecting within the TTL window can replay missed lines.
   const logBuffers = new Map<string, SseLogEvent[]>();
+
+  // Pending cleanup timers keyed by execution ID (set on completion/error)
+  const bufferCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function getOrCreateSubscriberMap(executionId: string): Map<string, Subscriber> {
     let map = subscriptions.get(executionId);
@@ -225,9 +235,22 @@ export function createSseManager(deps: SseManagerDeps): SseManager {
     }
 
     subscriptions.delete(executionId);
-    // Keep the log buffer a bit longer for late subscribers; in production
-    // this would be pruned by a TTL mechanism. For now we clean up immediately.
-    logBuffers.delete(executionId);
+
+    // Retain the log buffer for LOG_BUFFER_TTL_MS so late-connecting subscribers
+    // (e.g. a UI that briefly drops its SSE connection) can still replay all lines.
+    // Cancel any existing timer for this execution before setting a new one to
+    // avoid double-cleanup if the execution terminates unexpectedly mid-drain.
+    const existing = bufferCleanupTimers.get(executionId);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+    }
+    const handle = setTimeout(() => {
+      logBuffers.delete(executionId);
+      bufferCleanupTimers.delete(executionId);
+    }, LOG_BUFFER_TTL_MS);
+    // unref() so the timer does not prevent Node from exiting cleanly in tests
+    handle.unref();
+    bufferCleanupTimers.set(executionId, handle);
   }
 
   function unsubscribe(executionId: string, subscriberId: string): void {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "@oneplatform/core";
 import type { ExecutionRepository } from "../repositories/execution-repository.js";
 import type { ExecutionLogRepository } from "../repositories/execution-log-repository.js";
@@ -70,8 +70,9 @@ export interface InvalidateResult {
 
 export interface ExecutionService {
   runExecution(request: RunRequest, user: UserContext): Promise<RunExecutionResult>;
-  runInternalExecution(request: InternalRunRequest): Promise<RunExecutionResult>;
-  runConnectorExecution(request: ConnectorRunRequest): Promise<ConnectorRunResult>;
+  /** @param initiatedBy The service name extracted from the verified service token sub claim. */
+  runInternalExecution(request: InternalRunRequest, initiatedBy: string): Promise<RunExecutionResult>;
+  runConnectorExecution(request: ConnectorRunRequest, initiatedBy: string): Promise<ConnectorRunResult>;
   getExecution(tenantId: string, id: string): Promise<ExecutionRow>;
   listExecutions(tenantId: string, query: ListExecutionsQueryInput): Promise<ExecutionRow[]>;
   drainPlugin(request: PluginDrainRequest): Promise<DrainPluginResult>;
@@ -96,9 +97,6 @@ export interface ExecutionServiceDeps {
   serviceName?: string;
 }
 
-// Plugins currently being drained — new requests for listed pluginIds are rejected
-const drainingPlugins = new Map<string, boolean>();
-
 export function createExecutionService(deps: ExecutionServiceDeps): ExecutionService {
   const {
     executionRepo,
@@ -111,6 +109,11 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     serviceBaseUrl,
     serviceName = "execution-service",
   } = deps;
+
+  // Plugins currently being drained — new requests for listed pluginIds are rejected.
+  // Must be per-service-instance (inside the factory) so test isolation and future
+  // multi-instance setups do not share state across unrelated instances.
+  const drainingPlugins = new Map<string, boolean>();
 
   // ---------------------------------------------------------------------------
   // Wire sandbox log line callback — fan out to SSE and DB
@@ -131,10 +134,14 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
 
     // Write to DB asynchronously — do not await to keep the socket receive path fast.
     // Loss on crash is acceptable; SSE ensures real-time delivery to connected clients.
+    //
+    // execution_date must match the execution's started_at so the log row lands in
+    // the correct co-partitioned range. Using new Date() here would cause rows to
+    // drift into the wrong daily partition whenever the log line arrives after midnight.
     logRepo
       .append({
         execution_id: logLine.id,
-        execution_date: new Date(),
+        execution_date: new Date(logLine.timestamp),
         level: logLine.level,
         message: logLine.message,
         line_number: logLine.line,
@@ -156,7 +163,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     request: RunRequest,
     user: UserContext,
   ): Promise<RunExecutionResult> {
-    const traceId = crypto.randomUUID();
+    const traceId = randomUUID();
     const codeHash = createHash("sha256").update(request.code).digest("hex");
 
     const createData: CreateExecutionData = {
@@ -193,6 +200,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
 
   async function runInternalExecution(
     request: InternalRunRequest,
+    initiatedBy: string,
   ): Promise<RunExecutionResult> {
     const ctx = request.context;
     const pluginId = ctx.pluginId;
@@ -214,7 +222,8 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
       language: request.language,
       sandbox_type: sandboxType,
       trace_id: ctx.traceId,
-      initiated_by: "pipeline-service",
+      // Use the verified service token sub claim so audit records name the actual caller
+      initiated_by: initiatedBy,
       code_hash: codeHash,
       ...(pluginId !== undefined ? { plugin_id: pluginId } : {}),
       ...(ctx.pipelineId !== undefined ? { pipeline_id: ctx.pipelineId } : {}),
@@ -249,12 +258,16 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
 
   async function runConnectorExecution(
     request: ConnectorRunRequest,
+    initiatedBy: string,
   ): Promise<ConnectorRunResult> {
-    // Fetch plugin bundle from cache (or Plugin Service)
+    // Fetch plugin bundle from cache (or Plugin Service).
+    // "latest" is a well-known sentinel that the Plugin Service resolves to the
+    // current published version; it also ensures a stable cache key rather than
+    // the empty string which always misses (the LRU key includes the version segment).
     const bundle = await pluginBundleCache.get(
       request.tenantId,
       request.pluginId,
-      "", // use latest version
+      "latest",
     );
 
     const traceId = request.traceId;
@@ -264,7 +277,8 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
       language: "js",
       sandbox_type: "isolated-vm",
       trace_id: traceId,
-      initiated_by: "ingestion-service",
+      // Use the verified service token sub claim so audit records name the actual caller
+      initiated_by: initiatedBy,
       plugin_id: request.pluginId,
       ...(request.pipelineRunId !== undefined ? { pipeline_run_id: request.pipelineRunId } : {}),
     };

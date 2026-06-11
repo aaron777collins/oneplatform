@@ -60,7 +60,10 @@ export function createInternalRoutes(
       );
     }
 
-    const result = await executionService.runInternalExecution(parsed.data);
+    // c.var.user.userId contains the verified service token sub claim (the caller's
+    // service name). Use it as initiated_by so audit records name the actual caller.
+    const initiatedBy = c.var.user?.userId ?? "unknown-service";
+    const result = await executionService.runInternalExecution(parsed.data, initiatedBy);
 
     return c.json(
       {
@@ -103,7 +106,8 @@ export function createInternalRoutes(
       );
     }
 
-    const result = await executionService.runConnectorExecution(parsed.data);
+    const initiatedBy = c.var.user?.userId ?? "unknown-service";
+    const result = await executionService.runConnectorExecution(parsed.data, initiatedBy);
 
     return c.json({
       data: {

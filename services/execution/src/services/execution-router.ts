@@ -268,12 +268,10 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
       },
     };
 
-    // Register for context calls BEFORE sending the request
+    // ExecutionService registers the global onLogLine callback during construction.
+    // Do not register a second callback here — it would overwrite the service-level
+    // handler and discard all log lines after the first execution completes.
     const client: UnixSocketClient = sandbox.client;
-    client.onLogLine((_logLine) => {
-      // Log lines are handled by the caller (ExecutionService) which registered
-      // its own callback. This is a no-op here — we just need the handler registered.
-    });
 
     let response: SandboxResponse;
     const timeoutPromise = new Promise<never>((_, reject) => {

@@ -101,7 +101,23 @@ export function createExecRoutes(
 
     const id = c.req.param("id");
 
-    const execution = await executionService.getExecution(user.tenantId, id);
+    // getExecution throws ExecutionNotFoundError when the record is absent or
+    // belongs to a different tenant (responses are identical to avoid leaking
+    // cross-tenant existence). Core's global error handler catches AppError
+    // subclasses, but we handle this explicitly here to return the correct 404
+    // body shape with the request ID already in scope.
+    let execution: Awaited<ReturnType<typeof executionService.getExecution>>;
+    try {
+      execution = await executionService.getExecution(user.tenantId, id);
+    } catch (err) {
+      if (err instanceof ExecutionNotFoundError) {
+        return c.json(
+          { error: { code: "EXECUTION_NOT_FOUND", message: `Execution ${id} not found.`, requestId: c.var.requestId } },
+          404,
+        );
+      }
+      throw err;
+    }
 
     return c.json({
       data: {
