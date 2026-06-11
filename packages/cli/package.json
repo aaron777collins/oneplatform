@@ -5,20 +5,43 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "op": "./dist/index.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "build:binaries": "bash scripts/build-binaries.sh",
     "dev": "tsc --project tsconfig.json --watch",
     "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint src",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "docs:generate": "tsx src/lib/docs-generator.ts"
   },
   "devDependencies": {
-    "typescript": "*"
+    "@types/inquirer": "^9.0.9",
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "*",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@oneplatform/sdk": "workspace:*",
+    "cli-table3": "^0.6.5",
+    "commander": "^15.0.0",
+    "inquirer": "10",
+    "js-yaml": "^4.2.0"
   }
 }
