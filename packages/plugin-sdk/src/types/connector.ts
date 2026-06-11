@@ -86,7 +86,7 @@ export interface Connector {
   /**
    * Fetch the next batch of records from the external system.
    *
-   * cursor=undefined signals the first call (fetch from the beginning of available data).
+   * cursor=null signals the first call (fetch from the beginning of available data).
    * For incremental syncs, the cursor is the value returned by the previous fetchBatch.
    * The platform stores the last successful cursor and resumes from it on retry.
    *
@@ -100,7 +100,7 @@ export interface Connector {
    */
   fetchBatch(
     handle: ConnectorHandle,
-    cursor: string | undefined,
+    cursor: string | null,
     context: PluginContext,
   ): Promise<BatchResult>;
 

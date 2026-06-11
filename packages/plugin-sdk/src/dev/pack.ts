@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
-import * as tar from "node:stream";
+import * as nodeStream from "node:stream";
 import { validateManifest } from "../manifest/schema.js";
 import type { PluginManifest } from "../manifest/schema.js";
 
@@ -337,7 +337,7 @@ async function createTarGz(outputPath: string, filePaths: string[]): Promise<voi
     const output = fs.createWriteStream(outputPath);
     const gzip = zlib.createGzip();
 
-    const passthrough = new tar.PassThrough();
+    const passthrough = new nodeStream.PassThrough();
     passthrough.pipe(gzip).pipe(output);
 
     output.on("error", reject);
@@ -460,6 +460,28 @@ interface EntrypointCheckResult {
   message?: string;
 }
 
+/**
+ * Re-bundle an already-compiled ESM buffer as CJS so it can be loaded inside a
+ * vm.Script context that uses the classic `exports`/`module.exports` shim.
+ *
+ * esbuild's `transform` API handles ESM→CJS rewriting entirely in-process
+ * without spawning a child process, and requires no filesystem access.
+ * We use `stdin` mode (source passed as a string) so no temp file is needed.
+ */
+async function toBundleCjs(esmSource: string): Promise<string> {
+  // Dynamic import so that projects without esbuild installed still compile;
+  // the error surface is narrow — it only surfaces during pack validation.
+  const { transform } = await import("esbuild");
+  // `transform` operates on a single source string (no bundling step);
+  // `bundle` is a build-API-only option and must not be passed here.
+  const result = await transform(esmSource, {
+    format: "cjs",
+    platform: "node",
+    target: "node20",
+  });
+  return result.code;
+}
+
 async function verifyEntrypoint(
   bundleBytes: Buffer,
   entrypoint: string,
@@ -469,8 +491,15 @@ async function verifyEntrypoint(
   const moduleExports: Record<string, unknown> = {};
   const context = createContext({ exports: moduleExports, module: { exports: moduleExports } });
 
+  let cjsSource: string;
   try {
-    new Script(bundleBytes.toString("utf-8")).runInContext(context);
+    cjsSource = await toBundleCjs(bundleBytes.toString("utf-8"));
+  } catch (err) {
+    return { valid: false, message: `CJS re-bundle error: ${String(err)}` };
+  }
+
+  try {
+    new Script(cjsSource).runInContext(context);
   } catch (err) {
     return { valid: false, message: `Bundle execution error: ${String(err)}` };
   }
@@ -496,8 +525,15 @@ async function verifyMetadataType(
   const moduleExports: Record<string, unknown> = {};
   const context = createContext({ exports: moduleExports, module: { exports: moduleExports } });
 
+  let cjsSource: string;
   try {
-    new Script(bundleBytes.toString("utf-8")).runInContext(context);
+    cjsSource = await toBundleCjs(bundleBytes.toString("utf-8"));
+  } catch (err) {
+    return { valid: false, message: `CJS re-bundle error: ${String(err)}` };
+  }
+
+  try {
+    new Script(cjsSource).runInContext(context);
   } catch (err) {
     return { valid: false, message: `Bundle execution error: ${String(err)}` };
   }

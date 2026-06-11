@@ -37,8 +37,10 @@ export const PluginManifestSchema = z.object({
     .string()
     .min(3)
     .max(200)
-    .regex(/^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*[a-z0-9])+$/, {
-      message: "id must be reverse-domain format, e.g. com.example.my-plugin",
+    // Requires at least three dot-separated segments (e.g. com.example.plugin).
+    // Each segment may be a single character, fixing rejection of e.g. com.x.plugin.
+    .regex(/^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*){2,}$/, {
+      message: "id must be reverse-domain format with at least three segments, e.g. com.example.my-plugin",
     }),
 
   name: z.string().min(2).max(100),
@@ -51,7 +53,8 @@ export const PluginManifestSchema = z.object({
 
   type: z.enum(["connector", "transformer", "destination", "auth-provider", "widget"]),
 
-  description: z.string().min(10).max(200),
+  // 500 aligns with BaseMetadata's description limit in types/metadata.ts
+  description: z.string().min(10).max(500),
 
   author: z.string().min(1).max(200),
 

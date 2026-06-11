@@ -27,6 +27,13 @@ export interface SimulateHookCliArgs {
   /** The hook stage, e.g. "before:ingestion.receive" */
   stage: string;
 
+  /**
+   * Named export to invoke as the hook function.
+   * Defaults to the value of `entrypoint` in the plugin's manifest.
+   * When provided explicitly, overrides whatever is in the manifest.
+   */
+  entrypoint?: string;
+
   /** Path to the compiled bundle.js. Default: ./dist/bundle.js */
   plugin?: string;
 
@@ -111,6 +118,27 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
     process.exit(1);
   }
 
+  // Resolve the hook entrypoint: explicit CLI arg > manifest field > error.
+  // We read the manifest here (not in the vm context) so the CLI arg can override it.
+  let entrypoint: string;
+  if (args.entrypoint !== undefined) {
+    entrypoint = args.entrypoint;
+  } else {
+    const manifestPath = path.resolve(path.dirname(bundlePath), "..", "plugin.manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      process.stderr.write(
+        `Error: cannot determine entrypoint — provide --entrypoint or ensure plugin.manifest.json exists at "${manifestPath}"\n`,
+      );
+      process.exit(1);
+    }
+    const rawManifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+    if (typeof rawManifest["entrypoint"] !== "string") {
+      process.stderr.write(`Error: plugin.manifest.json is missing a valid "entrypoint" field\n`);
+      process.exit(1);
+    }
+    entrypoint = rawManifest["entrypoint"];
+  }
+
   // Load the HookPayload data from --input file or use an empty object
   const inputData: Record<string, unknown> = args.input
     ? loadJsonFile(args.input, "--input")
@@ -157,17 +185,28 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
     process.stderr.write("[sandbox mode not available in SDK — install isolated-vm in the CLI]\n");
     process.exit(1);
   } else {
-    // Fast path: vm.Script with a synthetic module environment
-    // Provides basic isolation without the overhead of a full V8 isolate
+    // Fast path: vm.Script with a synthetic module environment.
+    // Provides basic isolation without the overhead of a full V8 isolate.
     const moduleExports: Record<string, unknown> = {};
+
+    // __resolve + __done let the host await full async hook completion.
+    // A single setTimeout(0) tick is not enough when the hook itself awaits I/O;
+    // awaiting __done waits for the inner IIFE to actually settle.
+    // We always resolve (never reject) so __error is read from context after settling.
+    let vmResolve!: () => void;
+    const vmDone = new Promise<void>((res) => {
+      vmResolve = res;
+    });
 
     const context = vm.createContext({
       exports: moduleExports,
       module: { exports: moduleExports },
       __pluginContext: mockCtx,
       __hookPayload: hookPayload,
+      __entrypoint: entrypoint,
       __result: undefined as HookResult | undefined,
       __error: undefined as unknown,
+      __resolve: vmResolve,
       performance,
       console,
       setTimeout,
@@ -179,20 +218,22 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
     const wrappedSource = `
       (async () => {
         ${bundleSource}
-        const fn = exports[Object.keys(exports)[0]];
+        const fn = exports[__entrypoint];
         if (typeof fn !== "function") {
-          throw new Error("Bundle does not export a callable function");
+          throw new Error(
+            "Bundle export \\"" + __entrypoint + "\\" is not a callable function (got " + typeof fn + ")"
+          );
         }
         __result = await fn(__hookPayload, __pluginContext);
-      })().then(() => {}).catch((e) => { __error = e; });
+      })().then(() => { __resolve(); }).catch((e) => { __error = e; __resolve(); });
     `;
 
     const script = new vm.Script(wrappedSource);
     try {
       script.runInContext(context);
-      // Allow micro-tasks to settle — vm.Script runs synchronously but async
-      // functions need to flush their internal promise queues
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // Await the promise that the inner IIFE resolves — this correctly handles
+      // hooks that await real async work, not just a single microtask tick.
+      await vmDone;
     } catch (err) {
       errorInfo = buildErrorInfo(err);
     }

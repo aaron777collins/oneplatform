@@ -35,10 +35,11 @@ export type HookStage =
   | "before:pipeline.complete"
   | "after:pipeline.complete"
   // Execution Service
-  | "before:execution.before"
-  | "after:execution.before"
-  | "before:execution.after"
-  | "after:execution.after"
+  // "setup" = the pre-run wiring phase; "teardown" = the post-run cleanup phase
+  | "before:execution.setup"
+  | "after:execution.setup"
+  | "before:execution.teardown"
+  | "after:execution.teardown"
   // Auth Service
   | "before:auth.login"
   | "after:auth.login"

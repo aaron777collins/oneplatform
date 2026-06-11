@@ -39,8 +39,7 @@ export interface ScaffoldResult {
 // Manifest template
 // ────────────────────────────────────────────────────────────────────────────
 
-function buildManifest(opts: ScaffoldOptions): string {
-  const entrypoint = toPascalCase(opts.name.replace(/[^a-zA-Z0-9]/g, " "));
+function buildManifest(opts: ScaffoldOptions, entrypoint: string): string {
 
   const typeSpecific: Record<PluginType, object> = {
     connector: {
@@ -194,10 +193,10 @@ export const ${entrypoint}: Connector = {
 
   async fetchBatch(
     handle: ConnectorHandle,
-    cursor: string | undefined,
+    cursor: string | null,
     context: PluginContext,
   ): Promise<BatchResult> {
-    const offset = cursor ? parseInt(cursor, 10) : 0;
+    const offset = cursor !== null ? parseInt(cursor, 10) : 0;
     context.logger.info("Fetching batch", { offset });
 
     // TODO: implement actual API call using handle.metadata.baseUrl
@@ -521,6 +520,7 @@ dist/
  * This separation makes the scaffold testable without touching the filesystem.
  */
 export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
+  // Compute once and pass down — avoids divergence between manifest and source file.
   const entrypoint = toPascalCase(opts.name.replace(/[^a-zA-Z0-9]/g, " "));
 
   const sourceBuilders: Record<PluginType, (o: ScaffoldOptions, e: string) => string> = {
@@ -536,7 +536,7 @@ export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
   const files: ScaffoldedFile[] = [
     { relativePath: "package.json", content: buildPackageJson(opts) },
     { relativePath: "tsconfig.json", content: buildTsConfig() },
-    { relativePath: "plugin.manifest.json", content: buildManifest(opts) },
+    { relativePath: "plugin.manifest.json", content: buildManifest(opts, entrypoint) },
     { relativePath: "src/index.ts", content: buildSource(opts, entrypoint) },
     { relativePath: "src/__tests__/index.test.ts", content: buildTestSource(opts, entrypoint) },
     { relativePath: ".gitignore", content: buildGitIgnore() },
