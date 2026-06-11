@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import type { ConnectorService, SyncService, CredentialService } from "../services/index.js";
+import type { ConnectorRepository } from "../services/connector-service.js";
 import {
   registerConnectorPluginRequest,
   internalSyncRequest,
@@ -8,6 +9,7 @@ import {
 
 export interface InternalRouteDeps {
   connectorService: ConnectorService;
+  connectorRepo: ConnectorRepository;
   credentialService: CredentialService;
   syncService: SyncService;
   masterKey: Buffer;
@@ -15,7 +17,7 @@ export interface InternalRouteDeps {
 
 export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { connectorService, credentialService, syncService, masterKey } = deps;
+  const { connectorService, connectorRepo, credentialService, syncService, masterKey } = deps;
 
   routes.post("/ingestion/connectors", async (c) => {
     const user = c.var.user;
@@ -51,8 +53,11 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
     }
 
     const instanceId = c.req.param("instanceId");
-    await connectorService.deleteConnector("*", instanceId, masterKey);
-    return c.json({ disabledCount: 1 });
+    // Disable (not delete) so existing connector rows remain visible in the UI
+    // with is_enabled=false rather than disappearing. Hard delete is reserved
+    // for tenant-initiated connector removal.
+    const disabledCount = await connectorRepo.disableByInstanceId(instanceId);
+    return c.json({ disabledCount });
   });
 
   routes.delete("/ingestion/connectors/plugin/:pluginId", async (c) => {
@@ -81,6 +86,13 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
     const user = c.var.user;
     if (!user?.isService) {
       return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+    }
+    // Credentials are decrypted on behalf of the Execution Service only.
+    // user.userId carries the service name for service-to-service tokens
+    // (claims.sub = the caller's service identity, set in serviceAuthMiddleware).
+    // Any other internal caller is denied to enforce least-privilege access.
+    if (user.userId !== "execution-service") {
+      return c.json({ error: { code: "FORBIDDEN", message: "Credential access is restricted to execution-service." } }, 403);
     }
 
     const connectorId = c.req.param("credentialBundleId");

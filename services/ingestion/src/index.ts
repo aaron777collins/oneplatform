@@ -27,6 +27,7 @@ import {
   createRetentionService,
 } from "./services/index.js";
 import type { SyncJobPayload, BatchJobPayload } from "./services/index.js";
+import type { FileParseJobPayload } from "./services/upload-service.js";
 import { createWebhookManagementService } from "./services/webhook-management-service.js";
 import {
   createHealthRoutes,
@@ -118,6 +119,7 @@ async function main(): Promise<void> {
     redis,
     masterKey,
     logger,
+    executionServiceUrl,
   });
 
   const webhookReceiveService = createWebhookReceiveService({
@@ -184,7 +186,18 @@ async function main(): Promise<void> {
     },
   );
 
-  logger.info("BullMQ sync and batch workers started");
+  const fileParseWorker = new Worker<FileParseJobPayload>(
+    "ingestion:file-parse",
+    async (job) => uploadService.processUploadJob(job),
+    {
+      connection: { url: config.OP_REDIS_URL },
+      concurrency: parseInt(process.env["OP_FILE_PARSE_WORKER_CONCURRENCY"] ?? "5", 10),
+      removeOnComplete: { age: 86_400 },
+      removeOnFail: { age: 604_800 },
+    },
+  );
+
+  logger.info("BullMQ sync, batch, and file-parse workers started");
 
   // Step 8: Start retention scheduler (daily cleanup)
   retentionService.startScheduler();
@@ -210,7 +223,7 @@ async function main(): Promise<void> {
   });
 
   // Step 11: Register routes (order matters — specific before catch-all)
-  const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt });
+  const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt, storage, masterKey });
   app.route("/", healthRoutes);
 
   const connectorRoutes = createConnectorRoutes({ connectorService, syncService, masterKey });
@@ -226,12 +239,14 @@ async function main(): Promise<void> {
   const maxFileSizeBytes = parseInt(process.env["OP_UPLOAD_MAX_SIZE_BYTES"] ?? String(5 * 1024 * 1024 * 1024), 10);
   const uploadRoutes = createUploadRoutes({
     uploadService,
+    storage,
     ...(maxFileSizeBytes ? { maxFileSizeBytes } : {}),
   });
   app.route("/api/v1/uploads", uploadRoutes);
 
   const internalRoutes = createInternalRoutes({
     connectorService,
+    connectorRepo,
     credentialService,
     syncService,
     masterKey,
@@ -312,6 +327,7 @@ async function main(): Promise<void> {
     void Promise.all([
       syncWorker.close(),
       batchWorker.close(),
+      fileParseWorker.close(),
     ]).then(() => {
       server.close(() => {
         void db.end().then(() => {

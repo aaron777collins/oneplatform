@@ -77,6 +77,7 @@ export interface ConnectorRepository {
   update(id: string, data: UpdateConnectorData): Promise<ConnectorRow | null>;
   softDelete(id: string): Promise<boolean>;
   disableByPluginId(pluginId: string): Promise<number>;
+  disableByInstanceId(instanceId: string): Promise<number>;
   // list() supports cross-tenant iteration when tenantId is "*" — used by
   // the retention scheduler and internal plugin-management routes only.
   list(tenantId: string, options: ListConnectorsOptions): Promise<ConnectorListResult>;

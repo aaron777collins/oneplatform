@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { hash as bcryptHash, compare as bcryptCompare } from "bcryptjs";
-import { encrypt } from "@oneplatform/core";
+import { encrypt, ForbiddenError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import { WebhookReceiverNotFoundError } from "./errors.js";
 import type {
@@ -218,10 +218,15 @@ export function createWebhookManagementService(
       throw new WebhookReceiverNotFoundError(`Webhook receiver ${id} not found`);
     }
 
-    // Verify the current secret using the bcrypt hash
+    // Verify the current secret using the bcrypt hash.
+    // Throws ForbiddenError (403) rather than WebhookReceiverNotFoundError so
+    // the rotate-secret endpoint can surface a meaningful "wrong secret" response
+    // without leaking receiver existence via a 404 (the receive endpoint does
+    // that, but the management API sits behind authentication so enumeration is
+    // already gated by tenantId ownership).
     const matches = await bcryptCompare(currentSecret, existing.secret_hash);
     if (!matches) {
-      throw new WebhookReceiverNotFoundError("Current secret does not match");
+      throw new ForbiddenError("Current secret does not match.");
     }
 
     // Generate a new secret

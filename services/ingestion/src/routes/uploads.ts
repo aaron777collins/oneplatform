@@ -1,6 +1,7 @@
 import { Hono } from "hono";
+import { Queue } from "bullmq";
 import type { AppVariables } from "@oneplatform/core";
-import type { UploadService } from "../services/index.js";
+import type { UploadService, ObjectStorageClient, FileParseJobPayload } from "../services/upload-service.js";
 import { UploadFileTooLargeError, UploadUnsupportedTypeError } from "../services/errors.js";
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -11,15 +12,30 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 
 const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
+const FILE_UPLOADS_BUCKET = "file-uploads";
+const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
+
+// The file-parse queue is shared across all upload route instances (module-level
+// singleton so we don't create a new connection per request).
+const fileParseQueue = new Queue<FileParseJobPayload>("ingestion:file-parse", {
+  connection: { lazyConnect: true, url: redisUrl },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5_000 },
+    removeOnComplete: { age: 86_400 },
+    removeOnFail: { age: 604_800 },
+  },
+});
 
 export interface UploadRouteDeps {
   uploadService: UploadService;
+  storage: ObjectStorageClient;
   maxFileSizeBytes?: number;
 }
 
 export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { uploadService } = deps;
+  const { uploadService, storage } = deps;
   const maxFileSize = deps.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
 
   routes.post("/", async (c) => {
@@ -58,7 +74,7 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
       ? formData["connectorId"]
       : undefined;
 
-    const result = await uploadService.createUpload({
+    const uploadJob = await uploadService.createUpload({
       tenantId: user.tenantId,
       userId: user.userId,
       filename,
@@ -67,13 +83,31 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
       ...(connectorId ? { connectorId } : {}),
     });
 
+    // Stream the multipart bytes to MinIO before returning.
+    // Failure here should propagate — the client must retry rather than
+    // polling a job that will never have data to parse.
+    const minioKey = `file-uploads/${user.tenantId}/${uploadJob.id}/${filename}`;
+    const fileStream = file.stream();
+    await storage.putObject(FILE_UPLOADS_BUCKET, minioKey, fileStream, contentType);
+
+    // Enqueue the parse worker now that the bytes are durably in MinIO.
+    await fileParseQueue.add("parse", {
+      uploadJobId: uploadJob.id,
+      tenantId: user.tenantId,
+      // Use connector ID from the job row (may be null for unlinked uploads).
+      connectorId: uploadJob.connector_id ?? uploadJob.id,
+      minioKey,
+      contentType,
+      filename,
+    });
+
     return c.json({
       data: {
-        uploadJobId: result.id,
-        status: result.status,
-        filename: result.filename,
-        contentType: result.content_type,
-        fileSizeBytes: result.file_size_bytes,
+        uploadJobId: uploadJob.id,
+        status: uploadJob.status,
+        filename: uploadJob.filename,
+        contentType: uploadJob.content_type,
+        fileSizeBytes: uploadJob.file_size_bytes,
       },
     }, 202);
   });

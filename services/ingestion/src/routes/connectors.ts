@@ -110,8 +110,9 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
     if (d.credentials !== undefined) updates["credentials"] = d.credentials;
     if (d.syncMode !== undefined) updates["syncMode"] = d.syncMode;
     if (d.isEnabled !== undefined) updates["isEnabled"] = d.isEnabled;
-    if (d.description !== undefined && d.description !== null) updates["description"] = d.description;
-    if (d.scheduleCron !== undefined && d.scheduleCron !== null) updates["scheduleCron"] = d.scheduleCron;
+    // null is a valid value here — it explicitly clears description / scheduleCron.
+    if (d.description !== undefined) updates["description"] = d.description;
+    if (d.scheduleCron !== undefined) updates["scheduleCron"] = d.scheduleCron;
 
     const connector = await connectorService.updateConnector(
       user.tenantId,

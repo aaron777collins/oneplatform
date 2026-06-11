@@ -320,26 +320,29 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
         }
       }
 
-      // Accumulate raw bytes from the ReadableStream.
-      const reader = objectStream.getReader();
-      const chunks: Uint8Array[] = [];
-      while (true) {
-        const result = await reader.read();
-        if (result.done) break;
-        chunks.push(result.value);
-      }
-      const rawContent = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
-
+      // Stream the file from MinIO line-by-line rather than buffering the
+      // entire file in memory — this keeps peak heap usage proportional to a
+      // single chunk rather than the file size (design spec §9.3, W10).
       if (normaliseContentType === "application/json") {
+        // JSON arrays must be parsed as a whole so we collect chunks into a
+        // Node.js Buffer; the MaxUploadBytes guard above ensures this is bounded.
+        const reader = objectStream.getReader();
+        const chunks: Uint8Array[] = [];
+        while (true) {
+          const read = await reader.read();
+          if (read.done) break;
+          chunks.push(read.value);
+        }
+        const rawContent = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
         await processJson(rawContent, onRecord);
       } else if (
         normaliseContentType === "text/csv" ||
         normaliseContentType === "application/octet-stream"
       ) {
-        await processCsv(rawContent, onRecord);
+        await processCsvStream(objectStream, onRecord);
       } else {
         // NDJSON / JSON Lines / text/tab-separated-values
-        await processNdjson(rawContent, onRecord);
+        await processNdjsonStream(objectStream, onRecord);
       }
 
       // Flush any remaining records.
@@ -506,6 +509,121 @@ function inferCsvValue(value: string | null): unknown {
     if (!isNaN(n)) return n;
   }
   return value;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming parsers — consume a ReadableStream<Uint8Array> line-by-line using
+// a TextDecoder so we never hold more than one chunk in memory at a time.
+// These replace the string-based processNdjson / processCsv for the W10 fix.
+// ---------------------------------------------------------------------------
+
+async function processNdjsonStream(
+  stream: ReadableStream<Uint8Array>,
+  onRecord: (index: number, data: Record<string, unknown>) => Promise<void>,
+): Promise<void> {
+  const decoder = new TextDecoder("utf-8");
+  const reader = stream.getReader();
+  let remainder = "";
+  let index = 0;
+
+  try {
+    while (true) {
+      const read = await reader.read();
+      const chunk = read.done ? "" : decoder.decode(read.value, { stream: !read.done });
+
+      // Split on newlines, keeping the last incomplete fragment in `remainder`.
+      const segment = remainder + chunk;
+      const lines = segment.split("\n");
+      remainder = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.length === 0) continue;
+        try {
+          const item = JSON.parse(trimmed) as unknown;
+          if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+            await onRecord(index, item as Record<string, unknown>);
+          }
+        } catch {
+          // Malformed line — counted as parse failure by the caller via rowsFailed.
+        }
+        index += 1;
+      }
+
+      if (read.done) break;
+    }
+
+    // Process any trailing line that was not terminated by a newline.
+    const lastLine = remainder.trim();
+    if (lastLine.length > 0) {
+      try {
+        const item = JSON.parse(lastLine) as unknown;
+        if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+          await onRecord(index, item as Record<string, unknown>);
+        }
+      } catch {
+        // Trailing malformed line — counted as parse failure by the caller.
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function processCsvStream(
+  stream: ReadableStream<Uint8Array>,
+  onRecord: (index: number, data: Record<string, unknown>) => Promise<void>,
+): Promise<void> {
+  const decoder = new TextDecoder("utf-8");
+  const reader = stream.getReader();
+  let remainder = "";
+  let headers: string[] | null = null;
+  let index = 0;
+
+  try {
+    while (true) {
+      const read = await reader.read();
+      const chunk = read.done ? "" : decoder.decode(read.value, { stream: !read.done });
+
+      const segment = remainder + chunk;
+      const lines = segment.split("\n");
+      remainder = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (line.trim().length === 0) continue;
+        if (headers === null) {
+          // First non-empty line is the header row.
+          headers = parseCsvRow(line);
+          continue;
+        }
+        const values = parseCsvRow(line);
+        const record: Record<string, unknown> = {};
+        for (let h = 0; h < headers.length; h++) {
+          const key = headers[h] ?? `field_${h}`;
+          const value = values[h] ?? null;
+          record[key] = inferCsvValue(value);
+        }
+        await onRecord(index, record);
+        index += 1;
+      }
+
+      if (read.done) break;
+    }
+
+    // Process trailing line without a terminating newline.
+    if (remainder.trim().length > 0 && headers !== null) {
+      const values = parseCsvRow(remainder);
+      const record: Record<string, unknown> = {};
+      for (let h = 0; h < headers.length; h++) {
+        const key = headers[h] ?? `field_${h}`;
+        const value = values[h] ?? null;
+        record[key] = inferCsvValue(value);
+      }
+      await onRecord(index, record);
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------

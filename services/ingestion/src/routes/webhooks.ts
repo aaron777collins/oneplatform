@@ -23,15 +23,24 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   // Registered BEFORE parameterized management routes to avoid route shadowing.
 
   routes.post("/inbound/:id/receive", async (c) => {
-    const rawBody = Buffer.from(await c.req.arrayBuffer());
-    const receiverId = c.req.param("id");
+    // Anti-enumeration: always return 200 OK regardless of outcome.
+    // An attacker probing for valid receiver IDs must not be able to distinguish
+    // "receiver not found", "HMAC mismatch", or "processing error" from success.
+    try {
+      const rawBody = Buffer.from(await c.req.arrayBuffer());
+      const receiverId = c.req.param("id");
 
-    const signatureHeader = c.req.header("X-Webhook-Signature")
-      ?? c.req.header("x-hub-signature-256")
-      ?? c.req.header("x-signature");
+      const signatureHeader = c.req.header("X-Webhook-Signature")
+        ?? c.req.header("x-hub-signature-256")
+        ?? c.req.header("x-signature");
 
-    const result = await webhookReceiveService.receiveEvent(receiverId, rawBody, signatureHeader);
-    return c.json(result);
+      await webhookReceiveService.receiveEvent(receiverId, rawBody, signatureHeader);
+    } catch {
+      // Intentionally swallowed — errors are logged inside the service.
+      // The caller receives { ok: true } regardless so receiver IDs cannot
+      // be enumerated by timing or status code differences.
+    }
+    return c.json({ ok: true }, 200);
   });
 
   // --- Management routes (authenticated) ---
@@ -121,8 +130,9 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     if (d.hmacAlgorithm !== undefined) updates["hmacAlgorithm"] = d.hmacAlgorithm;
     if (d.headerName !== undefined) updates["headerName"] = d.headerName;
     if (d.isEnabled !== undefined) updates["isEnabled"] = d.isEnabled;
-    if (d.description !== undefined && d.description !== null) updates["description"] = d.description;
-    if (d.connectorId !== undefined && d.connectorId !== null) updates["connectorId"] = d.connectorId;
+    // null is a valid value here — it explicitly clears description / connectorId.
+    if (d.description !== undefined) updates["description"] = d.description;
+    if (d.connectorId !== undefined) updates["connectorId"] = d.connectorId;
 
     const receiver = await webhookManagementService.updateReceiver(
       user.tenantId,

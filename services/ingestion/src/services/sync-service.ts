@@ -1,5 +1,6 @@
 import { Queue, type Job } from "bullmq";
 import type { Redis } from "ioredis";
+import { AppError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import type { CredentialService } from "./credential-service.js";
 import type { ConnectorRepository, SyncStateRepository, ConnectorRow } from "./connector-service.js";
@@ -22,6 +23,7 @@ import {
 export interface RawTableRepository {
   createRawTable(connectorId: string): Promise<void>;
   insertBatch(connectorId: string, envelopes: ReturnType<typeof normalizeToEnvelope>[]): Promise<void>;
+  upsertBatch(tableName: string, envelopes: ReturnType<typeof normalizeToEnvelope>[]): Promise<void>;
   softDeleteNotInBatch(connectorId: string, currentBatchId: string): Promise<number>;
   deleteOlderThan(connectorId: string, olderThan: Date): Promise<number>;
   dropTable(connectorId: string): Promise<void>;
@@ -143,6 +145,7 @@ export interface SyncServiceDeps {
   redis: Redis;
   masterKey: Buffer;
   logger: Logger;
+  executionServiceUrl?: string;
 }
 
 // BullMQ queue capacity guard. Exceeding this triggers QueueFullError so the
@@ -154,14 +157,28 @@ const PROGRESS_TTL_SECONDS = 604_800;
 
 const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
 
+// Shape of the response returned by the Execution Service fetchBatch method.
+interface FetchBatchResponse {
+  records: DataRecord[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export function createSyncService(deps: SyncServiceDeps): SyncService {
   const {
     connectorRepo,
     syncStateRepo,
     rawTableRepo,
+    credentialService,
+    masterKey,
     redis,
     logger,
   } = deps;
+
+  const executionServiceUrl =
+    deps.executionServiceUrl ??
+    process.env["EXECUTION_SERVICE_URL"] ??
+    "http://execution-service:3005";
 
   // Queues are created lazily once — constructed at module level but connected
   // on first use. This defers connection errors to the first actual enqueue,
@@ -459,22 +476,15 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         return current?.status === "cancelled";
       }
 
-      // The connector invocation path (commented to document intent):
-      // const accessor = credentialService.createCredentialAccessor(connectorId, masterKey);
-      // const handle = await connector.connect(connector.config, accessor);
-      // while (true) {
-      //   const result = await connector.fetchBatch(handle, cursor, ctx);
-      //   await enqueueBatch(result.records, syncJobId, batchId, batchSeqNum++);
-      //   if (!result.hasMore) break;
-      //   cursor = result.nextCursor;
-      // }
-      //
-      // At this service layer the loop structure is correctly modelled. The
-      // actual connector invocation is wired in the application bootstrap via
-      // a ConnectorExecutor abstraction injected alongside the repos.
-      const hasMore = false;
+      // Credential accessor scoped to this sync job — lazy, cached decryption.
+      const credentialAccessor = credentialService.createCredentialAccessor(
+        connectorId,
+        masterKey,
+      );
+      const credentialFields = await credentialAccessor.list();
 
-      do {
+      let hasMore = true;
+      while (hasMore) {
         if (await isCancelled()) {
           logger.info("Sync cancelled by request", { syncJobId, connectorId });
           await syncStateRepo.updateStatus(connectorId, "cancelled", {
@@ -493,7 +503,95 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             { queueDepth: waiting },
           );
         }
-      } while (hasMore);
+
+        // Invoke the connector's fetchBatch method via the Execution Service.
+        // The Execution Service runs the connector plugin in a sandbox and
+        // returns the raw records + next cursor.
+        const payload = {
+          pluginId: connector.plugin_id,
+          instanceId: connector.instance_id,
+          tenantId,
+          method: "fetchBatch" as const,
+          config: connector.config,
+          credentialBundleId: connectorId,
+          credentialFields,
+          cursor,
+          syncMode,
+          timeoutMs: 60_000,
+        };
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 65_000);
+        let fetchResponse: Response;
+        try {
+          fetchResponse = await fetch(
+            `${executionServiceUrl}/internal/execution/run`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            },
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+
+        if (!fetchResponse.ok) {
+          const errBody = await fetchResponse.json().catch(() => ({})) as Record<string, unknown>;
+          const errMsg =
+            typeof errBody["message"] === "string"
+              ? errBody["message"]
+              : `Execution service returned HTTP ${fetchResponse.status}`;
+          throw new Error(errMsg);
+        }
+
+        const batchResult = (await fetchResponse.json()) as FetchBatchResponse;
+        const { records, nextCursor, hasMore: moreRecords } = batchResult;
+
+        if (records.length > 0) {
+          const envelopes = records.map((record) =>
+            normalizeToEnvelope(record, {
+              connectorId,
+              connectorName: connector.name,
+              batchId,
+              tenantId,
+              syncMode,
+              cursor,
+            }),
+          );
+
+          const tableName = connectorIdToTableName(connectorId);
+          await rawTableRepo.insertBatch(connectorId, envelopes);
+
+          totalRecords += records.length;
+          batchSeqNum += 1;
+          progress.totalRecords = totalRecords;
+          progress.completedBatches = batchSeqNum;
+          progress.lastBatchAt = new Date().toISOString();
+          await writeProgress(progress);
+
+          await batchQueue.add("batch", {
+            syncJobId,
+            connectorId,
+            tenantId,
+            batchId,
+            batchSeqNum,
+            syncMode,
+            cursor,
+            records,
+          });
+        }
+
+        cursor = nextCursor;
+        hasMore = moreRecords;
+
+        // Update cursor in sync_state after each successful batch so that a
+        // crash mid-sync resumes from the last committed position.
+        if (cursor !== null) {
+          await syncStateRepo.updateCursor(connectorId, cursor);
+        }
+      }
 
       // For full sync mode: soft-delete records not in the current batchId.
       if (syncMode === "full" && batchSeqNum > 0) {
@@ -534,7 +632,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
       progress.errors.push({
         batchId: "sync",
         message,
-        code: err instanceof Error ? err.constructor.name : "UNKNOWN",
+        // Use err.code from AppError for machine-readable codes; fall back to
+        // the error name only for non-AppError throws (e.g. network errors).
+        code: err instanceof AppError ? err.code : (err instanceof Error ? err.name : "UNKNOWN"),
         recordCount: 0,
       });
       await writeProgress(progress);
@@ -620,7 +720,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             {
               batchId,
               message,
-              code: err instanceof Error ? err.constructor.name : "UNKNOWN",
+              code: err instanceof AppError ? err.code : (err instanceof Error ? err.name : "UNKNOWN"),
               recordCount: records.length,
             },
           ],

@@ -73,7 +73,7 @@ CREATE OR REPLACE TRIGGER set_connectors_updated_at
 ALTER TABLE ingestion.connectors ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY connectors_tenant_isolation ON ingestion.connectors
-  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
 
 ALTER TABLE ingestion.connectors FORCE ROW LEVEL SECURITY;
 
@@ -184,7 +184,9 @@ CREATE OR REPLACE TRIGGER set_webhook_receivers_updated_at
 ALTER TABLE ingestion.webhook_receivers ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY webhook_receivers_tenant_isolation ON ingestion.webhook_receivers
-  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+ALTER TABLE ingestion.webhook_receivers FORCE ROW LEVEL SECURITY;
 
 -- ============================================================
 -- ingestion.upload_jobs
@@ -233,7 +235,9 @@ CREATE OR REPLACE TRIGGER set_upload_jobs_updated_at
 ALTER TABLE ingestion.upload_jobs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY upload_jobs_tenant_isolation ON ingestion.upload_jobs
-  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+ALTER TABLE ingestion.upload_jobs FORCE ROW LEVEL SECURITY;
 
 -- ============================================================
 -- ingestion.batch_errors

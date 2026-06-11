@@ -88,7 +88,7 @@ export class RawTableRepository {
             AND policyname = 'raw_tenant_isolation'
         ) THEN
           CREATE POLICY raw_tenant_isolation ON ${qtName}
-            USING (_tenant_id = current_setting('app.tenant_id')::uuid);
+            USING (_tenant_id = current_setting('app.tenant_id', true)::uuid);
         END IF;
       END;
       $$;
