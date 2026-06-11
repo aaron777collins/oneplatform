@@ -1,24 +1,44 @@
 {
   "name": "@oneplatform/plugin-sdk",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./manifest": {
+      "import": "./dist/manifest/schema.js",
+      "types": "./dist/manifest/schema.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing/index.js",
+      "types": "./dist/testing/index.d.ts"
     }
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
-    "test": "vitest run --passWithNoTests",
-    "lint": "eslint src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf dist"
   },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
   "devDependencies": {
-    "typescript": "*"
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.5.0"
   }
 }
