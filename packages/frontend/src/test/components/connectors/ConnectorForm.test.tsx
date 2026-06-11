@@ -5,7 +5,7 @@
  * each supported field type, password detection heuristics, validation, and
  * submission behaviour.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
@@ -48,7 +48,11 @@ function renderForm(
 // ---------------------------------------------------------------------------
 
 describe("ConnectorForm", () => {
-  const user = userEvent.setup();
+  let user: ReturnType<typeof userEvent.setup>;
+
+  beforeEach(() => {
+    user = userEvent.setup();
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();

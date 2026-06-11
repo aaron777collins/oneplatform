@@ -3,6 +3,15 @@ import { queryClient, configureQueryClientAuth } from "@/lib/query-client.js";
 import { ApiError } from "@/lib/api-client.js";
 
 // ---------------------------------------------------------------------------
+// Cache hygiene — clear between tests so one test's cached data cannot affect
+// another test's staleTime or refetch assertions.
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  queryClient.clear();
+});
+
+// ---------------------------------------------------------------------------
 // Default query options
 // ---------------------------------------------------------------------------
 

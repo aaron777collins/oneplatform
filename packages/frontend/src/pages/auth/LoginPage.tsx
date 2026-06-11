@@ -16,19 +16,7 @@ import {
   CardContent,
 } from "@/components/ui/card.js";
 import { Separator } from "@/components/ui/separator.js";
-
-// ---------------------------------------------------------------------------
-// Search params type registered with TanStack Router
-// ---------------------------------------------------------------------------
-
-/**
- * Prevents open-redirect attacks by rejecting absolute URLs.
- * The redirect param comes from AuthGuard and should always be a relative
- * path, but we validate here as a defense-in-depth measure.
- */
-function safeRedirect(raw: string): string {
-  return /^https?:\/\/|^\/\//i.test(raw) ? "/" : raw;
-}
+import { safeRedirect } from "@/lib/auth-utils.js";
 
 export function LoginPage() {
   const navigate = useNavigate();

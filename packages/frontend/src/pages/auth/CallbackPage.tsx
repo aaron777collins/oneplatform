@@ -19,6 +19,7 @@ import { useAuthStore } from "@/stores/auth.store.js";
 import type { Session } from "@/stores/auth.store.js";
 import type { ApiResponse } from "@/lib/api-client.js";
 import { Loader2 } from "lucide-react";
+import { safeRedirect } from "@/lib/auth-utils.js";
 
 export function CallbackPage() {
   const navigate = useNavigate();
@@ -45,10 +46,10 @@ export function CallbackPage() {
         setSession(result.data);
 
         // Navigate to the stored redirect param or fall back to root.
-        // safeRedirect guards against open-redirect attacks: any absolute URL
-        // (e.g. https://evil.example.com) is replaced with "/".
-        // Using window.location for a full reload so the bootstrap gate
-        // re-runs and the auth store rehydrates cleanly.
+        // safeRedirect (shared via auth-utils) guards against open-redirect
+        // attacks — dangerous schemes (javascript:, data:) and absolute URLs
+        // are all replaced with "/". Full reload lets the bootstrap gate
+        // re-run and the auth store rehydrate cleanly.
         const redirect = safeRedirect(params.get("redirect") ?? "/");
         window.location.href = redirect;
       } catch {
@@ -80,15 +81,6 @@ export function CallbackPage() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Prevents open-redirect attacks by rejecting absolute URLs.
- * OAuth state params should only carry relative paths, but we validate here
- * as a defense-in-depth measure against manipulated callback URLs.
- */
-function safeRedirect(raw: string): string {
-  return /^https?:\/\/|^\/\//i.test(raw) ? "/" : raw;
-}
 
 function detectProvider(params: URLSearchParams): string {
   const state = params.get("state") ?? "";

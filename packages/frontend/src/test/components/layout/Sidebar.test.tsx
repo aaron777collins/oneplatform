@@ -88,7 +88,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useAuthStore.setState({ ...CLEARED_AUTH }, true);
+  useAuthStore.setState({ ...CLEARED_AUTH });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -98,7 +98,11 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("Sidebar", () => {
-  const user = userEvent.setup();
+  let user: ReturnType<typeof userEvent.setup>;
+
+  beforeEach(() => {
+    user = userEvent.setup();
+  });
 
   describe("viewer role", () => {
     beforeEach(() => {

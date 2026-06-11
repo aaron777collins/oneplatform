@@ -128,7 +128,7 @@ describe("useSession", () => {
 describe("useRequireAuth", () => {
   it("navigates to /login with redirect param when not loading and not authenticated", () => {
     // Auth check is complete (isLoading=false) but user is not authenticated
-    useAuthStore.setState({ isLoading: false, isAuthenticated: false }, true);
+    useAuthStore.setState({ isLoading: false, isAuthenticated: false });
 
     renderHook(() => useRequireAuth());
 
@@ -140,7 +140,7 @@ describe("useRequireAuth", () => {
 
   it("does not navigate while the auth check is still loading", () => {
     // isLoading=true means we haven't resolved the session yet
-    useAuthStore.setState({ isLoading: true, isAuthenticated: false }, true);
+    useAuthStore.setState({ isLoading: true, isAuthenticated: false });
 
     renderHook(() => useRequireAuth());
 
@@ -148,7 +148,7 @@ describe("useRequireAuth", () => {
   });
 
   it("does not navigate when the user is authenticated", () => {
-    useAuthStore.setState({ isLoading: false, isAuthenticated: true }, true);
+    useAuthStore.setState({ isLoading: false, isAuthenticated: true });
 
     renderHook(() => useRequireAuth());
 

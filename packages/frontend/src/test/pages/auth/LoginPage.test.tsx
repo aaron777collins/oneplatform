@@ -6,8 +6,9 @@
  *
  * - The form is rendered
  * - Both OAuth buttons are present
- * - safeRedirect blocks absolute URLs (observable via window.location.href
- *   after simulating a successful login from LoginForm's onSuccess callback)
+ * - The shared safeRedirect utility blocks open-redirect attacks (observable
+ *   via window.location.href after a successful login). Unit tests for the
+ *   safeRedirect function itself live in src/test/lib/auth-utils.test.ts.
  * - A valid relative redirect param is forwarded to window.location.href
  *
  * The LoginPage does NOT support a ?mode=register URL param for switching to

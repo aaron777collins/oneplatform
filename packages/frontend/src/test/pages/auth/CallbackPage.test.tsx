@@ -1,15 +1,12 @@
 /**
  * CallbackPage tests
  *
- * Two concerns are tested independently:
+ * Tests the OAuth code-exchange effect and navigation logic: missing params,
+ * provider detection, post-login redirect (including open-redirect blocking),
+ * error fallback, and the loader spinner.
  *
- * 1. safeRedirect — the helper that blocks open-redirect attacks by rejecting
- *    absolute URLs. Tested as a pure function via the exported component's
- *    observable behaviour (window.location.href after a successful exchange).
- *
- * 2. CallbackPage component — the OAuth code-exchange effect and navigation
- *    logic for missing params, provider detection, error fallback, and the
- *    loader spinner.
+ * Unit tests for the safeRedirect helper itself live in
+ * src/test/lib/auth-utils.test.ts.
  *
  * CallbackPage reads search params from window.location.search (not from the
  * router) so tests set window.location.search directly.
@@ -135,85 +132,6 @@ const SUCCESS_SESSION = {
   isGuest: false,
   emailVerified: true,
 };
-
-// ---------------------------------------------------------------------------
-// safeRedirect — tested via CallbackPage's navigation behaviour
-//
-// The function itself is private, but its semantics are fully observable:
-// after a successful exchange, the component sets window.location.href to
-// whatever safeRedirect returns.
-// ---------------------------------------------------------------------------
-
-describe("safeRedirect (via CallbackPage post-exchange navigation)", () => {
-  beforeEach(() => {
-    mockPost.mockResolvedValue({ data: SUCCESS_SESSION });
-  });
-
-  it("replaces https:// absolute URL with '/'", async () => {
-    setSearchParams({
-      code: "code-1",
-      state: "github:state-1",
-      redirect: "https://evil.example.com",
-    });
-    renderCallbackPage();
-
-    await waitFor(() => {
-      expect(locationMock.href).toBe("/");
-    });
-  });
-
-  it("replaces protocol-relative URL (//evil.example.com) with '/'", async () => {
-    setSearchParams({
-      code: "code-1",
-      state: "github:state-1",
-      redirect: "//evil.example.com",
-    });
-    renderCallbackPage();
-
-    await waitFor(() => {
-      expect(locationMock.href).toBe("/");
-    });
-  });
-
-  it("preserves a valid relative path", async () => {
-    setSearchParams({
-      code: "code-1",
-      state: "github:state-1",
-      redirect: "/dashboard",
-    });
-    renderCallbackPage();
-
-    await waitFor(() => {
-      expect(locationMock.href).toBe("/dashboard");
-    });
-  });
-
-  it("preserves a relative path with a query string", async () => {
-    setSearchParams({
-      code: "code-1",
-      state: "github:state-1",
-      redirect: "/dashboard?q=1",
-    });
-    renderCallbackPage();
-
-    await waitFor(() => {
-      expect(locationMock.href).toBe("/dashboard?q=1");
-    });
-  });
-
-  it("falls back to '/' when the redirect param is absent", async () => {
-    setSearchParams({
-      code: "code-1",
-      state: "github:state-1",
-      // no redirect param
-    });
-    renderCallbackPage();
-
-    await waitFor(() => {
-      expect(locationMock.href).toBe("/");
-    });
-  });
-});
 
 // ---------------------------------------------------------------------------
 // CallbackPage component

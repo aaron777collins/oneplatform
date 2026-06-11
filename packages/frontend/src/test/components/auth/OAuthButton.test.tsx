@@ -39,7 +39,11 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("OAuthButton", () => {
-  const user = userEvent.setup();
+  let user: ReturnType<typeof userEvent.setup>;
+
+  beforeEach(() => {
+    user = userEvent.setup();
+  });
 
   describe("provider=github", () => {
     it("includes 'GitHub' in the button label", () => {

@@ -42,8 +42,6 @@ function renderDialog(overrides: Props = {}) {
 // ---------------------------------------------------------------------------
 
 describe("ConfirmDialog", () => {
-  const user = userEvent.setup();
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -74,6 +72,7 @@ describe("ConfirmDialog", () => {
 
   describe("cancel button", () => {
     it("calls onOpenChange(false) when cancel is clicked", async () => {
+      const user = userEvent.setup();
       const onOpenChange = vi.fn();
       renderDialog({ onOpenChange });
 
@@ -95,6 +94,7 @@ describe("ConfirmDialog", () => {
 
   describe("confirm button", () => {
     it("calls onConfirm when the confirm button is clicked", async () => {
+      const user = userEvent.setup();
       const onConfirm = vi.fn();
       renderDialog({ onConfirm });
 
