@@ -1,24 +1,46 @@
 {
   "name": "@oneplatform/app-sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "types": "./dist/index.d.ts"
     }
   },
+  "sideEffects": false,
+  "files": ["dist"],
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
-    "test": "vitest run --passWithNoTests",
-    "lint": "eslint src",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": { "optional": false }
+  },
   "devDependencies": {
-    "typescript": "*"
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "18",
+    "@types/react-dom": "18",
+    "jsdom": "^29.1.1",
+    "react": "18",
+    "react-dom": "18",
+    "typescript": "*",
+    "vitest": "^4.1.8"
   }
 }
