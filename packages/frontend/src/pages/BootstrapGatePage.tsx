@@ -10,11 +10,15 @@ import React from "react";
 import { useLoaderData } from "@tanstack/react-router";
 import type { IndexLoaderData } from "@/router.js";
 
+// Hoisted to module scope — React.lazy() must not be called inside a render
+// function or the component will be re-created on every render, causing remounts.
+const WizardPage = React.lazy(() => import("./wizard/WizardPage.js"));
+const AuthenticatedApp = React.lazy(() => import("../components/layout/AuthenticatedApp.js"));
+
 export function BootstrapGatePage() {
   const { bootstrapComplete, bootstrapToken } = useLoaderData({ from: "/" }) as IndexLoaderData;
 
   if (!bootstrapComplete) {
-    const WizardPage = React.lazy(() => import("./wizard/WizardPage.js"));
     return (
       <React.Suspense fallback={<FullPageSpinner />}>
         <WizardPage bootstrapToken={bootstrapToken} />
@@ -22,7 +26,6 @@ export function BootstrapGatePage() {
     );
   }
 
-  const AuthenticatedApp = React.lazy(() => import("../components/layout/AuthenticatedApp.js"));
   return (
     <React.Suspense fallback={<FullPageSpinner />}>
       <AuthenticatedApp />

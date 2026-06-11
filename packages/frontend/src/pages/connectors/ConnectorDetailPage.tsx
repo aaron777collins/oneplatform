@@ -112,19 +112,19 @@ export function ConnectorDetailPage() {
 
   if (isError) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <EmptyState
           title="Connector not found"
           description="The connector may have been deleted."
           actionLabel="Back to connectors"
           onAction={() => void navigate({ to: "/connectors" })}
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title={isLoading ? "Loading…" : (connector?.name ?? id)}
         breadcrumbs={[
@@ -300,6 +300,6 @@ export function ConnectorDetailPage() {
         onConfirm={() => deleteConnector.mutate()}
         isLoading={deleteConnector.isPending}
       />
-    </main>
+    </div>
   );
 }

@@ -90,7 +90,10 @@ async function apiFetch<T>(
     ...init,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      // Only set Content-Type when a body is present. Sending it on GET/DELETE
+      // requests causes some servers/proxies to reject the request (RFC 7230
+      // allows bodies on GET but many implementations reject it).
+      ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
   });

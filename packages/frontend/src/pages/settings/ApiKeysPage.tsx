@@ -149,7 +149,7 @@ export function ApiKeysPage() {
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="API Keys"
         description="Keys for programmatic access to the platform API."
@@ -324,6 +324,6 @@ export function ApiKeysPage() {
         }}
         isLoading={revokeMutation.isPending}
       />
-    </main>
+    </div>
   );
 }

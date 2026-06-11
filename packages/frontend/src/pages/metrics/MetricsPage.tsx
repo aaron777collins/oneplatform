@@ -9,7 +9,7 @@ import { MetricsDashboard } from "@/components/metrics/MetricsDashboard.js";
 
 export function MetricsPage() {
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Metrics"
         description="Pipeline throughput, error rates, queue depths, and service health."
@@ -17,6 +17,6 @@ export function MetricsPage() {
       <div className="mt-6">
         <MetricsDashboard />
       </div>
-    </main>
+    </div>
   );
 }

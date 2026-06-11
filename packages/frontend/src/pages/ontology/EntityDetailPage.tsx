@@ -106,18 +106,18 @@ export function EntityDetailPage() {
 
   if (!isNew && isError) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <EmptyState
           title="Entity not found"
           actionLabel="Back to ontology"
           onAction={() => void navigate({ to: "/ontology" })}
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title={isNew ? "New entity" : (entity?.name ?? entityType)}
         breadcrumbs={[
@@ -149,6 +149,6 @@ export function EntityDetailPage() {
           />
         )}
       </div>
-    </main>
+    </div>
   );
 }

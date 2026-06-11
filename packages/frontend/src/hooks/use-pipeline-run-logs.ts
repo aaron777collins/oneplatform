@@ -22,6 +22,10 @@ export interface UsePipelineRunLogsResult {
 // Hook
 // ---------------------------------------------------------------------------
 
+// Cap the in-memory log buffer to prevent unbounded memory growth for
+// long-running pipelines. Oldest lines are evicted when the cap is reached.
+const MAX_LINES = 10_000;
+
 /**
  * Streams log lines from a pipeline run via SSE.
  *
@@ -54,7 +58,11 @@ export function usePipelineRunLogs(runId: string): UsePipelineRunLogsResult {
     es.addEventListener("log", (e) => {
       try {
         const line = JSON.parse((e as MessageEvent<string>).data) as LogLine;
-        setLogs((prev) => [...prev, line]);
+        setLogs((prev) => {
+          const next = [...prev, line];
+          // Evict oldest lines when the buffer exceeds MAX_LINES to bound memory usage
+          return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;
+        });
       } catch {
         // Malformed log line — skip silently rather than crashing the viewer
       }

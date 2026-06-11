@@ -93,7 +93,7 @@ export function ProfilePage() {
   });
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader title="Profile" description="Manage your personal account details." />
 
       <div className="mt-6 max-w-lg space-y-6">
@@ -199,6 +199,6 @@ export function ProfilePage() {
           </Form>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

@@ -159,7 +159,7 @@ export default function DashboardPage() {
   const activities = activityData?.data ?? [];
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <header className="border-b border-[var(--color-border)] bg-[var(--color-background)] px-6 py-4">
         <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
       </header>
@@ -296,6 +296,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </div>
   );
 }

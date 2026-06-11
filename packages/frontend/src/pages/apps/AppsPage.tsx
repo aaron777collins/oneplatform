@@ -127,7 +127,7 @@ export function AppsPage() {
   });
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Apps"
         description="Monaco-built internal tools and data views."
@@ -277,6 +277,6 @@ export function AppsPage() {
           </Form>
         </DialogContent>
       </Dialog>
-    </main>
+    </div>
   );
 }

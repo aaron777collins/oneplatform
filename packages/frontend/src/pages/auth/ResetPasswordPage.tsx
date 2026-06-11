@@ -62,6 +62,16 @@ export function ResetPasswordPage() {
   const [succeeded, setSucceeded] = React.useState(false);
   const [serverError, setServerError] = React.useState<string | null>(null);
 
+  // Clean up the auto-redirect timer if the component unmounts before it fires
+  // (e.g. user manually clicks "Sign in now" before the 3-second delay elapses).
+  React.useEffect(() => {
+    if (!succeeded) return;
+    const timer = setTimeout(() => {
+      void navigate({ to: "/login" });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [succeeded, navigate]);
+
   const form = useForm<ResetPasswordValues>({
     resolver: zodResolver(resetPasswordSchema),
     defaultValues: { password: "", confirmPassword: "" },
@@ -74,11 +84,9 @@ export function ResetPasswordPage() {
         token,
         password: values.password,
       });
+      // Setting succeeded triggers the useEffect above which owns the
+      // auto-redirect timer and its cleanup.
       setSucceeded(true);
-      // Auto-redirect after 3 seconds so the user sees the success message
-      setTimeout(() => {
-        void navigate({ to: "/login" });
-      }, 3000);
     } catch (err) {
       if (err instanceof ApiError) {
         // 410 Gone means the token was already used or has expired

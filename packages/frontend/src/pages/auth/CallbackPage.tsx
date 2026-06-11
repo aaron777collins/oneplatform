@@ -45,9 +45,11 @@ export function CallbackPage() {
         setSession(result.data);
 
         // Navigate to the stored redirect param or fall back to root.
+        // safeRedirect guards against open-redirect attacks: any absolute URL
+        // (e.g. https://evil.example.com) is replaced with "/".
         // Using window.location for a full reload so the bootstrap gate
         // re-runs and the auth store rehydrates cleanly.
-        const redirect = params.get("redirect") ?? "/";
+        const redirect = safeRedirect(params.get("redirect") ?? "/");
         window.location.href = redirect;
       } catch {
         // Any error sends back to login — the user can retry the OAuth flow
@@ -78,6 +80,15 @@ export function CallbackPage() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Prevents open-redirect attacks by rejecting absolute URLs.
+ * OAuth state params should only carry relative paths, but we validate here
+ * as a defense-in-depth measure against manipulated callback URLs.
+ */
+function safeRedirect(raw: string): string {
+  return /^https?:\/\/|^\/\//i.test(raw) ? "/" : raw;
+}
 
 function detectProvider(params: URLSearchParams): string {
   const state = params.get("state") ?? "";

@@ -60,7 +60,7 @@ export function PipelinesPage() {
     : pipelines.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title="Pipelines"
         breadcrumbs={[{ label: "Platform" }, { label: "Pipelines" }]}
@@ -130,6 +130,6 @@ export function PipelinesPage() {
           </div>
         )}
       </div>
-    </main>
+    </div>
   );
 }

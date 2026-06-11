@@ -97,7 +97,7 @@ export function OntologyPage() {
       );
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title="Ontology"
         breadcrumbs={[{ label: "Platform" }, { label: "Ontology" }]}
@@ -182,6 +182,6 @@ export function OntologyPage() {
           />
         </DialogContent>
       </Dialog>
-    </main>
+    </div>
   );
 }

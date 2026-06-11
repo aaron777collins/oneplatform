@@ -6,17 +6,10 @@
     <title>OnePlatform</title>
     <!--
       Theme detection runs before React hydrates to prevent a flash of the wrong
-      theme. The hash of this exact script must be added to the CSP header in
-      nginx.conf when CSP is enforced in production.
+      theme. Extracted to an external file so no inline-script CSP hash is needed
+      in nginx.conf — 'script-src self' covers it automatically.
     -->
-    <script>
-      (function () {
-        var theme = localStorage.getItem("op-theme");
-        if (theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-          document.documentElement.setAttribute("data-theme", "dark");
-        }
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

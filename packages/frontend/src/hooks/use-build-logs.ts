@@ -28,6 +28,10 @@ export interface UseBuildLogsResult {
 // Hook
 // ---------------------------------------------------------------------------
 
+// Cap the in-memory build log buffer to prevent unbounded memory growth.
+// Build logs are typically short, but this guards against runaway build output.
+const MAX_LINES = 10_000;
+
 /**
  * Streams build log lines for a specific app build via SSE.
  *
@@ -66,7 +70,11 @@ export function useBuildLogs(
     es.addEventListener("log", (e) => {
       try {
         const line = JSON.parse((e as MessageEvent<string>).data) as BuildLogLine;
-        setLogs((prev) => [...prev, line]);
+        setLogs((prev) => {
+          const next = [...prev, line];
+          // Evict oldest lines when the buffer exceeds MAX_LINES to bound memory usage
+          return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;
+        });
       } catch {
         // Skip malformed lines rather than crashing the build log panel
       }

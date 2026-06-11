@@ -26,13 +26,19 @@ export function CopyButton({
 }: CopyButtonProps) {
   const [copied, setCopied] = React.useState(false);
 
+  // useEffect handles timer cleanup: if the component unmounts while the timer
+  // is running (e.g. the user navigates away) we avoid a state update on an
+  // unmounted component.
+  React.useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), SUCCESS_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      // Reset to copy icon after the success duration
-      const timer = setTimeout(() => setCopied(false), SUCCESS_DURATION_MS);
-      return () => clearTimeout(timer);
     } catch {
       // Clipboard API may be blocked in non-secure contexts; fail silently
     }

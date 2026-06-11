@@ -86,7 +86,7 @@ export function DLQPage() {
   });
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Dead Letter Queue"
         description="Failed jobs that could not be automatically retried."
@@ -168,6 +168,6 @@ export function DLQPage() {
         onConfirm={() => bulkDiscardMutation.mutate()}
         isLoading={bulkDiscardMutation.isPending}
       />
-    </main>
+    </div>
   );
 }

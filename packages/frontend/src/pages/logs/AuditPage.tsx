@@ -14,7 +14,7 @@ export function AuditPage() {
   const [to, setTo] = React.useState("");
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Audit Log"
         description="Tamper-evident record of all platform actions."
@@ -53,6 +53,6 @@ export function AuditPage() {
           {...(to !== "" ? { to: new Date(to + "T23:59:59").toISOString() } : {})}
         />
       </div>
-    </main>
+    </div>
   );
 }

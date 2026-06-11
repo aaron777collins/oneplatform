@@ -14,12 +14,14 @@ import {
   createRouter,
   createRootRouteWithContext,
   createRoute,
+  redirect,
   Outlet,
   lazyRouteComponent,
 } from "@tanstack/react-router";
 import React from "react";
 import type { ApiClient } from "@/lib/api-client.js";
 import type { QueryClient } from "@tanstack/react-query";
+import { useAuthStore } from "@/stores/auth.store.js";
 
 // ---------------------------------------------------------------------------
 // Router context — available in all loaders
@@ -356,6 +358,15 @@ const webhooksRoute = createRoute({
 const adminRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/settings/admin",
+  // Guard: only platform-admin users may access the admin page.
+  // The server enforces this too — this check prevents non-admins from seeing
+  // the page content while the server request is in flight.
+  beforeLoad: () => {
+    const hasPermission = useAuthStore.getState().hasPermission("platform-admin");
+    if (!hasPermission) {
+      throw redirect({ to: "/settings" });
+    }
+  },
   component: lazyRouteComponent(
     () => import("./pages/settings/AdminPage.js"),
     "AdminPage",

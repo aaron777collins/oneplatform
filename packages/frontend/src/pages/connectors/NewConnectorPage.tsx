@@ -157,7 +157,7 @@ export function NewConnectorPage() {
   const connectorTypes = typesData?.data ?? [];
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title="New connector"
         breadcrumbs={[
@@ -319,6 +319,6 @@ export function NewConnectorPage() {
           </div>
         )}
       </div>
-    </main>
+    </div>
   );
 }

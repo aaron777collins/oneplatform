@@ -96,7 +96,7 @@ export function AdminPage() {
 
   if (!isAdmin) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <Shield className="mb-4 h-12 w-12 text-[var(--color-muted-foreground)]" aria-hidden="true" />
           <h2 className="text-lg font-semibold">Admin access required</h2>
@@ -104,12 +104,12 @@ export function AdminPage() {
             You need tenant-admin or platform-admin role to access this page.
           </p>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Admin"
         description="Platform and tenant configuration. Changes take effect immediately."
@@ -195,6 +195,6 @@ export function AdminPage() {
         onConfirm={() => rotateMasterKeyMutation.mutate()}
         isLoading={rotateMasterKeyMutation.isPending}
       />
-    </main>
+    </div>
   );
 }

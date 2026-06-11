@@ -35,7 +35,7 @@ export function LogsPage() {
   const services = servicesQuery.data?.data ?? [];
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Logs"
         description="Unified log stream across all platform services."
@@ -67,6 +67,6 @@ export function LogsPage() {
           height={600}
         />
       </div>
-    </main>
+    </div>
   );
 }

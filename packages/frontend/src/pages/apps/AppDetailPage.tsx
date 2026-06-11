@@ -116,17 +116,17 @@ export function AppDetailPage() {
 
   if (query.isLoading || app === undefined) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <Skeleton className="mb-6 h-10 w-64" />
         <Skeleton className="h-64 w-full" />
-      </main>
+      </div>
     );
   }
 
   const AccessIcon = app.accessMode === "public" ? Globe : Lock;
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title={app.name}
         description={`/${app.slug}`}
@@ -295,6 +295,6 @@ export function AppDetailPage() {
         open={rollbackOpen}
         onOpenChange={setRollbackOpen}
       />
-    </main>
+    </div>
   );
 }

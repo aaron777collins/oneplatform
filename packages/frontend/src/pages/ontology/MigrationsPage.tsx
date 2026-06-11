@@ -102,7 +102,7 @@ export function MigrationsPage() {
   const migrations = data?.data ?? [];
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title="Migrations"
         breadcrumbs={[
@@ -210,6 +210,6 @@ export function MigrationsPage() {
         }}
         isLoading={rollbackMigration.isPending}
       />
-    </main>
+    </div>
   );
 }

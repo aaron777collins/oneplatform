@@ -21,16 +21,26 @@ import { Separator } from "@/components/ui/separator.js";
 // Search params type registered with TanStack Router
 // ---------------------------------------------------------------------------
 
+/**
+ * Prevents open-redirect attacks by rejecting absolute URLs.
+ * The redirect param comes from AuthGuard and should always be a relative
+ * path, but we validate here as a defense-in-depth measure.
+ */
+function safeRedirect(raw: string): string {
+  return /^https?:\/\/|^\/\//i.test(raw) ? "/" : raw;
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   // The redirect param is set by AuthGuard when it bounces unauthenticated
   // users to /login. It is always a relative pathname (never an external URL).
   const search = useSearch({ from: "/login" });
   // The search type comes from the router — cast to access optional redirect
-  const redirectTo =
+  const rawRedirect =
     typeof (search as Record<string, unknown>)["redirect"] === "string"
       ? (search as Record<string, unknown>)["redirect"] as string
       : "/";
+  const redirectTo = safeRedirect(rawRedirect);
 
   function handleLoginSuccess(): void {
     // Use window.location for a full reload that re-runs the bootstrap gate
@@ -82,7 +92,7 @@ export function LoginPage() {
           <button
             type="button"
             className="text-[var(--color-primary)] hover:underline"
-            onClick={() => void navigate({ to: "/login" })}
+            onClick={() => void navigate({ to: "/login", search: { mode: "register" } })}
           >
             Register
           </button>

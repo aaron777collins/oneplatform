@@ -125,7 +125,7 @@ export function PipelineBuilderPage() {
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title={isNew ? "New pipeline" : "Edit pipeline"}
         breadcrumbs={[
@@ -203,6 +203,6 @@ export function PipelineBuilderPage() {
           </>
         )}
       </div>
-    </main>
+    </div>
   );
 }

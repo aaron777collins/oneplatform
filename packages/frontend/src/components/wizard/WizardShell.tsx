@@ -132,7 +132,7 @@ export function WizardShell({ bootstrapToken }: WizardShellProps) {
         {currentStep === 3 && <MasterKeyStep onNext={next} onPrev={prev} />}
         {currentStep === 4 && (
           <ReviewStep
-            bootstrapToken={bootstrapToken ?? ""}
+            bootstrapToken={bootstrapToken}
             onNext={next}
             onPrev={prev}
           />

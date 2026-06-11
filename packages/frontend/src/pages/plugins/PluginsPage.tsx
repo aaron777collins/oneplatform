@@ -65,7 +65,7 @@ export function PluginsPage() {
   }, [plugins, typeFilter]);
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Plugins"
         description="Extend OnePlatform with connectors, transformers, and auth providers."
@@ -127,6 +127,6 @@ export function PluginsPage() {
         onOpenChange={setInstallOpen}
         onInstalled={(id) => void navigate({ to: "/plugins/$id", params: { id } })}
       />
-    </main>
+    </div>
   );
 }

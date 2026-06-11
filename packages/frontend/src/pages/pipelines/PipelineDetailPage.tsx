@@ -90,18 +90,18 @@ export function PipelineDetailPage() {
 
   if (isError) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <EmptyState
           title="Pipeline not found"
           actionLabel="Back to pipelines"
           onAction={() => void navigate({ to: "/pipelines" })}
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title={isLoading ? "Loading…" : (pipeline?.name ?? id)}
         breadcrumbs={[
@@ -236,6 +236,6 @@ export function PipelineDetailPage() {
         onConfirm={() => deletePipeline.mutate()}
         isLoading={deletePipeline.isPending}
       />
-    </main>
+    </div>
   );
 }

@@ -7,7 +7,7 @@
  */
 import * as React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Bell, User, KeyRound, LogOut } from "lucide-react";
+import { Bell, Menu, X, User, KeyRound, LogOut } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,9 +43,13 @@ interface Notification {
 
 export interface TopbarProps {
   className?: string;
+  /** Called when the hamburger button is clicked on mobile screens. */
+  onMobileMenuToggle?: () => void;
+  /** Current open state of the mobile navigation drawer. */
+  mobileMenuOpen?: boolean;
 }
 
-export function Topbar({ className }: TopbarProps) {
+export function Topbar({ className, onMobileMenuToggle, mobileMenuOpen }: TopbarProps) {
   const navigate = useNavigate();
   const client = useApiClient();
   const userId = useAuthStore((state) => state.userId);
@@ -106,6 +110,25 @@ export function Topbar({ className }: TopbarProps) {
         className,
       )}
     >
+      {/* Hamburger — visible only on mobile (<md). Toggles the mobile nav drawer. */}
+      {onMobileMenuToggle !== undefined && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="mr-1 md:hidden"
+          onClick={onMobileMenuToggle}
+          aria-label={mobileMenuOpen === true ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={mobileMenuOpen === true}
+          aria-controls="mobile-nav-drawer"
+        >
+          {mobileMenuOpen === true ? (
+            <X className="h-5 w-5" aria-hidden="true" />
+          ) : (
+            <Menu className="h-5 w-5" aria-hidden="true" />
+          )}
+        </Button>
+      )}
+
       {/* Tenant name */}
       <div className="flex-1 truncate">
         {tenantId !== null && (

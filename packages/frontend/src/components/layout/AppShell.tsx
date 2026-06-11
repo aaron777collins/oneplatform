@@ -4,14 +4,15 @@
  * Renders Sidebar (left) + Topbar (top) + main content area (right).
  * Uses TanStack Router's Outlet for nested route content.
  *
- * On mobile (< 768px) the sidebar collapses to icon-only mode automatically.
- * The Toaster is mounted here so toast notifications work across all pages.
+ * On mobile (< 768px) the sidebar is hidden. A hamburger button in Topbar
+ * opens a full-height overlay drawer containing the Sidebar. The drawer
+ * closes automatically on route change so the user is never left with it open.
  *
  * The <main> element has tabIndex={-1} so focus can be programmatically moved
  * to the content region on route change (§14.5 focus management).
  */
 import * as React from "react";
-import { Outlet } from "@tanstack/react-router";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import { Sidebar } from "@/components/layout/Sidebar.js";
 import { Topbar } from "@/components/layout/Topbar.js";
 import { Toaster } from "@/components/ui/toaster.js";
@@ -19,24 +20,56 @@ import { TooltipProvider } from "@/components/ui/tooltip.js";
 
 export function AppShell() {
   const mainRef = React.useRef<HTMLElement>(null);
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
-  // Move focus to the main content region on every route change.
-  // This helps screen reader users know a navigation has occurred.
+  // useRouterState gives us the resolved pathname so we can key focus management
+  // on actual route changes rather than triggering on every re-render.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Move focus to the main content region only when the route pathname changes.
+  // Without a dependency array this fires on every render, which disturbs focus
+  // during in-page state updates (e.g. form submissions, data re-fetches).
   React.useEffect(() => {
     mainRef.current?.focus();
-  });
+    // Close mobile nav on route change so the user isn't left with the drawer open
+    setMobileNavOpen(false);
+  }, [pathname]);
 
   return (
     <TooltipProvider>
       <div className="flex h-screen overflow-hidden bg-[var(--color-background)]">
-        {/* Sidebar — hidden on small screens via CSS; collapsed state managed internally */}
+        {/* Desktop sidebar — hidden below md breakpoint */}
         <div className="hidden md:flex">
           <Sidebar />
         </div>
 
+        {/* Mobile navigation drawer overlay — visible only when hamburger is open */}
+        {mobileNavOpen && (
+          <>
+            {/* Backdrop: clicking outside closes the drawer */}
+            <div
+              className="fixed inset-0 z-40 bg-black/50 md:hidden"
+              aria-hidden="true"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            {/* Drawer panel */}
+            <div
+              className="fixed inset-y-0 left-0 z-50 flex md:hidden"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Navigation"
+            >
+              <Sidebar />
+            </div>
+          </>
+        )}
+
         {/* Right column: topbar + scrollable content */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Topbar />
+          <Topbar
+            onMobileMenuToggle={() => setMobileNavOpen((prev) => !prev)}
+            mobileMenuOpen={mobileNavOpen}
+          />
 
           <main
             ref={mainRef}

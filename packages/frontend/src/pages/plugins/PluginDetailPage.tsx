@@ -101,15 +101,15 @@ export function PluginDetailPage() {
 
   if (query.isLoading || plugin === undefined) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <Skeleton className="mb-6 h-10 w-64" />
         <Skeleton className="h-64 w-full" />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title={plugin.name}
         description={`${plugin.type} · v${plugin.version} · by ${plugin.author}`}
@@ -236,6 +236,6 @@ export function PluginDetailPage() {
         onConfirm={() => uninstallMutation.mutate()}
         isLoading={uninstallMutation.isPending}
       />
-    </main>
+    </div>
   );
 }

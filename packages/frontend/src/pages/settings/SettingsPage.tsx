@@ -48,7 +48,7 @@ export function SettingsPage() {
   });
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
 
       <div className="flex gap-8">
@@ -86,6 +86,6 @@ export function SettingsPage() {
           </p>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

@@ -86,7 +86,7 @@ export function ConnectorsPage() {
       );
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title="Connectors"
         breadcrumbs={[{ label: "Platform" }, { label: "Connectors" }]}
@@ -164,6 +164,6 @@ export function ConnectorsPage() {
           </div>
         )}
       </div>
-    </main>
+    </div>
   );
 }

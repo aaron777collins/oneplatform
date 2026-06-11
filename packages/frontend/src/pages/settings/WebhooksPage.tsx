@@ -147,7 +147,7 @@ export function WebhooksPage() {
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+    <div className="flex-1 p-6">
       <PageHeader
         title="Webhooks"
         description="Receive HTTP notifications when platform events occur."
@@ -336,6 +336,6 @@ export function WebhooksPage() {
         }}
         isLoading={deleteMutation.isPending}
       />
-    </main>
+    </div>
   );
 }

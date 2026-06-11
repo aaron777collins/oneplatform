@@ -89,18 +89,18 @@ export function RunDetailPage() {
 
   if (isError) {
     return (
-      <main id="main-content" tabIndex={-1} className="flex-1 p-6">
+      <div className="flex-1 p-6">
         <EmptyState
           title="Run not found"
           actionLabel="Back to pipelines"
           onAction={() => void navigate({ to: "/pipelines" })}
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
       <PageHeader
         title={`Run ${runId.slice(0, 8)}…`}
         breadcrumbs={[
@@ -199,6 +199,6 @@ export function RunDetailPage() {
           </>
         ) : null}
       </div>
-    </main>
+    </div>
   );
 }

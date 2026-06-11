@@ -180,8 +180,10 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
   });
 
   const deployMutation = useMutation({
+    // POST to the deploy endpoint promotes the latest successful build to
+    // production — distinct from /builds which creates a new build.
     mutationFn: () =>
-      client.post<{ data: AppBuild }>(`/v1/apps/${appId}/builds`),
+      client.post<{ data: AppBuild }>(`/v1/apps/${appId}/deploy`),
     onSuccess: (response) => {
       const build = response.data;
       toast({ title: "Deploy started", description: `Build ${build.id.slice(0, 8)} queued.` });

@@ -24,8 +24,12 @@ import { WizardStep } from "@/components/wizard/WizardStep.js";
 // ---------------------------------------------------------------------------
 
 export interface ReviewStepProps {
-  /** Bootstrap token from GET /api/v1/auth/bootstrap/status (held in WizardPage). */
-  bootstrapToken: string;
+  /**
+   * Bootstrap token from GET /api/v1/auth/bootstrap/status (held in WizardPage).
+   * undefined means the server did not return a token — the confirm button is
+   * disabled with an explanatory error so the user cannot submit an empty token.
+   */
+  bootstrapToken: string | undefined;
   onNext: () => void;
   onPrev: () => void;
 }
@@ -45,6 +49,13 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
   const [serverError, setServerError] = React.useState<string | null>(null);
 
   async function handleConfirm(): Promise<void> {
+    // The button is disabled when bootstrapToken is undefined, but guard here
+    // too in case the component is rendered programmatically.
+    if (bootstrapToken === undefined) {
+      setServerError("Bootstrap token is missing. Refresh the page and try again.");
+      return;
+    }
+
     setServerError(null);
     setIsSubmitting(true);
 
@@ -93,6 +104,17 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
           <ReviewRow label="Organization" value={orgName} />
         </dl>
 
+        {/* Show token-missing error ahead of submission attempt */}
+        {bootstrapToken === undefined && (
+          <p
+            role="alert"
+            aria-live="assertive"
+            className="rounded-md bg-[var(--color-destructive)]/10 px-4 py-3 text-sm text-[var(--color-destructive)]"
+          >
+            Bootstrap token is missing. Refresh the page to obtain a valid token before continuing.
+          </p>
+        )}
+
         {serverError !== null && (
           <p
             role="alert"
@@ -116,7 +138,7 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
           <Button
             type="button"
             onClick={() => void handleConfirm()}
-            disabled={isSubmitting}
+            disabled={isSubmitting || bootstrapToken === undefined}
             className="flex-1"
           >
             {isSubmitting && (
