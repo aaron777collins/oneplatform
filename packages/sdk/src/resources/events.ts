@@ -24,7 +24,6 @@ export interface EventNamespace {
 export function createEventNamespace(
   transport: Transport,
   authHandler: AuthHandler,
-  baseUrl: string,
   fetchImpl: typeof globalThis.fetch,
   isBrowser: boolean,
 ): EventNamespace {
@@ -36,7 +35,8 @@ export function createEventNamespace(
         );
       }
 
-      const sseUrl = transport.buildUrl(`${baseUrl}/api/v1/events/subscribe`);
+      // transport.buildUrl() prepends the stored baseUrl — do not pass baseUrl here
+      const sseUrl = transport.buildUrl('/api/v1/events/subscribe');
 
       return createSseSubscription(
         sseUrl,

@@ -71,7 +71,8 @@ export class Paginator<T> implements PaginatedIterable<T> {
         break;
       }
     }
-    return results;
+    // A single oversized page can push results beyond maxItems — enforce the cap.
+    return results.slice(0, maxItems);
   }
 
   async take(n: number): Promise<T[]> {

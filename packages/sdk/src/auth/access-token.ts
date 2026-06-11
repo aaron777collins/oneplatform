@@ -20,6 +20,14 @@ export interface AccessTokenHandler extends AuthHandler {
 
   /** Returns true when a refreshToken callback is configured. */
   canRefresh(): boolean;
+
+  /**
+   * Replace the active token with a new one supplied by the caller.
+   * Only meaningful when the handler was constructed without a built-in refreshToken callback
+   * — i.e. the caller manages their own session and pushes fresh tokens in.
+   * When a TokenManager is in use, this is a no-op because the manager owns the token.
+   */
+  setToken(token: string): void;
 }
 
 export function createAccessTokenHandler(config: AccessTokenAuthConfig): AccessTokenHandler {
@@ -53,15 +61,13 @@ export function createAccessTokenHandler(config: AccessTokenAuthConfig): AccessT
     canRefresh(): boolean {
       return manager !== null;
     },
-  };
-}
 
-/**
- * Updates the static token slot when the caller manages refresh externally.
- * Only callable on handlers without a built-in refreshToken callback.
- */
-export function setAccessToken(handler: AccessTokenHandler, token: string): void {
-  // Reach through to update the captured staticToken.
-  // We use a small side-channel approach to keep the handler interface clean.
-  (handler as unknown as { _setToken?: (t: string) => void })._setToken?.(token);
+    setToken(token: string): void {
+      // When a TokenManager is present it owns the token lifecycle via its own
+      // refresh callback — external pushes would race with that mechanism.
+      if (manager === null) {
+        staticToken = token;
+      }
+    },
+  };
 }

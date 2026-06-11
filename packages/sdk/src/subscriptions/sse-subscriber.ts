@@ -13,13 +13,14 @@
 import type { SubscriptionOptions, Subscription, PlatformEvent } from '../types/subscription.js';
 import type { AuthHandler } from '../auth/api-key.js';
 import { NetworkError } from '../errors/network-error.js';
+import { AuthError } from '../errors/client-errors.js';
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
 type StatusHandler = (status: Subscription['status']) => void;
-type ErrorHandler = (error: NetworkError) => void;
+type ErrorHandler = (error: NetworkError | AuthError) => void;
 
 /** Validates SSE event pattern syntax. Only alphanumeric, dot, and trailing * are valid. */
 function validateEventPattern(pattern: string): void {
@@ -122,7 +123,7 @@ export function createSseSubscription(
     }
   }
 
-  function emitError(error: NetworkError): void {
+  function emitError(error: NetworkError | AuthError): void {
     for (const handler of errorHandlers) {
       try {
         handler(error);
@@ -173,6 +174,21 @@ export function createSseSubscription(
         headers: requestHeaders,
         signal: currentAbortController.signal,
       });
+
+      if (response.status === 401) {
+        // Auth failure cannot be recovered by reconnecting — surface as AuthError
+        // and close immediately so the reconnect loop is never entered.
+        const authErr = new AuthError({
+          code: 'UNAUTHORIZED',
+          message: 'SSE connection rejected: 401 Unauthorized. Check your credentials.',
+          statusCode: 401,
+          retryable: false,
+        });
+        emitError(authErr);
+        setStatus('closed');
+        destroyed = true;
+        return;
+      }
 
       if (!response.ok || response.body === null) {
         throw new NetworkError({

@@ -103,15 +103,18 @@ function createEntityResource<T>(
       });
     },
 
-    async create(data: Partial<T>, _options?: MutationOptions): Promise<T> {
+    async create(data: Partial<T>, options?: MutationOptions): Promise<T> {
       return transport.request<T>({
         method: 'POST',
         path: basePath,
         body: data,
+        ...(options?.idempotencyKey !== undefined
+          ? { idempotencyKey: options.idempotencyKey }
+          : {}),
       });
     },
 
-    async update(id: string, data: Partial<T>, _options?: MutationOptions): Promise<T> {
+    async update(id: string, data: Partial<T>, options?: MutationOptions): Promise<T> {
       if (!id || id.trim() === '') {
         throw new Error('[OnePlatform SDK] entity.update() requires a non-empty id');
       }
@@ -119,10 +122,13 @@ function createEntityResource<T>(
         method: 'PATCH',
         path: `${basePath}/${encodeURIComponent(id)}`,
         body: data,
+        ...(options?.idempotencyKey !== undefined
+          ? { idempotencyKey: options.idempotencyKey }
+          : {}),
       });
     },
 
-    async replace(id: string, data: T, _options?: MutationOptions): Promise<T> {
+    async replace(id: string, data: T, options?: MutationOptions): Promise<T> {
       if (!id || id.trim() === '') {
         throw new Error('[OnePlatform SDK] entity.replace() requires a non-empty id');
       }
@@ -130,6 +136,9 @@ function createEntityResource<T>(
         method: 'PUT',
         path: `${basePath}/${encodeURIComponent(id)}`,
         body: data,
+        ...(options?.idempotencyKey !== undefined
+          ? { idempotencyKey: options.idempotencyKey }
+          : {}),
       });
     },
 

@@ -164,6 +164,11 @@ export interface RequestOptions {
   readonly path: string;
   readonly query?: Record<string, string | string[] | number | boolean | undefined>;
   readonly body?: unknown;
+  /**
+   * When set, sent as the `Idempotency-Key` request header so the server can
+   * safely deduplicate POST/PATCH/PUT retries.
+   */
+  readonly idempotencyKey?: string;
 }
 
 export class Transport {
@@ -178,14 +183,14 @@ export class Transport {
   }
 
   async request<T>(requestOptions: RequestOptions): Promise<T> {
-    const { method, path, query, body } = requestOptions;
+    const { method, path, query, body, idempotencyKey } = requestOptions;
     const url = this.buildUrl(path, query);
     const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
 
     this.logger.debug(`${method} ${path}`);
 
     const result = await withRetry(
-      () => this.executeRequest<T>(method, url, serializedBody),
+      () => this.executeRequest<T>(method, url, serializedBody, false, idempotencyKey),
       (err) => (err instanceof OnePlatformError ? err.statusCode : undefined),
       (err) =>
         err instanceof RateLimitError
@@ -207,6 +212,8 @@ export class Transport {
     method: string,
     url: string,
     serializedBody: string | undefined,
+    isAuthRetry: boolean,
+    idempotencyKey?: string,
   ): Promise<T> {
     const controller = new AbortController();
     const timeoutMs = this.opts.timeout;
@@ -227,6 +234,9 @@ export class Transport {
       };
       if (serializedBody !== undefined) {
         headers['Content-Type'] = 'application/json';
+      }
+      if (idempotencyKey !== undefined) {
+        headers['Idempotency-Key'] = idempotencyKey;
       }
       if (this.opts.isBrowser) {
         headers['X-Requested-With'] = 'XMLHttpRequest';
@@ -277,16 +287,18 @@ export class Transport {
       if (!response.ok) {
         const err = await mapResponseToError(response);
 
-        // Access token mode: if we have a refresh callback, retry once on 401
+        // Access token mode: if we have a refresh callback, retry once on 401.
+        // isAuthRetry guard ensures a second 401 after refresh fails loudly rather
+        // than recursing infinitely.
         if (
           err instanceof AuthError &&
+          !isAuthRetry &&
           'canRefresh' in this.opts.authHandler &&
           (this.opts.authHandler as AccessTokenHandler).canRefresh()
         ) {
           try {
             await (this.opts.authHandler as AccessTokenHandler).handleUnauthorized();
-            // Re-execute with the new token (no recursive retry — one shot)
-            return this.executeRequest<T>(method, url, serializedBody);
+            return this.executeRequest<T>(method, url, serializedBody, true, idempotencyKey);
           } catch {
             // Refresh failed — surface the original AuthError
             throw err;

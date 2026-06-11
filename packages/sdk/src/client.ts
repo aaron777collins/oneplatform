@@ -200,7 +200,6 @@ export function createClient(options: ClientOptions): OnePlatformClient {
   const rawEventNamespace = createEventNamespace(
     transport,
     authHandler,
-    options.baseUrl,
     fetchImpl,
     isBrowser,
   );

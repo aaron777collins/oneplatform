@@ -3,6 +3,7 @@
  */
 
 import type { NetworkError } from '../errors/network-error.js';
+import type { AuthError } from '../errors/client-errors.js';
 
 export interface PlatformEvent {
   /** Unique event ID. Used as Last-Event-ID for stream resumption. */
@@ -61,6 +62,10 @@ export interface Subscription {
   /** Register a listener for status changes. */
   on(event: 'status', handler: (status: Subscription['status']) => void): this;
 
-  /** Register a listener for connection errors (emitted before reconnect attempts). */
-  on(event: 'error', handler: (error: NetworkError) => void): this;
+  /**
+   * Register a listener for connection errors (emitted before reconnect attempts).
+   * AuthError is emitted for 401 responses — the subscription closes immediately
+   * in that case and no reconnection is attempted.
+   */
+  on(event: 'error', handler: (error: NetworkError | AuthError) => void): this;
 }
