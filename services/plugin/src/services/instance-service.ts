@@ -1,0 +1,372 @@
+import type pg from "pg";
+import type { Logger, EventPublisher } from "@oneplatform/core";
+import type { InstanceRepository } from "../repositories/instance-repository.js";
+import type { HookRepository } from "../repositories/hook-repository.js";
+import type { PluginRepository } from "../repositories/plugin-repository.js";
+import type { ConnectorRegistrationService } from "./connector-registration-service.js";
+import type { HookService } from "./hook-service.js";
+import type { InstanceRow } from "../repositories/types.js";
+import {
+  PluginNotFoundError,
+  InstanceNotFoundError,
+  PluginNotActiveError,
+  ConnectorRegistrationFailedError,
+} from "./errors.js";
+
+// ---------------------------------------------------------------------------
+// InstanceService — per-tenant plugin instance lifecycle (spec §6)
+// ---------------------------------------------------------------------------
+
+export interface InstanceServiceDeps {
+  pool: pg.Pool;
+  pluginRepo: PluginRepository;
+  instanceRepo: InstanceRepository;
+  hookRepo: HookRepository;
+  connectorService: ConnectorRegistrationService;
+  hookService: HookService;
+  executionServiceUrl: string;
+  serviceToken: string;
+  drainGraceSeconds: number;
+  logger: Logger;
+  eventPublisher: EventPublisher;
+}
+
+export interface InstanceService {
+  createInstance(params: {
+    pluginIdOrManifestId: string;
+    tenantId: string;
+    displayName: string;
+    config: Record<string, unknown>;
+    createdBy: string;
+  }): Promise<InstanceRow>;
+
+  patchInstance(params: {
+    instanceId: string;
+    tenantId: string;
+    updatedBy: string;
+    displayName?: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
+  }): Promise<InstanceRow>;
+
+  listInstances(params: {
+    pluginIdOrManifestId: string;
+    tenantId?: string;
+    isPlatformAdmin: boolean;
+  }): Promise<InstanceRow[]>;
+
+  getInstance(instanceId: string, tenantId: string): Promise<InstanceRow>;
+}
+
+export function createInstanceService(deps: InstanceServiceDeps): InstanceService {
+  const {
+    pool,
+    pluginRepo,
+    instanceRepo,
+    hookRepo,
+    connectorService,
+    hookService,
+    executionServiceUrl,
+    serviceToken,
+    drainGraceSeconds,
+    logger,
+    eventPublisher,
+  } = deps;
+
+  async function enableInstance(instance: InstanceRow, pluginId: string): Promise<InstanceRow> {
+    const plugin = await pluginRepo.findById(pluginId);
+    if (plugin === null) {
+      throw new PluginNotFoundError(`Plugin ${pluginId} not found`);
+    }
+    if (plugin.status !== "active") {
+      throw new PluginNotActiveError(
+        `Plugin '${plugin.manifest_id}' must be in active status to enable instances`
+      );
+    }
+
+    // Build and insert hook rows, then activate them — all in one transaction
+    // so that a connector registration failure can roll everything back (spec §6.4).
+    const hookData = hookService.buildHookDataFromManifest(
+      plugin.id,
+      instance.id,
+      instance.tenant_id,
+      plugin.manifest
+    );
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Create hook rows in inactive state, then immediately activate them.
+      if (hookData.length > 0) {
+        await hookRepo.createMany(hookData);
+        await hookRepo.updateStateByInstance(client, instance.id, "active");
+      }
+
+      // Mark instance enabled.
+      const updated = await client.query<InstanceRow>(
+        `UPDATE plugin.instances
+            SET enabled = 'enabled', updated_at = now()
+          WHERE id = $1
+        RETURNING id, plugin_manifest_id, plugin_id, tenant_id, display_name, config,
+                  enabled, created_at, created_by, updated_at, updated_by, deleted_at`,
+        [instance.id]
+      );
+
+      const updatedInstance = updated.rows[0];
+      if (updatedInstance === undefined) {
+        throw new Error(`Failed to update instance ${instance.id} to enabled`);
+      }
+
+      // Attempt connector registration outside the transaction.
+      // On failure: roll back the transaction so instance stays disabled.
+      if (plugin.type === "connector") {
+        try {
+          await connectorService.register({
+            pluginId: plugin.manifest_id,
+            instanceId: instance.id,
+            tenantId: instance.tenant_id,
+            displayName: instance.display_name,
+            version: plugin.version,
+            metadata: (plugin.manifest as Record<string, unknown>)["connectorMetadata"] as Record<string, unknown> ?? {},
+          });
+        } catch (err) {
+          await client.query("ROLLBACK");
+          if (err instanceof ConnectorRegistrationFailedError) throw err;
+          throw new ConnectorRegistrationFailedError(
+            `Connector registration failed: ${String(err)}`
+          );
+        }
+      }
+
+      await client.query("COMMIT");
+      return updatedInstance;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function disableInstance(
+    instance: InstanceRow,
+    updatedBy: string
+  ): Promise<InstanceRow> {
+    // Step 1: Mark as disabling.
+    await instanceRepo.update(instance.id, { enabled: "disabling", updated_by: updatedBy });
+
+    // Step 2: Signal drain to Execution Service (fire-and-forget with 60s grace).
+    try {
+      await fetch(`${executionServiceUrl}/internal/execution/plugin-drain`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Service-Token": serviceToken,
+        },
+        body: JSON.stringify({
+          pluginId: instance.plugin_manifest_id,
+          tenantId: instance.tenant_id,
+          instanceId: instance.id,
+          gracePeriodMs: drainGraceSeconds * 1000,
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (err) {
+      logger.warn("Drain signal to Execution Service failed (proceeding)", {
+        instanceId: instance.id,
+        error: String(err),
+      });
+    }
+
+    // Step 3: Disable all hooks for this instance.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await hookRepo.updateStateByInstance(client, instance.id, "disabled");
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+
+    // Fetch the plugin to check type for connector deregistration.
+    const plugin = await pluginRepo.findById(instance.plugin_id);
+
+    // Step 4: Deregister connector (best-effort, spec §9.2).
+    if (plugin !== null && plugin.type === "connector") {
+      await connectorService.deregisterInstance(instance.id);
+    }
+
+    // Step 5: Cache invalidation signal.
+    const currentVersion = plugin?.version ?? "";
+    try {
+      await fetch(`${executionServiceUrl}/internal/execution/plugin-cache-invalidate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Service-Token": serviceToken,
+        },
+        body: JSON.stringify({
+          pluginId: instance.plugin_manifest_id,
+          tenantId: instance.tenant_id,
+          newBundleVersion: currentVersion,
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (err) {
+      logger.warn("Cache invalidation signal failed (non-fatal)", {
+        instanceId: instance.id,
+        error: String(err),
+      });
+    }
+
+    // Step 6: Mark disabled.
+    const disabled = await instanceRepo.update(instance.id, {
+      enabled: "disabled",
+      updated_by: updatedBy,
+    });
+
+    if (disabled === null) {
+      throw new InstanceNotFoundError(
+        `Instance ${instance.id} disappeared during disable transition`
+      );
+    }
+
+    return disabled;
+  }
+
+  return {
+    async createInstance({ pluginIdOrManifestId, tenantId, displayName, config, createdBy }) {
+      // Resolve plugin — must be active.
+      let plugin = await pluginRepo.findById(pluginIdOrManifestId).catch(() => null);
+      if (plugin === null) {
+        plugin = await pluginRepo.findActiveByManifestId(pluginIdOrManifestId);
+      }
+      if (plugin === null) {
+        throw new PluginNotFoundError(`Plugin '${pluginIdOrManifestId}' not found`);
+      }
+      if (plugin.status !== "active") {
+        throw new PluginNotActiveError(
+          `Plugin '${plugin.manifest_id}' must be in active status to create instances`
+        );
+      }
+
+      // Insert instance row in disabled state first (atomicity guard, spec §6.4).
+      const instance = await instanceRepo.create({
+        plugin_manifest_id: plugin.manifest_id,
+        plugin_id: plugin.id,
+        tenant_id: tenantId,
+        display_name: displayName,
+        config,
+        enabled: "disabled",
+        created_by: createdBy,
+      });
+
+      // Enable the instance (inserts hooks, registers connector).
+      const enabled = await enableInstance(instance, plugin.id);
+
+      await eventPublisher.publish({
+        eventType: "plugin.enabled",
+        eventVersion: "1.0.0",
+        tenantId,
+        actor: { type: "user", id: createdBy },
+        data: {
+          pluginId: plugin.manifest_id,
+          pluginName: plugin.name,
+          tenantId,
+          instanceId: instance.id,
+          enabledBy: createdBy,
+        },
+      });
+
+      return enabled;
+    },
+
+    async patchInstance({ instanceId, tenantId, updatedBy, displayName, config, enabled }) {
+      const instance = await instanceRepo.findByIdAndTenant(instanceId, tenantId);
+      if (instance === null) {
+        throw new InstanceNotFoundError(`Instance '${instanceId}' not found`);
+      }
+
+      if (config !== undefined) {
+        await instanceRepo.update(instanceId, { config, updated_by: updatedBy });
+      }
+      if (displayName !== undefined) {
+        await instanceRepo.update(instanceId, { display_name: displayName, updated_by: updatedBy });
+      }
+
+      if (enabled === false) {
+        const result = await disableInstance(instance, updatedBy);
+        await eventPublisher.publish({
+          eventType: "plugin.disabled",
+          eventVersion: "1.0.0",
+          tenantId,
+          actor: { type: "user", id: updatedBy },
+          data: {
+            pluginId: instance.plugin_manifest_id,
+            tenantId,
+            instanceId,
+            disabledBy: updatedBy,
+          },
+        });
+        return result;
+      }
+
+      if (enabled === true && instance.enabled !== "enabled") {
+        const plugin = await pluginRepo.findById(instance.plugin_id);
+        if (plugin === null) {
+          throw new PluginNotFoundError(`Plugin ${instance.plugin_id} not found`);
+        }
+        const result = await enableInstance(instance, plugin.id);
+        await eventPublisher.publish({
+          eventType: "plugin.enabled",
+          eventVersion: "1.0.0",
+          tenantId,
+          actor: { type: "user", id: updatedBy },
+          data: {
+            pluginId: instance.plugin_manifest_id,
+            tenantId,
+            instanceId,
+            enabledBy: updatedBy,
+          },
+        });
+        return result;
+      }
+
+      const refreshed = await instanceRepo.findByIdAndTenant(instanceId, tenantId);
+      if (refreshed === null) {
+        throw new InstanceNotFoundError(`Instance '${instanceId}' not found after update`);
+      }
+      return refreshed;
+    },
+
+    async listInstances({ pluginIdOrManifestId, tenantId, isPlatformAdmin }) {
+      // Resolve manifest_id from UUID or manifest_id string.
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        pluginIdOrManifestId
+      );
+
+      let manifestId = pluginIdOrManifestId;
+      if (isUuid) {
+        const plugin = await pluginRepo.findById(pluginIdOrManifestId);
+        if (plugin === null) {
+          throw new PluginNotFoundError(`Plugin '${pluginIdOrManifestId}' not found`);
+        }
+        manifestId = plugin.manifest_id;
+      }
+
+      return instanceRepo.findByPluginManifestId(
+        manifestId,
+        ...(isPlatformAdmin ? [{}] : [{ tenantId }]) as [{ tenantId?: string; includeDeleted?: boolean }]
+      );
+    },
+
+    async getInstance(instanceId: string, tenantId: string): Promise<InstanceRow> {
+      const instance = await instanceRepo.findByIdAndTenant(instanceId, tenantId);
+      if (instance === null) {
+        throw new InstanceNotFoundError(`Instance '${instanceId}' not found`);
+      }
+      return instance;
+    },
+  };
+}
