@@ -7,7 +7,7 @@ import { withContext } from "../../lib/context.js";
 import type { CommandContext } from "../../lib/context.js";
 import { CliError, EXIT } from "../../lib/errors.js";
 import { confirmDestructive, promptText, promptSelect } from "../../lib/prompts.js";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 const PLUGIN_COLUMNS = [
@@ -36,9 +36,18 @@ async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
 
 async function installAction(source: string, opts: InstallOpts, ctx: CommandContext): Promise<void> {
   let filePath = source;
+  let tempFileToClean: string | null = null;
+
+  // Plain HTTP is rejected — plugin downloads must use HTTPS to prevent MITM attacks.
+  if (source.startsWith("http://")) {
+    throw new CliError(
+      "Insecure URL rejected. Plugin sources must use HTTPS (https://). Plain HTTP is not allowed.",
+      EXIT.GENERAL,
+    );
+  }
 
   // Download from URL if needed
-  if (source.startsWith("https://") || source.startsWith("http://")) {
+  if (source.startsWith("https://")) {
     ctx.renderer.info(`Downloading ${source}...`);
     const resp = await fetch(source);
     if (!resp.ok) {
@@ -48,36 +57,46 @@ async function installAction(source: string, opts: InstallOpts, ctx: CommandCont
     const { tmpdir } = await import("node:os");
     const { randomBytes } = await import("node:crypto");
     filePath = join(tmpdir(), `op-plugin-${randomBytes(8).toString("hex")}.oppkg`);
+    tempFileToClean = filePath;
     writeFileSync(filePath, Buffer.from(arrayBuffer));
     ctx.renderer.info("Download complete.");
   }
 
-  const content = readFileSync(filePath);
-  const form = new FormData();
-  form.append("file", new Blob([content]), "plugin.oppkg");
-  if (opts.tenant) form.append("tenantId", opts.tenant);
+  // Ensure the temp download file is removed even when upload or approval throws.
+  try {
+    const content = readFileSync(filePath);
+    const form = new FormData();
+    form.append("file", new Blob([content]), "plugin.oppkg");
+    if (opts.tenant) form.append("tenantId", opts.tenant);
 
-  const resp = await ctx.http.postMultipart<{
-    id: string; name: string; version: string;
-    permissions: string[]; externalUrls: string[]
-  }>("/api/v1/plugins", form);
+    const resp = await ctx.http.postMultipart<{
+      id: string; name: string; version: string;
+      permissions: string[]; externalUrls: string[]
+    }>("/api/v1/plugins", form);
 
-  // Show approval prompt
-  ctx.renderer.info(`Plugin: ${resp.name} v${resp.version}`);
-  if (resp.permissions.length > 0) {
-    ctx.renderer.info(`Permissions requested:\n  ${resp.permissions.join("\n  ")}`);
+    // Show approval prompt
+    ctx.renderer.info(`Plugin: ${resp.name} v${resp.version}`);
+    if (resp.permissions.length > 0) {
+      ctx.renderer.info(`Permissions requested:\n  ${resp.permissions.join("\n  ")}`);
+    }
+    if (resp.externalUrls.length > 0) {
+      ctx.renderer.info(`External URLs:\n  ${resp.externalUrls.join("\n  ")}`);
+    }
+
+    if (ctx.yes) {
+      ctx.renderer.warn("Auto-approving plugin installation (--yes). This is logged to audit.");
+    } else {
+      await confirmDestructive(`Install plugin '${resp.name}'?`, false);
+    }
+
+    ctx.renderer.success(`Plugin '${resp.name}' v${resp.version} installed (ID: ${resp.id}).`);
+  } finally {
+    // Clean up the temp file regardless of success or failure.
+    // Only a temp file we created should be cleaned; local file paths are left alone.
+    if (tempFileToClean !== null) {
+      try { unlinkSync(tempFileToClean); } catch { /* best-effort */ }
+    }
   }
-  if (resp.externalUrls.length > 0) {
-    ctx.renderer.info(`External URLs:\n  ${resp.externalUrls.join("\n  ")}`);
-  }
-
-  if (ctx.yes) {
-    ctx.renderer.warn("Auto-approving plugin installation (--yes). This is logged to audit.");
-  } else {
-    await confirmDestructive(`Install plugin '${resp.name}'?`, false);
-  }
-
-  ctx.renderer.success(`Plugin '${resp.name}' v${resp.version} installed (ID: ${resp.id}).`);
 }
 
 async function enableAction(pluginId: string, opts: PluginTenantOpts, ctx: CommandContext): Promise<void> {

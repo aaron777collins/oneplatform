@@ -109,6 +109,9 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
     if (status.status === "failed") {
       throw new CliError("Connector run failed.", EXIT.SERVER);
     }
+    if (status.status === "cancelled" || status.status === "timeout") {
+      throw new CliError(`Connector run ${status.status}.`, EXIT.GENERAL);
+    }
   }
 }
 

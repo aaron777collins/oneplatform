@@ -87,7 +87,10 @@ async function statusAction(opts: StatusOpts, ctx: CommandContext): Promise<void
 
   if (!opts.watch) {
     const unhealthy = await renderOnce();
-    if (unhealthy) process.exit(1);
+    if (unhealthy) {
+      // Throw rather than call process.exit directly so withContext controls the exit path.
+      throw new CliError("One or more services are unhealthy.", EXIT.SERVER);
+    }
     return;
   }
 

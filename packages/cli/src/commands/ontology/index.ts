@@ -97,6 +97,9 @@ async function migrateAction(entityType: string, opts: MigrateOpts, ctx: Command
     if (status.status === "failed") {
       throw new CliError("Migration failed.", EXIT.SERVER);
     }
+    if (status.status === "cancelled" || status.status === "timeout") {
+      throw new CliError(`Migration ${status.status}.`, EXIT.GENERAL);
+    }
   }
   throw new CliError(`Migration timed out after ${opts.timeout ?? 300}s.`, EXIT.NETWORK);
 }

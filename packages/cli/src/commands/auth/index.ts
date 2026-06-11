@@ -23,8 +23,16 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
   let apiKey: string;
 
   if (opts.key) {
-    // Key mode: validate then store
-    const tempClient = ctx.http;
+    // Validate the supplied key by constructing a temporary HTTP client that uses it.
+    // Using ctx.http here would validate the already-stored credential, not the new key.
+    const { createHttpClient } = await import("../../lib/http-client.js");
+    const tempClient = createHttpClient({
+      platformUrl,
+      apiKey: opts.key,
+      timeout: ctx.config.timeout,
+      insecureTls: ctx.config.insecureTls,
+      verbose: ctx.config.verbose,
+    });
     const me = await tempClient.get<{ email: string }>("/api/v1/auth/me");
     apiKey = opts.key;
     ctx.renderer.success(`Logged in as ${me.email} on ${platformUrl}`);
@@ -52,7 +60,10 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
 
 async function logoutAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const platformUrl = ctx.config.platformUrl;
-  const profileName = "default"; // resolved from context in real impl
+  // Derive the active profile name from context rather than hardcoding "default",
+  // so multi-profile users always log out of the profile they actually ran the command against.
+  const { getActiveProfileName } = await import("../../lib/profiles.js");
+  const profileName = getActiveProfileName();
   deleteCredentials(profileName);
   ctx.renderer.success(`Logged out of ${platformUrl}`);
 }

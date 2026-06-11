@@ -5,6 +5,18 @@
 import { input, confirm, password, select } from "@inquirer/prompts";
 import { CliError, EXIT } from "./errors.js";
 
+/**
+ * Thrown when the user explicitly declines a prompt ("No" / wrong confirmation word).
+ * withContext catches CliError and exits with exitCode — EXIT.OK means silent exit,
+ * which is the correct UX for a voluntary abort rather than an actual error.
+ */
+export class UserAbortError extends CliError {
+  constructor(message: string = "Aborted.") {
+    super(message, EXIT.OK);
+    this.name = "UserAbortError";
+  }
+}
+
 /** Standard confirmation for destructive operations. */
 export async function confirmDestructive(
   message: string,
@@ -19,7 +31,8 @@ export async function confirmDestructive(
   }
   const confirmed = await confirm({ message, default: false });
   if (!confirmed) {
-    throw new CliError("Aborted.", EXIT.OK);
+    // UserAbortError exits cleanly with code 0 — the user said "no", which is not an error.
+    throw new UserAbortError("Aborted.");
   }
 }
 
@@ -39,7 +52,8 @@ export async function confirmByTyping(
   }
   const typed = await input({ message });
   if (typed !== requiredWord) {
-    throw new CliError(`Aborted. You must type ${requiredWord} to confirm.`, EXIT.GENERAL);
+    // EXIT.OK: the user made a deliberate choice not to confirm — not a system error.
+    throw new UserAbortError(`Aborted. You must type ${requiredWord} to confirm.`);
   }
 }
 

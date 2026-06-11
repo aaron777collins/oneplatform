@@ -42,7 +42,19 @@ function writeGlobalConfig(cfg: GlobalConfig): void {
   writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
 }
 
+// Profile names are used as filesystem path components — restrict to safe chars.
+const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function validateProfileName(name: string): void {
+  if (!PROFILE_NAME_RE.test(name)) {
+    throw new Error(
+      `Invalid profile name "${name}". Use only alphanumeric, hyphens, underscores (max 64 chars).`,
+    );
+  }
+}
+
 function profilePath(name: string): string {
+  validateProfileName(name);
   return join(PROFILES_DIR, `${name}.json`);
 }
 

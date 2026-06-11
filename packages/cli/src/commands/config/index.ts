@@ -27,17 +27,27 @@ interface ValidateOpts { file: string }
 
 async function exportAction(opts: ExportOpts, ctx: CommandContext): Promise<void> {
   const format = opts.format ?? "yaml";
-  const query: Record<string, unknown> = { format };
-  if (opts.kinds) query["kinds"] = opts.kinds;
+
+  let data: unknown;
+
   if (opts.includeCredentials) {
     if (!opts.passphrase) {
       throw new CliError("--passphrase is required when --include-credentials is set.", EXIT.GENERAL);
     }
-    query["includeCredentials"] = "true";
-    query["passphrase"] = opts.passphrase;
+    // POST is required here because the passphrase must travel in the request body,
+    // not in the URL query string where it would be visible in server/proxy access logs.
+    const body: Record<string, unknown> = {
+      format,
+      includeCredentials: true,
+      passphrase: opts.passphrase,
+      ...(opts.kinds ? { kinds: opts.kinds } : {}),
+    };
+    data = await ctx.http.post<unknown>("/api/v1/admin/config/export", body);
+  } else {
+    const query: Record<string, unknown> = { format };
+    if (opts.kinds) query["kinds"] = opts.kinds;
+    data = await ctx.http.get<unknown>("/api/v1/admin/config/export", query);
   }
-
-  const data = await ctx.http.get<unknown>("/api/v1/admin/config/export", query);
   const output = typeof data === "string" ? data : JSON.stringify(data, null, 2);
 
   if (opts.out) {

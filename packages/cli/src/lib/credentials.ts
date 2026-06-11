@@ -190,7 +190,7 @@ export async function loadCredentials(profileName: string): Promise<ResolvedCred
     return { apiKey: null, platformUrl: null, source: "none" };
   }
 
-  const { encryptedApiKey, derivation } = await decryptEntry(entry);
+  const { encryptedApiKey, derivation } = await decryptEntry(entry, profileName);
   return {
     apiKey: encryptedApiKey,
     platformUrl: entry.platformUrl,
@@ -200,9 +200,13 @@ export async function loadCredentials(profileName: string): Promise<ResolvedCred
 
 async function decryptEntry(
   entry: StoredCredential,
+  profileName: string,
 ): Promise<{ encryptedApiKey: string; derivation: "keychain" | "machine-id" }> {
   if (entry.keyDerivation === "keychain" && (await isKeytarAvailable())) {
-    const encKey = await keytarGet("oneplatform-cli", entry.platformUrl);
+    // Account is scoped to profileName so two profiles sharing the same platformUrl
+    // each get their own independent keychain entry and never collide.
+    const account = `${profileName}:${entry.platformUrl}`;
+    const encKey = await keytarGet("oneplatform-cli", account);
     if (encKey) {
       const key = Buffer.from(encKey, "base64");
       return { encryptedApiKey: decrypt(entry.apiKey, key), derivation: "keychain" };
@@ -227,7 +231,10 @@ export async function saveCredentials(
 
   if (await isKeytarAvailable()) {
     key = randomBytes(32);
-    await keytarSet("oneplatform-cli", platformUrl, key.toString("base64"));
+    // Account is scoped to profileName to avoid collisions when multiple profiles
+    // point at the same platformUrl — each profile gets its own keychain entry.
+    const account = `${profileName}:${platformUrl}`;
+    await keytarSet("oneplatform-cli", account, key.toString("base64"));
     derivation = "keychain";
   } else {
     process.stderr.write(

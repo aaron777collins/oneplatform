@@ -16,7 +16,7 @@ export interface HttpClient {
   put<T>(path: string, body: unknown): Promise<T>;
   delete(path: string): Promise<void>;
   postMultipart<T>(path: string, form: FormData): Promise<T>;
-  stream(path: string, query?: Record<string, unknown>): AsyncIterable<string>;
+  stream(path: string, query?: Record<string, unknown>, signal?: AbortSignal): AsyncIterable<string>;
 }
 
 export interface HttpClientConfig {
@@ -55,8 +55,11 @@ async function parseErrorBody(res: Response): Promise<{ error?: { code?: string;
 export function createHttpClient(cfg: HttpClientConfig): HttpClient {
   const { platformUrl, apiKey, timeout, verbose } = cfg;
 
-  // TLS override applies only in Node.js; in Bun it's handled differently
   if (cfg.insecureTls) {
+    // NODE_TLS_REJECT_UNAUTHORIZED is a process-level flag in Node.js — there is no
+    // per-request TLS bypass in native fetch. This intentionally affects all HTTPS
+    // connections for the lifetime of this process, not just calls to platformUrl.
+    // Bun handles this differently via its own TLS options.
     process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
   }
 
@@ -170,14 +173,14 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
       return res.json() as Promise<T>;
     },
 
-    async *stream(path: string, query?: Record<string, unknown>): AsyncIterable<string> {
+    async *stream(path: string, query?: Record<string, unknown>, signal?: AbortSignal): AsyncIterable<string> {
       const url = buildUrl(platformUrl, path, query);
       const headers: Record<string, string> = {
         Accept: "text/event-stream",
         ...authHeaders(apiKey),
       };
 
-      const res = await fetch(url, { headers });
+      const res = await fetch(url, { headers, ...(signal !== undefined ? { signal } : {}) });
       if (!res.ok) {
         const errBody = await parseErrorBody(res);
         throw httpErrorToCliError(res.status, errBody, verbose);

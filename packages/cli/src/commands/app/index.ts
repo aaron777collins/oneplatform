@@ -203,13 +203,25 @@ async function envListAction(slug: string, _opts: Record<string, never>, ctx: Co
 }
 
 async function rollbackAction(slug: string, opts: RollbackOpts, ctx: CommandContext): Promise<void> {
+  // Fetch current deployment info first so we can show a meaningful confirmation message
+  // before the destructive POST. The confirmation must happen before the rollback is
+  // triggered server-side, not after.
+  const current = await ctx.http.get<{ version: string; deployedAt?: string }>(
+    `/api/v1/apps/${encodeURIComponent(slug)}/deployments/current`,
+  );
+  const targetVersion = opts.to ?? "(previous)";
+  const currentInfo = `current: ${current.version}${current.deployedAt ? ` deployed ${current.deployedAt}` : ""}`;
+  await confirmDestructive(
+    `Roll back '${slug}' to version ${targetVersion}? (${currentInfo})`,
+    ctx.yes,
+  );
+
   const body: Record<string, unknown> = {};
   if (opts.to) body["version"] = opts.to;
   const resp = await ctx.http.post<{ version: string }>(
     `/api/v1/apps/${encodeURIComponent(slug)}/rollback`,
     body,
   );
-  await confirmDestructive(`Roll back '${slug}' to version ${resp.version}?`, ctx.yes);
   ctx.renderer.success(`App '${slug}' rolled back to version ${resp.version}.`);
 }
 

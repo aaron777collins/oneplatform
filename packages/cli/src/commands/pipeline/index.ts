@@ -123,7 +123,7 @@ async function runLogsAction(runId: string, opts: RunLogsOpts, ctx: CommandConte
     if (opts.level) query["level"] = opts.level;
 
     process.stderr.write(`Streaming logs for run ${runId}... (Ctrl+C to stop)\n`);
-    for await (const event of streamSse(ctx.http, `/api/v1/pipeline-runs/${runId}/logs/stream`, query)) {
+    for await (const event of streamSse(ctx.http, `/api/v1/pipeline-runs/${encodeURIComponent(runId)}/logs/stream`, query)) {
       try {
         const logEntry = JSON.parse(event.data) as { level?: string; message?: string; timestamp?: string };
         const level = colorizeLogLevel(logEntry.level ?? "info", ctx.noColor);
