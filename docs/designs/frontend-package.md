@@ -125,7 +125,7 @@ React context is used only for provider-pattern values that are stable across re
 |--------|--------------|
 | **@monaco-editor/react v4** | The L1 spec (§9) and app-service design (§13) mandate Monaco. `@monaco-editor/react` provides a React component wrapper with lazy loading. The underlying `monaco-editor` package (~4MB gzipped) is loaded on demand via a route-level code split — only Jordan's app developer persona loads it. |
 
-Monaco worker files are served from a CDN (`cdnjs.cloudflare.com/ajax/libs/monaco-editor/`) in production to avoid bundling the language workers. The self-hosted fallback uses Vite's `new URL('./worker', import.meta.url)` worker pattern. See section 11 for full configuration.
+Monaco worker files are served from the self-hosted path `/monaco-workers/` by default, consistent with OnePlatform's self-hosted deployment model (operators cannot depend on CDN availability in air-gapped or private-network environments). CDN delivery is opt-in via the `VITE_MONACO_CDN=true` build flag for operators who prefer it. See section 11 for full configuration.
 
 ### 2.8 Real-Time
 
@@ -157,6 +157,7 @@ tailwind-merge              ^2.3.0        (shadcn dependency)
 lucide-react                ^0.400.0      (icon set used by shadcn)
 recharts                    ^2.12.0       (metrics charts — already in app-sdk allowed list)
 date-fns                    ^3.6.0        (date formatting in log viewer, metrics)
+react-window                ^1.8.0        (virtualized list for log viewer — see §15.4)
 ```
 
 **Dev dependencies:**
@@ -173,6 +174,7 @@ msw                         ^2.3.0        (API mocking for tests)
 tailwindcss                 ^4.0.0
 autoprefixer                ^10.4.0
 typescript                  *             (workspace version)
+@types/react-window         ^1.8.0        (types for react-window)
 ```
 
 No `@oneplatform/sdk` dependency at runtime — the dashboard builds its own fetch wrapper around the Gateway API (see section 7). The `@oneplatform/app-sdk` is never imported by the dashboard; it is used only inside Monaco-built app bundles.
@@ -491,14 +493,25 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
 ### 4.4 Route-Level Code Splitting
 
-Every top-level page is lazy-loaded via TanStack Router's `lazy` option. The Monaco editor chunk (~4MB) is only loaded when the user navigates to `/apps/$id/edit`.
+Every top-level page is lazy-loaded using TanStack Router's `createLazyRoute` pattern, which integrates cleanly with the router's type system. The Monaco editor chunk (~4MB) is only loaded when the user navigates to `/apps/$id/edit`.
 
 ```typescript
-const appEditorRoute = createRoute({
-  path: "/apps/$id/edit",
-  component: lazy(() => import("./pages/apps/AppEditorPage")),
+// pages/apps/AppEditorPage.tsx — lazy route module
+import { createLazyRoute } from "@tanstack/react-router";
+
+export const Route = createLazyRoute("/apps/$id/edit")({
+  component: AppEditorPage,
 });
+
+// src/router.tsx — static route registration (no component here)
+const appEditorRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/apps/$id/edit",
+  preload: "intent",
+}).lazy(() => import("./pages/apps/AppEditorPage").then((m) => m.Route));
 ```
+
+Using `createLazyRoute` (not React's `lazy()`) is the correct pattern for TanStack Router — it preserves full type inference for `useParams()`, `useLoaderData()`, and `useSearch()` inside the lazy-loaded component. React's `lazy()` loses these types because TanStack Router cannot inspect the dynamically imported module at the call site.
 
 This keeps the initial bundle below 200KB (gzipped) for the login and dashboard views.
 
@@ -689,14 +702,26 @@ Access tokens inside `op_session` are 15-minute JWTs. The server handles refresh
 From the dashboard's perspective: if an API call returns 401, the dashboard retries it once (in case the cookie was just refreshed by a parallel request) and then redirects to `/login` if the retry also fails.
 
 ```typescript
-// src/lib/api-client.ts — simplified retry on 401
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+// src/lib/api-client.ts — retry on 401 with loop guard
+// isRetry prevents infinite recursion: a 401 on the retried request means the
+// session is genuinely expired, so we redirect rather than looping again.
+async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+  isRetry = false,
+): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
     credentials: "include",  // always send cookies
   });
 
   if (response.status === 401) {
+    if (isRetry) {
+      // Second consecutive 401 — session is expired, not a race condition.
+      authStore.getState().clearSession();
+      window.location.href = "/login";
+      throw new AuthError("Session expired");
+    }
     // Attempt one refresh via the auth endpoint
     const refreshed = await fetch("/api/v1/auth/refresh", {
       method: "POST",
@@ -707,8 +732,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       window.location.href = "/login";
       throw new AuthError("Session expired");
     }
-    // Retry the original request once
-    return apiFetch<T>(path, init);
+    // Retry the original request exactly once
+    return apiFetch<T>(path, init, true);
   }
 
   if (!response.ok) {
@@ -1000,7 +1025,7 @@ When the user first navigates to `/`, the bootstrap gate (section 4.2) calls `GE
 | Welcome | 0 | (none — step 0) | Platform overview, "Get started" CTA | None |
 | Admin Account | 1 | — | Email + password + confirm password fields | Zod: email format, password min 12 chars, passwords match |
 | Org Name | 2 | — | Tenant/organization name field | Zod: 2–64 chars, no leading/trailing spaces |
-| Master Key | 3 | — | Displays master key from `/internal/auth/master-key-display`, 60s countdown auto-clear | User must click "I have saved this key" checkbox to proceed |
+| Master Key | 3 | — | Displays master key from `GET /api/v1/auth/bootstrap/master-key` (Gateway-proxied, only accessible when `bootstrap_completed === false`), 60s countdown auto-clear | User must click "I have saved this key" checkbox to proceed |
 | Review | 4 | — | Summary of admin email + org name (password hidden), no master key shown again | None (confirmation step) |
 | Success | 5 | — | "Platform ready" message, link to login | None |
 
@@ -1010,7 +1035,7 @@ This screen is the most security-sensitive screen in the application.
 
 **Behavior:**
 
-1. On mount, call `GET /internal/auth/master-key-display` (proxied through Gateway, auth not required during bootstrap, single-use endpoint that returns 410 after first access).
+1. On mount, call `GET /api/v1/auth/bootstrap/master-key` — a Gateway-proxied route that the Auth Service only exposes when `bootstrap_completed === false`. The endpoint returns 410 Gone after first access. This is a public-facing route; it is **not** the internal `/internal/auth/master-key-display` service-to-service route (which requires `X-Service-Token` and is unreachable from the browser).
 2. Display the key in a monospace, masked input. Provide a "Show / Hide" toggle (eye icon) and a "Copy to clipboard" button.
 3. Start a 60-second countdown timer. When the timer reaches 0:
    - Clear the displayed key from the DOM (set state to `null`).
@@ -1021,6 +1046,8 @@ This screen is the most security-sensitive screen in the application.
 
 ```typescript
 // src/components/wizard/MasterKeyDisplay.tsx
+// Calls GET /api/v1/auth/bootstrap/master-key — the Gateway-proxied public route.
+// Do NOT call /internal/auth/master-key-display (service-to-service only, unreachable from browser).
 export function MasterKeyDisplay() {
   const [key, setKey] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -1028,7 +1055,9 @@ export function MasterKeyDisplay() {
   const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
-    fetchMasterKey().then((k) => setKey(k));
+    // Route only responds when bootstrap is incomplete; 410 means another session beat us here.
+    apiClient.get<{ masterKey: string }>("/v1/auth/bootstrap/master-key")
+      .then((res) => setKey(res.data.masterKey));
   }, []);
 
   useEffect(() => {
@@ -1055,7 +1084,13 @@ const payload = {
   adminEmail: wizardStore.adminEmail,
   adminPassword: wizardStore.adminPassword,
   tenantName: wizardStore.orgName,
-  bootstrapToken: "<entered by user on review screen OR fetched earlier>",
+  // bootstrapToken is NOT collected from user input.
+  // GET /api/v1/auth/bootstrap/status returns { completed: false, bootstrapToken: "<token>" }
+  // when bootstrap has not yet been completed. The wizard reads this on startup via
+  // useBootstrapStatus() and holds the token in local state — never in the Zustand store.
+  // The Auth Service reads the token from a mounted volume path (e.g. /run/secrets/bootstrap-token),
+  // which means Sam never needs to copy it from docker logs.
+  bootstrapToken: bootstrapToken, // from useBootstrapStatus() local state
 };
 // POST /api/v1/auth/bootstrap
 // On 200: navigate to step 5 (Success), clear store
@@ -1063,7 +1098,7 @@ const payload = {
 // On 4xx: show error, stay on step 4
 ```
 
-The bootstrap token is not shown to the user in the wizard — Sam (DevOps) runs `docker compose up`, the services start, and the bootstrap token was already consumed by the Auth Service to secure the endpoint. The `POST /api/v1/auth/bootstrap` body includes the bootstrap token that op-init generated; the wizard collects this via a text input on the Review step labeled "Bootstrap Token (from docker compose logs)".
+The bootstrap token is **never entered manually by Sam**. The Auth Service writes the token to a mounted volume path on startup; `GET /api/v1/auth/bootstrap/status` (called by the bootstrap gate, section 4.2) returns the token in its response body when `bootstrap_completed === false`. The wizard captures this token silently on mount and includes it in the `POST /api/v1/auth/bootstrap` body automatically. The Review step (step 4) shows no bootstrap token field — it displays only the admin email and org name for confirmation.
 
 ### 9.5 Accessibility for the Wizard
 
@@ -1129,7 +1164,26 @@ Role gating:
 
 ### 10.3 Dashboard Overview Page
 
-`DashboardPage.tsx` shows three panels:
+`DashboardPage.tsx` shows three panels, plus a conditional Quick Start panel.
+
+**Quick Start Panel — New User Onboarding (Casey's entry point):**
+
+Rendered **only when the authenticated user has zero apps** (`GET /api/v1/apps` returns an empty list). Auto-hides permanently once the user's first app is created.
+
+The panel displays three action cards:
+- **Upload CSV** → navigates to `/ontology` with the CSV upload dialog pre-opened.
+- **Create from Template** → opens a template picker dialog with starter app templates.
+- **Browse Connectors** → navigates to `/connectors`.
+
+This provides Casey (non-technical user) a direct onboarding path from the dashboard without requiring prior knowledge of the sidebar navigation.
+
+```typescript
+// DashboardPage.tsx
+const { data: apps } = useQuery({ queryKey: ["apps"], queryFn: () => client.get("/v1/apps") });
+const showQuickStart = apps?.data.length === 0;
+// ...
+{showQuickStart && <QuickStartPanel />}
+```
 
 **Panel 1 — Active Pipelines:**
 - List of pipelines with most-recent run status.
@@ -1153,7 +1207,9 @@ A notification bell in the `Topbar` tracks:
 - Pipeline failures.
 - DLQ additions.
 
-Notifications are stored in-memory (local component state, not persisted). Clicking "mark all read" clears them.
+Notifications are stored **in-memory only** (local component state, not persisted to storage). They are capped at **100 entries**; when the cap is reached, the oldest notification is evicted to make room. Clicking "mark all read" clears the list.
+
+**Limitation:** Notifications are lost on page refresh because they exist only in the React component tree. This is a deliberate trade-off — notifications are a real-time surfacing mechanism, not an event log. **For durable event history, use the Logs page (`/logs`).** A future enhancement could add IndexedDB session persistence to survive page refreshes within the same browser session.
 
 ---
 
@@ -1240,7 +1296,9 @@ function configureMonaco(monaco: Monaco): void {
 
 ### 11.4 File Saves (Debounced)
 
-The `EditorPane` calls `onChange` on every keystroke. `AppEditor.tsx` debounces this to 500ms before calling the save API:
+The `EditorPane` calls `onChange` on every keystroke. `AppEditor.tsx` debounces this to 500ms before calling the save API.
+
+The `debounce` function is implemented in `src/lib/utils.ts` — no external dependency is needed for a simple leading/trailing debounce over async callbacks. Adding a library like `lodash.debounce` would be disproportionate.
 
 ```typescript
 // src/components/editor/AppEditor.tsx
@@ -1292,7 +1350,7 @@ async function triggerBuild() {
 
 ### 11.7 Preview Pane
 
-`PreviewPane.tsx` renders an `<iframe>` pointing to `/apps/{slug}/preview`. The iframe reloads automatically when a build completes:
+`PreviewPane.tsx` renders an `<iframe>` pointing to the app preview URL. The iframe reloads automatically when a build completes:
 
 ```typescript
 useEffect(() => {
@@ -1309,7 +1367,31 @@ useEffect(() => {
 }, [slug]);
 ```
 
-The preview iframe is sandboxed with `allow-scripts allow-same-origin allow-forms` to permit the app-sdk to function while preventing the hosted app from navigating the parent frame.
+**Preview iframe origin and sandbox — two modes:**
+
+**Mode A — Wildcard domain (default when `OP_WILDCARD_DOMAIN` is configured):**
+
+App previews are served from a distinct origin: `preview-{slug}.apps.{OP_WILDCARD_DOMAIN}` (e.g., `preview-myapp.apps.example.com`). Because the preview is cross-origin relative to the dashboard (`example.com`), the iframe can use `allow-same-origin` safely — the app-sdk runs in its own origin and has no access to the dashboard's cookies or localStorage.
+
+```html
+<iframe
+  src="https://preview-{slug}.apps.{OP_WILDCARD_DOMAIN}/preview"
+  sandbox="allow-scripts allow-same-origin allow-forms"
+/>
+```
+
+**Mode B — No wildcard domain (fallback):**
+
+When `OP_WILDCARD_DOMAIN` is not configured, the preview is served from the same origin as the dashboard. In this mode `allow-same-origin` is **removed** from the sandbox attribute to prevent the hosted app from accessing dashboard cookies or localStorage. The app-sdk communicates with the preview host via `postMessage` instead of direct storage access.
+
+```html
+<iframe
+  src="/apps/{slug}/preview"
+  sandbox="allow-scripts allow-forms"
+/>
+```
+
+The `PreviewPane` detects the active mode from the `useBootstrapConfig()` hook (which reads the platform config from `GET /api/v1/config/public`). Operators are advised to configure `OP_WILDCARD_DOMAIN` for full app-sdk functionality; Mode B is a reduced-capability fallback.
 
 ### 11.8 Diff View
 
@@ -1519,7 +1601,7 @@ Vite produces multiple chunks:
 | `icons` | lucide-react (used icons only — tree-shaken) | ~10KB |
 | `wizard` | Setup wizard screens, RHF, Zod | ~20KB (lazy) |
 | `editor` | Monaco editor wrapper, editor components | ~4MB (lazy) |
-| `monaco-worker-ts` | TypeScript language worker | served from CDN |
+| `monaco-worker-ts` | TypeScript language worker | served from `/monaco-workers/` (CDN opt-in via `VITE_MONACO_CDN=true`) |
 | `charts` | Recharts | ~80KB (lazy) |
 | Per-page chunks | Individual page components | 5–30KB each (lazy) |
 
@@ -1527,7 +1609,18 @@ The initial page load (login or dashboard for returning user) delivers ≤ 100KB
 
 ### 15.2 Code Splitting
 
-All routes use `lazy()` loading. Vite's automatic chunk splitting handles vendor deduplication. The Vite config sets `build.rollupOptions.output.manualChunks` for the three large stable vendors (React, TanStack Query, Monaco).
+All routes use `createLazyRoute` loading (see section 4.4). Vite's automatic chunk splitting handles vendor deduplication. The Vite config sets `build.rollupOptions.output.manualChunks` for the three large stable vendors (React, TanStack Query, Monaco).
+
+**Preloading strategy:** All routes are configured with `preload: "intent"` in TanStack Router, meaning route chunks are fetched when the user hovers or focuses a navigation link — before the click is confirmed. This is especially important for the Monaco editor route: at ~4MB the chunk takes 1–3 seconds on a slow connection, so intent-based preloading eliminates the perceived load time for users who hover the "Edit" button before clicking it.
+
+```typescript
+// src/router.tsx — applied to every route definition
+const appEditorRoute = createRoute({
+  path: "/apps/$id/edit",
+  preload: "intent",
+  component: lazy(() => import("./pages/apps/AppEditorPage")),
+});
+```
 
 ### 15.3 Image and Asset Optimization
 
@@ -1548,15 +1641,22 @@ The `LogViewer` component renders potentially thousands of log lines. It uses `r
 
 ### 15.6 Monaco Worker Offloading
 
-Monaco's TypeScript, JSON, and HTML language workers run in Web Workers, never on the main thread. The `@monaco-editor/react` package handles worker setup. In production builds, workers are loaded from `cdnjs.cloudflare.com` via the `getWorker` option to avoid including them in the Vite build:
+Monaco's TypeScript, JSON, and HTML language workers run in Web Workers, never on the main thread. The `@monaco-editor/react` package handles worker setup.
+
+**Default (self-hosted):** Workers are served from `/monaco-workers/` on the frontend Nginx container. Worker files are pre-downloaded and baked into the Docker image at build time, making the deployment fully offline/air-gapped safe. This aligns with OnePlatform's self-hosted deployment model.
+
+**Opt-in CDN mode:** Setting `VITE_MONACO_CDN=true` at build time switches worker delivery to `cdnjs.cloudflare.com`. This is suitable for operators who can guarantee outbound internet access and want to reduce image size.
 
 ```typescript
-// vite.config.ts
-// In self-hosted environments without CDN access, workers are served from the
-// frontend Nginx container at /monaco-workers/
+// vite.config.ts — Monaco worker source selection
+// Default: self-hosted at /monaco-workers/ (VITE_MONACO_CDN unset or false)
+// Opt-in CDN: set VITE_MONACO_CDN=true at build time
+const monacoWorkerBase = import.meta.env.VITE_MONACO_CDN === "true"
+  ? "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/<version>/min/vs"
+  : "/monaco-workers";
 ```
 
-The Nginx config serves pre-downloaded worker files at `/monaco-workers/` to support fully offline/air-gapped deployments.
+The Nginx config serves pre-downloaded worker files at `/monaco-workers/` regardless of the CDN flag, ensuring they are available as a fallback.
 
 ### 15.7 Nginx Caching Headers
 
@@ -1701,7 +1801,10 @@ export default defineConfig({
   build: {
     target: "es2020",
     outDir: "dist",
-    sourcemap: true, // included in dist, served by Nginx only in non-production
+    // 'hidden' generates .map files for error monitoring tools but omits the
+    // //# sourceMappingURL= comment from JS bundles, so browsers never fetch maps.
+    // Nginx also blocks .map requests (see nginx.conf) as defense-in-depth.
+    sourcemap: "hidden",
     rollupOptions: {
       output: {
         manualChunks: {
@@ -1797,6 +1900,12 @@ server {
     add_header Cache-Control "public, max-age=86400";
   }
 
+  # Block source map access — maps are generated with sourcemap: 'hidden' (Vite)
+  # so browsers never request them, but this ensures they cannot be fetched directly.
+  location ~* \.map$ {
+    return 404;
+  }
+
   # API proxy → Gateway
   location /api/ {
     proxy_pass http://gateway-service:3000;
@@ -1876,7 +1985,11 @@ The CSP header (set by Nginx) restricts:
 ```
 default-src 'self'
 script-src 'self'
-style-src 'self' 'unsafe-inline'     -- Required by Tailwind's dynamic CSS
+style-src 'self' 'unsafe-inline'     -- Required by Radix UI inline style attributes
+                                     -- (positioning/transform values injected at runtime
+                                     -- for floating elements, popovers, tooltips, etc.)
+                                     -- Tailwind v4 emits static CSS at build time and
+                                     -- does NOT require unsafe-inline.
 img-src 'self' data:                  -- data: required for Monaco editor
 connect-src 'self'                    -- API and SSE connections only
 worker-src 'self' blob:              -- Monaco Web Workers
@@ -1901,11 +2014,13 @@ The dashboard displays user-generated content in:
 
 All such content is rendered as React text nodes (string interpolation in JSX), never via `dangerouslySetInnerHTML`. This prevents XSS by construction — React escapes all string interpolations.
 
-The `PreviewPane` renders hosted apps in a sandboxed `<iframe>`. The iframe `sandbox` attribute is set to `allow-scripts allow-same-origin allow-forms`. The hosted app cannot access the parent frame's DOM or navigate the top-level browsing context.
+The `PreviewPane` renders hosted apps in a sandboxed `<iframe>`. The `sandbox` attribute mode depends on whether `OP_WILDCARD_DOMAIN` is configured: when it is, previews are served from a distinct origin so `allow-same-origin` is safe; when it is not, `allow-same-origin` is omitted and the app-sdk uses `postMessage` for parent communication. See section 11.7 for full details. In neither mode can the hosted app navigate the top-level browsing context.
 
 ### 18.5 No Secrets in Frontend Code
 
-The frontend has no hardcoded API keys, tokens, or credentials. All secrets are in `httpOnly` cookies managed by the server. The Vite build does not inline any `OP_*` environment variables — all configuration reaches the frontend through the session cookie and the `window.__OP_APP_CONFIG__` injection (which contains only `appId` and `tenantId`).
+The frontend has no hardcoded API keys, tokens, or credentials. All secrets are in `httpOnly` cookies managed by the server. The Vite build does not inline any `OP_*` environment variables. The dashboard has no runtime configuration needs beyond relative API URLs — all context comes from the session cookie and the responses of `GET /api/v1/auth/me` and `GET /api/v1/auth/bootstrap/status`.
+
+**Clarification on `window.__OP_APP_CONFIG__`:** This global is injected exclusively by the **App Service** into hosted app HTML pages (e.g., Jordan's internal tools) to pass `appId`, `tenantId`, and `bffBaseUrl` to the `@oneplatform/app-sdk` at runtime. The dashboard (`packages/frontend/`) **never reads or sets `window.__OP_APP_CONFIG__`**. Any reference to this global in the dashboard context would be a bug.
 
 ---
 
