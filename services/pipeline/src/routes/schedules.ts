@@ -1,33 +1,11 @@
 import { Hono } from "hono";
-import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
 import type { ScheduleService } from "../services/schedule-service.js";
-
-// ---------------------------------------------------------------------------
-// Zod schemas (design spec §5.1)
-// ---------------------------------------------------------------------------
-
-const UUIDSchema = z.string().uuid();
-
-const CreateScheduleSchema = z.object({
-  pipelineId: UUIDSchema,
-  cronExpr: z.string().min(1).max(100),
-  timezone: z.string().min(1).max(64).default("UTC"),
-  enabled: z.boolean().default(true),
-  inputTemplate: z.record(z.unknown()).default({}),
-});
-
-const PatchScheduleSchema = z.object({
-  cronExpr: z.string().min(1).max(100).optional(),
-  timezone: z.string().min(1).max(64).optional(),
-  enabled: z.boolean().optional(),
-  inputTemplate: z.record(z.unknown()).optional(),
-});
-
-const ListSchedulesQuerySchema = z.object({
-  cursor: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
+import {
+  CreateScheduleSchema,
+  PatchScheduleSchema,
+  ListSchedulesQuery,
+} from "../schemas/index.js";
 
 // ---------------------------------------------------------------------------
 // Route dependencies
@@ -54,7 +32,7 @@ export function createScheduleRoutes(
       return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
     }
 
-    const parsed = ListSchedulesQuerySchema.safeParse(c.req.query());
+    const parsed = ListSchedulesQuery.safeParse(c.req.query());
     if (!parsed.success) {
       return c.json(
         { error: { code: "VALIDATION_ERROR", message: "Invalid query parameters.", details: parsed.error.flatten() } },

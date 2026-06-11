@@ -151,6 +151,46 @@ export class ScheduleRepository {
     return result.rowCount !== null && result.rowCount > 0;
   }
 
+  // Tenant-scoped lookup — returns null for cross-tenant access attempts.
+  async findByTenantAndId(
+    tenantId: string,
+    id: string
+  ): Promise<ScheduleRow | null> {
+    const result = await this.pool.query<ScheduleRow>(
+      `SELECT ${SCHEDULE_COLUMNS}
+         FROM pipeline.schedules
+        WHERE id = $1
+          AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  // Returns all enabled schedules across all tenants. Used at service startup
+  // to pre-load in-memory state for any future per-schedule cache warming.
+  async findAllEnabled(): Promise<ScheduleRow[]> {
+    const result = await this.pool.query<ScheduleRow>(
+      `SELECT ${SCHEDULE_COLUMNS}
+         FROM pipeline.schedules
+        WHERE enabled = true
+        ORDER BY created_at ASC, id ASC`
+    );
+    return result.rows;
+  }
+
+  // Disables all schedules belonging to a pipeline. Called when the pipeline
+  // is set inactive so that no cron triggers fire against an inactive pipeline.
+  async disableByPipelineId(pipelineId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE pipeline.schedules
+          SET enabled    = false,
+              updated_at = now()
+        WHERE pipeline_id = $1
+          AND enabled = true`,
+      [pipelineId]
+    );
+  }
+
   // Returns all enabled schedules whose next_run_at is at or before the
   // provided threshold (typically now()). Used by the cron scheduler loop
   // which wakes every 30 seconds and processes due schedules.

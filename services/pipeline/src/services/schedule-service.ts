@@ -26,23 +26,25 @@ export interface ScheduleRow {
 // Repository interface
 // ---------------------------------------------------------------------------
 
+// Matches CreateScheduleData from the concrete repository (snake_case).
 export interface ScheduleCreateInput {
-  pipelineId: string;
-  tenantId: string;
-  cronExpr: string;
-  timezone: string;
-  enabled: boolean;
-  inputTemplate: Record<string, unknown>;
-  nextRunAt: Date;
-}
-
-export interface ScheduleUpdateInput {
-  cronExpr?: string;
+  pipeline_id: string;
+  tenant_id: string;
+  cron_expr: string;
   timezone?: string;
   enabled?: boolean;
-  inputTemplate?: Record<string, unknown>;
-  nextRunAt?: Date;
-  lastRunAt?: Date;
+  input_template?: Record<string, unknown>;
+  next_run_at?: Date;
+}
+
+// Matches UpdateScheduleData from the concrete repository (snake_case).
+export interface ScheduleUpdateInput {
+  cron_expr?: string;
+  timezone?: string;
+  enabled?: boolean;
+  input_template?: Record<string, unknown>;
+  next_run_at?: Date;
+  last_run_at?: Date;
 }
 
 export interface ScheduleListQuery {
@@ -58,15 +60,15 @@ export interface ScheduleListResult {
 export interface ScheduleRepository {
   create(input: ScheduleCreateInput): Promise<ScheduleRow>;
   findById(id: string): Promise<ScheduleRow | null>;
-  findByIdWithTenant(tenantId: string, id: string): Promise<ScheduleRow | null>;
-  list(tenantId: string, query: ScheduleListQuery): Promise<ScheduleListResult>;
-  update(tenantId: string, id: string, input: ScheduleUpdateInput): Promise<ScheduleRow>;
-  delete(tenantId: string, id: string): Promise<void>;
+  findByTenantAndId(tenantId: string, id: string): Promise<ScheduleRow | null>;
+  findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number }): Promise<ScheduleRow[]>;
+  update(id: string, data: ScheduleUpdateInput): Promise<ScheduleRow | null>;
+  delete(id: string): Promise<boolean>;
   findAllEnabled(): Promise<ScheduleRow[]>;
   findDueSchedules(asOf: Date): Promise<ScheduleRow[]>;
-  // Optimistic-lock update: only succeeds if the row still has the expected next_run_at
-  // Used to prevent duplicate cron triggers across replicas (design spec §19.3)
-  claimScheduleRun(scheduleId: string, expectedNextRunAt: Date, newNextRunAt: Date, lastRunAt: Date): Promise<boolean>;
+  // Optimistic-lock update: only succeeds if the row still has the expected next_run_at.
+  // Used to prevent duplicate cron triggers across replicas (design spec §19.3).
+  updateNextRunAt(id: string, lastRunAt: Date, nextRunAt: Date, currentNextRunAt: Date): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,13 +186,13 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
     const nextRunAt = computeNextRunAt(input.cronExpr, input.timezone);
 
     const schedule = await scheduleRepo.create({
-      pipelineId: input.pipelineId,
-      tenantId,
-      cronExpr: input.cronExpr,
+      pipeline_id: input.pipelineId,
+      tenant_id: tenantId,
+      cron_expr: input.cronExpr,
       timezone: input.timezone,
       enabled: input.enabled,
-      inputTemplate: input.inputTemplate,
-      nextRunAt,
+      input_template: input.inputTemplate,
+      next_run_at: nextRunAt,
     });
 
     logger.info("Schedule created", {
@@ -208,7 +210,7 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
   // -------------------------------------------------------------------------
 
   async function getSchedule(tenantId: string, id: string): Promise<ScheduleRow> {
-    const schedule = await scheduleRepo.findByIdWithTenant(tenantId, id);
+    const schedule = await scheduleRepo.findByTenantAndId(tenantId, id);
     if (schedule === null) {
       throw new ScheduleNotFoundError(`Schedule "${id}" not found.`, { scheduleId: id, tenantId });
     }
@@ -220,7 +222,19 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
   // -------------------------------------------------------------------------
 
   async function listSchedules(tenantId: string, query: ScheduleListQuery): Promise<ScheduleListResult> {
-    return scheduleRepo.list(tenantId, query);
+    const rows = await scheduleRepo.findByTenantId(tenantId, {
+      ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+      limit: query.limit,
+    });
+
+    const nextCursor = rows.length === query.limit
+      ? (rows[rows.length - 1]?.id ?? null)
+      : null;
+
+    return {
+      data: rows,
+      pagination: { nextCursor, total: null },
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -234,20 +248,20 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
   ): Promise<ScheduleRow> {
     const existing = await getSchedule(tenantId, id);
 
-    const updateInput: ScheduleUpdateInput = {};
+    const updateData: ScheduleUpdateInput = {};
 
     if (input.cronExpr !== undefined) {
       validateCronExpression(input.cronExpr);
-      updateInput.cronExpr = input.cronExpr;
+      updateData.cron_expr = input.cronExpr;
     }
     if (input.timezone !== undefined) {
-      updateInput.timezone = input.timezone;
+      updateData.timezone = input.timezone;
     }
     if (input.enabled !== undefined) {
-      updateInput.enabled = input.enabled;
+      updateData.enabled = input.enabled;
     }
     if (input.inputTemplate !== undefined) {
-      updateInput.inputTemplate = input.inputTemplate;
+      updateData.input_template = input.inputTemplate;
     }
 
     // Recompute next_run_at if cron or timezone changed
@@ -255,10 +269,15 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
     const newTimezone = input.timezone ?? existing.timezone;
 
     if (input.cronExpr !== undefined || input.timezone !== undefined) {
-      updateInput.nextRunAt = computeNextRunAt(newCronExpr, newTimezone);
+      updateData.next_run_at = computeNextRunAt(newCronExpr, newTimezone);
     }
 
-    const schedule = await scheduleRepo.update(tenantId, id, updateInput);
+    const updated = await scheduleRepo.update(id, updateData);
+    if (updated === null) {
+      throw new ScheduleNotFoundError(`Schedule "${id}" not found.`, { scheduleId: id, tenantId });
+    }
+
+    const schedule = updated;
 
     logger.info("Schedule updated", { tenantId, scheduleId: id });
 
@@ -271,7 +290,7 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
 
   async function deleteSchedule(tenantId: string, id: string): Promise<void> {
     await getSchedule(tenantId, id);
-    await scheduleRepo.delete(tenantId, id);
+    await scheduleRepo.delete(id);
     logger.info("Schedule deleted", { tenantId, scheduleId: id });
   }
 
@@ -300,13 +319,14 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
       try {
         const nextRunAt = computeNextRunAt(schedule.cron_expr, schedule.timezone);
 
-        // Optimistic lock: only the first replica to claim this tick wins
-        // (design spec §19.3 — UPDATE WHERE next_run_at = expected prevents duplicate triggers)
-        const claimed = await scheduleRepo.claimScheduleRun(
+        // Optimistic lock: only the first replica to claim this tick wins.
+        // The UPDATE WHERE next_run_at = currentNextRunAt guard (design spec §19.3)
+        // prevents duplicate triggers when multiple instances race on the same schedule.
+        const claimed = await scheduleRepo.updateNextRunAt(
           schedule.id,
-          schedule.next_run_at ?? now,
-          nextRunAt,
           now,
+          nextRunAt,
+          schedule.next_run_at ?? now,
         );
 
         if (!claimed) {

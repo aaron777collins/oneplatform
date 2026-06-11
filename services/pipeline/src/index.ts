@@ -22,53 +22,20 @@ import type {
   PipelineRunJobPayload,
 } from "./services/index.js";
 import {
+  PipelineRepository,
+  RunRepository,
+  RunStepRepository,
+  RunLogRepository,
+  ScheduleRepository,
+  TriggerRepository,
+} from "./repositories/index.js";
+import {
   createHealthRoutes,
   createPipelineRoutes,
   createRunRoutes,
   createScheduleRoutes,
   createInternalRoutes,
 } from "./routes/index.js";
-
-// ---------------------------------------------------------------------------
-// Placeholder repository implementations — these satisfy the interfaces until
-// the concrete repository layer (built by the parallel agent) is merged in.
-// They throw meaningful errors at runtime to signal an unimplemented path
-// rather than silently failing.
-// ---------------------------------------------------------------------------
-
-function notImplemented(method: string): never {
-  throw new Error(`Repository method not implemented: ${method}. Awaiting concrete repo layer.`);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const placeholderPipelineRepo: any = new Proxy({}, {
-  get: (_target, prop) => () => notImplemented(`PipelineRepository.${String(prop)}`),
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const placeholderRunRepo: any = new Proxy({}, {
-  get: (_target, prop) => () => notImplemented(`RunRepository.${String(prop)}`),
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const placeholderRunStepRepo: any = new Proxy({}, {
-  get: (_target, prop) => () => notImplemented(`RunStepRepository.${String(prop)}`),
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const placeholderRunLogRepo: any = new Proxy({}, {
-  get: (_target, prop) => () => notImplemented(`RunLogRepository.${String(prop)}`),
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const placeholderScheduleRepo: any = new Proxy({}, {
-  get: (_target, prop) => () => notImplemented(`ScheduleRepository.${String(prop)}`),
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const placeholderTriggerRepo: any = new Proxy({}, {
-  get: (_target, prop) => () => notImplemented(`TriggerRepository.${String(prop)}`),
-});
 
 // ---------------------------------------------------------------------------
 // Service public key loading — same pattern as ingestion service
@@ -180,16 +147,13 @@ async function main(): Promise<void> {
     logger.error("Redis connection error", { error: err.message });
   });
 
-  // Steps 7–9 use the placeholder repos until the concrete repo layer is merged.
-  // Replace placeholderXRepo with concrete instances once available.
-
-  // Step 7: Instantiate repositories (placeholder until concrete repos are merged)
-  const pipelineRepo = placeholderPipelineRepo;
-  const runRepo = placeholderRunRepo;
-  const runStepRepo = placeholderRunStepRepo;
-  const runLogRepo = placeholderRunLogRepo;
-  const scheduleRepo = placeholderScheduleRepo;
-  const triggerRepo = placeholderTriggerRepo;
+  // Step 7: Instantiate concrete repositories
+  const pipelineRepo = new PipelineRepository(db);
+  const runRepo = new RunRepository(db);
+  const runStepRepo = new RunStepRepository(db);
+  const runLogRepo = new RunLogRepository(db);
+  const scheduleRepo = new ScheduleRepository(db);
+  const triggerRepo = new TriggerRepository(db);
 
   // Step 8: Create BullMQ queues
   const redisConnection = { url: process.env["REDIS_URL"] ?? config.OP_REDIS_URL };
@@ -200,6 +164,7 @@ async function main(): Promise<void> {
   // Step 9: Create services
   const pipelineService = createPipelineService({
     pipelineRepo,
+    scheduleRepo,
     runRepo,
     logger,
   });
@@ -226,6 +191,7 @@ async function main(): Promise<void> {
     pipelineRepo,
     runService,
     redis,
+    redisUrl: process.env["REDIS_URL"] ?? config.OP_REDIS_URL,
     logger,
   });
 
@@ -275,9 +241,9 @@ async function main(): Promise<void> {
 
       // Mark the run as failed in the database
       try {
-        await runRepo.update(job.data.runId, {
+        await runRepo.updateStatus(job.data.runId, {
           status: "failed",
-          completedAt: new Date(),
+          completed_at: new Date(),
           error: {
             code: "DLQ_MOVED",
             message: `Job moved to DLQ after ${job.attemptsMade} rapid failures: ${error.message}`,
@@ -350,7 +316,7 @@ async function main(): Promise<void> {
   const scheduleRoutes = createScheduleRoutes({ scheduleService });
   app.route("/api/v1/schedules", scheduleRoutes);
 
-  const internalRoutes = createInternalRoutes({ runService });
+  const internalRoutes = createInternalRoutes({ runService, triggerRepo });
   app.route("/internal", internalRoutes);
 
   // Step 16: Start HTTP server on port 3004 (design spec §1.2)

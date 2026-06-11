@@ -20,6 +20,9 @@ import type {
   PipelineRunJobPayload,
   RunStatus,
   RunStepStatus,
+  RunUpdateInput,
+  RunStepRepository,
+  RunLogRepository,
 } from "./run-service.js";
 import { StepExecutionError } from "./errors.js";
 
@@ -29,54 +32,17 @@ import { StepExecutionError } from "./errors.js";
 
 export interface RunEngineRepository {
   findById(id: string): Promise<RunRow | null>;
-  update(
-    id: string,
-    input: {
-      status?: RunStatus;
-      startedAt?: Date;
-      completedAt?: Date;
-      error?: { code: string; message: string; stepId?: string; details?: unknown } | null;
-    },
-  ): Promise<RunRow>;
+  // Uses the concrete RunRepository's updateStatus signature.
+  updateStatus(id: string, data: RunUpdateInput): Promise<RunRow | null>;
 }
 
-export interface RunStepEngineRepository {
-  createBulk(
-    steps: Array<{
-      runId: string;
-      tenantId: string;
-      stepId: string;
-      stepName: string;
-      stepType: string;
-      status: RunStepStatus;
-      input: Record<string, unknown>;
-    }>,
-  ): Promise<RunStepRow[]>;
-  findByRunId(runId: string): Promise<RunStepRow[]>;
-  update(
-    id: string,
-    input: {
-      status?: RunStepStatus;
-      startedAt?: Date;
-      completedAt?: Date;
-      input?: Record<string, unknown>;
-      output?: unknown;
-      executionId?: string;
-      error?: { code: string; message: string; details?: unknown } | null;
-    },
-  ): Promise<RunStepRow>;
-  findByRunIdAndStepId(runId: string, stepId: string): Promise<RunStepRow | null>;
-}
+// The execution engine uses the same RunStepRepository interface as RunService,
+// which has all the methods the engine needs (createBatch, updateStatus, updateOutput).
+export type RunStepEngineRepository = RunStepRepository;
 
 export interface RunLogEngineRepository {
-  append(entry: {
-    runId: string;
-    tenantId: string;
-    stepId?: string;
-    level: "debug" | "info" | "warn" | "error";
-    message: string;
-    details?: unknown;
-  }): Promise<void>;
+  // Structural alias for the concrete repo's append method.
+  append: RunLogRepository["append"];
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +102,8 @@ interface RunContext {
   tenantId: string;
   pipelineId: string;
   definition: PipelineDefinition;
+  // The pipeline's top-level input, passed through to steps that source from "pipeline.input"
+  runInput: Record<string, unknown>;
   // Accumulated step outputs keyed by stepId
   stepOutputs: Map<string, unknown>;
   // The pool client that holds the advisory lock for this run
@@ -248,12 +216,12 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     runId: string,
     tenantId: string,
     message: string,
-    opts?: { stepId?: string; level?: "debug" | "info" | "warn" | "error"; details?: unknown },
+    opts?: { stepId?: string; level?: "debug" | "info" | "warn" | "error"; details?: Record<string, unknown> },
   ): Promise<void> {
     await runLogRepo.append({
-      runId,
-      tenantId,
-      ...(opts?.stepId !== undefined ? { stepId: opts.stepId } : {}),
+      run_id: runId,
+      tenant_id: tenantId,
+      ...(opts?.stepId !== undefined ? { step_id: opts.stepId } : {}),
       level: opts?.level ?? "info",
       message,
       ...(opts?.details !== undefined ? { details: opts.details } : {}),
@@ -627,7 +595,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
   async function executeStep(step: Step, ctx: RunContext): Promise<StepResult> {
     const resolvedInput = resolveStepInput(
       step,
-      ctx.definition.steps[0] !== undefined ? {} : {},
+      ctx.runInput,
       ctx.stepOutputs,
     );
 
@@ -726,12 +694,17 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
         throw new Error(`Advisory lock held for pipeline ${run.pipeline_id} — re-enqueue pending.`);
       }
 
+      // Cast definition_snapshot from JSONB Record to the typed PipelineDefinition.
+      // The definition was validated against PipelineDefinitionSchema at write time.
+      const definition = run.definition_snapshot as unknown as PipelineDefinition;
+
       // Build the run context shared across all step executions
       const ctx: RunContext = {
         runId,
         tenantId,
         pipelineId: run.pipeline_id,
-        definition: run.definition_snapshot,
+        definition,
+        runInput: run.input,
         stepOutputs: new Map(),
         lockClient,
         isCancelled: async () => {
@@ -741,20 +714,19 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       };
 
       // Step 3: Transition to running
-      await runRepo.update(runId, { status: "running", startedAt: new Date() });
+      await runRepo.updateStatus(runId, { status: "running", started_at: new Date() });
       await appendLog(runId, tenantId, `Pipeline run started, triggered by ${run.triggered_by}`);
 
       // Step 4: Create run_steps rows for all steps (status=pending) so the UI
       // can display the full step graph immediately
-      const allSteps = run.definition_snapshot.steps;
-      await runStepRepo.createBulk(
+      const allSteps = definition.steps;
+      await runStepRepo.createBatch(
         allSteps.map((step) => ({
-          runId,
-          tenantId,
-          stepId: step.id,
-          stepName: step.name,
-          stepType: step.type,
-          status: "pending" as RunStepStatus,
+          run_id: runId,
+          tenant_id: tenantId,
+          step_id: step.id,
+          step_name: step.name,
+          step_type: step.type,
           input: {},
         })),
       );
@@ -773,9 +745,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
             { runId, tenantId },
           );
         } catch (err) {
-          await runRepo.update(runId, {
+          await runRepo.updateStatus(runId, {
             status: "failed",
-            completedAt: new Date(),
+            completed_at: new Date(),
             error: {
               code: "PIPELINE_HOOK_CRITICAL_FAILURE",
               message: err instanceof Error ? err.message : String(err),
@@ -790,7 +762,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
       // Step 6: Traverse the step graph
       const stepMap = new Map(allSteps.map((s) => [s.id, s]));
-      let currentStepId: string | null = run.definition_snapshot.entryStepId;
+      let currentStepId: string | null = definition.entryStepId;
       let failedStepId: string | null = null;
       let failureError: Error | null = null;
 
@@ -803,10 +775,10 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           await Promise.all(
             stepRows
               .filter((r) => r.status === "pending")
-              .map((r) => runStepRepo.update(r.id, { status: "cancelled" })),
+              .map((r) => runStepRepo.updateStatus(runId, r.step_id, { status: "cancelled" })),
           );
 
-          await runRepo.update(runId, { status: "cancelled", completedAt: new Date() });
+          await runRepo.updateStatus(runId, { status: "cancelled", completed_at: new Date() });
           await appendLog(runId, tenantId, "Pipeline run cancelled.");
           await emitPlatformEvent("pipeline.cancelled", tenantId, {
             pipelineId: run.pipeline_id,
@@ -848,7 +820,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           }
 
           if (skip) {
-            await runStepRepo.update(runStepRow.id, { status: "skipped" });
+            await runStepRepo.updateStatus(runId, runStepRow.step_id, { status: "skipped" });
             currentStepId = getNextStepIdFromMain(step, allSteps, undefined);
             continue;
           }
@@ -874,9 +846,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
               { runId, tenantId, stepId: step.id },
             );
           } catch (err) {
-            await runStepRepo.update(runStepRow.id, {
+            await runStepRepo.updateStatus(runId, runStepRow.step_id, {
               status: "failed",
-              completedAt: new Date(),
+              completed_at: new Date(),
               error: {
                 code: "PIPELINE_HOOK_CRITICAL_FAILURE",
                 message: err instanceof Error ? err.message : String(err),
@@ -889,10 +861,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
         }
 
         // Mark step as running
-        await runStepRepo.update(runStepRow.id, {
+        await runStepRepo.updateStatus(runId, runStepRow.step_id, {
           status: "running",
-          startedAt: new Date(),
-          input: resolvedInput,
+          started_at: new Date(),
         });
 
         await appendLog(runId, tenantId, `Step "${step.name}" started.`, { stepId: step.id });
@@ -908,11 +879,17 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
           ctx.stepOutputs.set(step.id, stepOutput);
 
-          await runStepRepo.update(runStepRow.id, {
+          await runStepRepo.updateStatus(runId, runStepRow.step_id, {
             status: "completed",
-            completedAt: new Date(),
-            output: stepOutput,
+            completed_at: new Date(),
           });
+
+          // Write output separately — updateOutput is a dedicated method because
+          // output can be large JSONB and is only set on success.
+          const outputRecord = (stepOutput !== null && typeof stepOutput === "object")
+            ? (stepOutput as Record<string, unknown>)
+            : { value: stepOutput };
+          await runStepRepo.updateOutput(runId, runStepRow.step_id, outputRecord);
 
           await appendLog(runId, tenantId, `Step "${step.name}" completed.`, { stepId: step.id });
 
@@ -927,9 +904,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           const onError = step.onError ?? "fail";
           const errMessage = err instanceof Error ? err.message : String(err);
 
-          await runStepRepo.update(runStepRow.id, {
+          await runStepRepo.updateStatus(runId, runStepRow.step_id, {
             status: "failed",
-            completedAt: new Date(),
+            completed_at: new Date(),
             error: { code: "STEP_EXECUTION_FAILED", message: errMessage },
           });
 
@@ -970,7 +947,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           } catch (err) {
             // after:step is critical per spec table — propagate failure
             const errMessage = err instanceof Error ? err.message : String(err);
-            await runStepRepo.update(runStepRow.id, {
+            await runStepRepo.updateStatus(runId, runStepRow.step_id, {
               status: "failed",
               error: { code: "PIPELINE_HOOK_CRITICAL_FAILURE", message: errMessage },
             });
@@ -990,12 +967,12 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
         await Promise.all(
           stepRows
             .filter((r) => r.status === "pending")
-            .map((r) => runStepRepo.update(r.id, { status: "cancelled" })),
+            .map((r) => runStepRepo.updateStatus(runId, r.step_id, { status: "cancelled" })),
         );
 
-        await runRepo.update(runId, {
+        await runRepo.updateStatus(runId, {
           status: "failed",
-          completedAt: new Date(),
+          completed_at: new Date(),
           error: {
             code: "STEP_EXECUTION_FAILED",
             message: failureError.message,
@@ -1035,9 +1012,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
             { runId, tenantId },
           );
         } catch (err) {
-          await runRepo.update(runId, {
+          await runRepo.updateStatus(runId, {
             status: "failed",
-            completedAt: new Date(),
+            completed_at: new Date(),
             error: {
               code: "PIPELINE_HOOK_CRITICAL_FAILURE",
               message: err instanceof Error ? err.message : String(err),
@@ -1055,7 +1032,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       const completedAt = new Date();
       const durationMs = completedAt.getTime() - startedAt.getTime();
 
-      await runRepo.update(runId, { status: "completed", completedAt });
+      await runRepo.updateStatus(runId, { status: "completed", completed_at: completedAt });
       await appendLog(runId, tenantId, `Pipeline run completed in ${durationMs}ms.`);
 
       await emitPlatformEvent("pipeline.completed", tenantId, {

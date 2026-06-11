@@ -2,6 +2,13 @@ import type { Logger } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type { Queue } from "bullmq";
 import type { PipelineRow, PipelineDefinition } from "./pipeline-service.js";
+import type {
+  RunRow as RepoRunRow,
+  RunStepRow as RepoRunStepRow,
+  RunLogRow,
+  CreateRunData,
+  UpdateRunData,
+} from "../repositories/types.js";
 import {
   PipelineNotFoundError,
   PipelineInactiveError,
@@ -11,79 +18,25 @@ import {
 } from "./errors.js";
 
 // ---------------------------------------------------------------------------
-// Domain types
+// Domain types — use the concrete repo row types directly.
+// definition_snapshot is JSONB stored as Record<string,unknown>; callers cast
+// it to PipelineDefinition (which was validated at write time).
 // ---------------------------------------------------------------------------
 
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type RunStepStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "cancelled";
 export type TriggeredBy = "manual" | "schedule" | "event" | "webhook" | "service";
 
-export interface RunRow {
-  id: string;
-  pipeline_id: string;
-  tenant_id: string;
-  status: RunStatus;
-  triggered_by: TriggeredBy;
-  trigger_actor_id: string | null;
-  trigger_meta: Record<string, unknown>;
-  input: Record<string, unknown>;
-  started_at: Date | null;
-  completed_at: Date | null;
-  error: { code: string; message: string; stepId?: string; details?: unknown } | null;
-  bully_job_id: string | null;
-  definition_snapshot: PipelineDefinition;
-  created_at: Date;
-}
-
-export interface RunStepRow {
-  id: string;
-  run_id: string;
-  tenant_id: string;
-  step_id: string;
-  step_name: string;
-  step_type: string;
-  status: RunStepStatus;
-  attempt_count: number;
-  started_at: Date | null;
-  completed_at: Date | null;
-  input: Record<string, unknown>;
-  output: unknown | null;
-  error: { code: string; message: string; details?: unknown } | null;
-  execution_id: string | null;
-  created_at: Date;
-}
-
-export interface RunLogEntry {
-  id: number;
-  run_id: string;
-  step_id: string | null;
-  level: "debug" | "info" | "warn" | "error";
-  message: string;
-  details: unknown | null;
-  created_at: Date;
-}
+export type RunRow = RepoRunRow;
+export type RunStepRow = RepoRunStepRow;
+export type RunLogEntry = RunLogRow;
 
 // ---------------------------------------------------------------------------
-// Repository interfaces
+// Repository interfaces — use the concrete repo input types directly.
 // ---------------------------------------------------------------------------
 
-export interface RunCreateInput {
-  pipelineId: string;
-  tenantId: string;
-  triggeredBy: TriggeredBy;
-  triggerActorId?: string;
-  triggerMeta: Record<string, unknown>;
-  input: Record<string, unknown>;
-  definitionSnapshot: PipelineDefinition;
-}
-
-export interface RunUpdateInput {
-  status?: RunStatus;
-  startedAt?: Date;
-  completedAt?: Date;
-  bullJobId?: string;
-  error?: { code: string; message: string; stepId?: string; details?: unknown } | null;
-}
+export type RunCreateInput = CreateRunData;
+export type RunUpdateInput = UpdateRunData;
 
 export interface RunListQuery {
   cursor?: string;
@@ -98,20 +51,45 @@ export interface RunListResult {
 }
 
 export interface RunRepository {
-  create(input: RunCreateInput): Promise<RunRow>;
+  create(data: RunCreateInput): Promise<RunRow>;
   findById(id: string): Promise<RunRow | null>;
-  findByIdWithTenant(tenantId: string, id: string): Promise<RunRow | null>;
-  list(tenantId: string, query: RunListQuery): Promise<RunListResult>;
-  update(id: string, input: RunUpdateInput): Promise<RunRow>;
-  countActiveRuns(pipelineId: string): Promise<number>;
+  findByTenantAndId(tenantId: string, id: string): Promise<RunRow | null>;
+  findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number; filterStatus?: RunRow["status"] }): Promise<RunRow[]>;
+  updateStatus(id: string, data: RunUpdateInput): Promise<RunRow | null>;
+  countActiveByPipelineId(pipelineId: string): Promise<number>;
 }
 
 export interface RunStepRepository {
   findByRunId(runId: string): Promise<RunStepRow[]>;
+  createBatch(steps: Array<{
+    run_id: string;
+    tenant_id: string;
+    step_id: string;
+    step_name: string;
+    step_type: string;
+    input?: Record<string, unknown>;
+  }>): Promise<RunStepRow[]>;
+  updateStatus(runId: string, stepId: string, data: {
+    status?: RunStepRow["status"];
+    started_at?: Date;
+    completed_at?: Date;
+    error?: Record<string, unknown> | null;
+    execution_id?: string;
+    attempt_count?: number;
+  }): Promise<RunStepRow | null>;
+  updateOutput(runId: string, stepId: string, output: Record<string, unknown>): Promise<RunStepRow | null>;
 }
 
 export interface RunLogRepository {
-  findByRunId(runId: string, lastSeenId?: number, limit?: number): Promise<RunLogEntry[]>;
+  findByRunId(runId: string, options?: { limit?: number; afterId?: number }): Promise<RunLogEntry[]>;
+  append(data: {
+    run_id: string;
+    tenant_id: string;
+    step_id?: string;
+    level: "debug" | "info" | "warn" | "error";
+    message: string;
+    details?: Record<string, unknown>;
+  }): Promise<RunLogRow>;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,9 +198,12 @@ export function createRunService(deps: RunServiceDeps): RunService {
       );
     }
 
-    // Enforce allowConcurrentRuns=false: check for any pending/running runs
-    if (pipeline.definition.options?.allowConcurrentRuns === false) {
-      const activeCount = await runRepo.countActiveRuns(pipelineId);
+    // Enforce allowConcurrentRuns=false: check for any pending/running runs.
+    // definition is stored as JSONB Record<string,unknown>; cast to PipelineDefinition
+    // which was validated at write time.
+    const definition = pipeline.definition as unknown as PipelineDefinition;
+    if (definition.options?.allowConcurrentRuns === false) {
+      const activeCount = await runRepo.countActiveByPipelineId(pipelineId);
       if (activeCount > 0) {
         throw new PipelineConcurrentRunError(
           `Pipeline "${pipelineId}" does not allow concurrent runs.`,
@@ -233,13 +214,13 @@ export function createRunService(deps: RunServiceDeps): RunService {
 
     // Create the run row with a snapshot of the definition at trigger time
     const run = await runRepo.create({
-      pipelineId,
-      tenantId,
-      triggeredBy,
-      ...(triggerActorId !== undefined ? { triggerActorId } : {}),
-      triggerMeta,
+      pipeline_id: pipelineId,
+      tenant_id: tenantId,
+      triggered_by: triggeredBy,
+      ...(triggerActorId !== undefined ? { trigger_actor_id: triggerActorId } : {}),
+      trigger_meta: triggerMeta,
       input,
-      definitionSnapshot: pipeline.definition,
+      definition_snapshot: pipeline.definition,
     });
 
     // Enqueue the BullMQ job; the worker picks it up and drives execution
@@ -247,7 +228,7 @@ export function createRunService(deps: RunServiceDeps): RunService {
 
     // Record the BullMQ job ID on the run row for cancellation reference
     if (job.id !== undefined) {
-      await runRepo.update(run.id, { bullJobId: job.id });
+      await runRepo.updateStatus(run.id, { bully_job_id: job.id });
     }
 
     logger.info("Pipeline run triggered", {
@@ -265,7 +246,7 @@ export function createRunService(deps: RunServiceDeps): RunService {
   // -------------------------------------------------------------------------
 
   async function getRun(tenantId: string, runId: string): Promise<RunWithSteps> {
-    const run = await runRepo.findByIdWithTenant(tenantId, runId);
+    const run = await runRepo.findByTenantAndId(tenantId, runId);
     if (run === null) {
       throw new PipelineRunNotFoundError(
         `Pipeline run "${runId}" not found.`,
@@ -288,7 +269,20 @@ export function createRunService(deps: RunServiceDeps): RunService {
   // -------------------------------------------------------------------------
 
   async function listRuns(tenantId: string, query: RunListQuery): Promise<RunListResult> {
-    return runRepo.list(tenantId, query);
+    const rows = await runRepo.findByTenantId(tenantId, {
+      ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+      limit: query.limit,
+      ...(query.filterStatus !== undefined ? { filterStatus: query.filterStatus } : {}),
+    });
+
+    const nextCursor = rows.length === query.limit
+      ? (rows[rows.length - 1]?.id ?? null)
+      : null;
+
+    return {
+      data: rows,
+      pagination: { nextCursor, total: null },
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -297,7 +291,7 @@ export function createRunService(deps: RunServiceDeps): RunService {
   // -------------------------------------------------------------------------
 
   async function cancelRun(tenantId: string, runId: string): Promise<void> {
-    const run = await runRepo.findByIdWithTenant(tenantId, runId);
+    const run = await runRepo.findByTenantAndId(tenantId, runId);
     if (run === null) {
       throw new PipelineRunNotFoundError(
         `Pipeline run "${runId}" not found.`,
@@ -328,7 +322,7 @@ export function createRunService(deps: RunServiceDeps): RunService {
   // -------------------------------------------------------------------------
 
   async function getRunLogs(runId: string, lastSeenId?: number): Promise<RunLogEntry[]> {
-    return runLogRepo.findByRunId(runId, lastSeenId);
+    return runLogRepo.findByRunId(runId, lastSeenId !== undefined ? { afterId: lastSeenId } : undefined);
   }
 
   return {

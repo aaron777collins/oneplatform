@@ -1,5 +1,10 @@
 import type { Logger } from "@oneplatform/core";
 import type { Pool } from "pg";
+import type {
+  PipelineRow as RepoPipelineRow,
+  CreatePipelineData,
+  UpdatePipelineData,
+} from "../repositories/types.js";
 import {
   PipelineNotFoundError,
   PipelineRunsActiveError,
@@ -8,21 +13,15 @@ import {
 } from "./errors.js";
 
 // ---------------------------------------------------------------------------
-// Domain types — mirrored from the DB schema (design spec §2.2)
+// Domain types — re-use the concrete repo row type.
+// The service layer accesses definition as PipelineDefinition; we cast at the
+// boundary rather than re-declaring an incompatible type here.
 // ---------------------------------------------------------------------------
 
-export interface PipelineRow {
-  id: string;
-  tenant_id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  definition: PipelineDefinition;
-  is_active: boolean;
-  created_at: Date;
-  updated_at: Date;
-  created_by: string;
-}
+// PipelineRow is the concrete DB row type. definition is stored as JSONB and
+// returned as Record<string,unknown>; callers inside the service cast it to
+// PipelineDefinition after fetching (validated at write time).
+export type PipelineRow = RepoPipelineRow;
 
 // ---------------------------------------------------------------------------
 // Step types (design spec §4.2)
@@ -121,6 +120,9 @@ export interface PipelineDefinition {
   entryStepId: string;
   steps: Step[];
   options?: PipelineOptions;
+  // Index signature allows PipelineDefinition to be stored/returned as
+  // Record<string,unknown> at the JSONB boundary without a cast at every use site.
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,22 +131,10 @@ export interface PipelineDefinition {
 // the parallel agent. Concrete repos must satisfy these shapes.
 // ---------------------------------------------------------------------------
 
-export interface PipelineCreateInput {
-  tenantId: string;
-  name: string;
-  slug: string;
-  description?: string;
-  definition: PipelineDefinition;
-  isActive: boolean;
-  createdBy: string;
-}
-
-export interface PipelineUpdateInput {
-  name?: string;
-  description?: string | null;
-  definition?: PipelineDefinition;
-  isActive?: boolean;
-}
+// These aliases expose the concrete repository input shapes through the service
+// layer's PipelineRepository interface.
+type RepoCreateInput = CreatePipelineData;
+type RepoUpdateInput = UpdatePipelineData;
 
 export interface PipelineListQuery {
   cursor?: string;
@@ -159,36 +149,45 @@ export interface PipelineListResult {
 }
 
 export interface PipelineRepository {
-  create(input: PipelineCreateInput): Promise<PipelineRow>;
+  create(data: RepoCreateInput): Promise<PipelineRow>;
   findById(id: string): Promise<PipelineRow | null>;
-  findBySlug(tenantId: string, slug: string): Promise<PipelineRow | null>;
-  list(tenantId: string, query: PipelineListQuery): Promise<PipelineListResult>;
-  update(tenantId: string, id: string, input: PipelineUpdateInput): Promise<PipelineRow>;
-  delete(tenantId: string, id: string): Promise<void>;
-  disableSchedulesForPipeline(tenantId: string, pipelineId: string): Promise<void>;
+  findByTenantAndId(tenantId: string, id: string): Promise<PipelineRow | null>;
+  findByTenantAndSlug(tenantId: string, slug: string): Promise<PipelineRow | null>;
+  findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number; filterIsActive?: boolean }): Promise<PipelineRow[]>;
+  update(id: string, data: RepoUpdateInput): Promise<PipelineRow | null>;
+  delete(id: string): Promise<boolean>;
+}
+
+export interface ScheduleRepoForPipeline {
+  // Disables all schedules for a pipeline when it is set inactive, preventing
+  // further cron triggers from firing against a paused pipeline.
+  disableByPipelineId(pipelineId: string): Promise<void>;
 }
 
 export interface RunRepository {
-  countActiveRuns(pipelineId: string): Promise<number>;
-  countRunsByStatus(pipelineId: string, statuses: string[]): Promise<number>;
+  countActiveByPipelineId(pipelineId: string): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
 // Service input shapes
 // ---------------------------------------------------------------------------
 
+// The route layer passes a Zod-validated definition; we accept Record<string,unknown>
+// at the service boundary to avoid exactOptionalPropertyTypes mismatch between the
+// Zod-inferred type and PipelineDefinition. The definition is re-validated inside
+// createPipeline/updatePipeline as PipelineDefinition before any I/O.
 export interface CreatePipelineInput {
   name: string;
   slug?: string;
   description?: string;
-  definition: PipelineDefinition;
+  definition: Record<string, unknown>;
   isActive: boolean;
 }
 
 export interface UpdatePipelineInput {
   name?: string;
   description?: string | null;
-  definition?: PipelineDefinition;
+  definition?: Record<string, unknown>;
   isActive?: boolean;
 }
 
@@ -212,6 +211,7 @@ export interface ValidationResult {
 
 export interface PipelineServiceDeps {
   pipelineRepo: PipelineRepository;
+  scheduleRepo: ScheduleRepoForPipeline;
   runRepo: RunRepository;
   logger: Logger;
 }
@@ -342,7 +342,7 @@ function hasCycle(adj: Map<string, string[]>, startId: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function createPipelineService(deps: PipelineServiceDeps): PipelineService {
-  const { pipelineRepo, runRepo, logger } = deps;
+  const { pipelineRepo, scheduleRepo, runRepo, logger } = deps;
 
   // -------------------------------------------------------------------------
   // validateDefinition — pure graph validation, no I/O
@@ -409,8 +409,12 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     userId: string,
     input: CreatePipelineInput,
   ): Promise<PipelineRow> {
+    // Cast to PipelineDefinition for validation — input.definition is Record<string,unknown>
+    // at the service boundary to accommodate the Zod-inferred type from the route layer.
+    const definition = input.definition as unknown as PipelineDefinition;
+
     // Validate definition before any I/O
-    const validation = validateDefinition(input.definition);
+    const validation = validateDefinition(definition);
     if (!validation.valid) {
       throw new PipelineValidationError(
         `Pipeline definition is invalid: ${validation.errors.join("; ")}`,
@@ -421,7 +425,7 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     // Check for webhook step URLs via the stricter SSRF check (already done
     // inside validateDefinition, but we surface a dedicated error here for
     // webhook-specific rejections from definition validation)
-    for (const step of input.definition.steps) {
+    for (const step of definition.steps) {
       if (step.type === "webhook" && isUrlSsrfBlocked(step.url)) {
         throw new PipelineInvalidWebhookUrlError(
           `Step "${step.id}": webhook URL is blocked by the SSRF policy.`,
@@ -433,13 +437,13 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     const slug = input.slug ?? deriveSlug(input.name);
 
     const pipeline = await pipelineRepo.create({
-      tenantId,
+      tenant_id: tenantId,
       name: input.name,
       slug,
       ...(input.description !== undefined ? { description: input.description } : {}),
       definition: input.definition,
-      isActive: input.isActive,
-      createdBy: userId,
+      is_active: input.isActive,
+      created_by: userId,
     });
 
     logger.info("Pipeline created", { tenantId, pipelineId: pipeline.id, slug });
@@ -452,8 +456,8 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
   // -------------------------------------------------------------------------
 
   async function getPipeline(tenantId: string, id: string): Promise<PipelineRow> {
-    const pipeline = await pipelineRepo.findById(id);
-    if (pipeline === null || pipeline.tenant_id !== tenantId) {
+    const pipeline = await pipelineRepo.findByTenantAndId(tenantId, id);
+    if (pipeline === null) {
       throw new PipelineNotFoundError(
         `Pipeline "${id}" not found.`,
         { pipelineId: id, tenantId },
@@ -470,7 +474,20 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     tenantId: string,
     query: PipelineListQuery,
   ): Promise<PipelineListResult> {
-    return pipelineRepo.list(tenantId, query);
+    const rows = await pipelineRepo.findByTenantId(tenantId, {
+      ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+      limit: query.limit,
+      ...(query.filterIsActive !== undefined ? { filterIsActive: query.filterIsActive } : {}),
+    });
+
+    const nextCursor = rows.length === query.limit
+      ? (rows[rows.length - 1]?.id ?? null)
+      : null;
+
+    return {
+      data: rows.map((pipeline) => ({ pipeline, lastRunAt: null })),
+      pagination: { nextCursor, total: null },
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -485,9 +502,12 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     // Verify ownership before update
     await getPipeline(tenantId, id);
 
-    // Re-validate definition if it is being changed
+    // Re-validate definition if it is being changed.
+    // Cast to PipelineDefinition for validation — the service boundary accepts
+    // Record<string,unknown> to avoid exactOptionalPropertyTypes mismatches.
     if (input.definition !== undefined) {
-      const validation = validateDefinition(input.definition);
+      const newDefinition = input.definition as unknown as PipelineDefinition;
+      const validation = validateDefinition(newDefinition);
       if (!validation.valid) {
         throw new PipelineValidationError(
           `Pipeline definition is invalid: ${validation.errors.join("; ")}`,
@@ -495,7 +515,7 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
         );
       }
 
-      for (const step of input.definition.steps) {
+      for (const step of newDefinition.steps) {
         if (step.type === "webhook" && isUrlSsrfBlocked(step.url)) {
           throw new PipelineInvalidWebhookUrlError(
             `Step "${step.id}": webhook URL is blocked by the SSRF policy.`,
@@ -509,21 +529,28 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     // so no further cron runs fire. The schedule service's in-memory entries
     // are invalidated on the next cron tick via DB re-query.
     if (input.isActive === false) {
-      await pipelineRepo.disableSchedulesForPipeline(tenantId, id);
+      await scheduleRepo.disableByPipelineId(id);
       logger.info("Schedules paused for inactive pipeline", { tenantId, pipelineId: id });
     }
 
-    const repoInput: PipelineUpdateInput = {};
-    if (input.name !== undefined) repoInput.name = input.name;
-    if (input.description !== undefined) repoInput.description = input.description;
-    if (input.definition !== undefined) repoInput.definition = input.definition;
-    if (input.isActive !== undefined) repoInput.isActive = input.isActive;
+    const repoData: RepoUpdateInput = {};
+    if (input.name !== undefined) repoData.name = input.name;
+    if (input.description !== undefined) repoData.description = input.description;
+    if (input.definition !== undefined) repoData.definition = input.definition;
+    if (input.isActive !== undefined) repoData.is_active = input.isActive;
 
-    const pipeline = await pipelineRepo.update(tenantId, id, repoInput);
+    const updated = await pipelineRepo.update(id, repoData);
+    if (updated === null) {
+      // The row was removed between our ownership check and this UPDATE — treat as not found.
+      throw new PipelineNotFoundError(
+        `Pipeline "${id}" not found.`,
+        { pipelineId: id, tenantId },
+      );
+    }
 
     logger.info("Pipeline updated", { tenantId, pipelineId: id });
 
-    return pipeline;
+    return updated;
   }
 
   // -------------------------------------------------------------------------
@@ -535,7 +562,7 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     await getPipeline(tenantId, id);
 
     // Reject deletion when active runs exist to prevent data consistency issues
-    const activeCount = await runRepo.countActiveRuns(id);
+    const activeCount = await runRepo.countActiveByPipelineId(id);
     if (activeCount > 0) {
       throw new PipelineRunsActiveError(
         `Pipeline "${id}" has ${activeCount} active run(s). Cancel them before deleting.`,
@@ -543,7 +570,7 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
       );
     }
 
-    await pipelineRepo.delete(tenantId, id);
+    await pipelineRepo.delete(id);
 
     logger.info("Pipeline deleted", { tenantId, pipelineId: id });
   }

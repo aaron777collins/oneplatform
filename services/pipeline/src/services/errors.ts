@@ -65,14 +65,34 @@ export class TriggerNotFoundError extends AppError {
   readonly statusCode = 404;
 }
 
-// The Execution Service returned a non-zero exit code or timeout for a step.
+// The Execution Service returned a non-zero exit code for a step.
+// 500 because the fault originates inside our own execution infrastructure,
+// not from a downstream service the client controls.
 export class StepExecutionError extends AppError {
   readonly code = "STEP_EXECUTION_FAILED" as const;
-  readonly statusCode = 502;
+  readonly statusCode = 500;
+}
+
+// A step exceeded its configured execution timeout.
+export class StepExecutionTimeoutError extends AppError {
+  readonly code = "STEP_EXECUTION_TIMEOUT" as const;
+  readonly statusCode = 500;
 }
 
 // Hook dispatch to the Execution Service failed or a critical hook returned error.
 export class HookExecutionError extends AppError {
   readonly code = "PIPELINE_HOOK_CRITICAL_FAILURE" as const;
   readonly statusCode = 422;
+}
+
+// A hook attempted to trigger a pipeline run that would cause unbounded recursion.
+export class HookRecursionError extends AppError {
+  readonly code = "HOOK_RECURSION_ERROR" as const;
+  readonly statusCode = 422;
+}
+
+// Webhook inbound trigger HMAC signature verification failed.
+export class TriggerSignatureInvalidError extends AppError {
+  readonly code = "TRIGGER_SIGNATURE_INVALID" as const;
+  readonly statusCode = 401;
 }

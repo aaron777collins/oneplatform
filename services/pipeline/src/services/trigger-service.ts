@@ -1,23 +1,17 @@
 import type { Logger } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import jsonata from "jsonata";
-import type { PipelineRow } from "./pipeline-service.js";
+import type { PipelineRow, PipelineDefinition } from "./pipeline-service.js";
 import type { TriggeredBy, RunService } from "./run-service.js";
+import type { TriggerRow as RepoTriggerRow } from "../repositories/types.js";
 
 // ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
 
-export interface TriggerRow {
-  id: string;
-  pipeline_id: string;
-  tenant_id: string;
-  trigger_type: "event" | "webhook";
-  config: TriggerConfig;
-  enabled: boolean;
-  created_at: Date;
-  updated_at: Date;
-}
+// TriggerRow uses the concrete repo type. config is stored as JSONB
+// Record<string,unknown>; the service casts it to TriggerConfig where needed.
+export type TriggerRow = RepoTriggerRow;
 
 export type TriggerConfig =
   | EventTriggerConfig
@@ -42,7 +36,7 @@ export interface WebhookTriggerConfig {
 // ---------------------------------------------------------------------------
 
 export interface TriggerRepository {
-  findAllEnabled(): Promise<TriggerRow[]>;
+  findEnabledByType(triggerType: TriggerRow["trigger_type"]): Promise<TriggerRow[]>;
   findById(id: string): Promise<TriggerRow | null>;
 }
 
@@ -79,6 +73,9 @@ export interface TriggerServiceDeps {
   pipelineRepo: PipelineRepo;
   runService: RunService;
   redis: Redis;
+  // Redis URL is injected so the service does not read process.env directly
+  // (W9 — concrete config dependency belongs at the composition root in index.ts)
+  redisUrl: string;
   logger: Logger;
 }
 
@@ -110,7 +107,7 @@ async function evaluateFilter(
 // ---------------------------------------------------------------------------
 
 export function createTriggerService(deps: TriggerServiceDeps): TriggerService {
-  const { triggerRepo, pipelineRepo, runService, redis, logger } = deps;
+  const { triggerRepo, pipelineRepo, runService, redis, redisUrl, logger } = deps;
 
   // Active subscription state: channel → subscriber client
   // We use a single dedicated subscriber Redis connection to avoid polluting
@@ -143,7 +140,9 @@ export function createTriggerService(deps: TriggerServiceDeps): TriggerService {
       if (trigger === undefined || !trigger.enabled) continue;
       if (trigger.trigger_type !== "event") continue;
 
-      const config = trigger.config as EventTriggerConfig;
+      // config is stored as JSONB Record<string,unknown>; cast via unknown since
+      // the concrete type (EventTriggerConfig) was validated at write time.
+      const config = trigger.config as unknown as EventTriggerConfig;
 
       // Optional exact eventType match
       if (config.eventType !== undefined && event.eventType !== config.eventType) {
@@ -166,8 +165,11 @@ export function createTriggerService(deps: TriggerServiceDeps): TriggerService {
         continue;
       }
 
+      // definition is stored as JSONB Record<string,unknown>; cast to PipelineDefinition
+      // which was validated at write time.
+      const pipelineDefinition = pipeline.definition as unknown as PipelineDefinition;
       // allowConcurrentRuns=false → silently drop if a run is already active
-      if (pipeline.definition.options?.allowConcurrentRuns === false) {
+      if (pipelineDefinition.options?.allowConcurrentRuns === false) {
         // The RunService.triggerRun will throw PipelineConcurrentRunError if
         // a run is active; we catch and log it as informational.
       }
@@ -215,11 +217,9 @@ export function createTriggerService(deps: TriggerServiceDeps): TriggerService {
   // -------------------------------------------------------------------------
 
   async function loadTriggers(): Promise<void> {
-    const allTriggers = await triggerRepo.findAllEnabled();
-
     // Only event triggers require Redis subscriptions; webhook triggers are
-    // handled by the internal route handler (the Gateway forwards inbound calls)
-    const eventTriggers = allTriggers.filter((t) => t.trigger_type === "event");
+    // handled by the internal route handler (the Gateway forwards inbound calls).
+    const eventTriggers = await triggerRepo.findEnabledByType("event");
 
     if (eventTriggers.length === 0) {
       logger.info("No event triggers configured — skipping Redis subscriber setup.");
@@ -230,15 +230,18 @@ export function createTriggerService(deps: TriggerServiceDeps): TriggerService {
     for (const trigger of eventTriggers) {
       triggerMap.set(trigger.id, trigger);
 
-      const config = trigger.config as EventTriggerConfig;
+      // config is stored as JSONB Record<string,unknown>; cast via unknown.
+      const config = trigger.config as unknown as EventTriggerConfig;
       const existing = channelTriggerMap.get(config.channel) ?? [];
       channelTriggerMap.set(config.channel, [...existing, trigger.id]);
     }
 
     // Create a dedicated subscriber connection — ioredis requires a separate
     // client once subscribe() is called, as the client enters subscriber mode.
+    // redisUrl is injected at construction time so this service has no direct
+    // dependency on process.env (consistent with the composition root pattern).
     const { createRedisClient } = await import("@oneplatform/core");
-    subscriberClient = createRedisClient({ url: process.env["REDIS_URL"] ?? "redis://localhost:6379" });
+    subscriberClient = createRedisClient({ url: redisUrl });
 
     subscriberClient.on("message", (channel: string, message: string) => {
       void handleEvent(channel, message).catch((err) => {
