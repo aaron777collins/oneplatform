@@ -1,0 +1,44 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { RouterProvider } from "@tanstack/react-router";
+
+import "@/styles/globals.css";
+import { createApiClient, ApiClientContext, configureAuthStore } from "@/lib/api-client.js";
+import { queryClient, configureQueryClientAuth } from "@/lib/query-client.js";
+import { useAuthStore } from "@/stores/auth.store.js";
+import { createAppRouter } from "@/router.js";
+
+// ---------------------------------------------------------------------------
+// Bootstrap: wire up cross-module dependencies
+// ---------------------------------------------------------------------------
+
+// Provide api-client with access to the auth store's clearSession so it can
+// clear state on 401. Done here to avoid circular imports between the modules.
+configureAuthStore(() => useAuthStore.getState().clearSession());
+configureQueryClientAuth(() => useAuthStore.getState().clearSession());
+
+const apiClient = createApiClient({ baseUrl: "" });
+const router = createAppRouter({ apiClient, queryClient });
+
+// ---------------------------------------------------------------------------
+// React root
+// ---------------------------------------------------------------------------
+
+const rootElement = document.getElementById("root");
+if (rootElement === null) {
+  throw new Error("Root element #root not found in the DOM. Check index.html.");
+}
+
+createRoot(rootElement).render(
+  <React.StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <ApiClientContext.Provider value={apiClient}>
+        <RouterProvider router={router} />
+      </ApiClientContext.Provider>
+      {/* DevTools are tree-shaken in production builds */}
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
+  </React.StrictMode>,
+);
