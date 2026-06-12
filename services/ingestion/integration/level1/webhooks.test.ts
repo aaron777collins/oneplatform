@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createHmac } from "node:crypto";
-import { createDbClient } from "@oneplatform/core";
 import type pg from "pg";
 import { buildTestApp } from "../helpers/test-app.js";
 import { newTenantId, cleanupIngestionTenant } from "../helpers/tenant.js";
@@ -15,10 +14,7 @@ describe("Ingestion — webhook receivers (Level 1)", () => {
     const result = await buildTestApp();
     app = result.app;
     cleanup = result.cleanup;
-    db = createDbClient({
-      connectionString: process.env["OP_DATABASE_URL"]!,
-      maxConnections: 3,
-    });
+    db = result.db;
   });
 
   afterAll(async () => {

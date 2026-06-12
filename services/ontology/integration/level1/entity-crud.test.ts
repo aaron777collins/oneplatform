@@ -189,9 +189,19 @@ describe("Ontology — entity CRUD (Level 1)", () => {
 
       // Adding a nullable field is a backward-compatible change — returns 200 immediately.
       expect(patchRes.status).toBe(200);
-      const body = await patchRes.json() as { changeType: string; appliedImmediately: boolean };
+      const body = await patchRes.json() as {
+        changeType: string;
+        appliedImmediately: boolean;
+        entity: { fields: Array<{ name: string }> };
+      };
       expect(body.changeType).toBe("backward_compatible");
       expect(body.appliedImmediately).toBe(true);
+
+      // Verify the response includes the updated entity with the new field
+      const entity = body.entity;
+      expect(entity).toBeDefined();
+      const fields = entity.fields;
+      expect(fields.some((f) => f.name === "Tracking Number")).toBe(true);
     } finally {
       await cleanupOntologyTenant(db, tenantId);
     }

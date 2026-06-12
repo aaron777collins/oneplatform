@@ -10,13 +10,13 @@
  *
  * Tests verify:
  *   - Validation: 400 when stage query param is missing
- *   - Auth: 400 when no auth token is present (tenantId required)
+ *   - Auth: 401 when no auth token is present (auth middleware runs before the handler)
  *   - Happy path: 200 with { hooks: [] } for a tenant with no active hooks
  *   - Response shape: hooks array contains the expected fields
  *
- * Note: The route guards check `stage && tenantId` — an unauthenticated
- * request has no tenantId so it returns 400 (not 401). This matches the
- * route implementation in hooks.ts.
+ * Note: The hooks route is not listed in publicRoutes, so unauthenticated
+ * requests receive 401 from the auth middleware — the route handler's
+ * `!tenantId` guard (which would return 400) is never reached without a token.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -118,7 +118,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -133,7 +133,7 @@ describe("Plugin service — hook query validation", () => {
 
     try {
       // No ?stage= query param
-      const res = await fetch(`/api/v1/plugins/${fixturePluginId}/hooks`, {
+      const res = await appFetch(`/api/v1/plugins/${fixturePluginId}/hooks`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(400);
@@ -144,15 +144,13 @@ describe("Plugin service — hook query validation", () => {
     }
   });
 
-  it("GET /api/v1/plugins/:id/hooks returns 400 without auth (no tenantId)", async () => {
-    // The route requires both stage AND an authenticated tenantId.
-    // An unauthenticated request has no user context → no tenantId → 400.
-    const res = await fetch(
+  it("GET /api/v1/plugins/:id/hooks returns 401 without auth token", async () => {
+    // The hooks route is not listed in publicRoutes, so the auth middleware
+    // intercepts the request before the handler runs and returns 401.
+    const res = await appFetch(
       `/api/v1/plugins/${fixturePluginId}/hooks?stage=before:pipeline.step`,
     );
-    // The authMiddleware lets this through (no public route exclusion for this path),
-    // but the handler checks !tenantId and returns 400 before any DB query.
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -166,7 +164,7 @@ describe("Plugin service — hook query happy path", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch(
+      const res = await appFetch(
         `/api/v1/plugins/${fixturePluginId}/hooks?stage=before:pipeline.step`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
@@ -185,7 +183,7 @@ describe("Plugin service — hook query happy path", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch(
+      const res = await appFetch(
         `/api/v1/plugins/${fixturePluginId}/hooks?stage=after:data.ingestion`,
         { headers: { Authorization: `Bearer ${token}` } },
       );

@@ -117,7 +117,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -140,7 +140,7 @@ describe("Plugin service — create instance", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const res = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -165,7 +165,7 @@ describe("Plugin service — create instance", () => {
   });
 
   it("POST /api/v1/plugins/:id/instances returns 401 without a token", async () => {
-    const res = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+    const res = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ displayName: "Unauthed Instance" }),
@@ -178,7 +178,7 @@ describe("Plugin service — create instance", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const res = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -206,7 +206,7 @@ describe("Plugin service — enable and disable instance", () => {
 
     try {
       // Create instance
-      const createRes = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const createRes = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -219,7 +219,7 @@ describe("Plugin service — enable and disable instance", () => {
       const instanceId = created.instanceId;
 
       // Enable via PATCH
-      const patchRes = await fetch(
+      const patchRes = await appFetch(
         `/api/v1/plugins/${sharedPluginId}/instances/${instanceId}`,
         {
           method: "PATCH",
@@ -245,7 +245,7 @@ describe("Plugin service — enable and disable instance", () => {
 
   it("PATCH /api/v1/plugins/:id/instances/:instanceId returns 401 without a token", async () => {
     const fakeInstanceId = randomUUID();
-    const res = await fetch(
+    const res = await appFetch(
       `/api/v1/plugins/${sharedPluginId}/instances/${fakeInstanceId}`,
       {
         method: "PATCH",
@@ -268,7 +268,7 @@ describe("Plugin service — list instances", () => {
 
     try {
       // Create an instance
-      const createRes = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const createRes = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -278,7 +278,7 @@ describe("Plugin service — list instances", () => {
       });
       expect(createRes.status).toBe(201);
 
-      const listRes = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const listRes = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(listRes.status).toBe(200);
@@ -307,7 +307,7 @@ describe("Plugin service — list instances", () => {
 
     try {
       // Tenant A creates an instance
-      const createRes = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const createRes = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${tokenA}`,
@@ -318,7 +318,7 @@ describe("Plugin service — list instances", () => {
       expect(createRes.status).toBe(201);
 
       // Tenant B lists instances — must not see Tenant A's instance
-      const listRes = await fetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
+      const listRes = await appFetch(`/api/v1/plugins/${sharedPluginId}/instances`, {
         headers: { Authorization: `Bearer ${tokenB}` },
       });
       expect(listRes.status).toBe(200);

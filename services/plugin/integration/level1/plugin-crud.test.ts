@@ -58,7 +58,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -68,7 +68,7 @@ function fetch(path: string, init?: RequestInit): Promise<Response> {
 
 describe("Plugin service — list plugins", () => {
   it("GET /api/v1/plugins returns 200 with items array (no auth required)", async () => {
-    const res = await fetch("/api/v1/plugins");
+    const res = await appFetch("/api/v1/plugins");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       items: unknown[];
@@ -80,7 +80,7 @@ describe("Plugin service — list plugins", () => {
   });
 
   it("GET /api/v1/plugins accepts type query param", async () => {
-    const res = await fetch("/api/v1/plugins?type=connector");
+    const res = await appFetch("/api/v1/plugins?type=connector");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: { type: string }[] };
     // All returned items must match the type filter
@@ -90,7 +90,7 @@ describe("Plugin service — list plugins", () => {
   });
 
   it("GET /api/v1/plugins returns 400 for invalid type param", async () => {
-    const res = await fetch("/api/v1/plugins?type=invalid-type-xyz");
+    const res = await appFetch("/api/v1/plugins?type=invalid-type-xyz");
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("VALIDATION_ERROR");
@@ -104,7 +104,7 @@ describe("Plugin service — list plugins", () => {
 describe("Plugin service — get plugin detail", () => {
   it("GET /api/v1/plugins/:id returns error for a non-existent plugin ID", async () => {
     const fakeId = randomUUID();
-    const res = await fetch(`/api/v1/plugins/${fakeId}`);
+    const res = await appFetch(`/api/v1/plugins/${fakeId}`);
     // The route calls pluginService.getPlugin which should throw PluginNotFoundError
     // The core error handler maps this to a non-2xx response
     expect(res.status).not.toBe(200);
@@ -126,7 +126,7 @@ describe("Plugin service — install plugin auth enforcement", () => {
       const formData = new FormData();
       formData.append("approveUrls", "false");
 
-      const res = await fetch("/api/v1/plugins", {
+      const res = await appFetch("/api/v1/plugins", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -143,7 +143,7 @@ describe("Plugin service — install plugin auth enforcement", () => {
     const formData = new FormData();
     formData.append("approveUrls", "false");
 
-    const res = await fetch("/api/v1/plugins", {
+    const res = await appFetch("/api/v1/plugins", {
       method: "POST",
       body: formData,
     });
@@ -160,7 +160,7 @@ describe("Plugin service — install plugin auth enforcement", () => {
       const formData = new FormData();
       formData.append("approveUrls", "false");
 
-      const res = await fetch("/api/v1/plugins", {
+      const res = await appFetch("/api/v1/plugins", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -185,7 +185,7 @@ describe("Plugin service — uninstall plugin auth enforcement", () => {
     const fakeId = randomUUID();
 
     try {
-      const res = await fetch(`/api/v1/plugins/${fakeId}`, {
+      const res = await appFetch(`/api/v1/plugins/${fakeId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -197,7 +197,7 @@ describe("Plugin service — uninstall plugin auth enforcement", () => {
 
   it("DELETE /api/v1/plugins/:id returns 401 without a token", async () => {
     const fakeId = randomUUID();
-    const res = await fetch(`/api/v1/plugins/${fakeId}`, {
+    const res = await appFetch(`/api/v1/plugins/${fakeId}`, {
       method: "DELETE",
     });
     expect(res.status).toBe(401);

@@ -51,7 +51,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -61,7 +61,7 @@ function fetch(path: string, init?: RequestInit): Promise<Response> {
 
 describe("Execution service — auth enforcement", () => {
   it("GET /api/v1/exec returns 401 when no token is provided", async () => {
-    const res = await fetch("/api/v1/exec");
+    const res = await appFetch("/api/v1/exec");
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("UNAUTHORIZED");
@@ -69,14 +69,14 @@ describe("Execution service — auth enforcement", () => {
 
   it("GET /api/v1/exec/:id returns 401 when no token is provided", async () => {
     const fakeId = "00000000-0000-0000-0000-000000000001";
-    const res = await fetch(`/api/v1/exec/${fakeId}`);
+    const res = await appFetch(`/api/v1/exec/${fakeId}`);
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("UNAUTHORIZED");
   });
 
   it("POST /api/v1/exec/run returns 401 when no token is provided", async () => {
-    const res = await fetch("/api/v1/exec/run", {
+    const res = await appFetch("/api/v1/exec/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: 'console.log("hi")', language: "js" }),
@@ -94,7 +94,7 @@ describe("Execution service — scope enforcement", () => {
     const tenantId = newTenantId();
     const token = await createTestToken(tenantId, { scopes: ["data:read"] });
 
-    const res = await fetch("/api/v1/exec", {
+    const res = await appFetch("/api/v1/exec", {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(403);
@@ -107,7 +107,7 @@ describe("Execution service — scope enforcement", () => {
     // Deliberately issue a token with execution:read but NOT execution:run
     const token = await createTestToken(tenantId, { scopes: ["execution:read"] });
 
-    const res = await fetch("/api/v1/exec/run", {
+    const res = await appFetch("/api/v1/exec/run", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -131,7 +131,7 @@ describe("Execution service — list executions", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch("/api/v1/exec", {
+      const res = await appFetch("/api/v1/exec", {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
@@ -152,7 +152,7 @@ describe("Execution service — list executions", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch("/api/v1/exec?filter%5Bstatus%5D%5Beq%5D=success", {
+      const res = await appFetch("/api/v1/exec?filter%5Bstatus%5D%5Beq%5D=success", {
         headers: { Authorization: `Bearer ${token}` },
       });
       // The query schema coerces the filter — 200 with empty data is correct
@@ -176,7 +176,7 @@ describe("Execution service — GET /:id", () => {
     const nonExistentId = "00000000-0000-0000-0000-000000000099";
 
     try {
-      const res = await fetch(`/api/v1/exec/${nonExistentId}`, {
+      const res = await appFetch(`/api/v1/exec/${nonExistentId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(404);
@@ -205,7 +205,7 @@ describe("Execution service — tenant isolation", () => {
     const isolatedId = "cafebabe-0000-0000-0000-000000000001";
 
     try {
-      const res = await fetch(`/api/v1/exec/${isolatedId}`, {
+      const res = await appFetch(`/api/v1/exec/${isolatedId}`, {
         headers: { Authorization: `Bearer ${tokenB}` },
       });
       // Whether the row exists for tenant A or not, tenant B must get 404

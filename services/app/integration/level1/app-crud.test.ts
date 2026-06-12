@@ -50,7 +50,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -92,7 +92,7 @@ describe("App service — create app", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch("/api/v1/apps", {
+      const res = await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -123,7 +123,7 @@ describe("App service — create app", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch("/api/v1/apps", {
+      const res = await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -144,7 +144,7 @@ describe("App service — create app", () => {
   });
 
   it("POST /api/v1/apps returns 401 without an auth token", async () => {
-    const res = await fetch("/api/v1/apps", {
+    const res = await appFetch("/api/v1/apps", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Anon App", slug: "anon-app" }),
@@ -163,7 +163,7 @@ describe("App service — list apps", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const res = await fetch("/api/v1/apps", {
+      const res = await appFetch("/api/v1/apps", {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
@@ -184,7 +184,7 @@ describe("App service — list apps", () => {
 
     try {
       // Create two apps for this tenant
-      await fetch("/api/v1/apps", {
+      await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -195,7 +195,7 @@ describe("App service — list apps", () => {
           slug: `app-alpha-${randomUUID().split("-")[0] ?? "a"}`,
         }),
       });
-      await fetch("/api/v1/apps", {
+      await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -207,7 +207,7 @@ describe("App service — list apps", () => {
         }),
       });
 
-      const listRes = await fetch("/api/v1/apps", {
+      const listRes = await appFetch("/api/v1/apps", {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(listRes.status).toBe(200);
@@ -234,7 +234,7 @@ describe("App service — get app by ID", () => {
 
     try {
       // Create first
-      const createRes = await fetch("/api/v1/apps", {
+      const createRes = await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -250,7 +250,7 @@ describe("App service — get app by ID", () => {
       const appId = created.data.id;
 
       // Fetch by ID
-      const getRes = await fetch(`/api/v1/apps/${appId}`, {
+      const getRes = await appFetch(`/api/v1/apps/${appId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(getRes.status).toBe(200);
@@ -276,7 +276,7 @@ describe("App service — update app", () => {
 
     try {
       // Create
-      const createRes = await fetch("/api/v1/apps", {
+      const createRes = await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -291,7 +291,7 @@ describe("App service — update app", () => {
       const appId = created.data.id;
 
       // Patch
-      const patchRes = await fetch(`/api/v1/apps/${appId}`, {
+      const patchRes = await appFetch(`/api/v1/apps/${appId}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -317,7 +317,7 @@ describe("App service — update app", () => {
     const token = await createTestToken(tenantId);
 
     try {
-      const createRes = await fetch("/api/v1/apps", {
+      const createRes = await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -331,7 +331,7 @@ describe("App service — update app", () => {
       const created = (await createRes.json()) as AppBody;
       const appId = created.data.id;
 
-      const patchRes = await fetch(`/api/v1/apps/${appId}`, {
+      const patchRes = await appFetch(`/api/v1/apps/${appId}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -357,7 +357,7 @@ describe("App service — delete app", () => {
 
     try {
       // Create
-      const createRes = await fetch("/api/v1/apps", {
+      const createRes = await appFetch("/api/v1/apps", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -372,14 +372,14 @@ describe("App service — delete app", () => {
       const appId = created.data.id;
 
       // Delete
-      const delRes = await fetch(`/api/v1/apps/${appId}`, {
+      const delRes = await appFetch(`/api/v1/apps/${appId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(delRes.status).toBe(204);
 
       // Verify gone — the service throws an error converted to a non-200 response
-      const getRes = await fetch(`/api/v1/apps/${appId}`, {
+      const getRes = await appFetch(`/api/v1/apps/${appId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       // The app service throws AppNotFoundError which the core error handler

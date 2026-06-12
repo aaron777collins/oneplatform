@@ -55,7 +55,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -68,7 +68,7 @@ async function createApp(
   name: string,
   slug: string,
 ): Promise<string> {
-  const res = await fetch("/api/v1/apps", {
+  const res = await appFetch("/api/v1/apps", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -76,6 +76,9 @@ async function createApp(
     },
     body: JSON.stringify({ name, slug }),
   });
+  if (res.status !== 201) {
+    throw new Error(`createApp failed: ${res.status} ${await res.text()}`);
+  }
   const body = (await res.json()) as CreateAppResponse;
   return body.data.id;
 }
@@ -93,7 +96,7 @@ describe("App service — deploy auth enforcement", () => {
     try {
       const appId = await createApp(token, "Deploy Auth App", slug);
 
-      const res = await fetch(`/api/v1/apps/${appId}/deploy`, {
+      const res = await appFetch(`/api/v1/apps/${appId}/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -120,7 +123,7 @@ describe("App service — deploy with no successful build", () => {
 
       // Deploy without specifying a buildId — the service looks for the latest
       // successful build and finds none
-      const res = await fetch(`/api/v1/apps/${appId}/deploy`, {
+      const res = await appFetch(`/api/v1/apps/${appId}/deploy`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -147,7 +150,7 @@ describe("App service — deploy with no successful build", () => {
       const appId = await createApp(token, "Bad Build App", slug);
       const fakeBuildId = randomUUID();
 
-      const res = await fetch(`/api/v1/apps/${appId}/deploy`, {
+      const res = await appFetch(`/api/v1/apps/${appId}/deploy`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -172,7 +175,7 @@ describe("App service — deploy with no successful build", () => {
     try {
       const appId = await createApp(token, "Not Deployed App", slug);
 
-      const getRes = await fetch(`/api/v1/apps/${appId}`, {
+      const getRes = await appFetch(`/api/v1/apps/${appId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(getRes.status).toBe(200);

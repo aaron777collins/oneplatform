@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createDbClient } from "@oneplatform/core";
 import type pg from "pg";
 import { buildTestApp } from "../helpers/test-app.js";
 import { newTenantId, cleanupIngestionTenant } from "../helpers/tenant.js";
@@ -28,10 +27,7 @@ describe("Ingestion — connector CRUD (Level 1)", () => {
     const result = await buildTestApp();
     app = result.app;
     cleanup = result.cleanup;
-    db = createDbClient({
-      connectionString: process.env["OP_DATABASE_URL"]!,
-      maxConnections: 3,
-    });
+    db = result.db;
   });
 
   afterAll(async () => {

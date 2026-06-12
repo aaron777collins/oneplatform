@@ -54,7 +54,7 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fetch(path: string, init?: RequestInit): Promise<Response> {
+function appFetch(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init));
 }
 
@@ -67,7 +67,7 @@ async function createApp(
   name: string,
   slug: string,
 ): Promise<string> {
-  const res = await fetch("/api/v1/apps", {
+  const res = await appFetch("/api/v1/apps", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -75,6 +75,9 @@ async function createApp(
     },
     body: JSON.stringify({ name, slug }),
   });
+  if (res.status !== 201) {
+    throw new Error(`createApp failed: ${res.status} ${await res.text()}`);
+  }
   const body = (await res.json()) as CreateAppResponse;
   return body.data.id;
 }
@@ -92,7 +95,7 @@ describe("App service — trigger build", () => {
     try {
       const appId = await createApp(token, "Build Trigger App", slug);
 
-      const res = await fetch(`/api/v1/apps/${appId}/builds`, {
+      const res = await appFetch(`/api/v1/apps/${appId}/builds`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -101,10 +104,10 @@ describe("App service — trigger build", () => {
         body: JSON.stringify({ preview: false }),
       });
 
-      // 202 Accepted: build job enqueued. The build itself is async.
-      // If the Execution service is unreachable at Level 1, the service may
-      // return a 5xx — that is also acceptable and documents the dependency.
-      expect([202, 503]).toContain(res.status);
+      // 202 Accepted: build job enqueued. The dispatchBuild call is fire-and-forget
+      // (void), so the route always returns 202 before the Execution service is
+      // contacted. The 503 fallback is not needed at Level 1.
+      expect(res.status).toBe(202);
     } finally {
       await cleanupAppTenant(pool, tenantId);
     }
@@ -124,7 +127,7 @@ describe("App service — list builds", () => {
     try {
       const appId = await createApp(token, "List Builds App", slug);
 
-      const res = await fetch(`/api/v1/apps/${appId}/builds`, {
+      const res = await appFetch(`/api/v1/apps/${appId}/builds`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
@@ -148,7 +151,7 @@ describe("App service — list builds", () => {
     try {
       const appId = await createApp(token, "Builds Auth App", slug);
 
-      const res = await fetch(`/api/v1/apps/${appId}/builds`);
+      const res = await appFetch(`/api/v1/apps/${appId}/builds`);
       expect(res.status).toBe(401);
     } finally {
       await cleanupAppTenant(pool, tenantId);
@@ -163,7 +166,7 @@ describe("App service — list builds", () => {
     try {
       const appId = await createApp(token, "Builds Filter App", slug);
 
-      const res = await fetch(
+      const res = await appFetch(
         `/api/v1/apps/${appId}/builds?filter%5Bstatus%5D%5Beq%5D=success`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
