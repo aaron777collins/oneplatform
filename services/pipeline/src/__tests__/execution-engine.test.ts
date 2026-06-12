@@ -33,14 +33,15 @@ function makeLogger(): Logger {
 
 type MockRunRepo = {
   findById: ReturnType<typeof vi.fn>;
-  update: ReturnType<typeof vi.fn>;
+  // RunEngineRepository exposes updateStatus, not update
+  updateStatus: ReturnType<typeof vi.fn>;
 };
 
 type MockRunStepRepo = {
-  createBulk: ReturnType<typeof vi.fn>;
+  createBatch: ReturnType<typeof vi.fn>;
   findByRunId: ReturnType<typeof vi.fn>;
-  update: ReturnType<typeof vi.fn>;
-  findByRunIdAndStepId: ReturnType<typeof vi.fn>;
+  updateStatus: ReturnType<typeof vi.fn>;
+  updateOutput: ReturnType<typeof vi.fn>;
 };
 
 type MockRunLogRepo = {
@@ -50,16 +51,16 @@ type MockRunLogRepo = {
 function makeRunRepo(): MockRunRepo {
   return {
     findById: vi.fn(),
-    update: vi.fn(),
+    updateStatus: vi.fn(),
   };
 }
 
 function makeRunStepRepo(): MockRunStepRepo {
   return {
-    createBulk: vi.fn(),
+    createBatch: vi.fn(),
     findByRunId: vi.fn(),
-    update: vi.fn(),
-    findByRunIdAndStepId: vi.fn(),
+    updateStatus: vi.fn(),
+    updateOutput: vi.fn(),
   };
 }
 
@@ -242,7 +243,7 @@ describe("processRun — idempotency guards", () => {
       "processRun: run not found",
       expect.objectContaining({ runId: "run-999" }),
     );
-    expect(runRepo.update).not.toHaveBeenCalled();
+    expect(runRepo.updateStatus).not.toHaveBeenCalled();
   });
 
   it("returns early and logs a warning when run is not in pending state (running)", async () => {
@@ -255,7 +256,7 @@ describe("processRun — idempotency guards", () => {
       expect.stringContaining("not in pending state"),
       expect.any(Object),
     );
-    expect(runRepo.update).not.toHaveBeenCalled();
+    expect(runRepo.updateStatus).not.toHaveBeenCalled();
   });
 
   it("returns early when run is in completed state (idempotency guard)", async () => {
@@ -263,7 +264,7 @@ describe("processRun — idempotency guards", () => {
 
     await engine.processRun(makeJob({ runId: "run-001", tenantId: "tenant-001" }));
 
-    expect(runRepo.update).not.toHaveBeenCalled();
+    expect(runRepo.updateStatus).not.toHaveBeenCalled();
   });
 
   it("returns early when run is in failed state (idempotency guard)", async () => {
@@ -271,7 +272,7 @@ describe("processRun — idempotency guards", () => {
 
     await engine.processRun(makeJob({ runId: "run-001", tenantId: "tenant-001" }));
 
-    expect(runRepo.update).not.toHaveBeenCalled();
+    expect(runRepo.updateStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -374,10 +375,11 @@ describe("processRun — successful code step execution", () => {
       return Promise.resolve({ rows: [] });
     });
 
-    runRepo.update.mockResolvedValue(makeRunRow({ status: "running" }));
-    runStepRepo.createBulk.mockResolvedValue([makeRunStepRow()]);
+    runRepo.updateStatus.mockResolvedValue(makeRunRow({ status: "running" }));
+    runStepRepo.createBatch.mockResolvedValue([makeRunStepRow()]);
     runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow()]);
-    runStepRepo.update.mockResolvedValue(makeRunStepRow({ status: "completed" }));
+    runStepRepo.updateStatus.mockResolvedValue(makeRunStepRow({ status: "completed" }));
+    runStepRepo.updateOutput.mockResolvedValue(makeRunStepRow({ status: "completed" }));
     runLogRepo.append.mockResolvedValue(undefined);
     redis.get.mockResolvedValue(null); // not cancelled
     redis.publish.mockResolvedValue(0);
@@ -430,7 +432,7 @@ describe("processRun — successful code step execution", () => {
 
     await engine.processRun(makeJob({ runId: "run-001", tenantId: "tenant-001" }));
 
-    const calls = (runRepo.update as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
     const statuses = calls.map((call) => call[1]["status"]).filter(Boolean);
     expect(statuses).toContain("running");
     expect(statuses).toContain("completed");
@@ -441,7 +443,7 @@ describe("processRun — successful code step execution", () => {
 
     await engine.processRun(makeJob({ runId: "run-001", tenantId: "tenant-001" }));
 
-    expect(runStepRepo.createBulk).toHaveBeenCalledOnce();
+    expect(runStepRepo.createBatch).toHaveBeenCalledOnce();
   });
 
   it("calls the Execution Service via fetch for the code step", async () => {
@@ -509,10 +511,11 @@ describe("processRun — cancellation", () => {
       return Promise.resolve({ rows: [] });
     });
 
-    runRepo.update.mockResolvedValue(makeRunRow({ status: "running" }));
-    runStepRepo.createBulk.mockResolvedValue([makeRunStepRow()]);
+    runRepo.updateStatus.mockResolvedValue(makeRunRow({ status: "running" }));
+    runStepRepo.createBatch.mockResolvedValue([makeRunStepRow()]);
     runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow()]);
-    runStepRepo.update.mockResolvedValue(makeRunStepRow({ status: "cancelled" }));
+    runStepRepo.updateStatus.mockResolvedValue(makeRunStepRow({ status: "cancelled" }));
+    runStepRepo.updateOutput.mockResolvedValue(makeRunStepRow({ status: "cancelled" }));
     runLogRepo.append.mockResolvedValue(undefined);
 
     // Cancellation flag is SET (run is cancelled)
@@ -554,7 +557,7 @@ describe("processRun — cancellation", () => {
 
     await engine.processRun(makeJob({ runId: "run-001", tenantId: "tenant-001" }));
 
-    const calls = (runRepo.update as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
     const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
     expect(statuses).toContain("cancelled");
   });
@@ -598,10 +601,11 @@ describe("processRun — step failure propagation", () => {
       return Promise.resolve({ rows: [] });
     });
 
-    runRepo.update.mockResolvedValue(makeRunRow({ status: "running" }));
-    runStepRepo.createBulk.mockResolvedValue([makeRunStepRow()]);
+    runRepo.updateStatus.mockResolvedValue(makeRunRow({ status: "running" }));
+    runStepRepo.createBatch.mockResolvedValue([makeRunStepRow()]);
     runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow()]);
-    runStepRepo.update.mockResolvedValue(makeRunStepRow({ status: "failed" }));
+    runStepRepo.updateStatus.mockResolvedValue(makeRunStepRow({ status: "failed" }));
+    runStepRepo.updateOutput.mockResolvedValue(makeRunStepRow({ status: "failed" }));
     runLogRepo.append.mockResolvedValue(undefined);
     redis.get.mockResolvedValue(null); // not cancelled
     redis.publish.mockResolvedValue(0);
@@ -649,7 +653,7 @@ describe("processRun — step failure propagation", () => {
 
     await engine.processRun(makeJob({ runId: "run-001", tenantId: "tenant-001" }));
 
-    const calls = (runRepo.update as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
     const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
     expect(statuses).toContain("failed");
   });

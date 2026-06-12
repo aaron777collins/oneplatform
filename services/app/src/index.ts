@@ -131,9 +131,8 @@ function buildMinioGetHeaders(params: {
 // Service public key loader — same pattern as pipeline service
 // ---------------------------------------------------------------------------
 
-async function loadServicePublicKeys(): Promise<Record<string, string>> {
+async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
-    const dir   = process.env["SERVICE_KEYS_DIR"] ?? "/data/service-keys";
     const files = await readdir(dir);
     const keys: Record<string, string> = {};
 
@@ -171,36 +170,62 @@ async function checkGuestRateLimit(
 }
 
 // ---------------------------------------------------------------------------
-// Main startup sequence — design spec §1.3
+// Public types
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface AppConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  authServiceUrl: string;
+  executionServiceUrl: string;
+  baseUrl: string;
+  minioEndpoint: string;
+  minioAccessKey: string;
+  minioSecretKey: string;
+  minioRegion: string;
+  buildRetentionCount: number;
+  serviceKeysDir: string;
+  /** When false, BullMQ workers are not started (useful in test environments). Defaults to true. */
+  startWorkers?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Factory — wires all dependencies, returns the Hono app and a cleanup fn.
+// main() is the only caller in production; tests can call this directly.
+// ---------------------------------------------------------------------------
+
+export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   const serviceStartedAt = new Date();
 
-  // Step 1: Load config and master key once at startup (W10 — never call
-  // loadMasterKey() per-request; it reads a file on each invocation).
-  const config    = loadConfig();
-  const masterKey = loadMasterKey();
+  const {
+    databaseUrl,
+    redisUrl,
+    jwtSecret,
+    masterKey,
+    allowedOrigins,
+    authServiceUrl,
+    executionServiceUrl,
+    baseUrl,
+    minioEndpoint,
+    minioAccessKey,
+    minioSecretKey,
+    minioRegion,
+    buildRetentionCount,
+    serviceKeysDir,
+    startWorkers = true,
+  } = config;
 
-  const databaseUrl = process.env["DATABASE_URL"] ?? config.OP_DATABASE_URL;
-  const redisUrl    = process.env["REDIS_URL"]    ?? config.OP_REDIS_URL;
+  const minioBucket = "op-app-artifacts";
 
-  const authServiceUrl      = process.env["AUTH_SERVICE_URL"]      ?? "http://auth-service:3001";
-  const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-  const baseUrl             = process.env["OP_BASE_URL"]           ?? "http://localhost:3000";
-
-  // MinIO connection parameters — read once, used across multiple handlers
-  const minioEndpoint  = process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000";
-  const minioAccessKey = process.env["MINIO_ACCESS_KEY"] ?? "minioadmin";
-  const minioSecretKey = process.env["MINIO_SECRET_KEY"] ?? "minioadmin";
-  const minioRegion    = process.env["MINIO_REGION"]     ?? "us-east-1";
-  const minioBucket    = "op-app-artifacts";
-
-  const buildRetentionCount = parseInt(
-    process.env["APP_BUILD_RETENTION_COUNT"] ?? "20", 10
-  );
-
-  // Step 2: Create DB and Redis clients
+  // Step 1: Create DB and Redis clients
   const db = createDbClient({
     connectionString: databaseUrl,
     maxConnections: 15,  // transaction-mode PgBouncer, pool 15 per design spec
@@ -208,13 +233,13 @@ async function main(): Promise<void> {
 
   const redis = createRedisClient({ url: redisUrl });
 
-  // Step 3: Run DB migrations
+  // Step 2: Run DB migrations
   const migrationResult = await runMigrations(db);
   if (migrationResult.applied.length > 0) {
     console.info("App service migrations applied:", migrationResult.applied);
   }
 
-  // Step 4: Create logger
+  // Step 3: Create logger
   const logger = createLogger({ serviceName: "app-service", redis });
 
   // Redis error handling — degraded mode, not fatal
@@ -222,13 +247,13 @@ async function main(): Promise<void> {
     logger.error("Redis connection error", { error: err.message });
   });
 
-  // Step 5: Instantiate repositories
+  // Step 4: Instantiate repositories
   const appRepo   = new AppRepository(db);
   const fileRepo  = new VersionRepository(db);
   const buildRepo = new DeploymentRepository(db);
   const permRepo  = new PermissionRepository(db);
 
-  // Step 6: Create services
+  // Step 5: Create services
   const appService = createAppService({ appRepo, fileRepo, logger });
 
   const buildService = createBuildService({
@@ -258,62 +283,67 @@ async function main(): Promise<void> {
   // Widget service — in-memory registry for plugin widget registration
   createWidgetService({ logger });
 
-  // Step 7: Start BullMQ retention worker AND enqueue repeating job (W1).
+  // Step 6: Start BullMQ retention worker AND enqueue repeating job (W1).
   // The worker exists to consume jobs; we must also enqueue a repeating job
   // otherwise the worker sits idle and retention never runs.
   const retentionQueueName = "queue:app:retention";
-  const retentionQueue = new Queue(retentionQueueName, {
-    connection:        { url: redisUrl },
-    defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 5_000 } },
-  });
+  let retentionWorker: Worker | undefined;
+  let retentionQueue: Queue | undefined;
 
-  // Upsert the repeating job so restarts are idempotent (repeat key is stable)
-  await retentionQueue.upsertJobScheduler(
-    "daily-retention-cleanup",
-    { every: 24 * 60 * 60 * 1_000 },
-    {
-      name: "retention-cleanup",
-      data: { retentionCount: buildRetentionCount },
-      opts: { removeOnComplete: { count: 10 }, removeOnFail: { count: 100 } },
-    }
-  );
+  if (startWorkers) {
+    retentionQueue = new Queue(retentionQueueName, {
+      connection:        { url: redisUrl },
+      defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 5_000 } },
+    });
 
-  const retentionWorker = new Worker(
-    retentionQueueName,
-    async () => {
-      await buildService.runRetentionCleanup(buildRetentionCount);
-    },
-    {
-      connection:       { url: redisUrl },
-      concurrency:      1,
-      removeOnComplete: { count: 10 },
-      removeOnFail:     { count: 100 },
-    }
-  );
+    // Upsert the repeating job so restarts are idempotent (repeat key is stable)
+    await retentionQueue.upsertJobScheduler(
+      "daily-retention-cleanup",
+      { every: 24 * 60 * 60 * 1_000 },
+      {
+        name: "retention-cleanup",
+        data: { retentionCount: buildRetentionCount },
+        opts: { removeOnComplete: { count: 10 }, removeOnFail: { count: 100 } },
+      }
+    );
 
-  logger.info("App retention worker started", { buildRetentionCount });
+    retentionWorker = new Worker(
+      retentionQueueName,
+      async () => {
+        await buildService.runRetentionCleanup(buildRetentionCount);
+      },
+      {
+        connection:       { url: redisUrl },
+        concurrency:      1,
+        removeOnComplete: { count: 10 },
+        removeOnFail:     { count: 100 },
+      }
+    );
 
-  // Step 8: Load service public keys for inter-service JWT verification
-  const servicePublicKeys = await loadServicePublicKeys();
+    logger.info("App retention worker started", { buildRetentionCount });
+  }
+
+  // Step 7: Load service public keys for inter-service JWT verification
+  const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
   logger.info("Service public keys loaded", { count: Object.keys(servicePublicKeys).length });
 
   // Readiness gate — set true after all startup steps complete
   let serviceReady = true;
 
-  // Step 9: Create Hono app via core factory (attaches full middleware stack)
+  // Step 8: Create Hono app via core factory (attaches full middleware stack)
   const honoApp = createApp({
     serviceName:    "app-service",
     version:        "1.0.0",
-    jwtSecret:      config.OP_JWT_SECRET,
+    jwtSecret,
     redis,
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins,
     publicRoutes:   ["/healthz", "/readyz"],
     targetService:  "app-service",
     servicePublicKeys,
   });
 
-  // Step 10: Register routes (specific before catch-all)
+  // Step 9: Register routes (specific before catch-all)
 
   const healthRoutes = createHealthRoutes({
     pool: db,
@@ -559,7 +589,50 @@ async function main(): Promise<void> {
     });
   });
 
-  // Step 11: Start HTTP server on port 3006 (design spec §1.2)
+  const cleanup = async (): Promise<void> => {
+    serviceReady = false;
+    if (retentionWorker !== undefined) {
+      await retentionWorker.close();
+    }
+    if (retentionQueue !== undefined) {
+      await retentionQueue.close();
+    }
+    await Promise.all([db.end(), redis.quit()]);
+  };
+
+  return { app: honoApp, cleanup };
+}
+
+// ---------------------------------------------------------------------------
+// Main startup sequence — design spec §1.3
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  // Step 1: Load config and master key once at startup (W10 — never call
+  // loadMasterKey() per-request; it reads a file on each invocation).
+  const config    = loadConfig();
+  const masterKey = loadMasterKey();
+
+  const appConfig: AppConfig = {
+    databaseUrl:        process.env["DATABASE_URL"]       ?? config.OP_DATABASE_URL,
+    redisUrl:           process.env["REDIS_URL"]          ?? config.OP_REDIS_URL,
+    jwtSecret:          config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins:     config.OP_ALLOWED_ORIGINS,
+    authServiceUrl:     process.env["AUTH_SERVICE_URL"]      ?? "http://auth-service:3001",
+    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
+    baseUrl:            process.env["OP_BASE_URL"]           ?? "http://localhost:3000",
+    minioEndpoint:      process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000",
+    minioAccessKey:     process.env["MINIO_ACCESS_KEY"] ?? "minioadmin",
+    minioSecretKey:     process.env["MINIO_SECRET_KEY"] ?? "minioadmin",
+    minioRegion:        process.env["MINIO_REGION"]     ?? "us-east-1",
+    buildRetentionCount: parseInt(process.env["APP_BUILD_RETENTION_COUNT"] ?? "20", 10),
+    serviceKeysDir:     process.env["SERVICE_KEYS_DIR"] ?? "/data/service-keys",
+    startWorkers:       true,
+  };
+
+  const { app, cleanup } = await createServiceApp(appConfig);
+
   const port = parseInt(process.env["PORT"] ?? "3006", 10);
 
   const server = createServer(
@@ -594,7 +667,7 @@ async function main(): Promise<void> {
           ...(body !== undefined ? { body } : {}),
         });
 
-        const responseOrPromise = honoApp.fetch(fetchRequest);
+        const responseOrPromise = app.fetch(fetchRequest);
 
         const handleResponse = (response: Response): void => {
           const contentType = response.headers.get("content-type") ?? "";
@@ -630,14 +703,12 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("App service started", { port, buildRetentionCount });
+    console.info("App service started", { port, buildRetentionCount: appConfig.buildRetentionCount });
   });
 
-  // Step 12: SIGTERM handler with 30s hard-exit fallback
+  // SIGTERM handler with 30s hard-exit fallback
   process.on("SIGTERM", () => {
     console.info("SIGTERM received — starting graceful shutdown");
-
-    serviceReady = false;
 
     const shutdownTimeout = setTimeout(() => {
       console.error("Shutdown timeout exceeded — forcing exit");
@@ -645,19 +716,14 @@ async function main(): Promise<void> {
     }, 30_000);
     shutdownTimeout.unref();
 
-    void retentionWorker.close().then(() => {
-      void retentionQueue.close().then(() => {
-        server.close(() => {
-          void Promise.all([
-            db.end(),
-            redis.quit(),
-          ]).then(() => {
-            clearTimeout(shutdownTimeout);
-            console.info("App service graceful shutdown complete");
-            process.exit(0);
-          });
-        });
-      });
+    server.close(() => {
+      cleanup()
+        .then(() => {
+          clearTimeout(shutdownTimeout);
+          console.info("App service graceful shutdown complete");
+          process.exit(0);
+        })
+        .catch(() => process.exit(1));
     });
   });
 }

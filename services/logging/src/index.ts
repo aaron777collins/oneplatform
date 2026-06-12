@@ -51,11 +51,10 @@ import { registerRoutes } from "./routes/index.js";
 // Load peer service public keys for service-to-service auth
 // ---------------------------------------------------------------------------
 
-async function loadServicePublicKeys(): Promise<Record<string, string>> {
+async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
     const { readdir } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const dir = "/data/service-keys";
     const files = await readdir(dir);
     const keys: Record<string, string> = {};
 
@@ -78,41 +77,68 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Public types
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
-  // Step 1: Validate configuration — throws loudly on missing required vars.
-  const config = loadConfig();
-  const masterKey = loadMasterKey();
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface LoggingConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  /** Directory containing peer service public key files. Defaults to /data/service-keys. */
+  serviceKeysDir?: string;
+  /**
+   * Whether to start background jobs (retention scheduler, partition scheduler,
+   * pub/sub listener, audit worker). Defaults to true.
+   * Set to false in tests to avoid background timers interfering with cleanup.
+   */
+  startBackgroundJobs?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export async function createServiceApp(config: LoggingConfig): Promise<ServiceApp> {
+  const serviceKeysDir = config.serviceKeysDir ?? "/data/service-keys";
+  // startBackgroundJobs defaults to true so production behaviour is unchanged
+  // when callers omit the flag.
+  const startBackgroundJobs = config.startBackgroundJobs !== false;
+
   // masterKey is loaded to satisfy the platform startup contract even though
   // the Logging Service does not encrypt data at rest.
-  void masterKey;
+  void config.masterKey;
 
-  // Step 2: Create infrastructure clients.
+  // Step 1: Create infrastructure clients.
   // Two Redis connections: one for general use (BullMQ, health checks),
   // one dedicated to pub/sub (ioredis cannot issue regular commands once
   // PSUBSCRIBE is issued on a connection).
   const db = createDbClient({
-    connectionString: config.OP_DATABASE_URL,
+    connectionString: config.databaseUrl,
     maxConnections: 30,
   });
 
-  const redis = createRedisClient({ url: config.OP_REDIS_URL });
-  const redisSubscriber = createRedisClient({ url: config.OP_REDIS_URL });
+  const redis = createRedisClient({ url: config.redisUrl });
+  const redisSubscriber = createRedisClient({ url: config.redisUrl });
 
-  // Step 3: Run database migrations.
+  // Step 2: Run database migrations.
   const migrationResult = await runMigrations(db);
   if (migrationResult.applied.length > 0) {
     console.info("Logging migrations applied:", migrationResult.applied);
   }
 
-  // Step 4: Ensure partitions for current and next month exist.
+  // Step 3: Ensure partitions for current and next month exist.
   // This runs synchronously so the first batch insert always has a partition.
   const retentionService = new RetentionService(db);
   await retentionService.ensurePartitions();
 
-  // Step 5: Create logger and event publisher.
+  // Step 4: Create logger and event publisher.
   const logger = createLogger({
     serviceName: "logging-service",
     redis,
@@ -121,49 +147,50 @@ async function main(): Promise<void> {
   const events = createEventPublisher({ redis });
   void events; // Logging Service is a pure consumer; events are unused here
 
-  // Step 6: Instantiate repositories.
+  // Step 5: Instantiate repositories.
   const logEventRepository = new LogEventRepository(db);
   const auditEventRepository = new AuditEventRepository(db);
 
-  // Step 7: Start pub/sub listener — PSUBSCRIBE logs:* on the dedicated
+  // Step 6: Start pub/sub listener — PSUBSCRIBE logs:* on the dedicated
   // subscriber connection so the main Redis connection remains usable.
   const accumulator = new BatchAccumulator(logEventRepository);
   const ingestionService = new IngestionService(accumulator);
-  ingestionService.startPubSubListener(redisSubscriber);
 
-  logger.info("Pub/sub listener started");
-
-  // Step 8: Start BullMQ audit worker.
+  let auditWorker: Awaited<ReturnType<AuditService["startAuditWorker"]>> | null = null;
   const auditService = new AuditService(auditEventRepository);
-  // Pass the Redis URL string rather than the ioredis instance to avoid the
-  // ioredis version mismatch between logging@5.11.1 and bullmq@5.x's ioredis.
-  const auditWorker = auditService.startAuditWorker(config.OP_REDIS_URL);
 
-  logger.info("Audit worker started");
+  if (startBackgroundJobs) {
+    ingestionService.startPubSubListener(redisSubscriber);
+    logger.info("Pub/sub listener started");
 
-  // Step 9 & 10: Start retention and partition schedulers.
-  retentionService.startRetentionScheduler();
-  retentionService.startPartitionScheduler();
+    // Pass the Redis URL string rather than the ioredis instance to avoid the
+    // ioredis version mismatch between logging@5.11.1 and bullmq@5.x's ioredis.
+    auditWorker = auditService.startAuditWorker(config.redisUrl);
+    logger.info("Audit worker started");
 
-  // Step 11: Load peer service public keys.
-  const servicePublicKeys = await loadServicePublicKeys();
+    retentionService.startRetentionScheduler();
+    retentionService.startPartitionScheduler();
+  }
 
-  // Step 12: Create the Hono app with the standard middleware stack.
+  // Step 7: Load peer service public keys.
+  const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
+
+  // Step 8: Create the Hono app with the standard middleware stack.
   const app = createApp({
     serviceName: "logging-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret: config.jwtSecret,
     redis,
     // The Logging Service validates user JWTs for /api/v1/* routes but does
     // not issue its own API keys — pass a no-op validator here.
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins: config.allowedOrigins,
     publicRoutes: ["/healthz", "/readyz"],
     targetService: "logging-service",
     servicePublicKeys,
   });
 
-  // Step 13: Register all route groups.
+  // Step 9: Register all route groups.
   registerRoutes(app, {
     db,
     redis,
@@ -175,7 +202,44 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
-  // Step 14: Start HTTP server — Node.js HTTP adapter wrapping Hono app.fetch.
+  const cleanup = async (): Promise<void> => {
+    // Stop schedulers first so no new jobs are triggered during shutdown
+    retentionService.stop();
+
+    if (auditWorker !== null) {
+      await auditWorker.close();
+    }
+
+    // Stop the pub/sub listener and flush any remaining batch to Postgres
+    ingestionService.stopPubSubListener();
+    await ingestionService.flushBatch();
+
+    await db.end();
+    await redis.quit();
+    await redisSubscriber.quit();
+  };
+
+  return { app, cleanup };
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  // Step 1: Validate configuration — throws loudly on missing required vars.
+  const config = loadConfig();
+  const masterKey = loadMasterKey();
+
+  const { app, cleanup } = await createServiceApp({
+    databaseUrl: config.OP_DATABASE_URL,
+    redisUrl: config.OP_REDIS_URL,
+    jwtSecret: config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+  });
+
+  // Step 2: Start HTTP server — Node.js HTTP adapter wrapping Hono app.fetch.
   // Hono's `app.fetch` accepts a web-standard Request and returns a Response;
   // this bridge converts Node's IncomingMessage/ServerResponse to/from that API.
   const port = parseInt(process.env["PORT"] ?? "3007", 10);
@@ -237,7 +301,7 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Logging service started", { port });
+    console.info(`Logging service started on port ${port}`);
   });
 
   // ---------------------------------------------------------------------------
@@ -254,25 +318,10 @@ async function main(): Promise<void> {
       process.exit(1);
     }, 30_000).unref();
 
-    // Stop schedulers first so no new jobs are triggered during shutdown
-    retentionService.stop();
-
-    // Stop the BullMQ worker and wait for in-flight jobs to complete
-    void auditWorker.close().then(async () => {
-      // Stop the pub/sub listener and flush any remaining batch to Postgres
-      ingestionService.stopPubSubListener();
-      await ingestionService.flushBatch();
-
-      // Close the HTTP server (stop accepting new connections)
-      server.close(() => {
-        void db.end().then(() => {
-          void redis.quit().then(() => {
-            void redisSubscriber.quit().then(() => {
-              console.info("Graceful shutdown complete");
-              process.exit(0);
-            });
-          });
-        });
+    server.close(() => {
+      void cleanup().then(() => {
+        console.info("Graceful shutdown complete");
+        process.exit(0);
       });
     });
   });

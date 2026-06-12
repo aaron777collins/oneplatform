@@ -29,6 +29,23 @@ import { createInferenceService } from "./services/inference-service.js";
 import { createCleanupService } from "./services/cleanup-service.js";
 import { registerRoutes } from "./routes/index.js";
 
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface OntologyConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  /** Raw key bytes returned by loadMasterKey() */
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  executionServiceUrl: string;
+  /** When false, the cleanup background job is not started. Defaults to true. */
+  startBackgroundJobs?: boolean;
+}
+
 async function loadServicePublicKeys(): Promise<Record<string, string>> {
   try {
     const { readdir } = await import("node:fs/promises");
@@ -72,17 +89,17 @@ async function healStuckMigrations(
   }
 }
 
-async function main(): Promise<void> {
-  const config = loadConfig();
-  const masterKey = loadMasterKey();
+export async function createServiceApp(config: OntologyConfig): Promise<ServiceApp> {
+  const startBackgroundJobs = config.startBackgroundJobs ?? true;
 
+  // Create infrastructure clients using config values — never reads env directly
   const db = createDbClient({
-    connectionString: config.OP_DATABASE_URL,
+    connectionString: config.databaseUrl,
     maxConnections: 15,
   });
 
   const redis = createRedisClient({
-    url: config.OP_REDIS_URL,
+    url: config.redisUrl,
   });
 
   const migrationResult = await runMigrations(db);
@@ -135,28 +152,30 @@ async function main(): Promise<void> {
     logger, draftRepo,
   });
 
-  const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
   const mappingService = createMappingService({
     db, redis, logger,
     mappingRuleRepo, mappingErrorRepo, entityRepo, fieldRepo,
-    ...(executionServiceUrl ? { executionServiceUrl } : {}),
+    ...(config.executionServiceUrl ? { executionServiceUrl: config.executionServiceUrl } : {}),
   });
 
   const cleanupService = createCleanupService({
     db, redis, logger, shadowRegistryRepo,
   });
 
-  // Load service public keys for inter-service auth
+  // Background jobs are optional so tests can wire the app without side-effects
+  if (startBackgroundJobs) {
+    cleanupService.startBackgroundJob();
+  }
+
   const servicePublicKeys = await loadServicePublicKeys();
 
-  // Create Hono app
   const app = createApp({
     serviceName: "ontology-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins: config.allowedOrigins,
     publicRoutes: [
       "/healthz",
       "/readyz",
@@ -165,7 +184,6 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
-  // Register routes
   registerRoutes(app, {
     db,
     redis,
@@ -184,10 +202,34 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
-  // Start background jobs
-  cleanupService.startBackgroundJob();
+  // Suppress unused-variable warning — events publisher is retained for
+  // future route handlers that emit domain events.
+  void events;
 
-  // Start HTTP server
+  const cleanup = async (): Promise<void> => {
+    if (startBackgroundJobs) {
+      cleanupService.stopBackgroundJob();
+    }
+    await db.end();
+    await redis.quit();
+  };
+
+  return { app, cleanup };
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const masterKey = loadMasterKey();
+
+  const { app, cleanup } = await createServiceApp({
+    databaseUrl: config.OP_DATABASE_URL,
+    redisUrl: config.OP_REDIS_URL,
+    jwtSecret: config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
+  });
+
   const port = parseInt(process.env["PORT"] ?? "3003", 10);
 
   const server = createServer(
@@ -239,15 +281,13 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Ontology service started", { port });
+    console.info(`Ontology service started on port ${port}`);
   });
 
   // Graceful shutdown
   process.on("SIGTERM", () => {
-    cleanupService.stopBackgroundJob();
     server.close();
-    void db.end();
-    void redis.quit();
+    void cleanup();
   });
 }
 

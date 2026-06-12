@@ -25,11 +25,10 @@ import { createDataRoutes } from "./routes/data.js";
 import { createAdminRoutes } from "./routes/admin.js";
 import { createHealthRoutes } from "./routes/health.js";
 
-async function loadServicePublicKeys(): Promise<Record<string, string>> {
+async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
     const { readdir } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const dir = "/data/service-keys";
     const files = await readdir(dir);
     const keys: Record<string, string> = {};
 
@@ -49,20 +48,58 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
   }
 }
 
-async function main(): Promise<void> {
-  const config = loadConfig();
-  const masterKey = loadMasterKey();
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface GatewayConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  /** URL of the upstream ontology service. */
+  ontologyServiceUrl: string;
+  /** URL of the upstream ingestion service. */
+  ingestionServiceUrl: string;
+  /** Bearer token for outbound service-to-service requests. */
+  serviceToken?: string;
+  /** Directory containing peer service public key files. Defaults to /data/service-keys. */
+  serviceKeysDir?: string;
+  /** Requests per minute before rate limiting kicks in. Defaults to 1000. */
+  rateLimitPerMinute?: number;
+  /** Number of gateway replicas used by the sliding-window limiter. Defaults to 1. */
+  replicaCount?: number;
+  /** Number of failures before a circuit breaker opens. Defaults to 5. */
+  circuitBreakerThreshold?: number;
+  /** Milliseconds before an open circuit breaker resets. Defaults to 10000. */
+  circuitBreakerResetMs?: number;
+  /** Max SSE connections per key. Defaults to 10. */
+  sseMaxConnectionsPerKey?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export async function createServiceApp(config: GatewayConfig): Promise<ServiceApp> {
+  const serviceKeysDir = config.serviceKeysDir ?? "/data/service-keys";
   const serviceStartedAt = new Date();
 
   // Step 1: Database
   const db = createDbClient({
-    connectionString: config.OP_DATABASE_URL,
+    connectionString: config.databaseUrl,
     maxConnections: 20,
   });
 
   // Step 2: Redis (primary + separate for pub/sub)
   const redis = createRedisClient({
-    url: config.OP_REDIS_URL,
+    url: config.redisUrl,
   });
 
   // Step 3: Run migrations
@@ -83,22 +120,17 @@ async function main(): Promise<void> {
   const rateLimitConfigRepo = new RateLimitConfigRepository(db);
 
   // Step 6: Services
-  // serviceToken is read before createOntologyCache so the cache can include
-  // it in outbound requests to the ontology service from the very first call.
-  const serviceToken = process.env["OP_SERVICE_TOKEN"];
-
   const webhookService = createWebhookService({
     webhookRepo,
     deliveryRepo,
-    masterKey,
+    masterKey: config.masterKey,
     logger,
   });
 
-  const ontologyServiceUrl = process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3003";
   const ontologyCache = createOntologyCache({
     logger,
-    ontologyServiceUrl,
-    ...(serviceToken ? { serviceToken } : {}),
+    ontologyServiceUrl: config.ontologyServiceUrl,
+    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
   });
 
   const proxyService = createProxyService();
@@ -108,12 +140,12 @@ async function main(): Promise<void> {
   const rateLimiter = createSlidingWindowLimiter({
     redis,
     windowMs: 60_000,
-    fallbackReplicaCount: parseInt(process.env["OP_GATEWAY_REPLICAS"] ?? "1", 10),
+    fallbackReplicaCount: config.replicaCount ?? 1,
   });
 
   // Step 8: Circuit breakers (one per upstream service)
-  const failureThreshold = parseInt(process.env["OP_CIRCUIT_BREAKER_THRESHOLD"] ?? "5", 10);
-  const resetTimeoutMs = parseInt(process.env["OP_CIRCUIT_BREAKER_RESET_MS"] ?? "10000", 10);
+  const failureThreshold = config.circuitBreakerThreshold ?? 5;
+  const resetTimeoutMs = config.circuitBreakerResetMs ?? 10_000;
   // Names must match SERVICE_MAP keys in proxy-service.ts exactly so that
   // circuitBreakers.get(resolved.serviceName) finds the correct breaker.
   const serviceNames = [
@@ -140,16 +172,16 @@ async function main(): Promise<void> {
   );
 
   // Step 9: Load service public keys
-  const servicePublicKeys = await loadServicePublicKeys();
+  const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
 
   // Step 10: Create Hono app
   const app = createApp({
     serviceName: "gateway-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins: config.allowedOrigins,
     publicRoutes: [
       "/healthz",
       "/readyz",
@@ -160,7 +192,7 @@ async function main(): Promise<void> {
 
   // Step 10.5: Wire rate limiter as middleware on all routes.
   // Health check endpoints are excluded so liveness probes never get throttled.
-  const rateLimitPerMinute = parseInt(process.env["OP_RATE_LIMIT_PER_MIN"] ?? "1000", 10);
+  const rateLimitPerMinute = config.rateLimitPerMinute ?? 1000;
   app.use("*", async (c, next) => {
     const path = new URL(c.req.url).pathname;
     // Skip rate limiting for health probes to prevent probe self-throttling
@@ -203,7 +235,7 @@ async function main(): Promise<void> {
 
   const sseRoutes = createSseRoutes({
     sseService,
-    maxConnectionsPerKey: parseInt(process.env["OP_SSE_MAX_CONNECTIONS_PER_KEY"] ?? "10", 10),
+    maxConnectionsPerKey: config.sseMaxConnectionsPerKey ?? 10,
   });
   app.route("/api/v1/events", sseRoutes);
 
@@ -212,9 +244,9 @@ async function main(): Promise<void> {
   const dataRoutes = createDataRoutes({
     ontologyCache,
     proxyService,
-    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
-    ...(ingestionBreaker ? { circuitBreaker: ingestionBreaker } : {}),
-    ...(serviceToken ? { serviceToken } : {}),
+    ingestionServiceUrl: config.ingestionServiceUrl,
+    ...(ingestionBreaker !== undefined ? { circuitBreaker: ingestionBreaker } : {}),
+    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
   });
   app.route("/api/v1/data", dataRoutes);
 
@@ -224,7 +256,7 @@ async function main(): Promise<void> {
   const proxyRoutes = createProxyRoutes({
     proxyService,
     circuitBreakers,
-    ...(serviceToken ? { serviceToken } : {}),
+    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
   });
   app.route("/", proxyRoutes);
 
@@ -232,6 +264,43 @@ async function main(): Promise<void> {
   ontologyCache.startSafetyPoll();
   ontologyCache.startPubSubListener(redis);
   sseService.startPubSubListener(redis);
+
+  const cleanup = async (): Promise<void> => {
+    ontologyCache.stopSafetyPoll();
+    ontologyCache.stopPubSubListener();
+    sseService.stopPubSubListener();
+    await db.end();
+    await redis.quit();
+  };
+
+  return { app, cleanup };
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const masterKey = loadMasterKey();
+
+  const serviceToken = process.env["OP_SERVICE_TOKEN"];
+
+  const { app, cleanup } = await createServiceApp({
+    databaseUrl: config.OP_DATABASE_URL,
+    redisUrl: config.OP_REDIS_URL,
+    jwtSecret: config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    ontologyServiceUrl: process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3003",
+    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
+    ...(serviceToken !== undefined ? { serviceToken } : {}),
+    rateLimitPerMinute: parseInt(process.env["OP_RATE_LIMIT_PER_MIN"] ?? "1000", 10),
+    replicaCount: parseInt(process.env["OP_GATEWAY_REPLICAS"] ?? "1", 10),
+    circuitBreakerThreshold: parseInt(process.env["OP_CIRCUIT_BREAKER_THRESHOLD"] ?? "5", 10),
+    circuitBreakerResetMs: parseInt(process.env["OP_CIRCUIT_BREAKER_RESET_MS"] ?? "10000", 10),
+    sseMaxConnectionsPerKey: parseInt(process.env["OP_SSE_MAX_CONNECTIONS_PER_KEY"] ?? "10", 10),
+  });
 
   // Start HTTP server
   const port = parseInt(process.env["PORT"] ?? "3000", 10);
@@ -244,7 +313,7 @@ async function main(): Promise<void> {
       // they appear in logs rather than crashing the process with an uncaught
       // exception that Node emits when an 'error' event has no listener.
       req.on("error", (err) => {
-        logger.warn("Inbound request error", { error: err.message });
+        console.warn("Inbound request error", { error: err.message });
         if (!res.headersSent) {
           res.writeHead(400);
         }
@@ -316,23 +385,20 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Gateway service started", { port });
+    console.info(`Gateway service started on port ${port}`);
   });
 
   // Surface server-level socket / bind errors so they appear in logs
   // rather than causing an unhandled 'error' event crash.
   server.on("error", (err) => {
-    logger.error("HTTP server error", { error: err.message });
+    console.error("HTTP server error", { error: err.message });
   });
 
   // Graceful shutdown: stop accepting new connections, wait up to 10 s for
   // in-flight requests to complete before force-closing, then tear down
   // backing resources (pub/sub, DB pool, Redis).
   process.on("SIGTERM", () => {
-    logger.info("SIGTERM received — starting graceful shutdown");
-    ontologyCache.stopSafetyPoll();
-    ontologyCache.stopPubSubListener();
-    sseService.stopPubSubListener();
+    console.info("SIGTERM received — starting graceful shutdown");
 
     const DRAIN_TIMEOUT_MS = parseInt(
       process.env["OP_SHUTDOWN_DRAIN_MS"] ?? "10000",
@@ -340,16 +406,13 @@ async function main(): Promise<void> {
     );
 
     const drainTimeout = setTimeout(() => {
-      logger.warn("Drain timeout reached — forcing shutdown");
-      void db.end();
-      void redis.quit();
-      process.exit(1);
+      console.warn("Drain timeout reached — forcing shutdown");
+      void cleanup().then(() => process.exit(1));
     }, DRAIN_TIMEOUT_MS);
 
     server.close(() => {
       clearTimeout(drainTimeout);
-      void db.end();
-      void redis.quit();
+      void cleanup().then(() => process.exit(0));
     });
   });
 }

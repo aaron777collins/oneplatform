@@ -36,13 +36,13 @@ function makeLogger(): Logger {
 type MockScheduleRepo = {
   create: ReturnType<typeof vi.fn>;
   findById: ReturnType<typeof vi.fn>;
-  findByIdWithTenant: ReturnType<typeof vi.fn>;
-  list: ReturnType<typeof vi.fn>;
+  findByTenantAndId: ReturnType<typeof vi.fn>;
+  findByTenantId: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
   findAllEnabled: ReturnType<typeof vi.fn>;
   findDueSchedules: ReturnType<typeof vi.fn>;
-  claimScheduleRun: ReturnType<typeof vi.fn>;
+  updateNextRunAt: ReturnType<typeof vi.fn>;
 };
 
 type MockPipelineRepo = {
@@ -62,13 +62,13 @@ function makeScheduleRepo(): MockScheduleRepo {
   return {
     create: vi.fn(),
     findById: vi.fn(),
-    findByIdWithTenant: vi.fn(),
-    list: vi.fn(),
+    findByTenantAndId: vi.fn(),
+    findByTenantId: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
     findAllEnabled: vi.fn(),
     findDueSchedules: vi.fn(),
-    claimScheduleRun: vi.fn(),
+    updateNextRunAt: vi.fn(),
   };
 }
 
@@ -189,7 +189,7 @@ describe("createSchedule — valid cron expressions", () => {
     expect(result).toBeDefined();
   });
 
-  it("passes nextRunAt to the repository create call", async () => {
+  it("passes next_run_at to the repository create call", async () => {
     await service.createSchedule(UUID_TENANT, {
       pipelineId: UUID_PIPELINE,
       cronExpr: "0 * * * *",
@@ -198,8 +198,9 @@ describe("createSchedule — valid cron expressions", () => {
       inputTemplate: {},
     });
 
+    // The service passes snake_case ScheduleCreateInput to the repo
     const createArg = (scheduleRepo.create.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
-    expect(createArg["nextRunAt"]).toBeInstanceOf(Date);
+    expect(createArg["next_run_at"]).toBeInstanceOf(Date);
   });
 
   it("logs info message after creation", async () => {
@@ -329,25 +330,25 @@ describe("getSchedule", () => {
   });
 
   it("returns the schedule when found", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
 
     const result = await service.getSchedule(UUID_TENANT, "sched-001");
     expect(result.id).toBe("sched-001");
   });
 
   it("throws ScheduleNotFoundError when schedule does not exist", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(null);
+    scheduleRepo.findByTenantAndId.mockResolvedValue(null);
 
     await expect(service.getSchedule(UUID_TENANT, "sched-999")).rejects.toThrow(
       ScheduleNotFoundError,
     );
   });
 
-  it("passes tenantId and scheduleId to findByIdWithTenant", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(null);
+  it("passes tenantId and scheduleId to findByTenantAndId", async () => {
+    scheduleRepo.findByTenantAndId.mockResolvedValue(null);
 
     await expect(service.getSchedule(UUID_TENANT, "sched-abc")).rejects.toThrow();
-    expect(scheduleRepo.findByIdWithTenant).toHaveBeenCalledWith(UUID_TENANT, "sched-abc");
+    expect(scheduleRepo.findByTenantAndId).toHaveBeenCalledWith(UUID_TENANT, "sched-abc");
   });
 });
 
@@ -369,18 +370,18 @@ describe("listSchedules", () => {
     });
   });
 
-  it("delegates directly to repo.list and returns the result", async () => {
-    const expectedResult: ScheduleListResult = {
-      data: [],
-      pagination: { nextCursor: null, total: 0 },
-    };
-    scheduleRepo.list.mockResolvedValue(expectedResult);
+  it("calls repo.findByTenantId and wraps the result in pagination", async () => {
+    // The service calls findByTenantId, then builds the ScheduleListResult itself.
+    // A result shorter than the requested limit means no next page (nextCursor = null).
+    const rows: ScheduleRow[] = [makeScheduleRow()];
+    scheduleRepo.findByTenantId.mockResolvedValue(rows);
 
     const query: ScheduleListQuery = { limit: 20 };
     const result = await service.listSchedules(UUID_TENANT, query);
 
-    expect(result).toBe(expectedResult);
-    expect(scheduleRepo.list).toHaveBeenCalledWith(UUID_TENANT, query);
+    expect(result.data).toBe(rows);
+    expect(result.pagination.nextCursor).toBeNull();
+    expect(scheduleRepo.findByTenantId).toHaveBeenCalledWith(UUID_TENANT, { limit: 20 });
   });
 });
 
@@ -405,7 +406,7 @@ describe("updateSchedule", () => {
   });
 
   it("throws ScheduleNotFoundError when schedule does not exist", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(null);
+    scheduleRepo.findByTenantAndId.mockResolvedValue(null);
 
     await expect(
       service.updateSchedule(UUID_TENANT, "sched-999", { enabled: false }),
@@ -413,45 +414,48 @@ describe("updateSchedule", () => {
   });
 
   it("throws ScheduleInvalidCronError when new cronExpr is invalid (6 fields)", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
 
     await expect(
       service.updateSchedule(UUID_TENANT, "sched-001", { cronExpr: "0 0 * * * *" }),
     ).rejects.toThrow(ScheduleInvalidCronError);
   });
 
-  it("updates cronExpr and recomputes nextRunAt when cronExpr changes", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+  it("updates cronExpr and recomputes next_run_at when cronExpr changes", async () => {
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
     scheduleRepo.update.mockResolvedValue(makeScheduleRow({ cron_expr: "*/15 * * * *" }));
 
     await service.updateSchedule(UUID_TENANT, "sched-001", { cronExpr: "*/15 * * * *" });
 
-    const updateArg = (scheduleRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
-    expect(updateArg["nextRunAt"]).toBeInstanceOf(Date);
+    // Service calls update(id, updateData) — updateData is at index 1
+    const updateArg = (scheduleRepo.update.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(updateArg["next_run_at"]).toBeInstanceOf(Date);
   });
 
-  it("recomputes nextRunAt when timezone changes", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+  it("recomputes next_run_at when timezone changes", async () => {
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
     scheduleRepo.update.mockResolvedValue(makeScheduleRow({ timezone: "Europe/London" }));
 
     await service.updateSchedule(UUID_TENANT, "sched-001", { timezone: "Europe/London" });
 
-    const updateArg = (scheduleRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
-    expect(updateArg["nextRunAt"]).toBeInstanceOf(Date);
+    // Service calls update(id, updateData) — updateData is at index 1
+    const updateArg = (scheduleRepo.update.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(updateArg["next_run_at"]).toBeInstanceOf(Date);
   });
 
-  it("does not recompute nextRunAt when only enabled changes", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+  it("does not recompute next_run_at when only enabled changes", async () => {
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
     scheduleRepo.update.mockResolvedValue(makeScheduleRow({ enabled: false }));
 
     await service.updateSchedule(UUID_TENANT, "sched-001", { enabled: false });
 
-    const updateArg = (scheduleRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
-    expect(updateArg["nextRunAt"]).toBeUndefined();
+    // Service calls update(id, updateData) — updateData is at index 1
+    const updateArg = (scheduleRepo.update.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(updateArg["next_run_at"]).toBeUndefined();
   });
 
   it("logs info message after successful update", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
     scheduleRepo.update.mockResolvedValue(makeScheduleRow());
 
     await service.updateSchedule(UUID_TENANT, "sched-001", { enabled: false });
@@ -485,7 +489,7 @@ describe("deleteSchedule", () => {
   });
 
   it("throws ScheduleNotFoundError when schedule does not exist", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(null);
+    scheduleRepo.findByTenantAndId.mockResolvedValue(null);
 
     await expect(service.deleteSchedule(UUID_TENANT, "sched-999")).rejects.toThrow(
       ScheduleNotFoundError,
@@ -493,16 +497,17 @@ describe("deleteSchedule", () => {
   });
 
   it("deletes schedule when it exists", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
     scheduleRepo.delete.mockResolvedValue(undefined);
 
     await service.deleteSchedule(UUID_TENANT, "sched-001");
 
-    expect(scheduleRepo.delete).toHaveBeenCalledWith(UUID_TENANT, "sched-001");
+    // The service calls repo.delete(id) — tenant scoping is done by the prior findByTenantAndId
+    expect(scheduleRepo.delete).toHaveBeenCalledWith("sched-001");
   });
 
   it("logs info message after successful deletion", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(makeScheduleRow());
+    scheduleRepo.findByTenantAndId.mockResolvedValue(makeScheduleRow());
     scheduleRepo.delete.mockResolvedValue(undefined);
 
     await service.deleteSchedule(UUID_TENANT, "sched-001");
@@ -515,7 +520,7 @@ describe("deleteSchedule", () => {
   });
 
   it("does not call repo.delete when schedule is not found", async () => {
-    scheduleRepo.findByIdWithTenant.mockResolvedValue(null);
+    scheduleRepo.findByTenantAndId.mockResolvedValue(null);
 
     await expect(service.deleteSchedule(UUID_TENANT, "missing")).rejects.toThrow();
     expect(scheduleRepo.delete).not.toHaveBeenCalled();
@@ -601,7 +606,8 @@ describe("cronTick — due schedule triggering", () => {
   it("triggers a run for each claimed due schedule", async () => {
     const dueSchedule = makeScheduleRow();
     scheduleRepo.findDueSchedules.mockResolvedValue([dueSchedule]);
-    scheduleRepo.claimScheduleRun.mockResolvedValue(true);
+    // Service uses updateNextRunAt as the optimistic-lock claim (design spec §19.3)
+    scheduleRepo.updateNextRunAt.mockResolvedValue(true);
     const triggerResult: TriggerRunResult = { runId: "run-001", status: "pending" };
     runService.triggerRun.mockResolvedValue(triggerResult);
 
@@ -625,7 +631,8 @@ describe("cronTick — due schedule triggering", () => {
   it("skips schedule run when optimistic claim fails (another replica won)", async () => {
     const dueSchedule = makeScheduleRow();
     scheduleRepo.findDueSchedules.mockResolvedValue([dueSchedule]);
-    scheduleRepo.claimScheduleRun.mockResolvedValue(false); // another replica claimed it
+    // updateNextRunAt returning false means another replica won the optimistic lock race
+    scheduleRepo.updateNextRunAt.mockResolvedValue(false);
 
     service.startCronLoop();
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -638,7 +645,7 @@ describe("cronTick — due schedule triggering", () => {
     const schedA = makeScheduleRow({ id: "sched-a" });
     const schedB = makeScheduleRow({ id: "sched-b" });
     scheduleRepo.findDueSchedules.mockResolvedValue([schedA, schedB]);
-    scheduleRepo.claimScheduleRun.mockResolvedValue(true);
+    scheduleRepo.updateNextRunAt.mockResolvedValue(true);
     runService.triggerRun
       .mockRejectedValueOnce(new Error("trigger failed"))
       .mockResolvedValue({ runId: "run-002", status: "pending" as const });
@@ -687,7 +694,7 @@ describe("computeNextRunAt timezone handling (via createSchedule)", () => {
     });
   });
 
-  it("passes a nextRunAt Date in the future for UTC timezone", async () => {
+  it("passes a next_run_at Date in the future for UTC timezone", async () => {
     scheduleRepo.create.mockResolvedValue(makeScheduleRow());
     const now = new Date();
 
@@ -699,12 +706,13 @@ describe("computeNextRunAt timezone handling (via createSchedule)", () => {
       inputTemplate: {},
     });
 
+    // Service passes snake_case ScheduleCreateInput; next_run_at is the computed Date
     const createArg = (scheduleRepo.create.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
-    const nextRunAt = createArg["nextRunAt"] as Date;
+    const nextRunAt = createArg["next_run_at"] as Date;
     expect(nextRunAt.getTime()).toBeGreaterThan(now.getTime());
   });
 
-  it("passes a nextRunAt Date in the future for America/New_York timezone", async () => {
+  it("passes a next_run_at Date in the future for America/New_York timezone", async () => {
     scheduleRepo.create.mockResolvedValue(makeScheduleRow());
     const now = new Date();
 
@@ -716,8 +724,9 @@ describe("computeNextRunAt timezone handling (via createSchedule)", () => {
       inputTemplate: {},
     });
 
+    // Service passes snake_case ScheduleCreateInput; next_run_at is the computed Date
     const createArg = (scheduleRepo.create.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
-    const nextRunAt = createArg["nextRunAt"] as Date;
+    const nextRunAt = createArg["next_run_at"] as Date;
     expect(nextRunAt.getTime()).toBeGreaterThan(now.getTime());
   });
 });

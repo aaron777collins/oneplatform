@@ -37,9 +37,8 @@ import {
 // Load service public keys for inter-service JWT verification
 // ---------------------------------------------------------------------------
 
-async function loadServicePublicKeys(): Promise<Record<string, string>> {
+async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
-    const dir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
     const files = await readdir(dir);
     const keys: Record<string, string> = {};
 
@@ -90,53 +89,72 @@ async function retryWithBackoff<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Main startup sequence — design spec §1.3
+// Public types
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface PluginConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  s3Endpoint: string;
+  s3AccessKey: string;
+  s3SecretKey: string;
+  s3Region: string;
+  bundleBucket: string;
+  executionServiceUrl: string;
+  ingestionServiceUrl: string;
+  serviceToken: string;
+  retentionDays: number;
+  drainGraceSeconds: number;
+  serviceKeysDir: string;
+  /** When true, the MinIO ping check is skipped (useful in test environments). Defaults to false. */
+  skipMinioVerification?: boolean;
+  /** When false, BullMQ workers are not started (useful in test environments). Defaults to true. */
+  startWorkers?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Factory — wires all dependencies, returns the Hono app and a cleanup fn.
+// main() is the only caller in production; tests can call this directly.
+// ---------------------------------------------------------------------------
+
+export async function createServiceApp(config: PluginConfig): Promise<ServiceApp> {
   const serviceStartedAt = new Date();
 
-  // Step 1: Load config and master key.
-  const config = loadConfig();
-  const masterKey = loadMasterKey();
-  void masterKey; // Reserved for future field-level config encryption (spec §15.4)
+  const {
+    databaseUrl,
+    redisUrl,
+    jwtSecret,
+    allowedOrigins,
+    s3Endpoint,
+    s3AccessKey,
+    s3SecretKey,
+    s3Region,
+    bundleBucket,
+    executionServiceUrl,
+    ingestionServiceUrl,
+    serviceToken,
+    retentionDays,
+    drainGraceSeconds,
+    serviceKeysDir,
+    skipMinioVerification = false,
+    startWorkers = true,
+  } = config;
 
-  const databaseUrl = process.env["DATABASE_URL"] ?? config.OP_DATABASE_URL;
-  const redisUrl = process.env["REDIS_URL"] ?? config.OP_REDIS_URL;
-  const s3Endpoint = process.env["OP_S3_ENDPOINT"] ?? "http://minio:9000";
-  const s3AccessKey = process.env["OP_S3_ACCESS_KEY"] ?? "";
-  const s3SecretKey = process.env["OP_S3_SECRET_KEY"] ?? "";
-  const s3Region = process.env["OP_S3_REGION"] ?? "us-east-1";
-  const bundleBucket = process.env["OP_PLUGIN_BUNDLE_BUCKET"] ?? "plugin-bundles";
-  const executionServiceUrl =
-    process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-  const ingestionServiceUrl =
-    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002";
-  // B7 fix: spec requires OP_SERVICE_TOKEN_SECRET; guard against empty string so
-  // internal endpoints are not accidentally left open in misconfigured deploys.
-  const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
-  if (serviceToken === "") {
-    console.error(
-      "FATAL: OP_SERVICE_TOKEN_SECRET is not set. Internal endpoints will reject all requests."
-    );
-    process.exit(1);
-  }
-  const retentionDays = parseInt(
-    process.env["OP_PLUGIN_BUNDLE_RETENTION_DAYS"] ?? "7",
-    10
-  );
-  const drainGraceSeconds = parseInt(
-    process.env["OP_PLUGIN_DRAIN_GRACE_SECONDS"] ?? "60",
-    10
-  );
-
-  // Step 2: Create DB pool (transaction-mode PgBouncer — spec §2).
+  // Step 1: Create DB pool (transaction-mode PgBouncer — spec §2).
   const db = createDbClient({
     connectionString: databaseUrl,
     maxConnections: 10,
   });
 
-  // Step 3: Wait for PostgreSQL.
+  // Step 2: Wait for PostgreSQL.
   await retryWithBackoff(
     () => db.query("SELECT 1"),
     "PostgreSQL",
@@ -144,13 +162,13 @@ async function main(): Promise<void> {
   );
   console.info("PostgreSQL connection verified.");
 
-  // Step 4: Run database migrations — fatal on failure (spec §1.3).
+  // Step 3: Run database migrations — fatal on failure (spec §1.3).
   const migrationResult = await runMigrations(db);
   if (migrationResult.applied.length > 0) {
     console.info("Plugin migrations applied:", migrationResult.applied);
   }
 
-  // Step 5: Create Redis client.
+  // Step 4: Create Redis client.
   const redis = new Redis(redisUrl, {
     maxRetriesPerRequest: 3,
     lazyConnect: true,
@@ -170,13 +188,13 @@ async function main(): Promise<void> {
     console.error("Redis connection error:", err.message);
   });
 
-  // Step 6: Create structured logger.
+  // Step 5: Create structured logger.
   const logger = createLogger({
     serviceName: "plugin-service",
     redis,
   });
 
-  // Step 7: Create bundle service and verify MinIO.
+  // Step 6: Create bundle service and (optionally) verify MinIO.
   const bundleService = createBundleService({
     endpoint: s3Endpoint,
     accessKey: s3AccessKey,
@@ -186,39 +204,41 @@ async function main(): Promise<void> {
     logger,
   });
 
-  await retryWithBackoff(
-    () => bundleService.ping().then((ok) => {
-      if (!ok) throw new Error("MinIO ping returned false");
-    }),
-    "MinIO",
-    60_000
-  );
-  console.info("MinIO connection verified.");
+  if (!skipMinioVerification) {
+    await retryWithBackoff(
+      () => bundleService.ping().then((ok) => {
+        if (!ok) throw new Error("MinIO ping returned false");
+      }),
+      "MinIO",
+      60_000
+    );
+    console.info("MinIO connection verified.");
+  }
 
   // Ensure bucket exists and lifecycle policy is applied (idempotent).
   await bundleService.ensureBucket();
   logger.info("plugin-bundles bucket ready.");
 
-  // Step 8: Create repositories.
+  // Step 7: Create repositories.
   const pluginRepo = new PluginRepository(db);
   const instanceRepo = new InstanceRepository(db);
   const hookRepo = new HookRepository(db);
   const cacheRepo = new CacheRepository(redis);
 
-  // Step 9: Create event publisher.
+  // Step 8: Create event publisher.
   const eventPublisher = createEventPublisher({ redis });
 
-  // Step 10: Create connector registration service.
+  // Step 9: Create connector registration service.
   const connectorService = createConnectorRegistrationService({
     ingestionServiceUrl,
     serviceToken,
     logger,
   });
 
-  // Step 11: Create hook service.
+  // Step 10: Create hook service.
   const hookService = createHookService({ hookRepo, logger });
 
-  // Step 12: Create plugin service.
+  // Step 11: Create plugin service.
   const pluginService = createPluginService({
     pool: db,
     pluginRepo,
@@ -236,7 +256,7 @@ async function main(): Promise<void> {
     retentionDays,
   });
 
-  // Step 13: Create instance service.
+  // Step 12: Create instance service.
   const instanceService = createInstanceService({
     pool: db,
     pluginRepo,
@@ -251,7 +271,7 @@ async function main(): Promise<void> {
     eventPublisher,
   });
 
-  // Step 14: Create upgrade service.
+  // Step 13: Create upgrade service.
   const upgradeService = createUpgradeService({
     pool: db,
     pluginRepo,
@@ -264,15 +284,19 @@ async function main(): Promise<void> {
     eventPublisher,
   });
 
-  // Step 15: Start bundle cleanup worker (runs every hour, spec §10.4).
-  const cleanupInterval = setInterval(
-    () => void pluginService.cleanupExpiredBundles(),
-    60 * 60 * 1000
-  );
-  cleanupInterval.unref();
+  // Step 14: Start bundle cleanup worker (runs every hour, spec §10.4).
+  // Only started when startWorkers is true, consistent with the worker opt-out pattern.
+  let cleanupInterval: ReturnType<typeof setInterval> | undefined;
+  if (startWorkers) {
+    cleanupInterval = setInterval(
+      () => void pluginService.cleanupExpiredBundles(),
+      60 * 60 * 1000
+    );
+    cleanupInterval.unref();
+  }
 
-  // Step 16: Load service public keys.
-  const servicePublicKeys = await loadServicePublicKeys();
+  // Step 15: Load service public keys.
+  const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
   logger.info("Service public keys loaded", {
     count: Object.keys(servicePublicKeys).length,
   });
@@ -280,20 +304,20 @@ async function main(): Promise<void> {
   // Readiness gate — set true after all startup steps complete.
   let serviceReady = true;
 
-  // Step 17: Create Hono app.
+  // Step 16: Create Hono app.
   const app = createApp({
     serviceName: "plugin-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret,
     redis,
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins,
     publicRoutes: ["/health/live", "/health/ready"],
     targetService: "plugin-service",
     servicePublicKeys,
   });
 
-  // Step 18: Register routes — specific before catch-all.
+  // Step 17: Register routes — specific before catch-all.
   const healthRoutes = createHealthRoutes({
     pool: db,
     redis,
@@ -326,7 +350,59 @@ async function main(): Promise<void> {
   });
   app.route("/internal", internalRoutes);
 
-  // Step 19: Start HTTP server on port 3008 (spec §1.1).
+  const cleanup = async (): Promise<void> => {
+    serviceReady = false;
+    if (cleanupInterval !== undefined) {
+      clearInterval(cleanupInterval);
+    }
+    await Promise.all([db.end(), redis.quit()]);
+  };
+
+  return { app, cleanup };
+}
+
+// ---------------------------------------------------------------------------
+// Main startup sequence — design spec §1.3
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const masterKey = loadMasterKey();
+  void masterKey; // Reserved for future field-level config encryption (spec §15.4)
+
+  // B7 fix: spec requires OP_SERVICE_TOKEN_SECRET; guard against empty string so
+  // internal endpoints are not accidentally left open in misconfigured deploys.
+  const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+  if (serviceToken === "") {
+    console.error(
+      "FATAL: OP_SERVICE_TOKEN_SECRET is not set. Internal endpoints will reject all requests."
+    );
+    process.exit(1);
+  }
+
+  const pluginConfig: PluginConfig = {
+    databaseUrl:        process.env["DATABASE_URL"]          ?? config.OP_DATABASE_URL,
+    redisUrl:           process.env["REDIS_URL"]             ?? config.OP_REDIS_URL,
+    jwtSecret:          config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins:     config.OP_ALLOWED_ORIGINS,
+    s3Endpoint:         process.env["OP_S3_ENDPOINT"]        ?? "http://minio:9000",
+    s3AccessKey:        process.env["OP_S3_ACCESS_KEY"]      ?? "",
+    s3SecretKey:        process.env["OP_S3_SECRET_KEY"]      ?? "",
+    s3Region:           process.env["OP_S3_REGION"]          ?? "us-east-1",
+    bundleBucket:       process.env["OP_PLUGIN_BUNDLE_BUCKET"] ?? "plugin-bundles",
+    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
+    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
+    serviceToken,
+    retentionDays:      parseInt(process.env["OP_PLUGIN_BUNDLE_RETENTION_DAYS"] ?? "7", 10),
+    drainGraceSeconds:  parseInt(process.env["OP_PLUGIN_DRAIN_GRACE_SECONDS"] ?? "60", 10),
+    serviceKeysDir:     process.env["OP_SERVICE_KEYS_DIR"]   ?? "/data/service-keys",
+    skipMinioVerification: false,
+    startWorkers:       true,
+  };
+
+  const { app, cleanup } = await createServiceApp(pluginConfig);
+
   const port = parseInt(process.env["PORT"] ?? "3008", 10);
 
   const server = createServer(
@@ -336,7 +412,7 @@ async function main(): Promise<void> {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("error", (err) => {
-        logger.warn("Request socket error", { error: err.message });
+        console.error("Request socket error:", err.message);
         res.destroy();
       });
       req.on("end", () => {
@@ -411,13 +487,12 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Plugin service started", { port });
+    console.info("Plugin service started", { port });
   });
 
-  // Step 20: SIGTERM handler with 30s hard-exit fallback.
+  // SIGTERM handler with 30s hard-exit fallback.
   process.on("SIGTERM", () => {
     console.info("SIGTERM received — starting graceful shutdown");
-    serviceReady = false;
 
     const shutdownTimeout = setTimeout(() => {
       console.error("Shutdown timeout exceeded — forcing exit");
@@ -425,14 +500,14 @@ async function main(): Promise<void> {
     }, 30_000);
     shutdownTimeout.unref();
 
-    clearInterval(cleanupInterval);
-
     server.close(() => {
-      void Promise.all([db.end(), redis.quit()]).then(() => {
-        clearTimeout(shutdownTimeout);
-        console.info("Plugin service graceful shutdown complete");
-        process.exit(0);
-      });
+      cleanup()
+        .then(() => {
+          clearTimeout(shutdownTimeout);
+          console.info("Plugin service graceful shutdown complete");
+          process.exit(0);
+        })
+        .catch(() => process.exit(1));
     });
   });
 }

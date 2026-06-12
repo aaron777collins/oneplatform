@@ -94,7 +94,7 @@ export class AuditService {
       },
       {
         // RedisOptions with url avoids the ioredis instance type mismatch
-        connection: { url: redisUrl },
+        connection,
         concurrency,
         removeOnComplete: { count: 0 },
         removeOnFail: { count: 100 },

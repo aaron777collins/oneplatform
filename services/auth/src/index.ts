@@ -81,14 +81,13 @@ async function eraseBootstrapTokenFile(): Promise<void> {
 // Service keys for service-to-service auth
 // ---------------------------------------------------------------------------
 
-async function loadServicePublicKeys(): Promise<Record<string, string>> {
+async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   // In production, peer public keys are written to /data/service-keys/ by the
   // init container. In development they may be absent; we return an empty map
   // so the service starts without crashing — service calls will simply fail auth.
   try {
     const { readdir } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const dir = "/data/service-keys";
     const files = await readdir(dir);
     const keys: Record<string, string> = {};
 
@@ -109,18 +108,36 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Public types
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
-  // Step 1: Validate configuration — throws loudly if any required env var is missing.
-  const config = loadConfig();
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
 
-  // Step 2: Load master key for AES-256-GCM credential encryption.
-  const masterKey = loadMasterKey();
+export interface AuthConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  /** Bootstrap token read from disk before calling createServiceApp(). Null if bootstrap already completed. */
+  bootstrapToken?: string | null;
+  /** Directory containing peer service public key files. Defaults to /data/service-keys. */
+  serviceKeysDir?: string;
+}
 
-  // Step 3: Read bootstrap token into memory (null if already completed).
-  let inMemoryBootstrapToken: string | null = await readBootstrapToken();
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> {
+  const serviceKeysDir = config.serviceKeysDir ?? "/data/service-keys";
+
+  // Capture token in closure so the in-memory reference can be zeroed without
+  // the service layer needing to know about the source file.
+  let inMemoryBootstrapToken: string | null = config.bootstrapToken ?? null;
   const getInMemoryToken = (): string | null => inMemoryBootstrapToken;
   const clearInMemoryToken = (): void => {
     inMemoryBootstrapToken = null;
@@ -128,23 +145,23 @@ async function main(): Promise<void> {
     void eraseBootstrapTokenFile();
   };
 
-  // Step 4: Create infrastructure clients.
+  // Step 1: Create infrastructure clients using config fields, not loadConfig().
   const db = createDbClient({
-    connectionString: config.OP_DATABASE_URL,
+    connectionString: config.databaseUrl,
     maxConnections: 20,
   });
 
   const redis = createRedisClient({
-    url: config.OP_REDIS_URL,
+    url: config.redisUrl,
   });
 
-  // Step 5: Run database migrations (idempotent).
+  // Step 2: Run database migrations (idempotent).
   const migrationResult = await runMigrations(db);
   if (migrationResult.applied.length > 0) {
     console.info("Migrations applied:", migrationResult.applied);
   }
 
-  // Step 6: Create logger and event publisher.
+  // Step 3: Create logger and event publisher.
   const logger = createLogger({
     serviceName: "auth-service",
     redis,
@@ -152,13 +169,13 @@ async function main(): Promise<void> {
 
   const events = createEventPublisher({ redis });
 
-  // Step 7: Instantiate repositories.
+  // Step 4: Instantiate repositories.
   const userRepository = new UserRepository(db);
   const roleRepository = new RoleRepository(db);
   const oauthClientRepository = new OAuthClientRepository(db);
   const entityPermissionRepository = new EntityPermissionRepository(db);
 
-  // Step 8: Instantiate services (dependency order matters — token and password
+  // Step 5: Instantiate services (dependency order matters — token and password
   // services have no deps; other services depend on them).
   const passwordService = createPasswordService();
 
@@ -191,7 +208,7 @@ async function main(): Promise<void> {
     tokenService,
     logger,
     events,
-    masterKey,
+    masterKey: config.masterKey,
     // OAuth provider implementations are registered here when their env vars are present.
     // GitHub and Google providers are wired in a follow-up task; the empty map means
     // OAuth authorize/callback routes return 400 until providers are configured.
@@ -204,17 +221,17 @@ async function main(): Promise<void> {
 
   const guestSessionService = createGuestSessionService({ redis });
 
-  // Step 9: Load peer service public keys for service-to-service auth.
-  const servicePublicKeys = await loadServicePublicKeys();
+  // Step 6: Load peer service public keys for service-to-service auth.
+  const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
 
-  // Step 10: Create the Hono app with the standard middleware stack.
+  // Step 7: Create the Hono app with the standard middleware stack.
   const app = createApp({
     serviceName: "auth-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: (key) => apiKeyService.validate(key),
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins: config.allowedOrigins,
     // Public routes bypass JWT validation. These must exactly match the route
     // paths registered below (no trailing slashes, no wildcards).
     publicRoutes: [
@@ -231,7 +248,7 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
-  // Step 11: Register all route groups.
+  // Step 8: Register all route groups.
   registerRoutes(app, {
     // Infrastructure
     db,
@@ -254,7 +271,38 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
-  // Step 12: Start the server.
+  const cleanup = async (): Promise<void> => {
+    await db.end();
+    await redis.quit();
+  };
+
+  return { app, cleanup };
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  // Step 1: Validate configuration — throws loudly if any required env var is missing.
+  const config = loadConfig();
+
+  // Step 2: Load master key for AES-256-GCM credential encryption.
+  const masterKey = loadMasterKey();
+
+  // Step 3: Read bootstrap token into memory (null if already completed).
+  const bootstrapToken = await readBootstrapToken();
+
+  const { app, cleanup } = await createServiceApp({
+    databaseUrl: config.OP_DATABASE_URL,
+    redisUrl: config.OP_REDIS_URL,
+    jwtSecret: config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    ...(bootstrapToken !== null ? { bootstrapToken } : {}),
+  });
+
+  // Step 4: Start the server.
   const port = parseInt(process.env["PORT"] ?? "3001", 10);
 
   // Wrap the Hono app in a Node.js HTTP server using the Fetch-compatible adapter.
@@ -309,9 +357,12 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Auth service started", {
-      port,
-      bootstrapTokenLoaded: inMemoryBootstrapToken !== null,
+    console.info(`Auth service started on port ${port}`);
+  });
+
+  process.on("SIGTERM", () => {
+    server.close(() => {
+      void cleanup().then(() => process.exit(0));
     });
   });
 }

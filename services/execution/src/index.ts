@@ -78,46 +78,62 @@ function createNoopRedisStub() {
 }
 
 // ---------------------------------------------------------------------------
-// Main startup sequence — design spec §2 (startup dependencies)
+// Public types
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface ExecutionConfig {
+  databaseUrl: string;
+  jwtSecret: string;
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  sandboxSocketPath: string;
+  pluginServiceUrl: string;
+  ingestionServiceUrl: string;
+  pipelineServiceUrl: string;
+  serviceBaseUrl: string;
+  serviceToken: string;
+  retentionDays: number;
+}
+
+// ---------------------------------------------------------------------------
+// Factory — wires all dependencies, returns the Hono app and a cleanup fn.
+// main() is the only caller in production; tests can call this directly.
+// ---------------------------------------------------------------------------
+
+export async function createServiceApp(config: ExecutionConfig): Promise<ServiceApp> {
   const serviceStartedAt = new Date();
 
-  // Step 1: Load config
-  const config = loadConfig();
-  const masterKey = loadMasterKey();
-  void masterKey; // Available for future on-disk cache encryption (spec §10.3)
+  const {
+    databaseUrl,
+    jwtSecret,
+    allowedOrigins,
+    sandboxSocketPath,
+    pluginServiceUrl,
+    ingestionServiceUrl,
+    pipelineServiceUrl,
+    serviceBaseUrl,
+    serviceToken,
+    retentionDays,
+  } = config;
 
-  // Service-specific env vars
-  const sandboxSocketPath =
-    process.env["OP_SANDBOX_SOCKET_PATH"] ?? "/run/sandbox/op.sock";
-  const pluginServiceUrl =
-    process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3008";
-  const ingestionServiceUrl =
-    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002";
-  const pipelineServiceUrl =
-    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3004";
-  const serviceBaseUrl =
-    process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-  const retentionDays = parseInt(
-    process.env["OP_EXECUTION_LOG_RETENTION_DAYS"] ?? "30",
-    10,
-  );
-
-  // Step 2: Create DB pool (NO Redis)
+  // Step 1: Create DB pool (NO Redis — ADR-5, ADR-19)
   const db = createDbClient({
-    connectionString: process.env["DATABASE_URL"] ?? config.OP_DATABASE_URL,
+    connectionString: databaseUrl,
     maxConnections: 15,
   });
 
-  // Step 3: Run migrations (idempotent)
+  // Step 2: Run migrations (idempotent)
   const migrationResult = await runMigrations(db);
   if (migrationResult.applied.length > 0) {
     console.info("Execution migrations applied:", migrationResult.applied);
   }
 
-  // Step 4: Create structured logger
+  // Step 3: Create structured logger.
   // The logger normally receives a Redis client for log forwarding. Since this
   // service has no Redis, logs go to stdout only. The Logging Service collects
   // structured stdout via the Docker logging driver (spec §15.3).
@@ -127,11 +143,11 @@ async function main(): Promise<void> {
     redis: noopRedis,
   });
 
-  // Step 5: Instantiate repositories
+  // Step 4: Instantiate repositories
   const executionRepo = new ExecutionRepository(db);
   const logRepo = new ExecutionLogRepository(db);
 
-  // Step 6: Create Unix socket client and connect to sandbox
+  // Step 5: Create Unix socket client and connect to sandbox
   const sandboxClient = createUnixSocketClient({ logger });
 
   // Attempt initial connection — the sandbox container must be healthy before
@@ -159,19 +175,17 @@ async function main(): Promise<void> {
 
   await connectToSandbox();
 
-  // Step 7: Create plugin bundle cache
+  // Step 6: Create plugin bundle cache.
   // Service token for outbound Plugin Service calls is loaded from the mounted
   // keypair at /data/. For now we use a placeholder; the actual signing mechanism
   // is wired in the observability/auth task.
-  const serviceToken = process.env["OP_SERVICE_TOKEN"] ?? "";
-
   const pluginBundleCache = createPluginBundleCache({
     logger,
     pluginServiceUrl,
     serviceToken,
   });
 
-  // Step 8: Create context call handler
+  // Step 7: Create context call handler
   const contextCallHandler = createContextCallHandler({
     logger,
     ingestionServiceUrl,
@@ -180,10 +194,10 @@ async function main(): Promise<void> {
     serviceToken,
   });
 
-  // Step 9: Create SSE manager
+  // Step 8: Create SSE manager
   const sseManager = createSseManager({ logger });
 
-  // Step 10: Create sandbox manager
+  // Step 9: Create sandbox manager.
   // onCrash callback notifies the execution service to mark in-flight records as killed.
   // We wire this after creating the execution service below.
   let onCrashCallback: ((ids: string[]) => void) | undefined;
@@ -199,14 +213,14 @@ async function main(): Promise<void> {
     },
   });
 
-  // Step 11: Create execution router
+  // Step 10: Create execution router
   const executionRouter = createExecutionRouter({
     sandboxManager,
     contextCallHandler,
     logger,
   });
 
-  // Step 12: Create execution service
+  // Step 11: Create execution service
   const executionService = createExecutionService({
     executionRepo,
     logRepo,
@@ -222,7 +236,7 @@ async function main(): Promise<void> {
   // Wire the crash callback now that executionService exists
   onCrashCallback = (ids) => executionService.handleSandboxCrash(ids);
 
-  // Step 13: Create partition manager and ensure current partitions
+  // Step 12: Create partition manager and ensure current partitions
   const partitionManager = createPartitionManager({ pool: db, logger });
   await partitionManager.ensureCurrentPartitions();
 
@@ -234,35 +248,35 @@ async function main(): Promise<void> {
     partitionManagerExtended.startDailyScheduler(retentionDays);
   }
 
-  // Step 14: Start sandbox ping health checks (10s interval)
+  // Step 13: Start sandbox ping health checks (10s interval)
   sandboxManager.startHealthChecks();
   logger.info("Sandbox health checks started");
 
-  // Step 15: Load service public keys for inter-service JWT verification
+  // Step 14: Load service public keys for inter-service JWT verification
   const servicePublicKeys = await loadServicePublicKeys();
   logger.info("Service public keys loaded", { count: Object.keys(servicePublicKeys).length });
 
-  // Step 16: Gate — service is ready only after sandbox health check passes
+  // Step 15: Gate — service is ready only after sandbox health check passes.
+  // Allow a brief window for the first ping to complete before marking ready.
   let serviceReady = false;
-  // Allow a brief window for the first ping to complete before marking ready
   setTimeout(() => {
     serviceReady = true;
   }, 3_000);
 
-  // Step 17: Create Hono app (NO Redis — use noop stub for auth middleware)
+  // Step 16: Create Hono app (NO Redis — use noop stub for auth middleware)
   const app = createApp({
     serviceName: "execution-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret,
     redis: noopRedis,
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins,
     publicRoutes: ["/healthz", "/readyz"],
     targetService: "execution-service",
     servicePublicKeys,
   });
 
-  // Step 18: Register routes
+  // Step 17: Register routes
   const healthRoutes = createHealthRoutes({
     pool: db,
     sandboxClient,
@@ -277,7 +291,41 @@ async function main(): Promise<void> {
   const internalRoutes = createInternalRoutes({ executionService });
   app.route("/internal", internalRoutes);
 
-  // Step 19: Start HTTP server on port 3005 (design spec §1)
+  const cleanup = async (): Promise<void> => {
+    serviceReady = false;
+    sandboxManager.stop();
+    partitionManager.stop();
+    await db.end();
+  };
+
+  return { app, cleanup };
+}
+
+// ---------------------------------------------------------------------------
+// Main startup sequence — design spec §2 (startup dependencies)
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const masterKey = loadMasterKey();
+  void masterKey; // Available for future on-disk cache encryption (spec §10.3)
+
+  const executionConfig: ExecutionConfig = {
+    databaseUrl: process.env["DATABASE_URL"] ?? config.OP_DATABASE_URL,
+    jwtSecret: config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    sandboxSocketPath: process.env["OP_SANDBOX_SOCKET_PATH"] ?? "/run/sandbox/op.sock",
+    pluginServiceUrl: process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3008",
+    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
+    pipelineServiceUrl: process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3004",
+    serviceBaseUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
+    serviceToken: process.env["OP_SERVICE_TOKEN"] ?? "",
+    retentionDays: parseInt(process.env["OP_EXECUTION_LOG_RETENTION_DAYS"] ?? "30", 10),
+  };
+
+  const { app, cleanup } = await createServiceApp(executionConfig);
+
   const port = parseInt(process.env["PORT"] ?? "3005", 10);
 
   const server = createServer(
@@ -287,7 +335,7 @@ async function main(): Promise<void> {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("error", (err) => {
-        logger.warn("Request socket error", { error: err.message });
+        console.warn("Request socket error", err.message);
         res.destroy();
       });
       req.on("end", () => {
@@ -359,13 +407,12 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Execution service started", { port, sandboxSocketPath });
+    console.info("Execution service started", { port });
   });
 
-  // Step 20: SIGTERM handler with 30s hard-exit fallback (spec §2)
+  // SIGTERM handler with 30s hard-exit fallback (spec §2)
   process.on("SIGTERM", () => {
     console.info("SIGTERM received — starting graceful shutdown");
-    serviceReady = false;
 
     const shutdownTimeout = setTimeout(() => {
       console.error("Shutdown timeout exceeded — forcing exit");
@@ -373,12 +420,8 @@ async function main(): Promise<void> {
     }, 30_000);
     shutdownTimeout.unref();
 
-    // Stop background tasks
-    sandboxManager.stop();
-    partitionManager.stop();
-
     server.close(() => {
-      db.end()
+      cleanup()
         .then(() => {
           clearTimeout(shutdownTimeout);
           console.info("Execution service graceful shutdown complete");

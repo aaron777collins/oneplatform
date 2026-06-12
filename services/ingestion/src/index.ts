@@ -37,6 +37,24 @@ import {
   createInternalRoutes,
 } from "./routes/index.js";
 
+export interface ServiceApp {
+  app: ReturnType<typeof createApp>;
+  cleanup: () => Promise<void>;
+}
+
+export interface IngestionConfig {
+  databaseUrl: string;
+  redisUrl: string;
+  jwtSecret: string;
+  /** Raw key bytes returned by loadMasterKey() */
+  masterKey: Buffer;
+  allowedOrigins: string[];
+  executionServiceUrl: string;
+  baseUrl: string;
+  /** When false, BullMQ workers and retention scheduler are not started. Defaults to true. */
+  startWorkers?: boolean;
+}
+
 async function loadServicePublicKeys(): Promise<Record<string, string>> {
   try {
     const { readdir } = await import("node:fs/promises");
@@ -61,33 +79,29 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
   }
 }
 
-async function main(): Promise<void> {
-  // Step 1: Load configuration and master key
-  const config = loadConfig();
-  const masterKey = loadMasterKey();
+export async function createServiceApp(config: IngestionConfig): Promise<ServiceApp> {
+  const startWorkers = config.startWorkers ?? true;
   const serviceStartedAt = new Date();
 
-  // Step 2: Create infrastructure clients
+  // Create infrastructure clients using config values — never reads env directly
   const db = createDbClient({
-    connectionString: config.OP_DATABASE_URL,
+    connectionString: config.databaseUrl,
     maxConnections: 30,
   });
 
-  const redis = createRedisClient({ url: config.OP_REDIS_URL });
+  const redis = createRedisClient({ url: config.redisUrl });
 
-  // Step 3: Run database migrations
   const migrationResult = await runMigrations(db);
   if (migrationResult.applied.length > 0) {
     console.info("Ingestion migrations applied:", migrationResult.applied);
   }
 
-  // Step 4: Create logger
   const logger = createLogger({
     serviceName: "ingestion-service",
     redis,
   });
 
-  // Step 5: Instantiate repositories
+  // Repositories
   const connectorRepo = new ConnectorRepository(db);
   const credentialRepo = new CredentialRepository(db);
   const syncStateRepo = new SyncStateRepository(db);
@@ -95,19 +109,18 @@ async function main(): Promise<void> {
   const uploadJobRepo = new UploadJobRepository(db);
   const rawTableRepo = new RawTableRepository(db);
 
-  // Step 6: Create services
+  // Services
   const credentialService = createCredentialService({
     credentialRepo,
     logger,
   });
 
-  const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
   const connectorService = createConnectorService({
     connectorRepo,
     credentialService,
     syncStateRepo,
-    masterKey,
-    executionServiceUrl,
+    masterKey: config.masterKey,
+    executionServiceUrl: config.executionServiceUrl,
     logger,
   });
 
@@ -117,16 +130,16 @@ async function main(): Promise<void> {
     rawTableRepo,
     credentialService,
     redis,
-    masterKey,
+    masterKey: config.masterKey,
     logger,
-    executionServiceUrl,
+    executionServiceUrl: config.executionServiceUrl,
   });
 
   const webhookReceiveService = createWebhookReceiveService({
     receiverRepo: webhookReceiverRepo,
     rawTableRepo,
     credentialService,
-    masterKey,
+    masterKey: config.masterKey,
     logger,
   });
 
@@ -155,64 +168,66 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const baseUrl = process.env["OP_BASE_URL"] ?? "https://api.oneplatform.dev";
   const webhookManagementService = createWebhookManagementService({
     receiverRepo: webhookReceiverRepo,
     credentialService,
-    baseUrl,
+    baseUrl: config.baseUrl,
     logger,
   });
 
-  // Step 7: Start BullMQ workers
-  const syncWorker = new Worker<SyncJobPayload>(
-    "ingestion:sync",
-    async (job) => syncService.processSyncJob(job),
-    {
-      connection: { url: config.OP_REDIS_URL },
-      concurrency: parseInt(process.env["OP_SYNC_WORKER_CONCURRENCY"] ?? "3", 10),
-      removeOnComplete: { age: 604_800 },
-      removeOnFail: { age: 604_800 },
-    },
-  );
+  // Workers are optional so tests can wire the app without consuming Redis connections
+  let syncWorker: Worker<SyncJobPayload> | undefined;
+  let batchWorker: Worker<BatchJobPayload> | undefined;
+  let fileParseWorker: Worker<FileParseJobPayload> | undefined;
 
-  const batchWorker = new Worker<BatchJobPayload>(
-    "ingestion:batch",
-    async (job) => syncService.processBatchJob(job),
-    {
-      connection: { url: config.OP_REDIS_URL },
-      concurrency: parseInt(process.env["OP_BATCH_WORKER_CONCURRENCY"] ?? "10", 10),
-      removeOnComplete: { age: 604_800 },
-      removeOnFail: { age: 604_800 },
-    },
-  );
+  if (startWorkers) {
+    syncWorker = new Worker<SyncJobPayload>(
+      "ingestion:sync",
+      async (job) => syncService.processSyncJob(job),
+      {
+        connection: { url: config.redisUrl },
+        concurrency: parseInt(process.env["OP_SYNC_WORKER_CONCURRENCY"] ?? "3", 10),
+        removeOnComplete: { age: 604_800 },
+        removeOnFail: { age: 604_800 },
+      },
+    );
 
-  const fileParseWorker = new Worker<FileParseJobPayload>(
-    "ingestion:file-parse",
-    async (job) => uploadService.processUploadJob(job),
-    {
-      connection: { url: config.OP_REDIS_URL },
-      concurrency: parseInt(process.env["OP_FILE_PARSE_WORKER_CONCURRENCY"] ?? "5", 10),
-      removeOnComplete: { age: 86_400 },
-      removeOnFail: { age: 604_800 },
-    },
-  );
+    batchWorker = new Worker<BatchJobPayload>(
+      "ingestion:batch",
+      async (job) => syncService.processBatchJob(job),
+      {
+        connection: { url: config.redisUrl },
+        concurrency: parseInt(process.env["OP_BATCH_WORKER_CONCURRENCY"] ?? "10", 10),
+        removeOnComplete: { age: 604_800 },
+        removeOnFail: { age: 604_800 },
+      },
+    );
 
-  logger.info("BullMQ sync, batch, and file-parse workers started");
+    fileParseWorker = new Worker<FileParseJobPayload>(
+      "ingestion:file-parse",
+      async (job) => uploadService.processUploadJob(job),
+      {
+        connection: { url: config.redisUrl },
+        concurrency: parseInt(process.env["OP_FILE_PARSE_WORKER_CONCURRENCY"] ?? "5", 10),
+        removeOnComplete: { age: 86_400 },
+        removeOnFail: { age: 604_800 },
+      },
+    );
 
-  // Step 8: Start retention scheduler (daily cleanup)
-  retentionService.startScheduler();
+    logger.info("BullMQ sync, batch, and file-parse workers started");
 
-  // Step 9: Load service public keys
+    retentionService.startScheduler();
+  }
+
   const servicePublicKeys = await loadServicePublicKeys();
 
-  // Step 10: Create Hono app
   const app = createApp({
     serviceName: "ingestion-service",
     version: "0.0.0",
-    jwtSecret: config.OP_JWT_SECRET,
+    jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,
-    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    allowedOrigins: config.allowedOrigins,
     publicRoutes: [
       "/healthz",
       "/readyz",
@@ -222,17 +237,17 @@ async function main(): Promise<void> {
     servicePublicKeys,
   });
 
-  // Step 11: Register routes (order matters — specific before catch-all)
-  const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt, storage, masterKey });
+  // Route registration — specific before catch-all
+  const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt, storage, masterKey: config.masterKey });
   app.route("/", healthRoutes);
 
-  const connectorRoutes = createConnectorRoutes({ connectorService, syncService, masterKey });
+  const connectorRoutes = createConnectorRoutes({ connectorService, syncService, masterKey: config.masterKey });
   app.route("/api/v1/connectors", connectorRoutes);
 
   const webhookRoutes = createWebhookRoutes({
     webhookManagementService,
     webhookReceiveService,
-    masterKey,
+    masterKey: config.masterKey,
   });
   app.route("/api/v1/webhooks", webhookRoutes);
 
@@ -249,11 +264,40 @@ async function main(): Promise<void> {
     connectorRepo,
     credentialService,
     syncService,
-    masterKey,
+    masterKey: config.masterKey,
   });
   app.route("/internal", internalRoutes);
 
-  // Step 12: Start HTTP server
+  const cleanup = async (): Promise<void> => {
+    if (startWorkers) {
+      retentionService.stop();
+      await Promise.all([
+        syncWorker?.close(),
+        batchWorker?.close(),
+        fileParseWorker?.close(),
+      ]);
+    }
+    await db.end();
+    await redis.quit();
+  };
+
+  return { app, cleanup };
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const masterKey = loadMasterKey();
+
+  const { app, cleanup } = await createServiceApp({
+    databaseUrl: config.OP_DATABASE_URL,
+    redisUrl: config.OP_REDIS_URL,
+    jwtSecret: config.OP_JWT_SECRET,
+    masterKey,
+    allowedOrigins: config.OP_ALLOWED_ORIGINS,
+    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
+    baseUrl: process.env["OP_BASE_URL"] ?? "https://api.oneplatform.dev",
+  });
+
   const port = parseInt(process.env["PORT"] ?? "3002", 10);
 
   const server = createServer(
@@ -309,7 +353,7 @@ async function main(): Promise<void> {
   );
 
   server.listen(port, () => {
-    logger.info("Ingestion service started", { port });
+    console.info(`Ingestion service started on port ${port}`);
   });
 
   // Graceful shutdown with hard-exit fallback
@@ -322,21 +366,11 @@ async function main(): Promise<void> {
     }, 30_000);
     shutdownTimeout.unref();
 
-    retentionService.stop();
-
-    void Promise.all([
-      syncWorker.close(),
-      batchWorker.close(),
-      fileParseWorker.close(),
-    ]).then(() => {
-      server.close(() => {
-        void db.end().then(() => {
-          void redis.quit().then(() => {
-            clearTimeout(shutdownTimeout);
-            console.info("Graceful shutdown complete");
-            process.exit(0);
-          });
-        });
+    server.close(() => {
+      void cleanup().then(() => {
+        clearTimeout(shutdownTimeout);
+        console.info("Graceful shutdown complete");
+        process.exit(0);
       });
     });
   });
