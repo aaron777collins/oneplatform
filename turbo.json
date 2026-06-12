@@ -23,6 +23,14 @@
     "docs:generate": {
       "dependsOn": ["^build"],
       "outputs": ["docs/**"]
+    },
+    "test:integration:level1": {
+      "dependsOn": ["build"],
+      "outputs": ["coverage/**"]
+    },
+    "test:integration:level2": {
+      "dependsOn": ["build"],
+      "outputs": []
     }
   }
 }

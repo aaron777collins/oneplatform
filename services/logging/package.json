@@ -15,6 +15,7 @@
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
     "test": "vitest run --passWithNoTests",
+    "test:integration:level1": "vitest run --config vitest.integration.ts",
     "lint": "eslint src",
     "clean": "rm -rf dist"
   },
