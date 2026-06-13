@@ -37,6 +37,17 @@ export interface PkceAuthHandler extends AuthHandler {
 
   /** Returns true if the current access token is valid and not expiring soon. */
   isAuthenticated(): boolean;
+
+  /**
+   * Initiate the PKCE login flow by redirecting to the Auth Service.
+   * Call this explicitly instead of relying on automatic redirect behavior:
+   *
+   *   const handler = createPkceHandler(config, baseUrl);
+   *   if (!handler.isAuthenticated()) {
+   *     handler.login();
+   *   }
+   */
+  login(): Promise<void>;
 }
 
 function storageKey(prefix: string, name: string): string {
@@ -224,13 +235,17 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
     };
   }
 
-  // Check for authorization code callback on construction
+  // Check for authorization code callback on construction.
+  // Strip the params from the URL immediately to avoid re-processing on next
+  // render, but do NOT initiate the code exchange here — that is caller's
+  // responsibility via handleCallback(). This keeps the constructor side-effect
+  // free and avoids triggering redirects in server-side rendering contexts.
   const urlParams = new URLSearchParams(window.location.search);
   const callbackCode = urlParams.get('code');
   const callbackState = urlParams.get('state');
 
   if (callbackCode !== null && callbackState !== null) {
-    // Validate state to prevent CSRF before any async work
+    // Validate state immediately to fail fast on CSRF before any async work
     const expectedState = window.sessionStorage.getItem(storageKey(prefix, 'state'));
     if (callbackState !== expectedState) {
       throw new AuthError({
@@ -241,18 +256,14 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
       });
     }
 
-    // Code exchange happens asynchronously — see handleCallback()
-    // Strip the query params immediately to avoid re-processing on next render
+    // Strip the query params from the URL so back/forward navigation and
+    // React strict-mode double invocations do not reuse the code.
     const cleanUrl = window.location.pathname + window.location.hash;
     window.history.replaceState(null, '', cleanUrl);
-  } else {
-    // Check for valid stored token; if none, initiate PKCE flow
-    const stored = loadTokens();
-    if (stored === null || !isTokenValid(stored)) {
-      // Async side-effect: will redirect the browser
-      void initiateFlow();
-    }
   }
+  // No auto-redirect here. Callers check isAuthenticated() and call login()
+  // explicitly, giving them control over when the redirect happens (e.g. after
+  // rendering a loading state or choosing a different auth path).
 
   return {
     async getHeaders(): Promise<Record<string, string>> {
@@ -275,15 +286,19 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
         };
       }
 
-      // No valid token and no refresh token — initiate new PKCE flow
-      await initiateFlow();
-      // initiateFlow() redirects, so this line is never reached in practice
+      // No valid token and no refresh token. Callers should check isAuthenticated()
+      // before making requests and call login() to redirect to the Auth Service.
+      // Throwing here surfaces the problem clearly rather than silently redirecting.
       throw new AuthError({
         code: 'UNAUTHORIZED',
-        message: 'Authentication required. Redirecting to login.',
+        message: 'Not authenticated. Call isAuthenticated() and login() before making requests.',
         statusCode: 401,
         retryable: false,
       });
+    },
+
+    async login(): Promise<void> {
+      await initiateFlow();
     },
 
     async handleCallback(callbackUrl: string): Promise<void> {

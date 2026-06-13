@@ -115,6 +115,13 @@ const indexRoute = createRoute({
     () => import("./pages/BootstrapGatePage.js"),
     "BootstrapGatePage",
   ),
+  // When the loader fails (API unreachable, network error, etc.) show a
+  // recovery page instead of a white screen. This is the first page new
+  // operators see — a blank error is the worst possible first impression.
+  errorComponent: lazyRouteComponent(
+    () => import("./pages/BootstrapErrorPage.js"),
+    "BootstrapErrorPage",
+  ),
 });
 
 // ---------------------------------------------------------------------------

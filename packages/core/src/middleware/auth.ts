@@ -37,15 +37,13 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
     const path = new URL(c.req.url).pathname;
 
     // Skip auth entirely for explicitly public routes (healthz, bootstrap, etc.)
+    // Internal routes are NOT automatically skipped here — Docker network isolation
+    // is not a sufficient auth boundary. Each service must explicitly list its
+    // internal routes in publicRoutes if they should be accessible without user auth.
+    // /internal/* routes are protected by serviceAuthMiddleware (Ed25519 JWT) which
+    // runs as the next middleware layer in createApp(). They still pass through here,
+    // but serviceAuthMiddleware will enforce the service token before any handler runs.
     if (publicRouteSet.has(path)) {
-      await next();
-      return;
-    }
-
-    // /internal/* routes use service-to-service auth (Ed25519 JWT via
-    // serviceAuthMiddleware), not user auth. Service calls carry only
-    // X-Service-Token — no Bearer or X-API-Key.
-    if (path.startsWith("/internal/")) {
       await next();
       return;
     }

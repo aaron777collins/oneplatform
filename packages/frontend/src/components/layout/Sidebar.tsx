@@ -46,6 +46,12 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string | undefined }>;
   /** If set, the item is only shown when the user has this role. */
   requiredRole?: string;
+  /**
+   * Optional tooltip description. Shown as a native `title` on the link so
+   * users (especially those unfamiliar with the terminology) can hover to learn
+   * what the section does before clicking.
+   */
+  description?: string;
 }
 
 interface NavGroup {
@@ -59,7 +65,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Overview", to: "/", icon: LayoutDashboard },
       { label: "Connectors", to: "/connectors", icon: Database },
-      { label: "Ontology", to: "/ontology", icon: Layers },
+      {
+        label: "Ontology",
+        to: "/ontology",
+        icon: Layers,
+        description: "Define your data models and schemas. Create entity types that describe the shape of your data (like Customer, Order, or Product) and the relationships between them.",
+      },
       { label: "Pipelines", to: "/pipelines", icon: GitBranch },
       { label: "Apps", to: "/apps", icon: AppWindow },
     ],
@@ -141,7 +152,9 @@ function NavLinkItem({ item, collapsed }: NavLinkItemProps) {
           collapsed && "justify-center px-2",
         )}
         aria-current={isActive ? "page" : undefined}
-        title={collapsed ? item.label : undefined}
+        // Show the label as tooltip when collapsed; show the description when expanded.
+        // This gives both new and experienced users context without cluttering the UI.
+        title={collapsed ? item.label : item.description}
       >
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
         {!collapsed && <span>{item.label}</span>}

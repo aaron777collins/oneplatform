@@ -227,7 +227,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
   // Step 7: Create the Hono app with the standard middleware stack.
   const app = createApp({
     serviceName: "auth-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: (key) => apiKeyService.validate(key),
@@ -254,7 +254,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
     db,
     redis,
     serviceName: "auth-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     // Services
     bootstrapService,
     authService,

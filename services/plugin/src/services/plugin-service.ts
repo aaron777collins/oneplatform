@@ -25,7 +25,6 @@ import {
   EntrypointNotCallableError,
   ExecutionValidationFailedError,
   PlatformVersionTooOldError,
-  GpgSignatureMissingError,
 } from "./errors.js";
 import { PluginManifestSchema } from "../schemas/index.js";
 import type { Redis } from "ioredis";
@@ -276,26 +275,13 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           );
         }
 
-        // B4 fix: GPG guard — if the manifest declares a fingerprint, a signature
-        // file MUST be provided. Full cryptographic verification requires the openpgp
-        // npm package (not yet a declared dependency); this guard enforces the
-        // contract boundary so unsigned installs are rejected at the gate.
-        if (manifest.gpgFingerprint !== undefined) {
-          if (signaturePath === undefined || signaturePath === "") {
-            throw new GpgSignatureMissingError(
-              `Plugin manifest declares gpgFingerprint '${manifest.gpgFingerprint}' but no .sig file was provided. ` +
-                "Resubmit with the signature file attached."
-            );
-          }
-          // Full GPG verification (openpgp library) is intentionally deferred until
-          // the openpgp dependency is approved and added to package.json.
-          logger.info("GPG signature file received; cryptographic verification pending openpgp dep", {
-            manifestId: manifest.id,
-            fingerprint: manifest.gpgFingerprint,
-          });
-        }
-
         // Step 5: Verify bundle checksum.
+        // Note: GPG signature verification is not yet implemented. The gpgFingerprint
+        // field has been removed from the manifest schema to avoid security theater —
+        // the previous code accepted a signature file but never verified it cryptographically.
+        // TODO(#security-sig): implement full openpgp signature verification once the
+        // openpgp dependency is approved and a trusted keyring policy is defined.
+        // The signaturePath parameter is accepted but intentionally unused until then.
         await bundleService.verifyChecksum(
           extractedBundlePath,
           manifest.bundleChecksum
@@ -353,9 +339,6 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           manifest,
           is_platform_wide: platformWide,
           installed_by: installedBy,
-          ...(manifest.gpgFingerprint !== undefined
-            ? { gpg_fingerprint: manifest.gpgFingerprint }
-            : {}),
         });
 
         // Step 12: Insert approved URL rows if approveUrls=true.

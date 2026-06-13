@@ -307,7 +307,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   // Step 16: Create Hono app.
   const app = createApp({
     serviceName: "plugin-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret,
     redis,
     validateApiKey: async () => null,

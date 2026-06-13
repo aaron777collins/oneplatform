@@ -100,26 +100,124 @@ export interface HookDeclaration {
   entrypoint: string;
 }
 
+// ---------------------------------------------------------------------------
+// Per-stage payload data shapes
+//
+// Each entry maps a HookStage to the concrete shape of HookPayload.data at
+// that stage. Unmapped stages fall back to Record<string, unknown> so hooks
+// written against unknown future stages still compile.
+// ---------------------------------------------------------------------------
+
+/** Raw inbound record from a connector or webhook before any processing. */
+export interface IngestionReceiveData {
+  sourceId: string;
+  rawPayload: unknown;
+  contentType: string;
+  receivedAt: string; // ISO 8601
+  headers: Record<string, string>;
+}
+
+/** Record after structural/schema validation. */
+export interface IngestionValidateData {
+  sourceId: string;
+  record: Record<string, unknown>;
+  /** Validation errors found so far. Empty when all checks passed. */
+  validationErrors: Array<{ field: string; message: string }>;
+  receivedAt: string;
+}
+
+/** Record paired with its resolved ontology entity type. */
+export interface OntologyMapData {
+  record: Record<string, unknown>;
+  /** Resolved entity type name from the tenant's ontology schema. */
+  entityType: string;
+  /** Confidence score 0-1 for the entity type mapping. */
+  mappingConfidence: number;
+  /** All candidate entity types considered during mapping. */
+  candidates: Array<{ entityType: string; confidence: number }>;
+}
+
+/** Pipeline execution step data. */
+export interface PipelineExecuteData {
+  pipelineId: string;
+  pipelineRunId: string;
+  stepId: string;
+  stepType: string;
+  /** Input values for this step, keyed by parameter name. */
+  input: Record<string, unknown>;
+  /** Output from the previous step, if any. */
+  previousOutput: Record<string, unknown> | null;
+}
+
+/** Auth login event. */
+export interface AuthLoginData {
+  userId: string;
+  tenantId: string;
+  /** OAuth scopes granted in this session. */
+  scopes: string[];
+  /** True if the user authenticated via SSO rather than password. */
+  isSso: boolean;
+}
+
+/**
+ * Mapping from HookStage to the concrete data shape at that stage.
+ * Stages not listed here fall back to Record<string, unknown>.
+ */
+export interface HookPayloadDataMap {
+  "before:ingestion.receive":  IngestionReceiveData;
+  "after:ingestion.receive":   IngestionReceiveData;
+  "before:ingestion.validate": IngestionValidateData;
+  "after:ingestion.validate":  IngestionValidateData;
+  "before:ontology.map":       OntologyMapData;
+  "after:ontology.map":        OntologyMapData;
+  "before:pipeline.execute":   PipelineExecuteData;
+  "after:pipeline.execute":    PipelineExecuteData;
+  "before:auth.login":         AuthLoginData;
+  "after:auth.login":          AuthLoginData;
+}
+
+// ---------------------------------------------------------------------------
+// Generic HookPayload
+// ---------------------------------------------------------------------------
+
+/** Shared metadata injected into every hook invocation. */
+export interface HookContext {
+  tenantId: string;
+  traceId: string;
+  spanId: string;
+  pipelineRunId?: string;
+  ingestionJobId?: string;
+}
+
 /**
  * The payload passed to every hook function.
- * The concrete shape of `data` depends on the hook stage.
- * Hook functions may return a modified payload to alter platform behavior.
+ *
+ * Generic form: HookPayload<S extends HookStage>
+ * When S is a key of HookPayloadDataMap, data is narrowed to its specific type.
+ * For all other stages data is Record<string, unknown>.
+ *
+ * @example
+ * async function onBeforeIngestionReceive(
+ *   payload: HookPayload<"before:ingestion.receive">,
+ *   ctx: PluginContext,
+ * ): Promise<HookResult<"before:ingestion.receive">> {
+ *   // payload.data is IngestionReceiveData — fully typed
+ *   console.log(payload.data.rawPayload);
+ *   return { data: payload.data };
+ * }
  */
-export interface HookPayload {
+export interface HookPayload<S extends HookStage = HookStage> {
   /** The stage that triggered this hook. */
-  stage: HookStage;
+  stage: S;
 
-  /** The data being processed at this stage. Shape varies by stage. */
-  data: Record<string, unknown>;
+  /**
+   * The data being processed at this stage.
+   * Narrowed to a specific type when S is a known stage in HookPayloadDataMap.
+   */
+  data: S extends keyof HookPayloadDataMap ? HookPayloadDataMap[S] : Record<string, unknown>;
 
   /** Metadata about the execution context. */
-  context: {
-    tenantId: string;
-    traceId: string;
-    spanId: string;
-    pipelineRunId?: string;
-    ingestionJobId?: string;
-  };
+  context: HookContext;
 }
 
 /**
@@ -128,7 +226,19 @@ export interface HookPayload {
  * To pass data through unmodified, return the input payload unchanged.
  * Returning null from an advisory hook is equivalent to returning the input payload.
  */
-export interface HookResult {
+export interface HookResult<S extends HookStage = HookStage> {
   /** The (possibly modified) data to pass to the next hook or to the stage itself. */
-  data: Record<string, unknown>;
+  data: S extends keyof HookPayloadDataMap ? HookPayloadDataMap[S] : Record<string, unknown>;
 }
+
+/**
+ * Convenience type alias for a typed hook function.
+ * @example
+ * const onBeforeReceive: HookFn<"before:ingestion.receive"> = async (payload, ctx) => {
+ *   return { data: { ...payload.data, receivedAt: new Date().toISOString() } };
+ * };
+ */
+export type HookFn<S extends HookStage = HookStage> = (
+  payload: HookPayload<S>,
+  context: import('./context.js').PluginContext,
+) => Promise<HookResult<S>>;

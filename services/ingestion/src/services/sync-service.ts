@@ -12,7 +12,6 @@ import {
 } from "./errors.js";
 import {
   normalizeToEnvelope,
-  connectorIdToTableName,
   type DataRecord,
 } from "../utils/data-envelope.js";
 
@@ -52,6 +51,11 @@ export interface BatchJobPayload {
   batchSeqNum: number;
   syncMode: "full" | "incremental";
   cursor: string | null;
+  // recordCount is stored for metrics/logging; actual records are fetched from
+  // the staging table by processBatchJob rather than carried in the payload.
+  // Storing full record arrays in BullMQ payloads bloats Redis memory and risks
+  // hitting the 512 MB default limit on large syncs.
+  recordCount: number;
   records: DataRecord[];
 }
 
@@ -135,6 +139,9 @@ export interface SyncService {
   cancelSync(syncJobId: string): Promise<void>;
   processSyncJob(job: Job<SyncJobPayload>): Promise<void>;
   processBatchJob(job: Job<BatchJobPayload>): Promise<void>;
+  // runWatchdog scans for sync_state rows stuck in 'running' beyond the stale
+  // threshold and resets them. Called periodically by the background scheduler.
+  runWatchdog(staleThresholdMs?: number): Promise<void>;
 }
 
 export interface SyncServiceDeps {
@@ -550,20 +557,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         const { records, nextCursor, hasMore: moreRecords } = batchResult;
 
         if (records.length > 0) {
-          const envelopes = records.map((record) =>
-            normalizeToEnvelope(record, {
-              connectorId,
-              connectorName: connector.name,
-              batchId,
-              tenantId,
-              syncMode,
-              cursor,
-            }),
-          );
-
-          const tableName = connectorIdToTableName(connectorId);
-          await rawTableRepo.insertBatch(connectorId, envelopes);
-
+          // Raw table writes are performed exclusively by processBatchJob to
+          // prevent double-writes. processSyncJob is responsible only for
+          // pagination and job dispatch; processBatchJob owns persistence.
           totalRecords += records.length;
           batchSeqNum += 1;
           progress.totalRecords = totalRecords;
@@ -579,6 +575,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             batchSeqNum,
             syncMode,
             cursor,
+            recordCount: records.length,
             records,
           });
         }
@@ -738,6 +735,36 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     }
   }
 
+  // Default stale threshold: 15 minutes. A sync job that has been 'running'
+  // for longer than this without a progress update is almost certainly dead
+  // (process crashed or BullMQ worker never picked it up).
+  const DEFAULT_STALE_THRESHOLD_MS = 15 * 60 * 1_000;
+
+  // -------------------------------------------------------------------------
+  // runWatchdog — resets sync_state rows stuck in 'running' beyond the
+  // configurable stale threshold. Called periodically by the ingestion service
+  // background scheduler so downed workers never leave connectors stuck forever.
+  // -------------------------------------------------------------------------
+
+  async function runWatchdog(staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS): Promise<void> {
+    try {
+      const resetCount = await syncStateRepo.resetStaleSyncs(staleThresholdMs);
+      if (resetCount > 0) {
+        logger.warn("Watchdog reset stale sync states", {
+          resetCount,
+          staleThresholdMs,
+        });
+      } else {
+        logger.debug("Watchdog: no stale sync states found", { staleThresholdMs });
+      }
+    } catch (err) {
+      logger.error("Watchdog failed to reset stale syncs", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Do not rethrow — the watchdog must not crash the scheduler.
+    }
+  }
+
   return {
     triggerSync,
     getSyncProgress,
@@ -745,5 +772,6 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     cancelSync,
     processSyncJob,
     processBatchJob,
+    runWatchdog,
   };
 }

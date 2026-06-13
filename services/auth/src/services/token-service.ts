@@ -213,6 +213,10 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // Secondary index: token → familyId for replay detection.
     // Same TTL as the refresh token so it expires naturally.
     await redis.set(`auth:token-family:${token}`, familyId, "EX", ttl);
+    // Family membership set: familyId → Set of token keys.
+    // Using a Set avoids a full-keyspace SCAN during replay detection — SMEMBERS
+    // is O(n) on the family size only, not the entire Redis keyspace.
+    await redis.sadd(`auth:refresh-family:${familyId}`, token);
     // Track active tokens per user for logout-all (SADD has no TTL; cleaned on logout)
     await redis.sadd(`auth:user-sessions:${userId}`, token);
     return { token, jti };
@@ -377,6 +381,9 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     );
     // Secondary index for replay detection
     await redis.set(`auth:token-family:${newToken}`, payload.familyId, "EX", remainingSeconds);
+    // Update family set: remove old token, add new token
+    await redis.srem(`auth:refresh-family:${payload.familyId}`, oldToken);
+    await redis.sadd(`auth:refresh-family:${payload.familyId}`, newToken);
     // Update user-sessions set: remove old, add new
     await redis.srem(`auth:user-sessions:${payload.userId}`, oldToken);
     await redis.sadd(`auth:user-sessions:${payload.userId}`, newToken);
@@ -436,27 +443,18 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       [familyId]
     );
 
-    // Scan Redis for all refresh tokens in this family and delete them.
-    // The family index keys also get cleaned up.
-    const scanPattern = `auth:refresh:*`;
-    let cursor = "0";
-    do {
-      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", scanPattern, "COUNT", 100);
-      cursor = nextCursor;
-      for (const key of keys) {
-        const raw = await redis.get(key);
-        if (raw !== null) {
-          try {
-            const payload = JSON.parse(raw) as RefreshTokenPayload;
-            if (payload.familyId === familyId) {
-              await redis.del(key);
-            }
-          } catch {
-            // Skip malformed entries
-          }
-        }
-      }
-    } while (cursor !== "0");
+    // Delete all refresh tokens in this family from Redis.
+    // We use a Redis Set keyed by familyId (auth:refresh-family:{familyId}) that
+    // is maintained at issuance and rotation time. SMEMBERS is O(n) on the family
+    // size — avoids a full-keyspace SCAN which would be a DoS vector on large
+    // deployments (SCAN iterates every key in Redis regardless of pattern).
+    const familySetKey = `auth:refresh-family:${familyId}`;
+    const familyTokens = await redis.smembers(familySetKey);
+    for (const token of familyTokens) {
+      await redis.del(`auth:refresh:${token}`);
+      await redis.del(`auth:token-family:${token}`);
+    }
+    await redis.del(familySetKey);
 
     if (sessionsResult.rowCount !== null && sessionsResult.rowCount > 0) {
       throw new TokenReplayDetectedError(

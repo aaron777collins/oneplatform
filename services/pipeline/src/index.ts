@@ -295,7 +295,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
 
   const app = createApp({
     serviceName: "pipeline-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,

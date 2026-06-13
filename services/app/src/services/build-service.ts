@@ -197,6 +197,11 @@ export interface BuildService {
 
   // Called by the cleanup job — not a public API route
   runRetentionCleanup(retentionCount: number): Promise<void>;
+
+  // Called once at service startup to mark builds interrupted by a prior crash.
+  // Any build with status 'pending' or 'building' that has not been updated in
+  // the last 5 minutes is presumed lost and marked 'failed'.
+  recoverInterruptedBuilds(): Promise<void>;
 }
 
 export interface BuildServiceDeps {
@@ -214,6 +219,15 @@ export interface BuildServiceDeps {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+
+// Build dispatch timeout. If the Execution Service stream does not complete
+// within this window, the build is marked failed. 120 s is generous enough
+// for large bundles while still bounding runaway builds.
+const BUILD_TIMEOUT_MS = 120_000;
+
+// Grace period used by recoverInterruptedBuilds. Builds stuck in pending/building
+// for longer than this at startup are presumed lost (process crashed mid-build).
+const BUILD_INTERRUPTED_GRACE_MS = 5 * 60 * 1_000;
 
 export function createBuildService(deps: BuildServiceDeps): BuildService {
   const {
@@ -361,9 +375,15 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
     const LOG_CHANNEL = `app:build:${build.id}:log`;
     const startMs = Date.now();
 
+    logger.info("Build started", {
+      tenantId, appId, buildId: build.id,
+      versionNumber: build.version_number,
+    });
+
     try {
       // Mark building
       await buildRepo.update(build.id, { status: "building" });
+      logger.info("Build marked as building", { buildId: build.id });
 
       // Assemble VFS file map
       const files = await fileRepo.getAllFilesForBuild(appId);
@@ -414,15 +434,28 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         streaming:     true,
       };
 
-      // W3: include service token so Execution Service can verify the caller
-      const response = await fetch(`${executionServiceUrl}/internal/execution/execute`, {
-        method:  "POST",
-        headers: {
-          "Content-Type":    "application/json",
-          "X-Service-Token": serviceToken,
-        },
-        body: JSON.stringify(payload),
-      });
+      // W3: include service token so Execution Service can verify the caller.
+      // Abort the request if the full stream is not consumed within BUILD_TIMEOUT_MS
+      // to prevent builds from running forever.
+      const abortController = new AbortController();
+      const buildTimeoutHandle = setTimeout(() => {
+        abortController.abort(new Error(`Build exceeded timeout of ${BUILD_TIMEOUT_MS}ms`));
+      }, BUILD_TIMEOUT_MS);
+
+      let response: Response;
+      try {
+        response = await fetch(`${executionServiceUrl}/internal/execution/execute`, {
+          method:  "POST",
+          headers: {
+            "Content-Type":    "application/json",
+            "X-Service-Token": serviceToken,
+          },
+          body:   JSON.stringify(payload),
+          signal: abortController.signal,
+        });
+      } finally {
+        clearTimeout(buildTimeoutHandle);
+      }
 
       if (!response.ok || response.body === null) {
         throw new Error(`Execution Service returned ${response.status}`);
@@ -679,11 +712,58 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
     logger.info("Build retention cleanup complete", { retentionCount });
   }
 
+  // -------------------------------------------------------------------------
+  // recoverInterruptedBuilds — called once at service startup.
+  //
+  // If the service crashes while dispatchBuild is running, the build row is
+  // left in 'pending' or 'building' status permanently because the fire-and-
+  // forget async never resumes. At startup we query for such rows and mark
+  // them failed so the UI doesn't show builds stuck forever.
+  //
+  // We only reset builds that were last updated more than BUILD_INTERRUPTED_GRACE_MS
+  // ago (default 5 min) to avoid racing with a just-started build on a hot restart.
+  // -------------------------------------------------------------------------
+  async function recoverInterruptedBuilds(): Promise<void> {
+    const cutoff = new Date(Date.now() - BUILD_INTERRUPTED_GRACE_MS);
+
+    const result = await pool.query<{ id: string; app_id: string; status: string }>(
+      `UPDATE app.builds
+          SET status        = 'failed',
+              error_message = 'Interrupted by service restart',
+              updated_at    = now()
+        WHERE status IN ('pending', 'building')
+          AND updated_at   < $1
+      RETURNING id, app_id, status`,
+      [cutoff]
+    );
+
+    const recovered = result.rows;
+    if (recovered.length > 0) {
+      logger.warn("Recovered interrupted builds on startup", {
+        count: recovered.length,
+        buildIds: recovered.map((r) => r.id),
+      });
+
+      // Publish a 'done' event to any SSE subscribers still waiting on these builds.
+      for (const row of recovered) {
+        const LOG_KEY     = `app:build-logs:${row.id}`;
+        const LOG_CHANNEL = `app:build:${row.id}:log`;
+        const doneEvent   = JSON.stringify({ type: "done", buildId: row.id, status: "failed" });
+        await redis.rpush(LOG_KEY, doneEvent);
+        await redis.expire(LOG_KEY, 86_400);
+        await redis.publish(LOG_CHANNEL, doneEvent);
+      }
+    } else {
+      logger.info("No interrupted builds found at startup");
+    }
+  }
+
   return {
     triggerBuild,
     getBuild,
     listBuilds,
     deleteBuild,
     runRetentionCleanup,
+    recoverInterruptedBuilds,
   };
 }

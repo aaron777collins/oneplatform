@@ -178,7 +178,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
   // Step 8: Create the Hono app with the standard middleware stack.
   const app = createApp({
     serviceName: "logging-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret: config.jwtSecret,
     redis,
     // The Logging Service validates user JWTs for /api/v1/* routes but does
@@ -195,7 +195,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
     db,
     redis,
     serviceName: "logging-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     logEventRepository,
     auditEventRepository,
     batchAccumulator: accumulator,

@@ -54,6 +54,9 @@ export function Topbar({ className, onMobileMenuToggle, mobileMenuOpen }: Topbar
   const client = useApiClient();
   const userId = useAuthStore((state) => state.userId);
   const tenantId = useAuthStore((state) => state.tenantId);
+  const email = useAuthStore((state) => state.email);
+  const displayName = useAuthStore((state) => state.displayName);
+  const tenantName = useAuthStore((state) => state.tenantName);
   const clearSession = useAuthStore((state) => state.clearSession);
 
   // In-memory notification list — intentionally not persisted (§10.4)
@@ -99,9 +102,9 @@ export function Topbar({ className, onMobileMenuToggle, mobileMenuOpen }: Topbar
     window.location.href = "/login";
   }
 
-  // Display a short identifier for the user — userId is the only non-sensitive
-  // value available in the auth store without making a separate profile fetch.
-  const displayName = userId ? userId.slice(0, 8) : "User";
+  // Prefer email or displayName over the raw UUID. Fall back to a truncated
+  // userId only when profile data has not yet been fetched from /v1/auth/me.
+  const userLabel = displayName ?? email ?? (userId ? userId.slice(0, 8) : "User");
 
   return (
     <header
@@ -129,13 +132,13 @@ export function Topbar({ className, onMobileMenuToggle, mobileMenuOpen }: Topbar
         </Button>
       )}
 
-      {/* Tenant name */}
+      {/* Tenant name — show human-readable tenantName when available, fall back to tenantId UUID */}
       <div className="flex-1 truncate">
-        {tenantId !== null && (
+        {(tenantName !== null || tenantId !== null) && (
           <span className="text-sm text-[var(--color-muted-foreground)]">
             Tenant:{" "}
             <span className="font-medium text-[var(--color-foreground)]">
-              {tenantId}
+              {tenantName ?? tenantId}
             </span>
           </span>
         )}
@@ -217,10 +220,14 @@ export function Topbar({ className, onMobileMenuToggle, mobileMenuOpen }: Topbar
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium">{displayName}</p>
-              {tenantId !== null && (
+              <p className="text-sm font-medium">{userLabel}</p>
+              {/* Show email as secondary line when displayName is the primary label */}
+              {displayName !== null && email !== null && (
+                <p className="text-xs text-[var(--color-muted-foreground)]">{email}</p>
+              )}
+              {(tenantName !== null || tenantId !== null) && (
                 <p className="text-xs text-[var(--color-muted-foreground)]">
-                  {tenantId}
+                  {tenantName ?? tenantId}
                 </p>
               )}
             </div>

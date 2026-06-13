@@ -1,5 +1,9 @@
 /**
  * client.apps namespace — application management.
+ *
+ * Covers the full surface of the app service: CRUD, builds, deployments,
+ * and the virtual file system. Methods mirror the REST API 1:1 so callers
+ * do not need to know internal URL patterns.
  */
 
 import type { Transport } from '../transport.js';
@@ -8,18 +12,96 @@ import type { ListOptions } from '../types/resources.js';
 import type { App, CreateAppRequest, UpdateAppRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+// ---------------------------------------------------------------------------
+// Build types
+// ---------------------------------------------------------------------------
+
+export interface AppBuild {
+  readonly id: string;
+  readonly appId: string;
+  readonly status: 'queued' | 'building' | 'success' | 'failed';
+  readonly version: string | null;
+  readonly createdAt: string;
+  readonly completedAt: string | null;
+  readonly error: string | null;
+}
+
+export interface TriggerBuildRequest {
+  /** Optional commit SHA or tag that labels this build for traceability. */
+  readonly ref?: string;
+}
+
+// ---------------------------------------------------------------------------
+// File types
+// ---------------------------------------------------------------------------
+
+export interface AppFileSummary {
+  readonly id: string;
+  readonly appId: string;
+  readonly path: string;
+  readonly contentHash: string;
+  readonly fileVersion: number;
+  readonly sizeBytes: number;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+}
+
+export interface AppFileDetail extends AppFileSummary {
+  readonly content: string;
+}
+
+export interface WriteFileRequest {
+  readonly content: string;
+  /**
+   * Optimistic-lock version. Pass 0 to create a new file; pass the current
+   * fileVersion for updates. The server rejects mismatches with 409.
+   */
+  readonly fileVersion: number;
+}
+
+// ---------------------------------------------------------------------------
+// AppNamespace interface
+// ---------------------------------------------------------------------------
+
 export interface AppNamespace {
+  // Core CRUD
   list(options?: ListOptions): PaginatedIterable<App>;
   get(id: string): Promise<App>;
   create(data: CreateAppRequest): Promise<App>;
   update(id: string, data: UpdateAppRequest): Promise<App>;
   delete(id: string): Promise<void>;
+
+  // Build management
+  /** Enqueue a new build for the app's current file set. */
+  triggerBuild(id: string, data?: TriggerBuildRequest): Promise<AppBuild>;
+  /** Fetch a single build record by build ID. */
+  getBuild(id: string, buildId: string): Promise<AppBuild>;
+  /** List all builds for an app, newest first. */
+  listBuilds(id: string, options?: ListOptions): PaginatedIterable<AppBuild>;
+  /**
+   * Set the current (deployed) build. The build must be in 'success' status.
+   * Equivalent to a deployment/promotion step.
+   */
+  deploy(id: string, buildId: string): Promise<App>;
+
+  // Virtual file system
+  listFiles(id: string): Promise<AppFileSummary[]>;
+  getFile(id: string, filePath: string): Promise<AppFileDetail>;
+  /** Create or update a file using optimistic locking. */
+  writeFile(id: string, filePath: string, data: WriteFileRequest): Promise<AppFileSummary>;
+  deleteFile(id: string, filePath: string): Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
 
 export function createAppNamespace(transport: Transport): AppNamespace {
   const BASE = '/api/v1/apps';
 
   return {
+    // ── Core CRUD ────────────────────────────────────────────────────────────
+
     list(options?: ListOptions): PaginatedIterable<App> {
       const pageSize = options?.limit ?? 50;
       return new Paginator<App>(async (cursor, limit) => {
@@ -54,6 +136,85 @@ export function createAppNamespace(transport: Transport): AppNamespace {
 
     async delete(id: string): Promise<void> {
       await transport.request<void>({ method: 'DELETE', path: `${BASE}/${encodeURIComponent(id)}` });
+    },
+
+    // ── Build management ─────────────────────────────────────────────────────
+
+    async triggerBuild(id: string, data?: TriggerBuildRequest): Promise<AppBuild> {
+      return transport.request<AppBuild>({
+        method: 'POST',
+        path: `${BASE}/${encodeURIComponent(id)}/builds`,
+        body: data ?? {},
+      });
+    },
+
+    async getBuild(id: string, buildId: string): Promise<AppBuild> {
+      return transport.request<AppBuild>({
+        method: 'GET',
+        path: `${BASE}/${encodeURIComponent(id)}/builds/${encodeURIComponent(buildId)}`,
+      });
+    },
+
+    listBuilds(id: string, options?: ListOptions): PaginatedIterable<AppBuild> {
+      const pageSize = options?.limit ?? 20;
+      return new Paginator<AppBuild>(async (cursor, limit) => {
+        const result = await transport.request<{
+          items: AppBuild[];
+          nextCursor: string | null;
+          total: number | null;
+        }>({
+          method: 'GET',
+          path: `${BASE}/${encodeURIComponent(id)}/builds`,
+          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+        });
+        return { ...result, hasMore: result.nextCursor !== null };
+      }, pageSize);
+    },
+
+    async deploy(id: string, buildId: string): Promise<App> {
+      // PATCH the app's currentBuildId to promote a successful build to production.
+      return transport.request<App>({
+        method: 'PATCH',
+        path: `${BASE}/${encodeURIComponent(id)}`,
+        body: { currentBuildId: buildId },
+      });
+    },
+
+    // ── Virtual file system ──────────────────────────────────────────────────
+
+    async listFiles(id: string): Promise<AppFileSummary[]> {
+      const result = await transport.request<{ data: AppFileSummary[] }>({
+        method: 'GET',
+        path: `${BASE}/${encodeURIComponent(id)}/files`,
+      });
+      return result.data;
+    },
+
+    async getFile(id: string, filePath: string): Promise<AppFileDetail> {
+      // The path segment already contains slashes; encode each part individually
+      // to preserve directory separators while still escaping special characters.
+      const encodedPath = filePath.replace(/^\//, '').split('/').map(encodeURIComponent).join('/');
+      return transport.request<AppFileDetail>({
+        method: 'GET',
+        path: `${BASE}/${encodeURIComponent(id)}/files/${encodedPath}`,
+      });
+    },
+
+    async writeFile(id: string, filePath: string, data: WriteFileRequest): Promise<AppFileSummary> {
+      const encodedPath = filePath.replace(/^\//, '').split('/').map(encodeURIComponent).join('/');
+      return transport.request<AppFileSummary>({
+        method: 'PUT',
+        path: `${BASE}/${encodeURIComponent(id)}/files/${encodedPath}`,
+        body: data,
+      });
+    },
+
+    async deleteFile(id: string, filePath: string): Promise<void> {
+      const encodedPath = filePath.replace(/^\//, '').split('/').map(encodeURIComponent).join('/');
+      await transport.request<void>({
+        method: 'DELETE',
+        path: `${BASE}/${encodeURIComponent(id)}/files/${encodedPath}`,
+      });
     },
   };
 }

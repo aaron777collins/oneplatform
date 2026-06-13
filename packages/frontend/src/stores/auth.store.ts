@@ -11,6 +11,12 @@ export interface Session {
   scopes: string[];
   isGuest: boolean;
   emailVerified: boolean;
+  /** User's email address — displayed in the topbar instead of UUID. */
+  email?: string | null;
+  /** User's human-readable display name (full name or username). */
+  displayName?: string | null;
+  /** Human-readable tenant name — displayed in the topbar instead of tenant UUID. */
+  tenantName?: string | null;
 }
 
 interface AuthState {
@@ -20,6 +26,12 @@ interface AuthState {
   scopes: string[];
   isGuest: boolean;
   emailVerified: boolean;
+  /** Populated from GET /v1/auth/me after login. Null until fetched. */
+  email: string | null;
+  /** Populated from GET /v1/auth/me after login. Null until fetched. */
+  displayName: string | null;
+  /** Populated from GET /v1/auth/me after login. Null until fetched. */
+  tenantName: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
 
@@ -45,6 +57,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   scopes: [],
   isGuest: false,
   emailVerified: false,
+  email: null,
+  displayName: null,
+  tenantName: null,
   isLoading: true,
   isAuthenticated: false,
 
@@ -56,6 +71,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       scopes: session.scopes,
       isGuest: session.isGuest,
       emailVerified: session.emailVerified,
+      email: session.email ?? null,
+      displayName: session.displayName ?? null,
+      tenantName: session.tenantName ?? null,
       isLoading: false,
       isAuthenticated: true,
     });
@@ -69,6 +87,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       scopes: [],
       isGuest: false,
       emailVerified: false,
+      email: null,
+      displayName: null,
+      tenantName: null,
       isLoading: false,
       isAuthenticated: false,
     });

@@ -12,6 +12,40 @@ export const listConnectorsQuery = z.object({
   sort: z.string().default("-createdAt"),
 });
 
+// ---------------------------------------------------------------------------
+// Cron expression validation
+//
+// A valid standard cron expression has exactly 5 space-separated fields:
+//   minute  hour  day-of-month  month  day-of-week
+//
+// Each field is a non-empty sequence of digits, *, /, -, and comma characters.
+// This regex is intentionally permissive for the character set within each
+// field — semantic validation (e.g. minute 0-59) is left to the scheduler,
+// which provides better error messages than a generic regex.
+//
+// Examples of valid values:
+//   "0 9 * * 1-5"    — every weekday at 09:00
+//   "*/15 * * * *"   — every 15 minutes
+//   "0 0 1 * *"      — midnight on the 1st of every month
+// ---------------------------------------------------------------------------
+
+const CRON_FIELD_RE = /^(\*|[0-9][0-9,\-/]*)$/;
+
+function isValidCronExpression(value: string): boolean {
+  const fields = value.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  return fields.every((field) => CRON_FIELD_RE.test(field));
+}
+
+const cronExpressionSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine(isValidCronExpression, {
+    message:
+      "Invalid cron expression. Expected 5 space-separated fields: minute hour day-of-month month day-of-week. Example: '0 9 * * 1-5'",
+  });
+
 export const createConnectorRequest = z.object({
   pluginId: z.string().min(1),
   name: z.string().min(1).max(200),
@@ -19,7 +53,7 @@ export const createConnectorRequest = z.object({
   config: z.record(z.unknown()),
   credentials: z.record(z.string()),
   syncMode: z.enum(["full", "incremental"]).default("incremental"),
-  scheduleCron: z.string().optional(),
+  scheduleCron: cronExpressionSchema.optional(),
   isEnabled: z.boolean().default(true),
 });
 
@@ -29,7 +63,7 @@ export const patchConnectorRequest = z.object({
   config: z.record(z.unknown()).optional(),
   credentials: z.record(z.string()).optional(),
   syncMode: z.enum(["full", "incremental"]).optional(),
-  scheduleCron: z.string().nullable().optional(),
+  scheduleCron: cronExpressionSchema.nullable().optional(),
   isEnabled: z.boolean().optional(),
 });
 

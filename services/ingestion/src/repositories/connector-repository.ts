@@ -385,4 +385,30 @@ export class ConnectorRepository {
     );
     return result.rowCount ?? 0;
   }
+
+  // findDeletedBefore returns connectors that were soft-deleted before cutoffDate.
+  // Used by the retention job to identify rows whose grace period has elapsed
+  // and whose raw tables are safe to drop.
+  async findDeletedBefore(cutoffDate: Date): Promise<ConnectorRow[]> {
+    const result = await this.pool.query<ConnectorRow>(
+      `SELECT ${CONNECTOR_COLUMNS}
+         FROM ingestion.connectors
+        WHERE deleted_at IS NOT NULL
+          AND deleted_at < $1
+        ORDER BY deleted_at ASC`,
+      [cutoffDate]
+    );
+    return result.rows;
+  }
+
+  // hardDelete permanently removes a connector row. Only safe to call after
+  // the raw table has been dropped and FK-referencing rows have been removed.
+  // Using a direct DELETE rather than updating deleted_at so the row is gone
+  // from all future queries without any ambiguity.
+  async hardDelete(id: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM ingestion.connectors WHERE id = $1`,
+      [id]
+    );
+  }
 }

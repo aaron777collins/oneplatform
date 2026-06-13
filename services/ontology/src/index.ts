@@ -171,7 +171,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
 
   const app = createApp({
     serviceName: "ontology-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,
@@ -188,7 +188,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     db,
     redis,
     serviceName: "ontology-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     entityService,
     relationshipService,
     migrationService,
@@ -284,10 +284,29 @@ async function main(): Promise<void> {
     console.info(`Ontology service started on port ${port}`);
   });
 
-  // Graceful shutdown
+  // Graceful shutdown — close the HTTP server first so no new requests arrive,
+  // then run cleanup (close DB pool, quit Redis). A hard-exit timeout ensures
+  // the process never hangs indefinitely if cleanup stalls.
   process.on("SIGTERM", () => {
-    server.close();
-    void cleanup();
+    // Hard-exit after 30 s regardless of cleanup state. The timer is unref'd
+    // so it doesn't prevent the event loop from draining if cleanup finishes
+    // sooner — the process.exit(0) in the cleanup callback fires first.
+    const hardExit = setTimeout(() => {
+      console.error("Ontology service: graceful shutdown timed out, forcing exit");
+      process.exit(1);
+    }, 30_000);
+    hardExit.unref();
+
+    server.close(() => {
+      void cleanup().then(() => {
+        clearTimeout(hardExit);
+        process.exit(0);
+      }).catch((err: unknown) => {
+        console.error("Ontology service: cleanup error during shutdown", err);
+        clearTimeout(hardExit);
+        process.exit(1);
+      });
+    });
   });
 }
 

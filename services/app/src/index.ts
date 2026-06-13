@@ -283,6 +283,10 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   // Widget service — in-memory registry for plugin widget registration
   createWidgetService({ logger });
 
+  // Step 5b: Recover any builds that were interrupted by a previous restart.
+  // Must run before the HTTP server starts so the DB is clean before traffic arrives.
+  await buildService.recoverInterruptedBuilds();
+
   // Step 6: Start BullMQ retention worker AND enqueue repeating job (W1).
   // The worker exists to consume jobs; we must also enqueue a repeating job
   // otherwise the worker sits idle and retention never runs.
@@ -333,7 +337,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   // Step 8: Create Hono app via core factory (attaches full middleware stack)
   const honoApp = createApp({
     serviceName:    "app-service",
-    version:        "1.0.0",
+    version:        process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret,
     redis,
     validateApiKey: async () => null,

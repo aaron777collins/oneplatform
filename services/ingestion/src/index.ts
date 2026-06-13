@@ -175,6 +175,9 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     logger,
   });
 
+  // Cleanup hooks registered by optional startup code (e.g. watchdog timer).
+  const extraCleanupFns: Array<() => void> = [];
+
   // Workers are optional so tests can wire the app without consuming Redis connections
   let syncWorker: Worker<SyncJobPayload> | undefined;
   let batchWorker: Worker<BatchJobPayload> | undefined;
@@ -217,13 +220,46 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     logger.info("BullMQ sync, batch, and file-parse workers started");
 
     retentionService.startScheduler();
+
+    // Watchdog: scan for sync_state rows stuck in 'running' every 5 minutes.
+    // The threshold defaults to 15 minutes (configured via OP_SYNC_STALE_THRESHOLD_MS).
+    // Uses self-scheduling setTimeout (not setInterval) to prevent overlapping runs.
+    const staleThresholdMs = parseInt(
+      process.env["OP_SYNC_STALE_THRESHOLD_MS"] ?? String(15 * 60 * 1_000),
+      10,
+    );
+    const watchdogIntervalMs = 5 * 60 * 1_000;
+    let watchdogHandle: ReturnType<typeof setTimeout> | null = null;
+    let watchdogStopped = false;
+
+    async function watchdogTick(): Promise<void> {
+      if (watchdogStopped) return;
+      await syncService.runWatchdog(staleThresholdMs);
+      if (!watchdogStopped) {
+        watchdogHandle = setTimeout(() => void watchdogTick(), watchdogIntervalMs);
+      }
+    }
+    watchdogHandle = setTimeout(() => void watchdogTick(), watchdogIntervalMs);
+
+    // Store cleanup refs on the outer scope so the cleanup fn can cancel them.
+    const stopWatchdog = (): void => {
+      watchdogStopped = true;
+      if (watchdogHandle !== null) {
+        clearTimeout(watchdogHandle);
+        watchdogHandle = null;
+      }
+    };
+
+    // Attach stopWatchdog to cleanup via a module-scoped capture.
+    // We store it so the cleanup closure can call it without a closure cycle.
+    extraCleanupFns.push(stopWatchdog);
   }
 
   const servicePublicKeys = await loadServicePublicKeys();
 
   const app = createApp({
     serviceName: "ingestion-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,
@@ -269,6 +305,9 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   app.route("/internal", internalRoutes);
 
   const cleanup = async (): Promise<void> => {
+    // Cancel any background timers registered during startup (e.g. watchdog).
+    for (const fn of extraCleanupFns) fn();
+
     if (startWorkers) {
       retentionService.stop();
       await Promise.all([

@@ -1,8 +1,14 @@
 /**
- * createMockContext() factory.
+ * Mock context factories for plugin unit tests.
  *
- * Constructs a fully in-process PluginContext suitable for unit tests.
- * No Redis, no database, no network calls unless allowRealFetch is set.
+ * createMockContext()            — general-purpose PluginContext for any plugin type.
+ * createMockTransformerContext() — PluginContext shaped for Transformer plugins;
+ *                                  pre-configures record transform helpers.
+ * createMockAuthContext()        — PluginContext shaped for AuthProvider plugins;
+ *                                  pre-configures credential access patterns.
+ *
+ * All factories are fully in-process — no Redis, no database, no network calls
+ * unless allowRealFetch is set.
  */
 
 import type {
@@ -73,6 +79,37 @@ export interface MockContext extends PluginContext {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Specialized mock context types
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * MockTransformerContext — MockContext pre-configured for Transformer plugins.
+ *
+ * Transformers operate on records flowing through a pipeline step. They receive
+ * a record, transform it, and return the modified record. This context type makes
+ * test assertions clearer by surfacing the fetch proxy prominently (transformers
+ * call external enrichment APIs) and suppressing ontology details irrelevant to
+ * the transformation step.
+ */
+export interface MockTransformerContext extends MockContext {
+  /** Convenience alias: fetch.__calls for asserting outbound enrichment calls. */
+  fetchCalls: MockFetchCall[];
+}
+
+/**
+ * MockAuthContext — MockContext pre-configured for AuthProvider plugins.
+ *
+ * Auth plugins implement custom login flows (SAML, LDAP, magic links, etc.).
+ * They rely heavily on credential access (client secrets, private keys) and
+ * outbound HTTP to identity providers. This context type surfaces those
+ * dependencies prominently and pre-populates common auth credential names.
+ */
+export interface MockAuthContext extends MockContext {
+  /** Convenience alias: credentials.__calls for asserting credential reads. */
+  credentialCalls: MockCredentialCall[];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // MockContextOptions
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -121,6 +158,36 @@ const DEFAULT_ONTOLOGY_SCHEMA: OntologySchema = {
   version: 0,
   updatedAt: new Date(0).toISOString(),
 };
+
+/**
+ * Additional options for the Transformer context factory.
+ * All MockContextOptions are also accepted.
+ */
+export interface MockTransformerContextOptions extends MockContextOptions {
+  /**
+   * Expected shape of incoming records. Used to pre-validate test inputs
+   * and provide clearer assertion failure messages.
+   * Default: undefined (no validation).
+   */
+  expectedRecordShape?: Record<string, string>;
+}
+
+/**
+ * Additional options for the Auth context factory.
+ * All MockContextOptions are also accepted.
+ */
+export interface MockAuthContextOptions extends MockContextOptions {
+  /**
+   * Convenience shorthand: pass auth-specific credentials by name.
+   * These are merged with the base `credentials` map.
+   *
+   * Common names used by auth plugins:
+   *   - "clientSecret" — OAuth client secret
+   *   - "privateKey"   — SAML/JWT signing key
+   *   - "apiToken"     — Identity provider API token
+   */
+  authCredentials?: Record<string, string>;
+}
 
 /**
  * Create a mock PluginContext for use in unit tests.
@@ -303,5 +370,89 @@ export function createMockContext(options: MockContextOptions = {}): MockContext
     tenant,
     ontology: mockOntology,
     tracing: mockTracing,
+  };
+}
+
+/**
+ * Create a mock context shaped for Transformer plugins.
+ *
+ * Transformers receive a record, optionally call external enrichment APIs,
+ * and return a transformed record. This factory sets sensible defaults for
+ * that pattern and exposes a `fetchCalls` alias for concise assertions:
+ *
+ * @example
+ * const ctx = createMockTransformerContext({
+ *   fetchHandler: async (url) => new Response(JSON.stringify({ category: "electronics" })),
+ * });
+ * await myTransformer({ data: { id: "1", name: "Widget" } }, ctx);
+ * expect(ctx.fetchCalls).toHaveLength(1);
+ */
+export function createMockTransformerContext(
+  options: MockTransformerContextOptions = {},
+): MockTransformerContext {
+  // Transformer plugins call enrichment endpoints but rarely need ontology access.
+  // Provide a realistic instanceId pattern that matches production pipeline step IDs.
+  const base = createMockContext({
+    instanceId: options.instanceId ?? "transformer-step-test",
+    tenantId:   options.tenantId  ?? "test-tenant",
+    ...options,
+  });
+
+  return {
+    ...base,
+    // Expose fetch calls at the top level for concise assertion syntax
+    // (ctx.fetchCalls vs ctx.fetch.__calls).
+    get fetchCalls() {
+      return base.fetch.__calls;
+    },
+  };
+}
+
+/**
+ * Create a mock context shaped for AuthProvider plugins.
+ *
+ * Auth plugins implement custom login flows and rely heavily on credential
+ * access (client secrets, private keys, API tokens). This factory merges
+ * `authCredentials` with the base `credentials` map and exposes a
+ * `credentialCalls` alias for assertion clarity:
+ *
+ * @example
+ * const ctx = createMockAuthContext({
+ *   authCredentials: {
+ *     clientSecret: "test-secret",
+ *     privateKey: "-----BEGIN PRIVATE KEY-----\n...",
+ *   },
+ * });
+ * await mySamlProvider.authenticate({ username: "alice", password: "pw" }, ctx);
+ * expect(ctx.credentialCalls.map(c => c.name)).toContain("privateKey");
+ */
+export function createMockAuthContext(
+  options: MockAuthContextOptions = {},
+): MockAuthContext {
+  const mergedCredentials: Record<string, string> = {
+    // Provide empty stubs for common auth credential names so plugins that
+    // call credentials.list() get a realistic set of available names.
+    clientSecret: "test-client-secret",
+    privateKey:   "test-private-key",
+    apiToken:     "test-api-token",
+    // Caller-provided values override the stubs above
+    ...(options.credentials ?? {}),
+    ...(options.authCredentials ?? {}),
+  };
+
+  const base = createMockContext({
+    instanceId: options.instanceId ?? "auth-provider-test",
+    tenantId:   options.tenantId  ?? "test-tenant",
+    ...options,
+    credentials: mergedCredentials,
+  });
+
+  return {
+    ...base,
+    // Expose credential calls at the top level for concise assertion syntax
+    // (ctx.credentialCalls vs ctx.credentials.__calls).
+    get credentialCalls() {
+      return base.credentials.__calls;
+    },
   };
 }

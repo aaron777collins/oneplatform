@@ -177,7 +177,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   // Step 10: Create Hono app
   const app = createApp({
     serviceName: "gateway-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,

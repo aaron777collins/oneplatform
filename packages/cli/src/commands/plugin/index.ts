@@ -85,7 +85,8 @@ async function installAction(source: string, opts: InstallOpts, ctx: CommandCont
   try {
     const content = readFileSync(filePath);
     const form = new FormData();
-    form.append("file", new Blob([content]), "plugin.oppkg");
+    // API expects the field name "bundle", not "file"
+    form.append("bundle", new Blob([content]), "plugin.oppkg");
     if (opts.tenant) form.append("tenantId", opts.tenant);
 
     const resp = await ctx.http.postMultipart<{

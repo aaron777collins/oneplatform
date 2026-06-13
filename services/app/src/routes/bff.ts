@@ -225,6 +225,194 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   });
 
   // -------------------------------------------------------------------------
+  // PATCH /bff/data/:entity/:id  — update entity record (partial update)
+  // PUT   /bff/data/:entity/:id  — replace entity record (full update)
+  // DELETE /bff/data/:entity/:id — delete entity record
+  // POST  /bff/data/:entity/bulk — bulk create entity records
+  // Design spec §8.3
+  //
+  // useMutation() in the app-sdk calls these endpoints. They follow the same
+  // auth+tenant+proxy pattern as GET/POST above.
+  // -------------------------------------------------------------------------
+
+  routes.patch("/data/:entity/:id", async (c) => {
+    const user = c.var.user;
+    if (user === undefined) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    }
+
+    const appId  = c.req.header("x-app-id");
+    const entity = c.req.param("entity");
+    const itemId = c.req.param("id");
+    if (appId === undefined || appId === "") {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+    }
+
+    const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
+    if (!accessible) {
+      throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
+
+    const resp = await fetch(upstreamUrl, {
+      method:  "PATCH",
+      headers: {
+        "Content-Type":    "application/json",
+        "X-Service-Token": serviceToken(),
+        "X-User-Id":       user.userId,
+        "X-Tenant-Id":     user.tenantId,
+      },
+      body: JSON.stringify(body),
+    }).catch(() => null);
+
+    if (resp === null || !resp.ok) {
+      const status = resp?.status ?? 503;
+      return c.json(
+        { error: { code: "UPSTREAM_ERROR", message: `Data service returned ${status}.` } },
+        status >= 400 && status < 600 ? (status as 400) : 503
+      );
+    }
+
+    const data = await resp.json() as unknown;
+    return c.json({ data });
+  });
+
+  routes.put("/data/:entity/:id", async (c) => {
+    const user = c.var.user;
+    if (user === undefined) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    }
+
+    const appId  = c.req.header("x-app-id");
+    const entity = c.req.param("entity");
+    const itemId = c.req.param("id");
+    if (appId === undefined || appId === "") {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+    }
+
+    const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
+    if (!accessible) {
+      throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
+
+    const resp = await fetch(upstreamUrl, {
+      method:  "PUT",
+      headers: {
+        "Content-Type":    "application/json",
+        "X-Service-Token": serviceToken(),
+        "X-User-Id":       user.userId,
+        "X-Tenant-Id":     user.tenantId,
+      },
+      body: JSON.stringify(body),
+    }).catch(() => null);
+
+    if (resp === null || !resp.ok) {
+      const status = resp?.status ?? 503;
+      return c.json(
+        { error: { code: "UPSTREAM_ERROR", message: `Data service returned ${status}.` } },
+        status >= 400 && status < 600 ? (status as 400) : 503
+      );
+    }
+
+    const data = await resp.json() as unknown;
+    return c.json({ data });
+  });
+
+  routes.delete("/data/:entity/:id", async (c) => {
+    const user = c.var.user;
+    if (user === undefined) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    }
+
+    const appId  = c.req.header("x-app-id");
+    const entity = c.req.param("entity");
+    const itemId = c.req.param("id");
+    if (appId === undefined || appId === "") {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+    }
+
+    const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
+    if (!accessible) {
+      throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
+    }
+
+    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
+
+    const resp = await fetch(upstreamUrl, {
+      method:  "DELETE",
+      headers: {
+        "X-Service-Token": serviceToken(),
+        "X-User-Id":       user.userId,
+        "X-Tenant-Id":     user.tenantId,
+      },
+    }).catch(() => null);
+
+    if (resp === null || !resp.ok) {
+      const status = resp?.status ?? 503;
+      return c.json(
+        { error: { code: "UPSTREAM_ERROR", message: `Data service returned ${status}.` } },
+        status >= 400 && status < 600 ? (status as 400) : 503
+      );
+    }
+
+    return new Response(null, { status: 204 });
+  });
+
+  // Bulk create — POST /bff/data/:entity/bulk
+  // Must be registered before the /:id wildcard that would match "bulk" as an ID.
+  routes.post("/data/:entity/bulk", async (c) => {
+    const user = c.var.user;
+    if (user === undefined) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    }
+
+    const appId  = c.req.header("x-app-id");
+    const entity = c.req.param("entity");
+    if (appId === undefined || appId === "") {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+    }
+
+    const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
+    if (!accessible) {
+      throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/bulk`;
+
+    const resp = await fetch(upstreamUrl, {
+      method:  "POST",
+      headers: {
+        "Content-Type":    "application/json",
+        "X-Service-Token": serviceToken(),
+        "X-User-Id":       user.userId,
+        "X-Tenant-Id":     user.tenantId,
+      },
+      body: JSON.stringify(body),
+    }).catch(() => null);
+
+    if (resp === null || !resp.ok) {
+      const status = resp?.status ?? 503;
+      return c.json(
+        { error: { code: "UPSTREAM_ERROR", message: `Data service returned ${status}.` } },
+        status >= 400 && status < 600 ? (status as 400) : 503
+      );
+    }
+
+    const data = await resp.json() as unknown;
+    return c.json({ data }, 201);
+  });
+
+  // -------------------------------------------------------------------------
   // GET    /bff/storage/:key  — read per-user app storage
   // PUT    /bff/storage/:key  — write per-user app storage
   // DELETE /bff/storage/:key  — delete per-user app storage

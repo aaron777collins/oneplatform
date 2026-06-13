@@ -1,8 +1,8 @@
 // Unit tests for services/context-call-handler.ts
 //
 // Tests: SSRF blocklist (RFC 1918, localhost, link-local, internal services),
-// hookContext guard, credential access enforcement, ontology lookup,
-// error propagation via ContextCallResponse.
+// DNS rebinding defence, hookContext guard, credential access enforcement,
+// ontology lookup, error propagation via ContextCallResponse.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Logger } from "@oneplatform/core";
@@ -11,6 +11,21 @@ import type {
   ContextCallRequest,
   ExecutionContext,
 } from "../services/context-call-handler.js";
+
+// ---------------------------------------------------------------------------
+// DNS resolver mock — injected via ContextCallHandlerDeps.dnsResolver
+// ---------------------------------------------------------------------------
+// We inject a fake DNS resolver instead of mocking the node:dns module so
+// that the mock is entirely self-contained in the test file and unaffected by
+// the beforeEach/afterEach lifecycle. Each test that needs a specific DNS
+// resolution outcome can call resolver.resolve4.mockResolvedValueOnce([...]).
+
+function makeDnsResolver(defaultIpv4 = ["1.1.1.1"], defaultIpv6: string[] = []) {
+  return {
+    resolve4: vi.fn<[string], Promise<string[]>>().mockResolvedValue(defaultIpv4),
+    resolve6: vi.fn<[string], Promise<string[]>>().mockResolvedValue(defaultIpv6),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -25,13 +40,14 @@ function makeLogger(): Logger {
   } as unknown as Logger;
 }
 
-function makeDeps() {
+function makeDeps(dnsResolver = makeDnsResolver()) {
   return {
     logger: makeLogger(),
     ingestionServiceUrl: "http://ingestion:3000",
     pluginServiceUrl: "http://plugin:3001",
     pipelineServiceUrl: "http://pipeline:3002",
     serviceToken: "secret-service-token",
+    dnsResolver,
   };
 }
 
@@ -239,7 +255,32 @@ describe("contextCallHandler — fetch SSRF protection", () => {
     expect(result.body).toBe('{"result":"ok"}');
   });
 
-  it("blocks redirect to internal URL", async () => {
+  it("blocks redirect to internal URL (3xx response from manual redirect mode)", async () => {
+    // With redirect:'manual', a redirect returns a 3xx status. We check the
+    // Location header and block it if it points to an internal address.
+    const handler = createContextCallHandler(makeDeps());
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 302,
+      statusText: "Found",
+      redirected: false,
+      url: "https://example.com/redirect",
+      headers: {
+        get: vi.fn().mockReturnValue("http://192.168.1.1/admin"),
+        entries: vi.fn().mockReturnValue([["location", "http://192.168.1.1/admin"]]),
+      },
+    });
+
+    const response = await handler.handleContextCall(
+      makeRequest("fetch", ["https://example.com/redirect"]),
+      makeCtx(),
+    );
+    expect(response.error?.code).toBe("EXECUTION_FETCH_BLOCKED");
+  });
+
+  it("blocks redirect via response.redirected + url (belt-and-suspenders)", async () => {
+    // Some runtimes may expose response.url even in manual redirect mode.
+    // The belt-and-suspenders check still catches this case.
     const handler = createContextCallHandler(makeDeps());
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -248,7 +289,7 @@ describe("contextCallHandler — fetch SSRF protection", () => {
       redirected: true,
       url: "http://192.168.1.1/admin", // redirect destination is internal
       text: vi.fn().mockResolvedValue(""),
-      headers: { entries: vi.fn().mockReturnValue([]) },
+      headers: { get: vi.fn().mockReturnValue(null), entries: vi.fn().mockReturnValue([]) },
     });
 
     const response = await handler.handleContextCall(

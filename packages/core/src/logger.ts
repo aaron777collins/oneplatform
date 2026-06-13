@@ -43,6 +43,26 @@ export interface Logger {
   withTraceId(traceId: string): Logger;
 }
 
+// Level ordering used to filter stdout output based on OP_LOG_LEVEL.
+const LEVEL_ORDER: Record<LogLevel, number> = {
+  debug: 0,
+  info:  1,
+  warn:  2,
+  error: 3,
+};
+
+// Parse OP_LOG_LEVEL once at module load so the hot path avoids env reads.
+// Default to 'info' to avoid flooding stdout with debug lines in production.
+function resolveMinLevel(): LogLevel {
+  const raw = process.env["OP_LOG_LEVEL"]?.toLowerCase();
+  if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") {
+    return raw;
+  }
+  return "info";
+}
+
+const MIN_LEVEL = resolveMinLevel();
+
 export function createLogger(config: LoggerConfig): Logger {
   function log(
     level: LogLevel,
@@ -58,9 +78,24 @@ export function createLogger(config: LoggerConfig): Logger {
       message,
       metadata,
     };
-    // Fire-and-forget: log emission must never crash the caller.  Consumers
-    // subscribe to the Redis pub/sub channel for real-time streaming; the
-    // channel is named by service so subscribers can filter cheaply.
+
+    // Stdout transport — always active regardless of Redis availability.
+    // docker logs captures this even when Redis is unreachable.
+    // warn/error go to stderr so they surface in container runtime alerts;
+    // debug/info go to stdout so they can be filtered independently.
+    if (LEVEL_ORDER[level] >= LEVEL_ORDER[MIN_LEVEL]) {
+      const line = JSON.stringify(event);
+      if (level === "warn" || level === "error") {
+        process.stderr.write(line + "\n");
+      } else {
+        process.stdout.write(line + "\n");
+      }
+    }
+
+    // Redis pub/sub transport — secondary channel for real-time streaming.
+    // Consumers subscribe to logs:<service> for live tailing; the channel is
+    // named by service so subscribers can filter cheaply. Failures are swallowed
+    // because the stdout transport already guarantees durability.
     config.redis
       .publish(`logs:${config.serviceName}`, JSON.stringify(event))
       .catch(() => {});

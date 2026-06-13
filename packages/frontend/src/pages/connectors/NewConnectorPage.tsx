@@ -4,9 +4,9 @@
  * Route: /connectors/new
  */
 import React, { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Puzzle } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
@@ -184,9 +184,30 @@ export function NewConnectorPage() {
                 ))}
               </div>
             ) : connectorTypes.length === 0 ? (
-              <p className="text-sm text-[var(--color-muted-foreground)]">
-                No connector types available. Install a connector plugin to get started.
-              </p>
+              <div className="flex flex-col items-start gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/40 p-6 max-w-lg">
+                <div className="flex items-center gap-3">
+                  <Puzzle className="h-8 w-8 text-[var(--color-muted-foreground)]" aria-hidden />
+                  <div>
+                    <p className="text-sm font-medium">No connector plugins installed</p>
+                    <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
+                      Connector plugins add support for specific data sources (databases,
+                      SaaS APIs, file systems, etc.). You need to install at least one
+                      before creating a connector.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  to="/plugins"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-2 text-sm font-medium text-[var(--color-primary-foreground)] hover:opacity-90 transition-opacity"
+                >
+                  <Puzzle className="h-4 w-4" aria-hidden />
+                  Install connector plugins
+                </Link>
+                <p className="text-xs text-[var(--color-muted-foreground)]">
+                  Find connector plugins in the Plugins section. Look for plugins with
+                  type &quot;connector&quot;. After installing, return here to create your connector.
+                </p>
+              </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {connectorTypes.map((type) => (

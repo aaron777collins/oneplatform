@@ -150,6 +150,24 @@ export class SyncStateRepository {
     );
   }
 
+  // resetStaleSyncs bulk-resets sync_state rows that have been stuck in
+  // 'running' for longer than staleThresholdMs. Returns the count of reset rows.
+  // The watchdog calls this periodically so connectors are never permanently
+  // stuck after a crash or missed job pickup.
+  async resetStaleSyncs(staleThresholdMs: number): Promise<number> {
+    const cutoff = new Date(Date.now() - staleThresholdMs);
+    const result = await this.pool.query(
+      `UPDATE ingestion.sync_state
+            SET status     = 'failed',
+                last_error = 'Sync reset by watchdog: exceeded stale threshold',
+                updated_at = now()
+          WHERE status     = 'running'
+            AND updated_at < $1`,
+      [cutoff]
+    );
+    return result.rowCount ?? 0;
+  }
+
   // create — initialises the sync_state row for a new connector.
   // Delegates to upsert so the call is idempotent if the row already exists
   // (e.g. during connector re-activation after soft-restore).

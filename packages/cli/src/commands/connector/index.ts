@@ -89,17 +89,17 @@ async function testAction(id: string, _opts: Record<string, never>, ctx: Command
 }
 
 async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext): Promise<void> {
-  const resp = await ctx.http.post<{ jobId: string }>(
+  const resp = await ctx.http.post<{ syncJobId: string }>(
     `/api/v1/connectors/${encodeURIComponent(id)}/trigger`,
   );
-  ctx.renderer.info(`Connector triggered. Job ID: ${resp.jobId}`);
+  ctx.renderer.info(`Connector triggered. Sync Job ID: ${resp.syncJobId}`);
 
   if (!opts.wait) return;
 
   while (true) {
     await new Promise((r) => setTimeout(r, 2000));
     const status = await ctx.http.get<{ status: string; progress?: number }>(
-      `/api/v1/connectors/${encodeURIComponent(id)}/jobs/${resp.jobId}`,
+      `/api/v1/connectors/${encodeURIComponent(id)}/syncs/${resp.syncJobId}/progress`,
     );
     ctx.renderer.info(`Status: ${status.status}${status.progress !== undefined ? ` (${status.progress}%)` : ""}`);
     if (status.status === "completed") {

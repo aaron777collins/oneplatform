@@ -1,5 +1,6 @@
 import type { Logger } from "@oneplatform/core";
 import type { ConnectorRepository } from "./connector-service.js";
+import type { ConnectorRow } from "../repositories/types.js";
 import { connectorIdToTableName } from "../utils/data-envelope.js";
 
 // ---------------------------------------------------------------------------
@@ -130,10 +131,14 @@ export function createRetentionService(
 
   // -------------------------------------------------------------------------
   // cleanupDeletedConnectors — drops raw tables for connectors that were
-  // soft-deleted more than DELETED_TABLE_GRACE_PERIOD_DAYS days ago.
+  // soft-deleted more than DELETED_TABLE_GRACE_PERIOD_DAYS days ago, then
+  // hard-deletes the connector row.
   //
   // The 7-day grace period gives the Ontology Service time to finish any
   // in-flight mapping jobs that may reference the table before it is dropped.
+  //
+  // Each connector is processed independently so a failure on one does not
+  // abort cleanup for the remaining connectors.
   // -------------------------------------------------------------------------
 
   async function cleanupDeletedConnectors(): Promise<void> {
@@ -141,32 +146,50 @@ export function createRetentionService(
     let droppedCount = 0;
 
     try {
-      // Find connectors deleted more than DELETED_TABLE_GRACE_PERIOD_DAYS days ago.
-      // The ConnectorRepository.list call with an empty tenantId fetches across
-      // all tenants — valid only for internal maintenance operations.
-      //
-      // We use the soft-delete marker: deleted_at < now() - interval 'X days'.
-      // In practice the repository layer will implement a dedicated method for
-      // this query; here we model the intent correctly.
       const cutoffDate = new Date(
         Date.now() - DELETED_TABLE_GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1_000,
       );
 
-      // Page through recently deleted connectors (the list endpoint respects
-      // filter options — a production ConnectorRepository would add a
-      // findDeletedBefore method; this models the retention contract).
       logger.info("Checking for deleted connectors to clean up", {
         cutoffDate: cutoffDate.toISOString(),
         gracePeriodDays: DELETED_TABLE_GRACE_PERIOD_DAYS,
       });
 
-      // Implementation note: the repository agent will provide a method like
-      // connectorRepo.findDeletedBefore(cutoffDate). We call it generically here
-      // to keep the interface contract in the right place.
-      //
-      // The actual implementation will be wired in when both agents' outputs
-      // are merged. For now we log the intent and return — this is intentional
-      // because calling an undefined method would be worse than a no-op.
+      const deletedConnectors: ConnectorRow[] = await connectorRepo.findDeletedBefore(cutoffDate);
+
+      for (const connector of deletedConnectors) {
+        try {
+          const tableName = connectorIdToTableName(connector.id);
+          const tableExists = await rawTableRepo.tableExists(tableName);
+
+          if (tableExists) {
+            await rawTableRepo.dropTable(tableName);
+            logger.info("Raw table dropped for deleted connector", {
+              connectorId: connector.id,
+              tableName,
+              deletedAt: connector.deleted_at?.toISOString(),
+            });
+          }
+
+          // Hard-delete the connector row after the table is gone. This keeps
+          // the DB clean and removes the FK anchor that foreign tables rely on.
+          await connectorRepo.hardDelete(connector.id);
+          droppedCount += 1;
+
+          logger.info("Deleted connector hard-deleted", {
+            connectorId: connector.id,
+            tenantId: connector.tenant_id,
+          });
+        } catch (err) {
+          // Log and continue — a single connector failure must not abort the
+          // cleanup of other connectors.
+          logger.error("Failed to clean up deleted connector", {
+            connectorId: connector.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
       logger.info("Deleted connector cleanup complete", { droppedCount });
     } catch (err) {
       logger.error("Deleted connector cleanup failed", {

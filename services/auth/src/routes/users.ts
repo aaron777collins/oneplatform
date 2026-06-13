@@ -10,16 +10,23 @@ import {
   NotFoundError,
   ForbiddenError,
 } from "@oneplatform/core";
+import type { Redis } from "ioredis";
+import type pg from "pg";
 import type { UserRepository } from "../repositories/index.js";
 import { updateUserRequest } from "../schemas/index.js";
 
 export interface UserRouteDeps {
   userRepository: UserRepository;
+  // Required for session revocation when a user is deactivated.
+  // Active access tokens must be blocklisted and refresh tokens deleted so
+  // a deactivated user cannot continue operating with already-issued tokens.
+  db: pg.Pool;
+  redis: Redis;
 }
 
 export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { userRepository } = deps;
+  const { userRepository, db, redis } = deps;
 
   // GET /api/v1/users — list users in the caller's tenant
   // Requires users:read scope.
@@ -114,6 +121,19 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       throw new ForbiddenError("users:manage scope is required to change roles or activation status.");
     }
 
+    // Privilege escalation guard: only platform-admin can assign platform-admin.
+    // No user may grant a role that exceeds their own privilege level, preventing
+    // a tenant-admin from self-escalating or elevating others to platform-admin.
+    if (parsed.data.roles !== undefined) {
+      const requestingUserIsAdmin = user.scopes.includes("admin");
+      const requestedRoles = parsed.data.roles as string[];
+      if (requestedRoles.includes("platform-admin") && !requestingUserIsAdmin) {
+        throw new ForbiddenError(
+          "Only platform-admin users can assign the platform-admin role."
+        );
+      }
+    }
+
     // Verify the user belongs to this tenant (prevents cross-tenant updates).
     const existing = await userRepository.findById(id);
     if (!existing || existing.tenant_id !== user.tenantId) {
@@ -129,6 +149,50 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
     // since it's a distinct column update.
     if (parsed.data.isActive === false) {
       await userRepository.deactivate(id);
+
+      // Revoke all active sessions immediately so the deactivated user cannot
+      // continue using previously-issued tokens. Access tokens are short-lived
+      // (default 15 min) but still represent a window of unauthorized access.
+      //
+      // 1. Revoke all DB sessions — prevents refresh token rotation from succeeding.
+      const activeSessionsResult = await db.query<{
+        id: string;
+        refresh_token_jti: string | null;
+      }>(
+        `UPDATE auth.sessions
+         SET revoked_at = now(), revoked_reason = 'user_deactivated'
+         WHERE user_id = $1 AND revoked_at IS NULL
+         RETURNING id, refresh_token_jti`,
+        [id]
+      );
+
+      // 2. Delete all refresh tokens from Redis tracked in the user-sessions set.
+      const tokenKeys = await redis.smembers(`auth:user-sessions:${id}`);
+      for (const tokenKey of tokenKeys) {
+        await redis.del(`auth:refresh:${tokenKey}`);
+        await redis.del(`auth:token-family:${tokenKey}`);
+      }
+      await redis.del(`auth:user-sessions:${id}`);
+
+      // 3. Add access token JTIs to the revocation blocklist.
+      // The blocklist TTL mirrors the JWT expiry so entries are self-cleaning.
+      const jwtExpirySeconds = parseInt(
+        process.env["OP_JWT_EXPIRY_SECONDS"] ?? "900",
+        10
+      );
+      for (const session of activeSessionsResult.rows) {
+        if (session.refresh_token_jti !== null) {
+          // The refresh_token_jti stored on the session row is the JTI of the
+          // most-recently-issued access token for this session. Blocklisting it
+          // ensures the current access token is rejected on the next request.
+          await redis.set(
+            `revocation:${session.refresh_token_jti}`,
+            "1",
+            "EX",
+            jwtExpirySeconds
+          );
+        }
+      }
     }
 
     return c.json({

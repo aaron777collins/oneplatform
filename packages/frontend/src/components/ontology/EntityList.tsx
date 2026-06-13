@@ -93,8 +93,8 @@ export function EntityList({ entities, isLoading = false, isError = false, onRet
             <TableCell colSpan={5}>
               <EmptyState
                 icon={DatabaseIcon}
-                title="No entities yet"
-                description="Create your first entity type to start building your data model."
+                title="No data models yet"
+                description="Create your first entity type to define how your data is structured. Entity types describe the shape of your data (like 'Customer', 'Order', or 'Product') and the fields they contain."
               />
             </TableCell>
           </TableRow>

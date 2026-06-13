@@ -266,7 +266,7 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
   // Step 16: Create Hono app (NO Redis — use noop stub for auth middleware)
   const app = createApp({
     serviceName: "execution-service",
-    version: "0.0.0",
+    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
     jwtSecret,
     redis: noopRedis,
     validateApiKey: async () => null,

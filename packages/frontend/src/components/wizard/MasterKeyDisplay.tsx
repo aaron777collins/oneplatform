@@ -3,7 +3,11 @@
  *
  * Security design (§9.3):
  * - Key is held in local state only — never in the wizard Zustand store.
- * - 60-second countdown clears the key from the DOM on expiry.
+ * - 300-second (5-minute) countdown clears the key from the DOM on expiry.
+ * - "Need more time?" button adds 2 minutes for users who need it.
+ * - "Download as text file" button saves the key before it disappears.
+ * - Countdown pauses when the tab is not focused (visibilitychange) so the
+ *   timer does not run down while the user is switching to their password manager.
  * - Show/Hide toggle prevents shoulder-surfing in open offices.
  * - Copy button uses the CopyButton shared component.
  * - Acknowledgment checkbox is required before the parent can proceed.
@@ -13,15 +17,18 @@
  * prop. This separation keeps the component testable without mocking the API.
  */
 import * as React from "react";
-import { Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, AlertTriangle, Download, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { CopyButton } from "@/components/shared/CopyButton.js";
 import { cn } from "@/lib/utils.js";
 
-const COUNTDOWN_SECONDS = 60;
+// 5 minutes — gives users enough time to open a password manager.
+const COUNTDOWN_SECONDS = 300;
+// Extra time granted when the user clicks "Need more time?" (2 minutes).
+const EXTEND_SECONDS = 120;
 // Announce remaining time at these thresholds to avoid over-notifying
 // screen reader users on every tick (§9.5).
-const ANNOUNCE_AT_SECONDS = new Set([30, 10]);
+const ANNOUNCE_AT_SECONDS = new Set([120, 60, 30, 10]);
 
 export interface MasterKeyDisplayProps {
   /** The raw master key returned by GET /api/v1/auth/bootstrap/master-key. */
@@ -43,6 +50,18 @@ export function MasterKeyDisplay({
   const [liveKey, setLiveKey] = React.useState<string | null>(masterKey);
   // Announcement text for aria-live — only updated at specific thresholds.
   const [announcement, setAnnouncement] = React.useState("");
+  // Pause countdown when the tab is hidden (user switched to password manager).
+  const [isPaused, setIsPaused] = React.useState(false);
+
+  // Track document visibility to pause the countdown when the tab is not focused.
+  // This prevents the key from expiring while the user is saving it elsewhere.
+  React.useEffect(() => {
+    function handleVisibilityChange() {
+      setIsPaused(document.hidden);
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   React.useEffect(() => {
     if (secondsLeft <= 0) {
@@ -50,6 +69,9 @@ export function MasterKeyDisplay({
       setIsVisible(false);
       return;
     }
+
+    // Pause the countdown while the tab is not visible
+    if (isPaused) return;
 
     const timer = setTimeout(() => {
       const next = secondsLeft - 1;
@@ -61,7 +83,28 @@ export function MasterKeyDisplay({
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [secondsLeft]);
+  }, [secondsLeft, isPaused]);
+
+  function handleExtendTime(): void {
+    setSecondsLeft((prev) => prev + EXTEND_SECONDS);
+    setAnnouncement(`${EXTEND_SECONDS / 60} more minutes added to the countdown.`);
+  }
+
+  function handleDownload(): void {
+    if (liveKey === null) return;
+    const blob = new Blob(
+      [`OnePlatform Master Encryption Key\n\nKey: ${liveKey}\n\nGenerated: ${new Date().toISOString()}\n\nWARNING: Store this key securely. It cannot be recovered if lost.\n`],
+      { type: "text/plain" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "oneplatform-master-key.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   const isExpired = liveKey === null;
 
@@ -116,18 +159,48 @@ export function MasterKeyDisplay({
           </div>
 
           {/* Countdown timer — polite so screen readers announce at thresholds */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <p
               className={cn(
                 "text-xs tabular-nums",
-                secondsLeft <= 10
+                secondsLeft <= 30
                   ? "text-[var(--color-destructive)]"
                   : "text-[var(--color-muted-foreground)]",
               )}
             >
-              Key will be hidden in{" "}
-              <span aria-live="off">{secondsLeft}</span>s
+              {isPaused ? (
+                <span className="text-[var(--color-muted-foreground)]">
+                  Paused while tab is inactive
+                </span>
+              ) : (
+                <>
+                  Key will be hidden in{" "}
+                  <span aria-live="off">{secondsLeft}</span>s
+                </>
+              )}
             </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={handleDownload}
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                Download as text file
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={handleExtendTime}
+              >
+                <Clock className="h-3 w-3" aria-hidden="true" />
+                Need more time?
+              </Button>
+            </div>
             {/* Hidden live region — announced only at threshold seconds */}
             <span className="sr-only" aria-live="polite" aria-atomic="true">
               {announcement}

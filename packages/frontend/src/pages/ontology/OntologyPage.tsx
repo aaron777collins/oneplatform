@@ -5,7 +5,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Plus, Search, Upload } from "lucide-react";
+import { Plus, Search, Upload, Info } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import {
@@ -100,6 +100,7 @@ export function OntologyPage() {
     <div className="flex-1 overflow-y-auto">
       <PageHeader
         title="Ontology"
+        description="Define your data models and schemas."
         breadcrumbs={[{ label: "Platform" }, { label: "Ontology" }]}
         actions={
           <div className="flex items-center gap-2">

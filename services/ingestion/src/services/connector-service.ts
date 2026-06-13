@@ -76,6 +76,12 @@ export interface ConnectorRepository {
   countByTenantId(tenantId: string): Promise<number>;
   update(id: string, data: UpdateConnectorData): Promise<ConnectorRow | null>;
   softDelete(id: string): Promise<boolean>;
+  // findDeletedBefore returns connectors soft-deleted before cutoffDate so the
+  // retention job can drop their raw tables and hard-delete the rows.
+  findDeletedBefore(cutoffDate: Date): Promise<ConnectorRow[]>;
+  // hardDelete permanently removes a connector row. Only called after the raw
+  // table has been dropped and the grace period has elapsed.
+  hardDelete(id: string): Promise<void>;
   disableByPluginId(pluginId: string): Promise<number>;
   disableByInstanceId(instanceId: string): Promise<number>;
   // list() supports cross-tenant iteration when tenantId is "*" — used by
@@ -110,6 +116,10 @@ export interface SyncStateRepository {
     },
   ): Promise<SyncStateRow | null>;
   updateCursor(connectorId: string, lastCursor: string | null): Promise<void>;
+  // resetStaleSyncs resets sync_state rows stuck in 'running' for longer than
+  // staleThresholdMs. Returns the number of rows reset so the caller can log
+  // the count. The watchdog is the only caller.
+  resetStaleSyncs(staleThresholdMs: number): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------

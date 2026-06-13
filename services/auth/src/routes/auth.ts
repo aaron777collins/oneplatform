@@ -55,6 +55,34 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
       throw new ValidationError("Invalid login request", parsed.error.issues);
     }
     const result = await authService.login(parsed.data);
+
+    // Dual-mode token delivery: browser clients receive httpOnly cookies so tokens
+    // are never accessible to JavaScript (mitigates XSS-based token theft).
+    // API clients (no Origin header, or non-browser Accept) continue to receive
+    // tokens only in the JSON body, which is the correct pattern for non-browser callers.
+    //
+    // Detection heuristic: presence of an Origin header indicates a browser-initiated
+    // cross-origin request (set automatically by browsers, not by API clients).
+    if (c.req.header("Origin") !== undefined && result.accessToken !== undefined) {
+      const isSecure = c.req.url.startsWith("https://");
+      c.res = new Response(JSON.stringify(result), {
+        headers: { "Content-Type": "application/json" },
+      });
+      // httpOnly prevents JavaScript from reading the cookie; SameSite=Strict
+      // blocks cross-site requests from including it (CSRF mitigation).
+      c.header(
+        "Set-Cookie",
+        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/${isSecure ? "; Secure" : ""}`,
+      );
+      if (result.refreshToken !== undefined) {
+        c.header(
+          "Set-Cookie",
+          `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+        );
+      }
+      return c.res;
+    }
+
     return c.json(result);
   });
 

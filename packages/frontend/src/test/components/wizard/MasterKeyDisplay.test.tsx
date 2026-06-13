@@ -5,7 +5,11 @@
  * - Interaction tests (show/hide, checkbox) use real timers + fireEvent so
  *   there is no conflict between userEvent's internal scheduling and fake timers.
  * - Timer/countdown tests use vi.useFakeTimers() + vi.advanceTimersByTimeAsync()
- *   wrapped in act() to drive the 60-second countdown deterministically.
+ *   wrapped in act() to drive the 300-second countdown deterministically.
+ *
+ * The countdown was increased from 60 s to 300 s (5 minutes) to give users
+ * enough time to open a password manager. Tests drive the timer to expiry
+ * by advancing 300 ticks instead of 60.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
@@ -163,59 +167,59 @@ describe("MasterKeyDisplay", () => {
     it("announces '30 seconds remaining' in sr-only live region at the 30s threshold", async () => {
       renderComponent();
 
-      // Tick 31 times: countdown 60 → 29, announcement fires when next === 30
+      // Tick 271 times: countdown 300 → 29, announcement fires when next === 30
       // (CopyButton also renders an aria-live="polite" region — query all and
       // assert at least one contains the expected text.)
-      await advanceTicks(31);
+      await advanceTicks(271);
 
       const liveRegions = document.querySelectorAll("[aria-live='polite']");
       const texts = Array.from(liveRegions).map((el) => el.textContent ?? "");
       expect(texts.some((t) => t.includes("30 seconds remaining"))).toBe(true);
-    }, 15_000);
+    }, 60_000);
 
     it("announces '10 seconds remaining' in sr-only live region at the 10s threshold", async () => {
       renderComponent();
 
-      // Tick 51 times: countdown 60 → 9, announcement fires when next === 10
-      await advanceTicks(51);
+      // Tick 291 times: countdown 300 → 9, announcement fires when next === 10
+      await advanceTicks(291);
 
       const liveRegions = document.querySelectorAll("[aria-live='polite']");
       const texts = Array.from(liveRegions).map((el) => el.textContent ?? "");
       expect(texts.some((t) => t.includes("10 seconds remaining"))).toBe(true);
-    }, 20_000);
+    }, 60_000);
   });
 
-  describe("expiry at 60 seconds", () => {
+  describe("expiry at 300 seconds", () => {
     beforeEach(() => {
       vi.useFakeTimers();
     });
 
-    it("removes the key textbox from the DOM after 60 seconds", async () => {
+    it("removes the key textbox from the DOM after 300 seconds", async () => {
       renderComponent();
 
-      await advanceTicks(60);
+      await advanceTicks(300);
 
       expect(
         screen.queryByRole("textbox", { name: /master encryption key/i }),
       ).not.toBeInTheDocument();
-    }, 25_000);
+    }, 120_000);
 
     it("removes the show/hide toggle button after expiry", async () => {
       renderComponent();
 
-      await advanceTicks(60);
+      await advanceTicks(300);
 
       expect(screen.queryByRole("button", { name: /show master key/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /hide master key/i })).not.toBeInTheDocument();
-    }, 25_000);
+    }, 120_000);
 
-    it("shows the expiry alert with role=alert after 60 seconds", async () => {
+    it("shows the expiry alert with role=alert after 300 seconds", async () => {
       renderComponent();
 
-      await advanceTicks(60);
+      await advanceTicks(300);
 
       expect(screen.getByRole("alert")).toBeInTheDocument();
       expect(screen.getByRole("alert")).toHaveTextContent(/key display expired/i);
-    }, 25_000);
+    }, 120_000);
   });
 });

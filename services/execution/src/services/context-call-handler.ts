@@ -1,3 +1,4 @@
+import { promises as dns } from "node:dns";
 import type { Logger } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,15 @@ export interface ContextCallHandlerDeps {
   pipelineServiceUrl: string;
   /** Service token for outbound calls */
   serviceToken: string;
+  /**
+   * Optional DNS resolver override for testing. Production callers omit this
+   * and the handler uses the system dns.promises. Tests inject a mock resolver
+   * to avoid real network lookups and to simulate DNS rebinding scenarios.
+   */
+  dnsResolver?: {
+    resolve4(hostname: string): Promise<string[]>;
+    resolve6(hostname: string): Promise<string[]>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +97,7 @@ const BLOCKED_URL_PATTERNS = [
   /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
-  // Link-local
+  // Link-local (IPv4 and cloud metadata endpoint)
   /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
   // Internal service hostnames (*.service:*)
   /^https?:\/\/[^/]*\.service(:\d+)?(\/|$)/i,
@@ -97,8 +107,97 @@ const BLOCKED_URL_PATTERNS = [
   /^ftp:\/\//i,
 ];
 
+// Blocked CIDR ranges represented as [network_number, mask] pairs for IPv4,
+// and as prefix-matched strings for IPv6. These mirror the regex patterns above
+// but operate on resolved IP addresses to defeat DNS rebinding attacks.
+const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
+  [0x7f000000, 0xff000000], // 127.0.0.0/8   — loopback
+  [0x0a000000, 0xff000000], // 10.0.0.0/8    — RFC 1918
+  [0xac100000, 0xfff00000], // 172.16.0.0/12 — RFC 1918
+  [0xc0a80000, 0xffff0000], // 192.168.0.0/16 — RFC 1918
+  [0xa9fe0000, 0xffff0000], // 169.254.0.0/16 — link-local / cloud metadata
+];
+
+const BLOCKED_IPV6_PREFIXES = [
+  "::1",         // loopback
+  "fe80:",       // link-local (fe80::/10)
+  "fd",          // ULA (fd00::/8)
+  "fc",          // ULA (fc00::/7 covers fc and fd)
+];
+
+function ipv4ToNumber(ip: string): number {
+  return ip.split(".").reduce((acc, octet) => (acc << 8) | parseInt(octet, 10), 0) >>> 0;
+}
+
+function isIpv4Blocked(ip: string): boolean {
+  const num = ipv4ToNumber(ip);
+  return BLOCKED_IPV4_RANGES.some(([net, mask]) => (num & mask) === net);
+}
+
+function isIpv6Blocked(ip: string): boolean {
+  // Normalise to lowercase for consistent prefix matching
+  const lower = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  return BLOCKED_IPV6_PREFIXES.some((prefix) => lower === prefix || lower.startsWith(prefix));
+}
+
 function isUrlBlocked(url: string): boolean {
   return BLOCKED_URL_PATTERNS.some((pattern) => pattern.test(url));
+}
+
+// assertHostnameResolvesToPublicIp performs DNS resolution on the hostname in
+// the URL and verifies that every resolved address is a publicly-routable IP.
+// This defeats DNS rebinding: an attacker cannot use a hostname that initially
+// resolves to a public IP and later switches to an internal one, because we
+// resolve at fetch time and check both A and AAAA records.
+// The resolver parameter is injected so it can be replaced in tests without
+// real network lookups.
+async function assertHostnameResolvesToPublicIp(
+  url: URL,
+  resolver: { resolve4(h: string): Promise<string[]>; resolve6(h: string): Promise<string[]> }
+): Promise<void> {
+  const { hostname } = url;
+
+  // Bare IP literals pass through the regex checks above; no DNS lookup needed.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return;
+  if (hostname.startsWith("[") || hostname.includes(":")) return; // IPv6 literal
+
+  let ipv4Addresses: string[] = [];
+  let ipv6Addresses: string[] = [];
+
+  try {
+    ipv4Addresses = await resolver.resolve4(hostname);
+  } catch {
+    // NODATA / NXDOMAIN for A records is fine — the hostname may be IPv6-only.
+  }
+
+  try {
+    ipv6Addresses = await resolver.resolve6(hostname);
+  } catch {
+    // Same: NODATA / NXDOMAIN for AAAA is fine.
+  }
+
+  if (ipv4Addresses.length === 0 && ipv6Addresses.length === 0) {
+    // Hostname does not resolve at all — block it rather than allowing through.
+    throw { code: "EXECUTION_FETCH_BLOCKED", message: `Hostname '${hostname}' could not be resolved.` };
+  }
+
+  for (const ip of ipv4Addresses) {
+    if (isIpv4Blocked(ip)) {
+      throw {
+        code: "EXECUTION_FETCH_BLOCKED",
+        message: `Hostname '${hostname}' resolves to a blocked IP address (${ip}).`,
+      };
+    }
+  }
+
+  for (const ip of ipv6Addresses) {
+    if (isIpv6Blocked(ip)) {
+      throw {
+        code: "EXECUTION_FETCH_BLOCKED",
+        message: `Hostname '${hostname}' resolves to a blocked IPv6 address (${ip}).`,
+      };
+    }
+  }
 }
 
 // All pipeline-adjacent context call methods that must be guarded by
@@ -115,6 +214,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     pluginServiceUrl,
     pipelineServiceUrl,
     serviceToken,
+    dnsResolver = dns,
   } = deps;
 
   const authHeaders = {
@@ -159,17 +259,58 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
       };
     }
 
+    // DNS rebinding defence: resolve the hostname to IP addresses and verify
+    // that none of them fall within blocked CIDR ranges. A URL that passes
+    // the regex check above could still resolve to an internal IP if the
+    // attacker controls the DNS record (DNS rebinding attack).
+    await assertHostnameResolvesToPublicIp(parsedUrl, dnsResolver);
+
     const init = (args[1] ?? {}) as RequestInit;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
 
     try {
+      // Use redirect:'manual' so we intercept each redirect hop and validate
+      // the destination before following it. Without this, the fetch API
+      // silently follows redirects, which could lead to a public URL redirecting
+      // to an internal one after the DNS check has passed.
       const response = await fetch(rawUrl, {
         ...init,
+        redirect: "manual",
         signal: controller.signal,
       });
 
-      // Validate redirect destination against blocklist
+      // For redirect responses (3xx), validate the Location header before following.
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (location === null) {
+          throw { code: "EXECUTION_FETCH_BLOCKED", message: "Redirect with no Location header." };
+        }
+        if (isUrlBlocked(location)) {
+          throw { code: "EXECUTION_FETCH_BLOCKED", message: "Redirect target is blocked." };
+        }
+        // Validate resolved IPs for the redirect target as well.
+        let redirectUrl: URL;
+        try {
+          redirectUrl = new URL(location, rawUrl);
+        } catch {
+          throw { code: "EXECUTION_FETCH_BLOCKED", message: "Redirect Location is not a valid URL." };
+        }
+        await assertHostnameResolvesToPublicIp(redirectUrl, dnsResolver);
+        // Return the redirect as an opaque response — plugin code can choose to follow
+        // by calling context.fetch() on the Location URL explicitly. We do not
+        // auto-follow because each hop must be independently validated.
+        return {
+          ok: false,
+          status: response.status,
+          statusText: response.statusText,
+          body: "",
+          headers: Object.fromEntries(response.headers.entries()),
+        };
+      }
+
+      // Validate redirect destination against blocklist (belt-and-suspenders for
+      // runtimes that expose response.url even in manual redirect mode).
       if (response.redirected && isUrlBlocked(response.url)) {
         throw { code: "EXECUTION_FETCH_BLOCKED", message: "Redirect target is blocked." };
       }

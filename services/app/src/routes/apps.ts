@@ -499,8 +499,9 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
 
-    // Return minimal SDK type declarations. Full ontology-typed generation
-    // requires Ontology Service integration (phase 2 enhancement).
+    // Return accurate SDK type declarations matching actual app-sdk exports.
+    // Full ontology-typed generation (per-entity types) requires Ontology
+    // Service integration and is planned as a phase 2 enhancement.
     const declarations = [
       {
         filename: "oneplatform-sdk.d.ts",
@@ -509,12 +510,23 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
           `  export function useUser(): { id: string; email: string | null; displayName: string; tenantId: string; roles: string[]; isGuest: boolean };`,
           `  export function useQuery<T>(entity: string, options?: QueryOptions): QueryResult<T>;`,
           `  export function useMutation<T>(entity: string): MutationResult<T>;`,
+          `  export function useSubscription<T>(entity: string, options?: SubscriptionOptions): SubscriptionResult<T>;`,
           `  export function usePermission(entity: string, action: string): boolean;`,
-          `  export function useAppStorage(key: string): [unknown, (value: unknown) => Promise<void>];`,
+          `  /** Returns [value, setValue]. Value persists per-user per-app in platform storage. */`,
+          `  export function useAppStorage<T = unknown>(key: string): [T | null, (value: T) => Promise<void>];`,
           `  export function AppProvider(props: { children: React.ReactNode }): JSX.Element;`,
           `  export interface QueryOptions { filter?: Record<string, unknown>; limit?: number; cursor?: string; }`,
-          `  export interface QueryResult<T> { data: T[]; loading: boolean; error: Error | null; refetch: () => void; }`,
-          `  export interface MutationResult<T> { mutate: (data: Partial<T>) => Promise<T>; loading: boolean; error: Error | null; }`,
+          `  export interface SubscriptionOptions { filter?: Record<string, unknown>; }`,
+          `  export interface QueryResult<T> { data: T[]; isLoading: boolean; error: Error | null; refetch: () => void; }`,
+          `  export interface MutationResult<T> {`,
+          `    create(data: Partial<T>): Promise<T>;`,
+          `    update(id: string, data: Partial<T>): Promise<T>;`,
+          `    replace(id: string, data: T): Promise<T>;`,
+          `    remove(id: string): Promise<void>;`,
+          `    isLoading: boolean;`,
+          `    error: Error | null;`,
+          `  }`,
+          `  export interface SubscriptionResult<T> { data: T[]; isConnected: boolean; error: Error | null; }`,
           `}`,
         ].join("\n"),
       },

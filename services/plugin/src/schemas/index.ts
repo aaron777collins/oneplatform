@@ -52,7 +52,11 @@ export const PluginManifestSchema = z.object({
     /^[0-9a-f]{64}$/,
     "Must be 64-char hex SHA-256"
   ),
-  gpgFingerprint: z.string().optional(),
+  // gpgFingerprint removed: the openpgp library is not yet a declared dependency
+  // and the previous code logged "verification pending" without performing any
+  // actual cryptographic check — security theater that gave false assurance.
+  // TODO(#security-sig): re-add gpgFingerprint and full openpgp verification
+  // once the dependency is approved and a trusted keyring policy is defined.
   tags: z.array(z.string()).optional(),
   license: z.string().min(1),
   changelog: z.string().optional(),

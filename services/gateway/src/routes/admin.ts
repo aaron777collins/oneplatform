@@ -17,7 +17,11 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
       return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
     }
 
-    if (!user.roles?.includes("admin")) {
+    // 'admin' is a scope granted exclusively to the platform-admin role (token-service.ts
+    // resolveScopes). Checking the role name 'admin' was wrong — 'admin' is a scope,
+    // the role is named 'platform-admin'. Checking the scope is the correct approach
+    // and is consistent with how other routes guard admin operations.
+    if (!user.scopes?.includes("admin")) {
       return c.json({ error: { code: "FORBIDDEN", message: "Admin role required." } }, 403);
     }
 
@@ -31,7 +35,11 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
       return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
     }
 
-    if (!user.roles?.includes("admin")) {
+    // 'admin' is a scope granted exclusively to the platform-admin role (token-service.ts
+    // resolveScopes). Checking the role name 'admin' was wrong — 'admin' is a scope,
+    // the role is named 'platform-admin'. Checking the scope is the correct approach
+    // and is consistent with how other routes guard admin operations.
+    if (!user.scopes?.includes("admin")) {
       return c.json({ error: { code: "FORBIDDEN", message: "Admin role required." } }, 403);
     }
 

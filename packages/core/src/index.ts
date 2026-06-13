@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // App factory — the primary entry point for every service
 // ---------------------------------------------------------------------------
-export { createApp } from "./app.js";
+export { createApp, setupProcessErrorHandlers } from "./app.js";
 export type { CreateAppConfig } from "./app.js";
 
 // ---------------------------------------------------------------------------
