@@ -1,13 +1,13 @@
 /**
  * SettingsPage — settings layout with sidebar navigation.
  *
- * Route: /settings (redirects to /settings/profile)
+ * Route: /settings (index redirects to /settings/profile)
  *
- * Acts as a layout wrapper; renders nav + active sub-page via outlet.
- * The sidebar links correspond to sub-routes defined in router.tsx.
+ * Acts as a layout shell. Sub-pages render into <Outlet /> so the sidebar
+ * and heading persist across sub-route transitions without remounting.
  */
 import * as React from "react";
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
 import { User, Users, Key, Webhook, Shield } from "lucide-react";
 import { usePermission } from "@/hooks/use-auth.js";
 import { cn } from "@/lib/utils.js";
@@ -79,11 +79,9 @@ export function SettingsPage() {
           </ul>
         </nav>
 
-        {/* Content area — sub-routes render here via router outlet */}
+        {/* Content area — active sub-route renders here without remounting the shell */}
         <div className="min-w-0 flex-1">
-          <p className="text-sm text-[var(--color-muted-foreground)]">
-            Select a section from the sidebar.
-          </p>
+          <Outlet />
         </div>
       </div>
     </div>

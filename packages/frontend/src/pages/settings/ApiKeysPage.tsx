@@ -149,7 +149,7 @@ export function ApiKeysPage() {
   }
 
   return (
-    <div className="flex-1 p-6">
+    <div>
       <PageHeader
         title="API Keys"
         description="Keys for programmatic access to the platform API."

@@ -124,7 +124,7 @@ export function TeamsPage() {
   });
 
   return (
-    <div className="flex-1 p-6">
+    <div>
       <PageHeader title="Teams" description="Manage members and their access roles." />
 
       {/* Invite form */}

@@ -117,7 +117,7 @@ export function ProfilePage() {
   });
 
   return (
-    <div className="flex-1 p-6">
+    <div>
       <PageHeader title="Profile" description="Manage your personal account details." />
 
       <div className="mt-6 max-w-lg space-y-6">

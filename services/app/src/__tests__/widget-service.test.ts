@@ -1,15 +1,19 @@
 // Unit tests for services/widget-service.ts
 //
-// Covers register, list, and unregister for the in-memory widget registry.
+// Covers register, list, and unregister for the persisted widget registry.
 // Each describe block uses a fresh service instance (no shared state).
+// The WidgetRepository is stubbed with an in-memory implementation so tests
+// remain fast and hermetic — no real Postgres connection required.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   createWidgetService,
   type WidgetService,
   type WidgetServiceDeps,
+  type WidgetDescriptor,
   type RegisterWidgetInput,
 } from "../services/widget-service.js";
+import type { WidgetRepository } from "../repositories/widget-repository.js";
 import type { Logger } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
@@ -25,9 +29,27 @@ function makeLogger(): Logger {
   } as unknown as Logger;
 }
 
+// Minimal in-memory stub for WidgetRepository. Mirrors the real interface so
+// tests exercise the service logic without hitting a database.
+function makeWidgetRepo(seed: WidgetDescriptor[] = []): WidgetRepository {
+  const store = new Map<string, WidgetDescriptor>(seed.map((w) => [w.widgetId, w]));
+
+  return {
+    upsert: vi.fn(async (descriptor: WidgetDescriptor) => {
+      store.set(descriptor.widgetId, descriptor);
+      return descriptor;
+    }),
+    findAll: vi.fn(async () => [...store.values()]),
+    delete: vi.fn(async (_tenantId: string, widgetId: string) => {
+      store.delete(widgetId);
+    }),
+  } as unknown as WidgetRepository;
+}
+
 function makeDeps(overrides?: Partial<WidgetServiceDeps>): WidgetServiceDeps {
   return {
-    logger: overrides?.logger ?? makeLogger(),
+    widgetRepo: overrides?.widgetRepo ?? makeWidgetRepo(),
+    logger:     overrides?.logger ?? makeLogger(),
   };
 }
 
@@ -50,9 +72,10 @@ describe("register", () => {
   let logger:  Logger;
   let service: WidgetService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     logger  = makeLogger();
     service = createWidgetService(makeDeps({ logger }));
+    await service.initialize();
   });
 
   it("returns a WidgetDescriptor with the correct shape", async () => {
@@ -131,8 +154,9 @@ describe("register", () => {
 describe("list", () => {
   let service: WidgetService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     service = createWidgetService(makeDeps());
+    await service.initialize();
   });
 
   it("returns empty array when no widgets are registered", async () => {
@@ -200,9 +224,10 @@ describe("unregister", () => {
   let logger:  Logger;
   let service: WidgetService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     logger  = makeLogger();
     service = createWidgetService(makeDeps({ logger }));
+    await service.initialize();
   });
 
   it("removes the widget from the registry", async () => {
@@ -279,6 +304,9 @@ describe("in-memory registry isolation", () => {
   it("two service instances do not share registry state", async () => {
     const svc1 = createWidgetService(makeDeps());
     const svc2 = createWidgetService(makeDeps());
+
+    await svc1.initialize();
+    await svc2.initialize();
 
     await svc1.register("tenant-001", "app-001", makeWidgetInput({ name: "Widget" }));
 

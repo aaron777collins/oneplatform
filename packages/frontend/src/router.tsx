@@ -335,11 +335,10 @@ const pluginDetailRoute = createRoute({
 });
 
 // --- Settings ---
-// TODO: Make settings sub-pages children of settingsRoute so the sidebar layout
-// persists across sub-page transitions without a full remount. This requires
-// SettingsPage to render an <Outlet /> for the active sub-page content area and
-// each sub-route to be declared as getParentRoute: () => settingsRoute. The
-// sidebar Link components then become relative paths ('./profile', etc.). (M-18)
+// settingsRoute is a layout route: it owns the sidebar shell and renders
+// child routes via <Outlet />. All /settings/* pages are declared as children
+// so TanStack Router keeps the shell mounted and only swaps the outlet content
+// on sub-route transitions — no full-page remount (fixes M-18).
 const settingsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/settings",
@@ -349,9 +348,19 @@ const settingsRoute = createRoute({
   ),
 });
 
+// Bare /settings redirects to /settings/profile so the sidebar always has an
+// active selection on first load.
+const settingsIndexRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/profile" });
+  },
+});
+
 const profileRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/settings/profile",
+  getParentRoute: () => settingsRoute,
+  path: "/profile",
   component: lazyRouteComponent(
     () => import("./pages/settings/ProfilePage.js"),
     "ProfilePage",
@@ -359,8 +368,8 @@ const profileRoute = createRoute({
 });
 
 const teamsRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/settings/teams",
+  getParentRoute: () => settingsRoute,
+  path: "/teams",
   component: lazyRouteComponent(
     () => import("./pages/settings/TeamsPage.js"),
     "TeamsPage",
@@ -368,8 +377,8 @@ const teamsRoute = createRoute({
 });
 
 const apiKeysRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/settings/api-keys",
+  getParentRoute: () => settingsRoute,
+  path: "/api-keys",
   component: lazyRouteComponent(
     () => import("./pages/settings/ApiKeysPage.js"),
     "ApiKeysPage",
@@ -377,8 +386,8 @@ const apiKeysRoute = createRoute({
 });
 
 const webhooksRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/settings/webhooks",
+  getParentRoute: () => settingsRoute,
+  path: "/webhooks",
   component: lazyRouteComponent(
     () => import("./pages/settings/WebhooksPage.js"),
     "WebhooksPage",
@@ -386,15 +395,15 @@ const webhooksRoute = createRoute({
 });
 
 const adminRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/settings/admin",
+  getParentRoute: () => settingsRoute,
+  path: "/admin",
   // Guard: only platform-admin users may access the admin page.
   // The server enforces this too — this check prevents non-admins from seeing
   // the page content while the server request is in flight.
   beforeLoad: () => {
     const hasPermission = useAuthStore.getState().hasPermission("platform-admin");
     if (!hasPermission) {
-      throw redirect({ to: "/settings" });
+      throw redirect({ to: "/settings/profile" });
     }
   },
   component: lazyRouteComponent(
@@ -444,12 +453,14 @@ const routeTree = rootRoute.addChildren([
     metricsRoute,
     pluginsRoute,
     pluginDetailRoute,
-    settingsRoute,
-    profileRoute,
-    teamsRoute,
-    apiKeysRoute,
-    webhooksRoute,
-    adminRoute,
+    settingsRoute.addChildren([
+      settingsIndexRoute,
+      profileRoute,
+      teamsRoute,
+      apiKeysRoute,
+      webhooksRoute,
+      adminRoute,
+    ]),
   ]),
   notFoundRoute,
 ]);

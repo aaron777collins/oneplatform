@@ -17,6 +17,7 @@ import {
   PluginNotFoundError,
   InstanceNotFoundError,
   PluginNotActiveError,
+  ConfigValidationFailedError,
 } from "../services/errors.js";
 import type { Logger, EventPublisher } from "@oneplatform/core";
 
@@ -466,5 +467,242 @@ describe("InstanceService.listInstances", () => {
       "com.example.my-plugin",
       { tenantId: "tenant-001" },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createInstance — Ajv JSON Schema config validation (M-23)
+//
+// These tests exercise constraints the old hand-rolled validator did not cover:
+// enum, minimum/maximum, minLength/maxLength, pattern, additionalProperties.
+// ---------------------------------------------------------------------------
+
+describe("InstanceService.createInstance — Ajv config validation", () => {
+  function makeService(configSchema: Record<string, unknown>) {
+    const pluginRepo = makePluginRepo();
+    const instanceRepo = makeInstanceRepo();
+    const pool = makePool();
+    const plugin = makePluginRow({ manifest: { ...makePluginRow().manifest, configSchema } });
+
+    // First call: UUID lookup fails (input is a manifest_id string, not a UUID).
+    // Second call: enableInstance resolves the plugin by its actual UUID.
+    pluginRepo.findById
+      .mockRejectedValueOnce(new Error("bad uuid"))
+      .mockResolvedValue(plugin);
+    pluginRepo.findActiveByManifestId.mockResolvedValue(plugin);
+    instanceRepo.create.mockResolvedValue(makeInstanceRow());
+
+    const service = createInstanceService(
+      makeDeps({ pluginRepo, instanceRepo, pool })
+    );
+    return { service, instanceRepo };
+  }
+
+  it("accepts config that satisfies an empty schema", async () => {
+    const { service } = makeService({});
+
+    // Should not throw — empty schema allows any object
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: { anything: true },
+        createdBy: "u",
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("rejects config missing a required field", async () => {
+    const { service } = makeService({
+      type: "object",
+      required: ["apiKey"],
+      properties: { apiKey: { type: "string" } },
+    });
+
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: {},
+        createdBy: "u",
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
+  });
+
+  it("error message names the missing required field", async () => {
+    const { service } = makeService({
+      type: "object",
+      required: ["apiKey"],
+      properties: { apiKey: { type: "string" } },
+    });
+
+    const err = await service
+      .createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: {},
+        createdBy: "u",
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConfigValidationFailedError);
+    expect((err as ConfigValidationFailedError).message).toMatch(/apiKey/);
+  });
+
+  it("rejects a field that fails an enum constraint", async () => {
+    const { service } = makeService({
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["read", "write"] },
+      },
+    });
+
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: { mode: "delete" },
+        createdBy: "u",
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
+  });
+
+  it("rejects a number below the minimum constraint", async () => {
+    const { service } = makeService({
+      type: "object",
+      required: ["retries"],
+      properties: { retries: { type: "number", minimum: 1 } },
+    });
+
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: { retries: 0 },
+        createdBy: "u",
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
+  });
+
+  it("rejects a string shorter than minLength", async () => {
+    const { service } = makeService({
+      type: "object",
+      required: ["token"],
+      properties: { token: { type: "string", minLength: 8 } },
+    });
+
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: { token: "short" },
+        createdBy: "u",
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
+  });
+
+  it("rejects a string that does not match a pattern constraint", async () => {
+    const { service } = makeService({
+      type: "object",
+      required: ["webhookUrl"],
+      properties: { webhookUrl: { type: "string", pattern: "^https://" } },
+    });
+
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: { webhookUrl: "http://insecure.example.com" },
+        createdBy: "u",
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
+  });
+
+  it("rejects additional properties when additionalProperties is false", async () => {
+    const { service } = makeService({
+      type: "object",
+      properties: { apiKey: { type: "string" } },
+      additionalProperties: false,
+    });
+
+    await expect(
+      service.createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        config: { apiKey: "valid", unknownField: "oops" },
+        createdBy: "u",
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
+  });
+
+  it("collects multiple violations in one error (allErrors mode)", async () => {
+    const { service } = makeService({
+      type: "object",
+      required: ["apiKey", "retries"],
+      properties: {
+        apiKey: { type: "string" },
+        retries: { type: "number", minimum: 1 },
+      },
+    });
+
+    const err = await service
+      .createInstance({
+        pluginIdOrManifestId: "com.example.my-plugin",
+        tenantId: "t",
+        displayName: "D",
+        // Both required fields missing
+        config: {},
+        createdBy: "u",
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConfigValidationFailedError);
+    // fieldErrors.config must contain one entry per violation
+    const details = (err as ConfigValidationFailedError).details as
+      | { fieldErrors?: Record<string, string[]> }
+      | undefined;
+    expect(details?.fieldErrors?.["config"]?.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patchInstance — Ajv config validation on update (M-23)
+// ---------------------------------------------------------------------------
+
+describe("InstanceService.patchInstance — Ajv config validation", () => {
+  it("rejects a patched config that violates the plugin's configSchema", async () => {
+    const configSchema = {
+      type: "object",
+      required: ["apiKey"],
+      properties: { apiKey: { type: "string", minLength: 10 } },
+    };
+
+    const pluginRepo = makePluginRepo();
+    const instanceRepo = makeInstanceRepo();
+
+    instanceRepo.findByIdAndTenant.mockResolvedValue(makeInstanceRow());
+    // patchInstance loads the plugin to get configSchema
+    pluginRepo.findById.mockResolvedValue(
+      makePluginRow({ manifest: { ...makePluginRow().manifest, configSchema } })
+    );
+
+    const service = createInstanceService(makeDeps({ pluginRepo, instanceRepo }));
+
+    await expect(
+      service.patchInstance({
+        instanceId: "inst-001",
+        tenantId: "tenant-001",
+        updatedBy: "user-001",
+        config: { apiKey: "short" }, // fails minLength: 10
+      })
+    ).rejects.toThrow(ConfigValidationFailedError);
   });
 });

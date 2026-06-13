@@ -315,6 +315,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     publicRoutes: ["/health/live", "/health/ready"],
     targetService: "plugin-service",
     servicePublicKeys,
+    maxBodySize: 50 * 1024 * 1024,
   });
 
   // Step 17: Register routes — specific before catch-all.

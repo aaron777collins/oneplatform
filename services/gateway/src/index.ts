@@ -206,7 +206,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     // X-Forwarded-For is intentionally NOT used as a fallback — it is a
     // client-controlled header that can be spoofed to bypass rate limiting.
     const user = c.var.user;
-    const sourceIp = c.req.raw.socket?.remoteAddress ?? "unknown";
+    const sourceIp = c.req.header("x-real-ip") ?? "unknown";
     const key = user?.tenantId ?? sourceIp;
     const result = await rateLimiter.check(`gateway:${key}`, rateLimitPerMinute);
 
@@ -339,6 +339,13 @@ async function main(): Promise<void> {
           } else {
             headers.set(key, value);
           }
+        }
+
+        // Inject TCP source IP so Hono middleware can access it (Fetch API
+        // Request objects have no .socket property).
+        const remoteAddr = req.socket?.remoteAddress;
+        if (remoteAddr) {
+          headers.set("x-real-ip", remoteAddr);
         }
 
         const fetchRequest = new Request(url, {

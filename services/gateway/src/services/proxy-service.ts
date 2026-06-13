@@ -73,6 +73,8 @@ const HEADERS_TO_STRIP = new Set([
   "x-oneplatform-user-roles",
   "x-oneplatform-key-id",
   "x-user-context",
+  "x-user-context-signature",
+  "x-real-ip",
 ]);
 
 // ---------------------------------------------------------------------------

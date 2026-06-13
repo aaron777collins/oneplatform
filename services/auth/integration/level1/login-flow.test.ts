@@ -321,10 +321,12 @@ describe("Auth service — login flow", () => {
 
   // -------------------------------------------------------------------------
 
-  it("account locks after 10 failed login attempts (returns 403)", async () => {
+  it("account locks after 10 failed login attempts (returns generic 401 to prevent enumeration)", async () => {
     // The auth service increments failed_login_count on each bad password and
     // locks the account when the count reaches 10 (locked_until = now + 15 min).
-    // Subsequent login attempts return AccountLockedError (statusCode 403).
+    // Subsequent login attempts return a generic UnauthorizedError (401) to
+    // prevent user enumeration — the caller cannot distinguish locked from
+    // wrong password.
     const email = uniqueEmail("lockout");
     const password = "Correct-Horse-Battery-Staple-99";
 
@@ -338,11 +340,11 @@ describe("Auth service — login flow", () => {
       await res.text();
     }
 
-    // The 11th attempt should hit the locked account path (403)
+    // The 11th attempt should still return 401 (generic, not 403)
     const lockedRes = await loginUser(email, "wrong-password");
-    expect(lockedRes.status).toBe(403);
+    expect(lockedRes.status).toBe(401);
 
-    const body = await lockedRes.json() as { error?: { code?: string } };
-    expect(body.error?.code).toBe("AUTH_ACCOUNT_LOCKED");
+    const body = await lockedRes.json() as { error?: { code?: string; message?: string } };
+    expect(body.error?.message).toBe("Invalid email or password.");
   });
 });

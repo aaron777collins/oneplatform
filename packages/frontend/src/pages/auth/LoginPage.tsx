@@ -8,6 +8,8 @@ import React from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { LoginForm } from "@/components/auth/LoginForm.js";
 import { OAuthButton } from "@/components/auth/OAuthButton.js";
+
+const REGISTRATION_ENABLED = false;
 import {
   Card,
   CardHeader,
@@ -78,7 +80,7 @@ export function LoginPage() {
             signup flow are implemented. The server does not expose a public
             registration endpoint; new users are invited by a tenant admin.
             Re-enable this once M-17 (registration page) ships. */}
-        {false && (
+        {REGISTRATION_ENABLED && (
           <p className="text-center text-sm text-[var(--color-muted-foreground)]">
             Have an invite?{" "}
             <button

@@ -1,3 +1,4 @@
+import Ajv from "ajv";
 import type pg from "pg";
 import type { Logger, EventPublisher } from "@oneplatform/core";
 import type { InstanceRepository } from "../repositories/instance-repository.js";
@@ -15,51 +16,45 @@ import {
 } from "./errors.js";
 
 // ---------------------------------------------------------------------------
-// Minimal JSON Schema validator — avoids pulling in Ajv as a runtime dep that
-// hasn't been declared in package.json. Validates required + type constraints
-// from the manifest configSchema. Sufficient for the guard required by B5;
-// full JSON Schema 2020-12 can be added when Ajv is approved as a dependency.
+// Shared Ajv instance (v6 Draft-07) — compiled schemas are cached internally
+// so repeated calls for the same schema pay the compilation cost only once.
 //
-// TODO: Replace with Ajv (ajv + ajv-formats) once approved as a dependency to
-// gain support for: enum, minimum/maximum, minLength/maxLength, pattern,
-// additionalProperties: false, and recursive $ref schemas. (M-23)
+// allErrors: true — collect every violation in a single pass rather than
+// stopping at the first, so the caller receives a complete error list.
+//
+// useDefaults: false — we intentionally do not mutate the caller's config
+// object; defaults must be applied explicitly by the plugin itself.
+// ---------------------------------------------------------------------------
+const ajv = new Ajv({ allErrors: true, useDefaults: false });
+
+// ---------------------------------------------------------------------------
+// Validate a plugin instance config object against the plugin manifest's
+// configSchema (JSON Schema Draft-07).
+//
+// Returns a structured result rather than throwing so the caller controls how
+// to surface validation failures (currently via ConfigValidationFailedError).
 // ---------------------------------------------------------------------------
 function validateConfigAgainstSchema(
   config: Record<string, unknown>,
   schema: Record<string, unknown>
 ): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
+  // compile() caches by schema identity; safe to call on every request.
+  const validate = ajv.compile(schema);
+  const valid = validate(config) as boolean;
 
-  const required = schema["required"];
-  if (Array.isArray(required)) {
-    for (const key of required) {
-      if (typeof key === "string" && !(key in config)) {
-        errors.push(`Missing required config field: '${key}'`);
-      }
-    }
+  if (valid) {
+    return { valid: true, errors: [] };
   }
 
-  const properties = schema["properties"];
-  if (properties !== null && typeof properties === "object" && !Array.isArray(properties)) {
-    for (const [key, propSchema] of Object.entries(properties as Record<string, unknown>)) {
-      if (!(key in config)) continue;
-      const value = config[key];
-      if (propSchema !== null && typeof propSchema === "object" && !Array.isArray(propSchema)) {
-        const expectedType = (propSchema as Record<string, unknown>)["type"];
-        if (typeof expectedType === "string") {
-          const actualType =
-            value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
-          if (actualType !== expectedType) {
-            errors.push(
-              `Config field '${key}' must be of type '${expectedType}', got '${actualType}'`
-            );
-          }
-        }
-      }
-    }
-  }
+  // Map Ajv ErrorObjects to human-readable messages.  dataPath is empty for
+  // root-level errors (e.g. required), so we prefix with "config" to give
+  // users a stable anchor when reading the error alongside the request body.
+  const errors = (validate.errors ?? []).map((err) => {
+    const path = err.dataPath ? `config${err.dataPath}` : "config";
+    return `${path}: ${err.message ?? err.keyword}`;
+  });
 
-  return { valid: errors.length === 0, errors };
+  return { valid: false, errors };
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import {
   VersionRepository,
   DeploymentRepository,
   PermissionRepository,
+  WidgetRepository,
 } from "./repositories/index.js";
 import {
   createAppService,
@@ -248,10 +249,11 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   });
 
   // Step 4: Instantiate repositories
-  const appRepo   = new AppRepository(db);
-  const fileRepo  = new VersionRepository(db);
-  const buildRepo = new DeploymentRepository(db);
-  const permRepo  = new PermissionRepository(db);
+  const appRepo      = new AppRepository(db);
+  const fileRepo     = new VersionRepository(db);
+  const buildRepo    = new DeploymentRepository(db);
+  const permRepo     = new PermissionRepository(db);
+  const widgetRepo   = new WidgetRepository(db);
 
   // Step 5: Create services
   const appService = createAppService({ appRepo, fileRepo, logger });
@@ -280,12 +282,16 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
   const permService = createPermissionService({ appRepo, permRepo, logger, masterKey });
 
-  // Widget service — in-memory registry for plugin widget registration
-  createWidgetService({ logger });
+  // Widget service — persisted to Postgres, in-memory Map used as a read cache (M-15)
+  const widgetService = createWidgetService({ widgetRepo, logger });
 
-  // Step 5b: Recover any builds that were interrupted by a previous restart.
-  // Must run before the HTTP server starts so the DB is clean before traffic arrives.
-  await buildService.recoverInterruptedBuilds();
+  // Step 5b: Run startup tasks before the HTTP server accepts traffic.
+  // recoverInterruptedBuilds cleans up stale build records; initialize seeds the
+  // widget cache so list() is correct from the first request after restart.
+  await Promise.all([
+    buildService.recoverInterruptedBuilds(),
+    widgetService.initialize(),
+  ]);
 
   // Step 6: Start BullMQ retention worker AND enqueue repeating job (W1).
   // The worker exists to consume jobs; we must also enqueue a repeating job

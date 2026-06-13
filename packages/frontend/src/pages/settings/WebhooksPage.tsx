@@ -147,7 +147,7 @@ export function WebhooksPage() {
   }
 
   return (
-    <div className="flex-1 p-6">
+    <div>
       <PageHeader
         title="Webhooks"
         description="Receive HTTP notifications when platform events occur."

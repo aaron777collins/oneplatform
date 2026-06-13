@@ -96,7 +96,7 @@ export function AdminPage() {
 
   if (!isAdmin) {
     return (
-      <div className="flex-1 p-6">
+      <div>
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <Shield className="mb-4 h-12 w-12 text-[var(--color-muted-foreground)]" aria-hidden="true" />
           <h2 className="text-lg font-semibold">Admin access required</h2>
@@ -109,7 +109,7 @@ export function AdminPage() {
   }
 
   return (
-    <div className="flex-1 p-6">
+    <div>
       <PageHeader
         title="Admin"
         description="Platform and tenant configuration. Changes take effect immediately."

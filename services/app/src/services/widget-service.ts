@@ -1,4 +1,5 @@
 import type { Logger } from "@oneplatform/core";
+import type { WidgetRepository } from "../repositories/widget-repository.js";
 
 // ---------------------------------------------------------------------------
 // Widget registry — allows apps to register UI widgets that can be embedded
@@ -27,36 +28,44 @@ export interface RegisterWidgetInput {
 }
 
 export interface WidgetService {
+  // Resolves after the in-memory cache is seeded from the DB. Must be awaited
+  // before the HTTP server accepts traffic so that list() returns complete data.
+  initialize(): Promise<void>;
   register(tenantId: string, appId: string, input: RegisterWidgetInput): Promise<WidgetDescriptor>;
   list(tenantId: string, appId?: string): Promise<WidgetDescriptor[]>;
   unregister(tenantId: string, appId: string, widgetId: string): Promise<void>;
 }
 
 export interface WidgetServiceDeps {
-  logger: Logger;
+  widgetRepo: WidgetRepository;
+  logger:     Logger;
 }
 
 // ---------------------------------------------------------------------------
 // Factory
 //
-// The widget registry is held in-memory for this implementation. Widgets are
-// re-registered on service restart via the deploy event subscriber.
-// A persistent store (Redis or Postgres) can replace this map when multi-
-// instance deployments require cross-node consistency.
+// The in-memory Map is a read cache for fast O(1) lookups on the hot path.
+// All mutations go to Postgres first; the Map is updated only after the DB
+// write succeeds, so a failed write never leaves the cache in an inconsistent
+// state. On startup, initialize() seeds the cache from the DB so that widget
+// registrations survive service restarts (M-15).
 // ---------------------------------------------------------------------------
 
-// TODO: Persist widget registry to Postgres (app.widgets table) so that
-// registrations survive service restarts without requiring a full re-deploy
-// event from every installed app. Use the existing db pool from deps and
-// mirror the register/unregister operations to the DB alongside the in-memory
-// map. On startup, seed the in-memory map from the DB. (M-15)
 export function createWidgetService(deps: WidgetServiceDeps): WidgetService {
-  const { logger } = deps;
+  const { widgetRepo, logger } = deps;
 
-  // widgetId → WidgetDescriptor
+  // widgetId → WidgetDescriptor (read cache)
   const registry = new Map<string, WidgetDescriptor>();
 
-  function register(
+  async function initialize(): Promise<void> {
+    const widgets = await widgetRepo.findAll();
+    for (const widget of widgets) {
+      registry.set(widget.widgetId, widget);
+    }
+    logger.info("Widget registry seeded from DB", { count: widgets.length });
+  }
+
+  async function register(
     tenantId: string,
     appId: string,
     input: RegisterWidgetInput
@@ -75,10 +84,13 @@ export function createWidgetService(deps: WidgetServiceDeps): WidgetService {
       createdAt:   new Date().toISOString(),
     };
 
-    registry.set(widgetId, descriptor);
-    logger.info("Widget registered", { tenantId, appId, widgetId });
+    // Persist first — update cache only after the write succeeds so we never
+    // serve stale data from a Map that is ahead of the DB.
+    const persisted = await widgetRepo.upsert(descriptor);
+    registry.set(widgetId, persisted);
 
-    return Promise.resolve(descriptor);
+    logger.info("Widget registered", { tenantId, appId, widgetId });
+    return persisted;
   }
 
   function list(tenantId: string, appId?: string): Promise<WidgetDescriptor[]> {
@@ -90,14 +102,20 @@ export function createWidgetService(deps: WidgetServiceDeps): WidgetService {
     return Promise.resolve(widgets);
   }
 
-  function unregister(tenantId: string, appId: string, widgetId: string): Promise<void> {
+  async function unregister(tenantId: string, appId: string, widgetId: string): Promise<void> {
     const widget = registry.get(widgetId);
-    if (widget !== undefined && widget.tenantId === tenantId && widget.appId === appId) {
-      registry.delete(widgetId);
-      logger.info("Widget unregistered", { tenantId, appId, widgetId });
+
+    // Guard against cross-tenant or cross-app deletions — same checks as before,
+    // enforced before the DB delete so we never issue a spurious DELETE.
+    if (widget === undefined || widget.tenantId !== tenantId || widget.appId !== appId) {
+      return;
     }
-    return Promise.resolve();
+
+    await widgetRepo.delete(tenantId, widgetId);
+    registry.delete(widgetId);
+
+    logger.info("Widget unregistered", { tenantId, appId, widgetId });
   }
 
-  return { register, list, unregister };
+  return { initialize, register, list, unregister };
 }

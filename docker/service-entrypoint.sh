@@ -55,7 +55,8 @@ export OP_CURSOR_SECRET
 # Bootstrap token may be absent if bootstrap already completed on a previous run.
 # Do not fail if missing — the Auth Service handles the absent-token case.
 if [ -f "$INIT_DIR/bootstrap.token" ]; then
-  export OP_BOOTSTRAP_TOKEN=$(tr -d '[:space:]' < "$INIT_DIR/bootstrap.token")
+  OP_BOOTSTRAP_TOKEN=$(tr -d '[:space:]' < "$INIT_DIR/bootstrap.token")
+  export OP_BOOTSTRAP_TOKEN
 else
   export OP_BOOTSTRAP_TOKEN=""
 fi
