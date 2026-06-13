@@ -96,6 +96,14 @@ const indexRoute = createRoute({
     const status = await context.apiClient.get<{
       data: { completed: boolean; bootstrapToken?: string };
     }>("/v1/auth/bootstrap/status");
+
+    // Once bootstrap is complete the user belongs inside the authenticated shell.
+    // Redirecting here (in the loader, before render) avoids a flash of the
+    // BootstrapGatePage component entirely.
+    if (status.data.completed) {
+      throw redirect({ to: "/dashboard" });
+    }
+
     return {
       bootstrapComplete: status.data.completed,
       ...(status.data.bootstrapToken !== undefined
@@ -125,6 +133,16 @@ const authenticatedRoute = createRoute({
 // ---------------------------------------------------------------------------
 // Authenticated child routes
 // ---------------------------------------------------------------------------
+
+// --- Dashboard ---
+const dashboardRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/dashboard",
+  component: lazyRouteComponent(
+    () => import("./pages/dashboard/DashboardPage.js"),
+    "default",
+  ),
+});
 
 // --- Connectors ---
 const connectorsRoute = createRoute({
@@ -394,6 +412,7 @@ const routeTree = rootRoute.addChildren([
   forgotPasswordRoute,
   resetPasswordRoute,
   authenticatedRoute.addChildren([
+    dashboardRoute,
     connectorsRoute,
     newConnectorRoute,
     connectorDetailRoute,

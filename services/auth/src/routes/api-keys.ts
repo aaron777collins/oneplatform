@@ -30,11 +30,17 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
     // exactOptionalPropertyTypes: expiresAt is optional in Zod schema (string | undefined)
     // but CreateApiKeyInput uses exactOptionalPropertyTypes, so we must spread conditionally.
     const { name, scopes, expiresAt } = parsed.data;
-    const { apiKey, keyRecord } = await apiKeyService.create(user.userId, user.tenantId, {
-      name,
-      scopes,
-      ...(expiresAt !== undefined ? { expiresAt } : {}),
-    });
+    // Pass the caller's own scopes so the service can enforce the subset constraint.
+    const { apiKey, keyRecord } = await apiKeyService.create(
+      user.userId,
+      user.tenantId,
+      {
+        name,
+        scopes,
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      },
+      user.scopes,
+    );
 
     return c.json(
       {

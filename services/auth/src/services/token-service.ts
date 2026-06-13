@@ -22,6 +22,8 @@ import { UnauthorizedError } from "@oneplatform/core";
 // ---------------------------------------------------------------------------
 
 // The complete set of scopes the platform supports (from L2 design §4.4).
+// execution:read must pair with execution:run so GET endpoints on the
+// execution service are accessible to all roles that can trigger executions.
 const ALL_SCOPES: readonly string[] = [
   "data:read",
   "data:write",
@@ -39,6 +41,7 @@ const ALL_SCOPES: readonly string[] = [
   "users:manage",
   "logs:read",
   "webhooks:manage",
+  "execution:read",
   "execution:run",
   "admin",
 ] as const;
@@ -51,17 +54,17 @@ const PREDEFINED_ROLE_SCOPES: Readonly<Record<string, readonly string[]>> = {
   "tenant-admin": [
     "data:read", "data:write", "ontology:read", "ontology:write",
     "pipelines:manage", "apps:manage", "apps:deploy", "apps:read",
-    "execution:run", "plugins:read", "plugins:manage",
+    "execution:read", "execution:run", "plugins:read", "plugins:manage",
     "users:read", "users:manage", "logs:read", "webhooks:manage",
   ],
   developer: [
     "data:read", "data:write", "ontology:read", "pipelines:manage",
-    "apps:manage", "apps:deploy", "apps:read", "execution:run",
+    "apps:manage", "apps:deploy", "apps:read", "execution:read", "execution:run",
     "plugins:read", "logs:read",
   ],
   editor: [
     "data:read", "data:write", "ontology:read", "pipelines:manage",
-    "apps:manage", "apps:read", "logs:read",
+    "apps:manage", "apps:read", "execution:read", "logs:read",
   ],
   viewer: [
     "data:read", "ontology:read", "pipelines:read", "apps:read", "logs:read",

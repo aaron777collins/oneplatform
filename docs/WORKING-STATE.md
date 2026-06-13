@@ -2,118 +2,111 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Architecture Finalization
+## Current Phase: Phase 9 — Critical Fixes & Hardening
 
-### Completed
+### Completed Phases
+
+#### Phase 0: Architecture & Planning
 - [x] Initial brainstorming and requirements gathering
-- [x] 23 architecture decisions documented in `docs/decisions/001-architecture-decisions.md`
-- [x] 11 architecture review cycles completed — CLEAN APPROVED
-- [x] All blocking issues resolved across 11 review cycles
-- [x] README.md created
-- [x] DEVELOPMENT-PROCESS.md created (full team flow documented)
-- [x] GitHub repo created and all work pushed: https://github.com/aaron777collins/oneplatform
-- [x] HANDOFF.md created (comprehensive project context)
-- [x] User stories walkthrough completed — 108 friction points identified
-- [x] 13 new ADR decisions required (ADR 24-36) identified and documented
+- [x] 23 architecture decisions documented (`docs/decisions/001-architecture-decisions.md`)
+- [x] 11 architecture review cycles — CLEAN APPROVED
+- [x] User stories walkthrough — 108 friction points identified
+- [x] 13 new ADR decisions (ADR 24-36) — 2 review cycles, CLEAN APPROVED
+- [x] L1 design specification (2239 lines)
+- [x] Detailed implementation plans for Phase 0 (infra) + Phase 1 (core)
+
+#### Phase 1: Infrastructure & Core Library
+- [x] Monorepo infrastructure + Docker Compose stack
+- [x] Redis 7 AOF config and per-service ACL rules
+- [x] `@oneplatform/core` foundation (types, config, errors, crypto, DB, Redis, queues, logger, events, health)
+- [x] `@oneplatform/core` middleware stack + createApp() factory
+- [x] Architecture review fixes (2 blockers + 6 warnings)
+
+#### Phase 2: L2 Service Designs
+- [x] L2 design documents for all 9 services + 4 packages (25,535 lines)
+- [x] Cross-service consistency review (9 blocking + 10 warning fixes)
+
+#### Phase 3: Service Implementation
+- [x] Auth Service — full implementation + 182 unit tests + 6 security blocker fixes
+- [x] Ontology Service — full implementation + 610 unit tests
+- [x] Gateway Service — full implementation + tests
+- [x] Logging Service — full implementation + tests
+- [x] Ingestion Service — full implementation
+- [x] Pipeline Service — full implementation + 450 unit tests + 6 blocker fixes
+- [x] Execution Service — full implementation + 4 blocker fixes
+- [x] App Service — full implementation + 530 unit tests + 7 blocker fixes
+- [x] Plugin Service — full implementation + 557 unit tests + 7 blocker fixes
+
+#### Phase 4: SDKs, CLI & Plugin SDK
+- [x] `@oneplatform/sdk` — typed client, auth, pagination, SSE, filter builder (39 files)
+- [x] `@oneplatform/app-sdk` — React hooks, BFF client, WebSocket, permission cache (32 files)
+- [x] `@oneplatform/plugin-sdk` — types, manifest validation, testing utilities, dev tools
+- [x] `@oneplatform/cli` — full implementation + review fixes
+- [x] SDK review fixes (2 blockers, 4 warnings)
+- [x] App SDK review fixes (1 blocker, 8 warnings)
+- [x] Plugin SDK review fixes (4 blockers, 5 warnings)
+- [x] CLI review fixes (3 blockers, 12 warnings)
+
+#### Phase 5: Frontend Design
+- [x] Frontend design specification (2016 lines)
+- [x] Design review — 10 warnings + 4 suggestions addressed
+
+#### Phase 6: Frontend Implementation
+- [x] Layer 1 — scaffold, lib, stores, hooks, routing (52 files)
+- [x] Layer 2 — shadcn/ui components, layout, shared (31 files)
+- [x] Layer 3 — auth pages + 6-screen bootstrap wizard (18 files)
+- [x] Layer 4 — dashboard, connectors, ontology, pipelines (28 files)
+- [x] Layer 5 — apps, Monaco editor, plugins, logs, DLQ, metrics, settings (43 files)
+
+#### Phase 7: Frontend Testing & Review
+- [x] Frontend review fixes (3 blockers, 11 warnings)
+- [x] Frontend test suite — 367 tests across 24 files
+- [x] Test review fixes — safeRedirect security bug, false positives removed
+
+#### Phase 8: Integration & E2E Testing
+- [x] Integration test architecture design (APPROVED after 5 blocker fixes)
+- [x] Service refactoring — all 9 services export createServiceApp() factory
+- [x] Test infrastructure — helpers, env config, Docker Compose test profile
+- [x] Level 1 integration tests — 20 files, ~126 tests across all 9 services
+- [x] Level 1 review fixes — 4 blockers, 3 warnings
+- [x] Level 2 cross-service HTTP tests — 9 services covered
+- [x] Level 3 full-stack E2E tests — 4 test suites
+- [x] Level 2/3 review cycle — 12 blockers + 8 warnings + 3 regressions fixed, GREEN
+- [x] Shared test helpers extracted (e2e-auth.ts, wait-for-ready.ts)
+- [x] User story analysis v2 — 85 findings from 6 perspectives (13 CRITICAL, 35 HIGH)
 
 ### In Progress
-- [ ] Write full design spec
+- [ ] Fix 13 CRITICAL findings from user story analysis v2
 
-### Pending (in order)
-1. ~~Walk through user stories~~ (DONE — see `docs/USER-STORIES-ANALYSIS.md`)
-2. ~~Write new ADR decisions 24-36~~ (DONE — 13 new decisions, 2 review cycles, CLEAN APPROVED)
-3. Write full design spec and commit
-4. Create detailed implementation plan (invoke writing-plans skill)
-5. Granular sub-designs for each of the 9 services + core library + SDKs + CLI
-   - Each goes through: propose → review → test → code review (R/Y/G) → revise → review loop
-6. Full implementation using structured agent teams
-7. Comprehensive test suites — unit, integration, contract, e2e, security
+### Pending
+1. Fix 35 HIGH findings from user story analysis v2
+2. Docker Compose — add all 9 application service containers
+3. TLS configuration and security hardening
+4. Operational documentation (deployment, operations, upgrade guides)
+5. Auto-generated API docs pipeline
+6. BSL license file
+7. Final end-to-end verification
 
-## Architecture Summary (23 Decisions)
+## Test Totals
 
-| # | Decision | Status |
-|---|----------|--------|
-| 1 | MVP Scope — all subsystems including app platform | APPROVED |
-| 2 | App Platform — code-first, visual builder later | APPROVED |
-| 3 | Deployment — self-hosted Docker Compose, cloud-ready | APPROVED |
-| 4 | Tech Stack — TypeScript monorepo, Hono backend | APPROVED |
-| 5 | Database — Postgres + PgBouncer (dual-mode) + Redis (logical DBs + ACLs) | APPROVED |
-| 6 | Code Execution — isolated-vm in separate container + Docker sandbox via proxy | APPROVED |
-| 7 | Auth — email/password + OAuth + JWT revocation + emergency re-key | APPROVED |
-| 8 | License — BSL (converts to Apache 2.0 after 4 years) | APPROVED |
-| 9 | Real-Time — SSE + WebSockets | APPROVED |
-| 10 | Architecture — 9 microservices, SOLID, engine-first | APPROVED |
-| 11 | Secret Management — AES-256-GCM + HKDF + idempotent rotation | APPROVED |
-| 12 | Ontology Resilience — local cache + pub/sub + 15s poll + jitter + circuit breaker | APPROVED |
-| 13 | Queue Reliability — DLQ + backpressure + poison-pill | APPROVED |
-| 14 | Schema Migration — versioned, dual-schema UNION view, per-batch shadow tables, orphan cleanup | APPROVED |
-| 15 | App Routing — path-based default, optional subdomain | APPROVED |
-| 16 | Plugin Hooks — linearized, sandboxed, critical/advisory, depth guard | APPROVED |
-| 17 | Logging — async pub/sub + BullMQ audit + batch persist + horizontal scale path | APPROVED |
-| 18 | Redis Resilience — AOF + graceful degradation + WAL for job buffer + Sentinel docs | APPROVED |
-| 19 | Service-to-Service Auth — per-service secrets + service RBAC + 3-tier network | APPROVED |
-| 20 | Rate Limiting — multi-tier + local in-memory fallback | APPROVED |
-| 21 | Observability — OTEL + Prometheus + Jaeger + auto-instrumented via core | APPROVED |
-| 22 | SDK/CLI/API — first-class, auto-generated, browser OAuth+PKCE, App BFF | APPROVED |
-| 23 | Auto-Generated Docs — API/SDK/CLI/ontology, CI drift check, versioned | APPROVED |
+| Area | Tests |
+|------|-------|
+| Services (unit) | ~3,939 |
+| SDK | 82 |
+| Plugin SDK | 61 |
+| App SDK | 105 |
+| Frontend | 367 |
+| Integration L1 | ~126 |
+| Integration L2 | ~50 |
+| Integration L3 (E2E) | ~28 |
+| **Total** | **~4,758** |
 
-## Services
-
-| Service | Port | Key Responsibilities |
-|---------|------|---------------------|
-| Gateway | 3000 | API routing, rate limiting, auth validation, auto-generated REST endpoints |
-| Auth | 3001 | Users, sessions, OAuth, API keys, RBAC, ontology-aware permissions |
-| Ingestion | 3002 | Connectors, webhooks, uploads, credential vault |
-| Ontology | 3003 | Schema definitions, mapping, code generation, migration |
-| Pipeline | 3004 | Workflow orchestration, triggers, cron, hook invocation |
-| Execution | 3005 | Sandboxed code execution (isolated-vm + Docker) |
-| App | 3006 | User app hosting, SDK, build/deploy |
-| Logging | 3007 | Centralized logs, audit, metrics, alerting |
-| Plugin | 3008 | Plugin lifecycle, hook registry, extension points |
-
-## Infrastructure
-
-| Component | Purpose |
-|-----------|---------|
-| PostgreSQL 16 + PgBouncer | Persistent storage with connection pooling |
-| Redis 7 (AOF, ACLs, logical DBs) | Queues, cache, pub/sub, auth state |
-| Docker Socket Proxy | Restricted Docker API for sandbox containers |
-| op-sandbox-vm | Process-isolated isolated-vm container |
-| Nginx | Frontend SPA serving |
-
-## Shared Packages
-
-| Package | Purpose |
-|---------|---------|
-| @oneplatform/core | Engine library — DB, auth, queues, logging, OTEL, types |
-| @oneplatform/sdk | External app SDK (auto-generated from OpenAPI) |
-| @oneplatform/app-sdk | Platform app SDK |
-| @oneplatform/plugin-sdk | Plugin development SDK |
-| @oneplatform/cli | CLI tool (op) |
-
-## Key Design Principles (ALWAYS reference these)
-
-1. **SOLID** — Single Responsibility, Open/Closed, Liskov, Interface Segregation, Dependency Inversion
-2. **Engine-first** — Robust core engine, extensible layers on top
-3. **Plugin architecture** — Built-in features use the same interfaces as third-party plugins
-4. **Auth first-class** — Woven into core library, ontology-driven RBAC
-5. **API-first** — Everything available via REST API, CLI, SDKs
-6. **Auto-generated** — Types, API routes, docs, SDK methods all generated from ontology/code
-7. **Observable** — Trace IDs, OTEL, Prometheus metrics, audit trails
-8. **Secure** — Sandboxed execution, encrypted credentials, service-to-service auth, rate limiting
-
-## Files to Read
+## Key References
 
 | File | Purpose |
 |------|---------|
-| `docs/decisions/001-architecture-decisions.md` | All 23 architecture decisions (L0 reference) |
-| `DEVELOPMENT-PROCESS.md` | Full development pipeline and quality gates |
-| `docs/WORKING-STATE.md` | THIS FILE — current state of work |
-| `README.md` | Project overview and quick start |
-
-## Git History
-
-All work is committed and pushed to https://github.com/aaron777collins/oneplatform
-- Initial commit: architecture decisions
-- Multiple review cycles: all blocking issues resolved
-- Latest: 5th review fixes (per-service secrets, job WAL, graceful sandbox recycling, etc.)
+| `docs/decisions/001-architecture-decisions.md` | 36 architecture decisions (L0 reference) |
+| `docs/designs/*.md` | L2 service designs |
+| `docs/USER-STORIES-ANALYSIS-V2.md` | Latest friction point analysis (85 findings) |
+| `DEVELOPMENT-PROCESS.md` | Development pipeline and quality gates |
+| `.claude/handoff.md` | Session continuity handoff |

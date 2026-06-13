@@ -11,7 +11,7 @@
  */
 
 import type { BffClient } from "../client/BffClient.js";
-import type { PermissionEntry, BffPermissionsResponse } from "../types/api.js";
+import type { BffPermissionsResponse } from "../types/api.js";
 
 export class PermissionCache {
   // Flat map: "action:resource" → allowed. Replaced atomically on each refresh.
@@ -35,8 +35,8 @@ export class PermissionCache {
    * Called once by AppProvider at mount.
    */
   async seed(bffClient: BffClient): Promise<void> {
-    const data = await bffClient.request<BffPermissionsResponse>("/bff/permissions");
-    this.applySnapshot(data.permissions);
+    const resp = await bffClient.request<BffPermissionsResponse>("/bff/permissions");
+    this.applySnapshot(resp.data.permissions);
     this.startBackgroundRefresh(bffClient);
   }
 
@@ -53,11 +53,11 @@ export class PermissionCache {
     if (this.destroyed) return;
 
     try {
-      const data = await bffClient.request<BffPermissionsResponse>("/bff/permissions");
+      const resp = await bffClient.request<BffPermissionsResponse>("/bff/permissions");
       // Check destroyed again after the async BFF call completes in case
       // destroy() was called while the request was in-flight.
       if (this.destroyed) return;
-      this.applySnapshot(data.permissions);
+      this.applySnapshot(resp.data.permissions);
       this.notifyListeners();
     } catch {
       // Stale snapshot is acceptable — BFF enforces RBAC on every actual request.
@@ -113,11 +113,23 @@ export class PermissionCache {
 
   // ─── Private helpers ────────────────────────────────────────────────────────
 
-  private applySnapshot(permissions: PermissionEntry[]): void {
+  /**
+   * Rebuilds the flat snapshot from the BFF's entity→actions map.
+   *
+   * The BFF returns { "invoice": ["read", "write"], ... } meaning the user is
+   * allowed those actions on that resource. We expand each entry into individual
+   * "action:resource" keys set to true. Any action:resource pair absent from the
+   * response is implicitly denied (check() returns false for missing keys).
+   */
+  private applySnapshot(permissions: Record<string, string[]>): void {
     // Replace atomically so check() never sees a partial update
-    this.snapshot = new Map(
-      permissions.map((p) => [`${p.action}:${p.resource}`, p.allowed]),
-    );
+    const next = new Map<string, boolean>();
+    for (const [resource, actions] of Object.entries(permissions)) {
+      for (const action of actions) {
+        next.set(`${action}:${resource}`, true);
+      }
+    }
+    this.snapshot = next;
   }
 
   private notifyListeners(): void {

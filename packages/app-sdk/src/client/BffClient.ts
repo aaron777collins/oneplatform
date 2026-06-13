@@ -84,6 +84,10 @@ export class BffClient {
   // at instantiation so it is captured once and never changes (C-6 analogue for HTTP).
   private readonly baseUrl: string;
 
+  // Registered by AppProvider after reading window.__OP_APP_CONFIG__.
+  // Every BFF endpoint requires this header to scope requests to the correct app.
+  private appId: string | null = null;
+
   // Registered by AppProvider to redirect to /login on session expiry.
   // Kept as a nullable property so the client works in test environments
   // where AppProvider may not be fully wired.
@@ -91,6 +95,15 @@ export class BffClient {
 
   constructor() {
     this.baseUrl = window.location.origin;
+  }
+
+  /**
+   * Sets the app ID sent as X-App-Id on every BFF request.
+   * Called by AppProvider immediately after reading window.__OP_APP_CONFIG__,
+   * before any BFF calls are made.
+   */
+  configure(appId: string): void {
+    this.appId = appId;
   }
 
   setUnauthorizedHandler(handler: () => void): void {
@@ -114,11 +127,22 @@ export class BffClient {
 
     const hasBody = options.body !== undefined;
 
+    // Every BFF endpoint requires X-App-Id to scope requests to the correct app
+    // (see bff.ts §8.1 – §8.5). Fail loudly here rather than letting the server
+    // return a 400 with a less-obvious error message.
+    if (this.appId === null) {
+      throw new Error(
+        "[app-sdk] BffClient.configure(appId) must be called before making BFF requests. " +
+          "Ensure AppProvider has mounted and read window.__OP_APP_CONFIG__ successfully.",
+      );
+    }
+
     // Content-Type is only meaningful when there is a request body. Sending it
     // on bodyless requests (e.g. DELETE) causes some servers / proxies to reject
     // the request or interpret the absent body as malformed.
     const headers: Record<string, string> = {
       Accept: "application/json",
+      "X-App-Id": this.appId,
       ...(hasBody ? { "Content-Type": "application/json" } : {}),
     };
 

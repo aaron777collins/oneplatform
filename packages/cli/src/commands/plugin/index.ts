@@ -9,6 +9,8 @@ import { CliError, EXIT } from "../../lib/errors.js";
 import { confirmDestructive, promptText, promptSelect } from "../../lib/prompts.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { generateScaffold, packPlugin, runSimulateHook } from "@oneplatform/plugin-sdk/dev";
+import type { PluginType } from "@oneplatform/plugin-sdk/dev";
 
 const PLUGIN_COLUMNS = [
   { header: "ID", key: "id" },
@@ -24,7 +26,24 @@ interface ListOpts { type?: string; status?: string }
 interface InstallOpts { tenant?: string; yes?: boolean }
 interface PluginTenantOpts { tenant?: string }
 interface PackOpts { out?: string; sign?: string }
-interface SimulateOpts { plugin: string; input: string; timeout?: string }
+interface SimulateOpts {
+  /** Plugin bundle path (local) or Plugin ID (remote). */
+  plugin: string;
+  input: string;
+  timeout?: string;
+  /** Named export to invoke as the hook function (local mode only). */
+  entrypoint?: string;
+  /** Tenant ID to inject into the mock context (local mode only). */
+  tenantId?: string;
+  /** Path to credentials JSON file (local mode only). */
+  credentials?: string;
+  /** Path to config JSON file (local mode only). */
+  config?: string;
+  /** Force server-side execution instead of local vm.Script sandbox. */
+  remote?: boolean;
+  /** Use isolated-vm for production-accurate sandboxing (local mode only). */
+  sandbox?: boolean;
+}
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -140,63 +159,81 @@ async function infoAction(pluginId: string, _opts: Record<string, never>, ctx: C
   ctx.renderer.json(plugin);
 }
 
+// The plugin types accepted by the manifest schema and the SDK's scaffold generator.
+const PLUGIN_TYPES: PluginType[] = [
+  "connector",
+  "transformer",
+  "destination",
+  "auth-provider",
+  "widget",
+];
+
 async function createAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
+  // Validate name as a kebab-case identifier usable in reverse-domain plugin IDs.
   const name = await promptText("Plugin name (kebab-case):");
   if (!/^[a-z][a-z0-9-]*$/.test(name)) {
     throw new CliError("Plugin name must be lowercase kebab-case (e.g. my-connector).", EXIT.GENERAL);
   }
 
+  // Publisher forms the first two segments of the reverse-domain plugin ID
+  // (e.g. "com.example" + "my-plugin" → "com.example.my-plugin").
   const publisher = await promptText("Publisher (reverse-domain, e.g. com.example):");
-  const type = await promptSelect(
-    "Plugin type:",
-    ["connector", "transformer", "destination", "auth-provider", "widget"],
-  );
+  if (!/^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/.test(publisher)) {
+    throw new CliError(
+      "Publisher must be reverse-domain format with at least two segments (e.g. com.example).",
+      EXIT.GENERAL,
+    );
+  }
+
+  const typeRaw = await promptSelect("Plugin type:", PLUGIN_TYPES);
+  // promptSelect returns the chosen string — assert it is a PluginType since the
+  // choices array is typed as PluginType[].
+  const type = typeRaw as PluginType;
+
   const outDir = await promptText("Output directory:", `./${name}`);
 
-  mkdirSync(outDir, { recursive: true });
-  mkdirSync(join(outDir, "src"), { recursive: true });
+  // Compose the canonical reverse-domain ID required by the manifest schema.
+  // The schema requires at least three dot-separated segments (e.g. com.example.my-plugin).
+  const pluginId = `${publisher}.${name}`;
 
-  const manifest = {
-    name,
-    publisher,
-    type,
-    version: "0.1.0",
-    description: `${name} plugin`,
-    entrypoint: "./dist/index.js",
-  };
-  writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  // Delegate all file generation to the SDK's scaffold generator.
+  // This is the single source of truth for manifest format, source templates,
+  // tsconfig, and package.json — keeping CLI output in sync with the SDK.
+  const result = generateScaffold({ type, id: pluginId, name, author: publisher, outputDir: outDir });
 
-  const pkgJson = {
-    name: `@${publisher.replace(/\./g, "-")}/${name}`,
-    version: "0.1.0",
-    type: "module",
-    main: "./dist/index.js",
-    scripts: { build: "tsc", pack: "op plugin pack" },
-    dependencies: { "@oneplatform/plugin-sdk": "^1.0.0" },
-    devDependencies: { typescript: "^5.0.0" },
-  };
-  writeFileSync(join(outDir, "package.json"), JSON.stringify(pkgJson, null, 2) + "\n");
-
-  writeFileSync(
-    join(outDir, "src", "index.ts"),
-    `import type { Plugin } from "@oneplatform/plugin-sdk";\n\nexport const plugin: Plugin = {\n  name: "${name}",\n  type: "${type}",\n};\n`,
-  );
-
-  writeFileSync(
-    join(outDir, "tsconfig.json"),
-    JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", strict: true, outDir: "dist" } }, null, 2) + "\n",
-  );
+  // Write the generated files to disk. The generator returns content without
+  // performing I/O so it remains testable without filesystem access.
+  for (const file of result.files) {
+    const fullPath = join(outDir, file.relativePath);
+    const dir = join(outDir, file.relativePath.split("/").slice(0, -1).join("/"));
+    if (dir !== outDir) {
+      mkdirSync(dir, { recursive: true });
+    } else {
+      mkdirSync(outDir, { recursive: true });
+    }
+    writeFileSync(fullPath, file.content, { encoding: "utf-8" });
+  }
 
   ctx.renderer.success(`Plugin scaffold created in ${outDir}`);
+  ctx.renderer.info(`Next steps:\n  cd ${outDir}\n  npm install\n  npm run build\n  op plugin pack`);
 }
 
-async function packAction(opts: PackOpts, ctx: CommandContext): Promise<void> {
-  const manifest = JSON.parse(readFileSync("manifest.json", "utf8")) as { name: string; version: string };
-  const outPath = opts.out ?? `./${manifest.name}-${manifest.version}.oppkg`;
-  ctx.renderer.info(`Packing plugin ${manifest.name} v${manifest.version}...`);
-  // In a real implementation: run bun build, compute SHA-256, create ZIP
-  // Placeholder: write a minimal stub
-  ctx.renderer.success(`Plugin packed to ${outPath}`);
+async function packAction(opts: PackOpts, _ctx: CommandContext): Promise<void> {
+  // Delegate to the SDK's packPlugin() which:
+  //  1. Reads plugin.manifest.json (not manifest.json — the correct filename)
+  //  2. Validates the manifest schema
+  //  3. Compiles src/index.ts with esbuild → dist/bundle.js
+  //  4. Computes and writes the SHA-256 checksum
+  //  5. Updates bundleChecksum in plugin.manifest.json
+  //  6. Optionally signs with GPG
+  //  7. Creates the .oppkg tar.gz archive
+  //
+  // packPlugin() writes its own progress lines to stdout — no need to call
+  // ctx.renderer here. We only forward the CLI options it accepts.
+  await packPlugin({
+    ...(opts.out !== undefined ? { out: opts.out } : {}),
+    ...(opts.sign !== undefined ? { sign: opts.sign } : {}),
+  });
 }
 
 async function validateAction(path: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
@@ -215,18 +252,36 @@ async function validateAction(path: string, _opts: Record<string, never>, ctx: C
 }
 
 async function simulateHookAction(stage: string, opts: SimulateOpts, ctx: CommandContext): Promise<void> {
-  const input = JSON.parse(readFileSync(opts.input, "utf8")) as unknown;
-  const body: Record<string, unknown> = {
+  if (opts.remote) {
+    // Server-side execution: delegates to the running OnePlatform instance.
+    // Requires the plugin to already be installed and the server to be reachable.
+    const input = JSON.parse(readFileSync(opts.input, "utf8")) as unknown;
+    const body: Record<string, unknown> = {
+      stage,
+      input,
+      timeout: parseInt(opts.timeout ?? "30000", 10),
+    };
+    const resp = await ctx.http.post<{ output: unknown; logs: string[] }>(
+      `/api/v1/plugins/${encodeURIComponent(opts.plugin)}/simulate`,
+      body,
+    );
+    for (const line of resp.logs) process.stderr.write(line + "\n");
+    ctx.renderer.json(resp.output);
+    return;
+  }
+
+  // Local execution: uses the plugin-sdk's vm.Script sandbox.
+  // No server required — ideal for plugin development iteration.
+  await runSimulateHook({
     stage,
-    input,
-    timeout: parseInt(opts.timeout ?? "30000", 10),
-  };
-  const resp = await ctx.http.post<{ output: unknown; logs: string[] }>(
-    `/api/v1/plugins/${encodeURIComponent(opts.plugin)}/simulate`,
-    body,
-  );
-  for (const line of resp.logs) process.stderr.write(line + "\n");
-  ctx.renderer.json(resp.output);
+    plugin: opts.plugin,
+    input: opts.input,
+    ...(opts.entrypoint !== undefined ? { entrypoint: opts.entrypoint } : {}),
+    ...(opts.tenantId !== undefined ? { tenantId: opts.tenantId } : {}),
+    ...(opts.credentials !== undefined ? { credentials: opts.credentials } : {}),
+    ...(opts.config !== undefined ? { config: opts.config } : {}),
+    ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
+  });
 }
 
 export function registerPlugin(program: Command): void {
@@ -272,10 +327,20 @@ export function registerPlugin(program: Command): void {
     .argument("<path-to.oppkg>", "Path to the .oppkg file")
     .action(withContext<[string, Record<string, never>]>(validateAction));
 
-  plugin.command("simulate-hook").description("Test a plugin hook in a server-side sandbox")
-    .argument("<stage>", "Hook stage: pull|transform|push|authenticate|render")
-    .requiredOption("--plugin <plugin-id>", "Plugin ID")
-    .requiredOption("--input <data.json>", "Path to JSON input file")
-    .option("--timeout <ms>", "Execution timeout in milliseconds")
+  plugin.command("simulate-hook")
+    .description("Test a plugin hook locally (no server required) or against a running instance with --remote")
+    .argument(
+      "<stage>",
+      "Hook stage, e.g. before:ingestion.receive | after:ingestion.validate | before:ontology.map | before:pipeline.trigger | before:auth.login | before:app.request",
+    )
+    .option("--plugin <path-or-id>", "Local bundle path (default: ./dist/bundle.js) or Plugin ID when using --remote")
+    .requiredOption("--input <data.json>", "Path to JSON file containing HookPayload.data")
+    .option("--entrypoint <export>", "Named export to invoke (overrides plugin.manifest.json entrypoint)")
+    .option("--tenant-id <id>", "Tenant ID for the mock context (default: dev-tenant)")
+    .option("--credentials <creds.json>", "Path to JSON file with credential name→value mappings")
+    .option("--config <config.json>", "Path to JSON file with plugin instance config values")
+    .option("--timeout <ms>", "Execution timeout in milliseconds (default: 30000)")
+    .option("--sandbox", "Use isolated-vm for production-accurate sandboxing (requires isolated-vm to be installed)")
+    .option("--remote", "Execute on the running OnePlatform server instead of locally (requires --plugin <plugin-id>)")
     .action(withContext<[string, SimulateOpts]>(simulateHookAction));
 }

@@ -35,14 +35,18 @@ export interface BffMeResponse {
   isGuest: boolean;
 }
 
-export interface PermissionEntry {
-  action: string;
-  resource: string;
-  allowed: boolean;
-}
-
+/**
+ * Wire format from GET /bff/permissions.
+ *
+ * The BFF returns entity → [action, ...] map (e.g. { "invoice": ["read", "write"] }).
+ * PermissionCache.applySnapshot() expands this into the flat "action:resource" key space
+ * it uses internally, setting all listed entries to allowed=true.
+ */
 export interface BffPermissionsResponse {
-  permissions: PermissionEntry[];
+  data: {
+    appId: string;
+    permissions: Record<string, string[]>;
+  };
 }
 
 export interface BffStorageGetResponse {

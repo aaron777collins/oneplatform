@@ -126,7 +126,11 @@ export function AppProvider({
         return;
       }
 
-      // Step 2: register the 401 → login redirect handler
+      // Step 2: configure the BFF client with the app ID so every subsequent
+      // request carries the required X-App-Id header (see BffClient.configure).
+      bffClient.configure(config.appId);
+
+      // Step 3: register the 401 → login redirect handler
       bffClient.setUnauthorizedHandler(() => {
         const redirect = encodeURIComponent(
           window.location.pathname + window.location.search,
@@ -134,7 +138,7 @@ export function AppProvider({
         window.location.href = `/login?redirect=${redirect}`;
       });
 
-      // Step 3: fetch /bff/me and /bff/permissions in parallel (C-4)
+      // Step 4: fetch /bff/me and /bff/permissions in parallel (C-4)
       try {
         const [meResult] = await Promise.all([
           bffClient.request<UserContext>("/bff/me"),

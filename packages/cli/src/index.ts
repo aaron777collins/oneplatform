@@ -19,6 +19,7 @@ import { registerRole } from "./commands/role/index.js";
 import { registerOntology } from "./commands/ontology/index.js";
 import { registerData } from "./commands/data/index.js";
 import { registerConnector } from "./commands/connector/index.js";
+import { registerMapping } from "./commands/mapping/index.js";
 import { registerWebhookOut } from "./commands/webhook-out/index.js";
 import { registerPipeline } from "./commands/pipeline/index.js";
 import { registerSchedule } from "./commands/schedule/index.js";
@@ -54,7 +55,7 @@ export function buildProgram(): Command {
     .option("--platform <url>", "Override platform URL (env: OP_PLATFORM_URL)")
     .hook("preAction", globalPreActionHook);
 
-  // 20 command groups registered in spec order
+  // 21 command groups registered in spec order
   registerAuth(program);
   registerProfile(program);
   registerUser(program);
@@ -62,6 +63,7 @@ export function buildProgram(): Command {
   registerOntology(program);
   registerData(program);
   registerConnector(program);
+  registerMapping(program);
   registerWebhookOut(program);
   registerPipeline(program);
   registerSchedule(program);

@@ -102,7 +102,7 @@ describe("ApiKeyService.create()", () => {
     const { apiKey } = await svc.create("user-1", "tenant-1", {
       name: "Test Key",
       scopes: ["data:read"],
-    });
+    }, ["data:read"]);
     expect(apiKey).toMatch(/^op_live_/);
   });
 
@@ -117,7 +117,7 @@ describe("ApiKeyService.create()", () => {
     const { apiKey } = await svc.create("user-1", "tenant-1", {
       name: "Test Key",
       scopes: ["data:read"],
-    });
+    }, ["data:read"]);
 
     // Find the INSERT call
     const insertCall = dbQuerySpy.mock.calls.find(
@@ -154,7 +154,7 @@ describe("ApiKeyService.create()", () => {
     const { apiKey, keyRecord } = await svc.create("user-1", "tenant-1", {
       name: "Test Key",
       scopes: ["data:read"],
-    });
+    }, ["data:read"]);
 
     // The random part starts right after "op_live_"
     const randomPart = apiKey.replace("op_live_", "");
@@ -166,10 +166,40 @@ describe("ApiKeyService.create()", () => {
     const { createApiKeyService } = await import("../services/api-key-service.js");
     const events = makeEvents();
     const svc = createApiKeyService(makeDeps({ events }));
-    await svc.create("user-1", "tenant-1", { name: "My Key", scopes: ["data:read"] });
+    await svc.create("user-1", "tenant-1", { name: "My Key", scopes: ["data:read"] }, ["data:read"]);
     expect(events.publish).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "auth.key.created" }),
     );
+  });
+
+  it("throws ForbiddenError when requesting a scope not held by the caller", async () => {
+    const { createApiKeyService } = await import("../services/api-key-service.js");
+    const { ForbiddenError } = await import("@oneplatform/core");
+    const svc = createApiKeyService(makeDeps());
+    // Caller has only data:read but requests admin scope
+    await expect(
+      svc.create("user-1", "tenant-1", { name: "Escalated Key", scopes: ["admin"] }, ["data:read"]),
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it("throws ForbiddenError with the offending scope name in the message", async () => {
+    const { createApiKeyService } = await import("../services/api-key-service.js");
+    const svc = createApiKeyService(makeDeps());
+    await expect(
+      svc.create("user-1", "tenant-1", { name: "Bad Key", scopes: ["data:write"] }, ["data:read"]),
+    ).rejects.toThrow("Cannot create API key with scope 'data:write'");
+  });
+
+  it("allows creating a key when requested scopes are a strict subset of caller scopes", async () => {
+    const { createApiKeyService } = await import("../services/api-key-service.js");
+    const svc = createApiKeyService(makeDeps());
+    const { apiKey } = await svc.create(
+      "user-1",
+      "tenant-1",
+      { name: "Subset Key", scopes: ["data:read"] },
+      ["data:read", "data:write", "logs:read"],
+    );
+    expect(apiKey).toMatch(/^op_live_/);
   });
 });
 

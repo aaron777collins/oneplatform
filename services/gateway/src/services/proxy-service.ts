@@ -63,12 +63,16 @@ const DEFAULT_TIMEOUT_MS = parseInt(
 
 // Headers injected by clients that must never reach an upstream service.
 // Stripping them prevents callers from spoofing identity or service tokens.
+// x-user-context must be stripped because the gateway rebuilds it from the
+// verified JWT claims — allowing external injection would let any caller
+// impersonate an arbitrary user even when X-Service-Token is also valid.
 const HEADERS_TO_STRIP = new Set([
   "x-service-token",
   "x-oneplatform-tenant-id",
   "x-oneplatform-user-id",
   "x-oneplatform-user-roles",
   "x-oneplatform-key-id",
+  "x-user-context",
 ]);
 
 // ---------------------------------------------------------------------------

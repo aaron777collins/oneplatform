@@ -57,7 +57,8 @@ export interface ApiKeyService {
   create(
     userId: string,
     tenantId: string,
-    data: CreateApiKeyInput
+    data: CreateApiKeyInput,
+    callerScopes: string[]
   ): Promise<{ apiKey: string; keyRecord: ApiKeyRecord }>;
   validate(key: string): Promise<UserContext | null>;
   list(userId: string): Promise<ApiKeyRecord[]>;
@@ -113,8 +114,21 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
   async function create(
     userId: string,
     tenantId: string,
-    data: CreateApiKeyInput
+    data: CreateApiKeyInput,
+    callerScopes: string[]
   ): Promise<{ apiKey: string; keyRecord: ApiKeyRecord }> {
+    // Scope subsetting check: a user cannot grant an API key more privileges
+    // than they themselves possess. This prevents privilege escalation via
+    // key creation (e.g. a viewer creating an admin-scoped key).
+    const callerScopeSet = new Set(callerScopes);
+    for (const requestedScope of data.scopes) {
+      if (!callerScopeSet.has(requestedScope)) {
+        throw new ForbiddenError(
+          `Cannot create API key with scope '${requestedScope}' — not in your permissions.`
+        );
+      }
+    }
+
     const { fullKey, keyPrefix } = generateRawKey();
     const keyHash = await bcrypt.hash(fullKey, getBcryptRounds());
 

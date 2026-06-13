@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@oneplatform/sdk": "workspace:*",
+    "@oneplatform/plugin-sdk": "workspace:*",
     "cli-table3": "^0.6.5",
     "commander": "^15.0.0",
     "inquirer": "10",
