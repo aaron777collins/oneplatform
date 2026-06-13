@@ -116,10 +116,10 @@ describe("Pipeline service — Level 2 HTTP smoke tests", () => {
       expect(listRes.status).toBe(200);
 
       const body = await listRes.json() as {
-        data: Array<{ id: string; name: string }>;
+        data: Array<{ pipeline: { name: string }; lastRunAt: string | null }>;
       };
       expect(Array.isArray(body.data)).toBe(true);
-      expect(body.data.some((p) => p.name === "Listed Pipeline")).toBe(true);
+      expect(body.data.some((p) => p.pipeline.name === "Listed Pipeline")).toBe(true);
     } finally {
       await cleanupPipelineTenant(db, tenantId);
     }
@@ -155,12 +155,11 @@ describe("Pipeline service — Level 2 HTTP smoke tests", () => {
         },
       );
 
-      expect(triggerRes.status).toBe(201);
+      expect(triggerRes.status).toBe(202);
       const triggerBody = await triggerRes.json() as {
-        data: { id: string; status: string; pipelineId: string };
+        data: { runId: string; status: string };
       };
-      expect(triggerBody.data.id).toBeTruthy();
-      expect(triggerBody.data.pipelineId).toBe(pipeline.data.id);
+      expect(triggerBody.data.runId).toBeTruthy();
       // Run starts in pending status (worker picks it up asynchronously)
       expect(triggerBody.data.status).toBe("pending");
     } finally {

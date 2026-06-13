@@ -10,14 +10,10 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createCleanupPool, createE2ETenant, cleanupE2ETenant } from "../helpers/e2e-cleanup.js";
+import { getToken as registerAndLogin } from "../helpers/e2e-auth.js";
 import type pg from "pg";
 
-const AUTH_URL     = "http://localhost:13001";
 const ONTOLOGY_URL = "http://localhost:13003";
-
-// ---------------------------------------------------------------------------
-// Shared pool — created once for the file, closed in afterAll
-// ---------------------------------------------------------------------------
 
 let pool: pg.Pool;
 
@@ -28,46 +24,6 @@ beforeAll(() => {
 afterAll(async () => {
   await pool.end();
 });
-
-// ---------------------------------------------------------------------------
-// Helper: register a user in a tenant and return the access token
-// ---------------------------------------------------------------------------
-
-async function registerAndLogin(tenantId: string, email: string, password: string): Promise<string> {
-  const regRes = await fetch(`${AUTH_URL}/api/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, tenantId }),
-  });
-  if (regRes.status !== 201) {
-    const body = await regRes.text();
-    throw new Error(`Register failed (${regRes.status}): ${body}`);
-  }
-
-  // Registration returns tokens directly when OP_REQUIRE_EMAIL_VERIFICATION=false
-  const regBody = await regRes.json() as {
-    data: { accessToken?: string; tenantId: string };
-  };
-
-  // If registration returned a token, use it directly; otherwise login
-  if (regBody.data.accessToken !== undefined) {
-    return regBody.data.accessToken;
-  }
-
-  const loginRes = await fetch(`${AUTH_URL}/api/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, tenantId }),
-  });
-  if (loginRes.status !== 200) {
-    const body = await loginRes.text();
-    throw new Error(`Login failed (${loginRes.status}): ${body}`);
-  }
-  const loginBody = await loginRes.json() as {
-    data: { accessToken: string };
-  };
-  return loginBody.data.accessToken;
-}
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -98,17 +54,16 @@ describe("E2E: auth-to-ontology cross-service flow", () => {
           slug: entitySlug,
           description: "E2E test product entity",
           fields: [
-            { name: "SKU", type: "string", required: true },
+            { name: "SKU", fieldType: "string", required: true },
           ],
         }),
       });
 
       expect(createRes.status).toBe(201);
-      const createBody = await createRes.json() as {
-        data: { id: string; slug: string; name: string };
-      };
-      expect(createBody.data.slug).toBe(entitySlug);
-      expect(createBody.data.name).toBe("Product");
+      // Ontology CREATE returns a flat response (no data wrapper)
+      const createBody = await createRes.json() as { id: string; slug: string; name: string };
+      expect(createBody.slug).toBe(entitySlug);
+      expect(createBody.name).toBe("Product");
     } finally {
       await cleanupE2ETenant(pool, tenantId);
     }
@@ -133,22 +88,23 @@ describe("E2E: auth-to-ontology cross-service flow", () => {
         body: JSON.stringify({
           name: "Order",
           slug: entitySlug,
-          fields: [{ name: "Total", type: "number", required: false }],
+          fields: [{ name: "Total", fieldType: "number", required: false }],
         }),
       });
       expect(createRes.status).toBe(201);
-      const created = await createRes.json() as { data: { id: string } };
-      const entityId = created.data.id;
+      // Ontology CREATE returns a flat response (no data wrapper)
+      const created = await createRes.json() as { id: string; slug: string };
 
-      // Retrieve entity by ID
+      // Retrieve entity by slug — the route expects a slug, not a UUID
       const getRes = await fetch(
-        `${ONTOLOGY_URL}/api/v1/ontology/${entityId}`,
+        `${ONTOLOGY_URL}/api/v1/ontology/${entitySlug}`,
         { headers: { "Authorization": `Bearer ${token}` } }
       );
       expect(getRes.status).toBe(200);
-      const getBody = await getRes.json() as { data: { id: string; slug: string } };
-      expect(getBody.data.id).toBe(entityId);
-      expect(getBody.data.slug).toBe(entitySlug);
+      // GET by slug also returns a flat response
+      const getBody = await getRes.json() as { id: string; slug: string };
+      expect(getBody.id).toBe(created.id);
+      expect(getBody.slug).toBe(entitySlug);
     } finally {
       await cleanupE2ETenant(pool, tenantId);
     }

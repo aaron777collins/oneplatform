@@ -15,6 +15,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
+import { waitForHealthy } from "../helpers/wait-for-ready.js";
 
 // ---------------------------------------------------------------------------
 // Service manifest — order matters for readability only; startup is parallel.
@@ -26,7 +27,7 @@ const SERVICE_MAP = [
   { name: "ontology",  entry: "services/ontology/dist/index.js",   port: 13003, healthPath: "/healthz" },
   { name: "pipeline",  entry: "services/pipeline/dist/index.js",   port: 13004, healthPath: "/healthz" },
   { name: "app",       entry: "services/app/dist/index.js",        port: 13006, healthPath: "/healthz" },
-  { name: "plugin",    entry: "services/plugin/dist/index.js",     port: 13008, healthPath: "/healthz" },
+  { name: "plugin",    entry: "services/plugin/dist/index.js",     port: 13008, healthPath: "/health/live" },
 ] as const;
 
 // Process handles are module-level so teardown (a different module invocation)
@@ -35,24 +36,6 @@ const SERVICE_MAP = [
 declare global {
   // eslint-disable-next-line no-var
   var __e2eProcs: ChildProcess[];
-}
-
-// ---------------------------------------------------------------------------
-// Health probe — polls until 200 or deadline exceeded
-// ---------------------------------------------------------------------------
-
-async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.status === 200) return;
-    } catch {
-      // Service not yet listening — expected during startup
-    }
-    await new Promise<void>((r) => setTimeout(r, 300));
-  }
-  throw new Error(`[Level 3 globalSetup] Service at ${url} did not become healthy within ${timeoutMs}ms`);
 }
 
 // ---------------------------------------------------------------------------
@@ -124,11 +107,20 @@ export async function setup(): Promise<void> {
 
   // Wait for all services to be healthy in parallel — 60s is generous enough
   // for cold JIT compilation of Node modules but fails fast if a service crashes.
-  await Promise.all(
-    SERVICE_MAP.map((svc) =>
-      waitForHealthy(`http://localhost:${svc.port}${svc.healthPath}`, 60_000)
-    )
-  );
+  // If any health check times out or throws, kill all spawned processes before
+  // re-throwing so we don't leave zombie processes behind when setup fails.
+  try {
+    await Promise.all(
+      SERVICE_MAP.map((svc) =>
+        waitForHealthy(`http://localhost:${svc.port}${svc.healthPath}`, 60_000)
+      )
+    );
+  } catch (err) {
+    for (const proc of procs) {
+      try { proc.kill("SIGKILL"); } catch (_) {}
+    }
+    throw err;
+  }
 
   console.info("[Level 3 globalSetup] All services healthy — running tests");
 }

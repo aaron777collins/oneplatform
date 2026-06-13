@@ -10,6 +10,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
+import { waitForHealthy } from "../../../../tests/helpers/wait-for-ready.js";
 
 const PORT = 13005;
 const HEALTH_URL = `http://localhost:${PORT}/healthz`;
@@ -46,18 +47,3 @@ export async function teardown(): Promise<void> {
   }
 }
 
-async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.status === 200) return;
-    } catch {
-      // Process not listening yet — keep polling.
-    }
-    await new Promise<void>((r) => setTimeout(r, 200));
-  }
-  throw new Error(
-    `[execution-l2] Service at ${url} did not become healthy within ${timeoutMs}ms`,
-  );
-}

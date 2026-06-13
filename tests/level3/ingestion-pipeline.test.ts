@@ -14,9 +14,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createCleanupPool, createE2ETenant, cleanupE2ETenant } from "../helpers/e2e-cleanup.js";
+import { getToken } from "../helpers/e2e-auth.js";
 import type pg from "pg";
 
-const AUTH_URL      = "http://localhost:13001";
 const INGESTION_URL = "http://localhost:13002";
 const PIPELINE_URL  = "http://localhost:13004";
 
@@ -29,39 +29,6 @@ beforeAll(() => {
 afterAll(async () => {
   await pool.end();
 });
-
-// ---------------------------------------------------------------------------
-// Helper: register + login, return token
-// ---------------------------------------------------------------------------
-
-async function getToken(tenantId: string, email: string, password: string): Promise<string> {
-  const regRes = await fetch(`${AUTH_URL}/api/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, tenantId }),
-  });
-  if (regRes.status !== 201) {
-    const body = await regRes.text();
-    throw new Error(`Register failed (${regRes.status}): ${body}`);
-  }
-
-  const regBody = await regRes.json() as { data: { accessToken?: string } };
-  if (regBody.data.accessToken !== undefined) {
-    return regBody.data.accessToken;
-  }
-
-  const loginRes = await fetch(`${AUTH_URL}/api/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, tenantId }),
-  });
-  if (loginRes.status !== 200) {
-    const body = await loginRes.text();
-    throw new Error(`Login failed (${loginRes.status}): ${body}`);
-  }
-  const loginBody = await loginRes.json() as { data: { accessToken: string } };
-  return loginBody.data.accessToken;
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -197,10 +164,10 @@ describe("E2E: ingestion connector and pipeline run lifecycle", () => {
       );
       // 202 Accepted — run created, queued for execution
       expect(triggerRes.status).toBe(202);
-      const triggerBody = await triggerRes.json() as { data: { id: string; pipelineId: string } };
-      expect(triggerBody.data.id).toBeTruthy();
-      // The run must reference the pipeline that triggered it
-      expect(triggerBody.data.pipelineId).toBe(pipelineId);
+      const triggerBody = await triggerRes.json() as { data: { runId: string; status: string } };
+      expect(triggerBody.data.runId).toBeTruthy();
+      // Run starts in pending status (worker picks it up asynchronously)
+      expect(triggerBody.data.status).toBe("pending");
     } finally {
       await cleanupE2ETenant(pool, tenantId);
     }
@@ -243,8 +210,8 @@ describe("E2E: ingestion connector and pipeline run lifecycle", () => {
       expect(pipelineRes.status).toBe(201);
       const { data: pipeline } = await pipelineRes.json() as { data: { id: string } };
 
-      // Trigger a run
-      await fetch(`${PIPELINE_URL}/api/v1/pipelines/${pipeline.id}/trigger`, {
+      // Trigger a run and assert the response before checking the list
+      const triggerRes = await fetch(`${PIPELINE_URL}/api/v1/pipelines/${pipeline.id}/trigger`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -252,6 +219,9 @@ describe("E2E: ingestion connector and pipeline run lifecycle", () => {
         },
         body: JSON.stringify({ input: {} }),
       });
+      expect(triggerRes.status).toBe(202);
+      const triggerBody = await triggerRes.json() as { data: { runId: string; status: string } };
+      expect(triggerBody.data.runId).toBeTruthy();
 
       // List runs for this pipeline
       const listRes = await fetch(
@@ -259,11 +229,11 @@ describe("E2E: ingestion connector and pipeline run lifecycle", () => {
         { headers: { "Authorization": `Bearer ${token}` } }
       );
       expect(listRes.status).toBe(200);
-      const listBody = await listRes.json() as { data: Array<{ id: string; pipelineId: string }> };
+      const listBody = await listRes.json() as { data: Array<{ id: string; pipeline_id: string }> };
       expect(listBody.data.length).toBeGreaterThanOrEqual(1);
       // Every run in the list must belong to this pipeline
       for (const run of listBody.data) {
-        expect(run.pipelineId).toBe(pipeline.id);
+        expect(run.pipeline_id).toBe(pipeline.id);
       }
     } finally {
       await cleanupE2ETenant(pool, tenantId);
@@ -311,8 +281,8 @@ describe("E2E: ingestion connector and pipeline run lifecycle", () => {
         headers: { "Authorization": `Bearer ${tokenB}` },
       });
       expect(listB.status).toBe(200);
-      const listBody = await listB.json() as { data: Array<{ name: string }> };
-      const names = listBody.data.map((p) => p.name);
+      const listBody = await listB.json() as { data: Array<{ pipeline: { name: string }; lastRunAt: string | null }> };
+      const names = listBody.data.map((p) => p.pipeline.name);
       expect(names.some((n) => n.includes(tenantA.slice(0, 8)))).toBe(false);
     } finally {
       await cleanupE2ETenant(pool, tenantA);

@@ -101,16 +101,15 @@ describe("Ingestion service — Level 2 HTTP smoke tests", () => {
       expect(listRes.status).toBe(200);
 
       const body = await listRes.json() as {
-        data: Array<{ id: string; tenantId?: string }>;
+        data: Array<{ connector: { tenant_id: string }; syncState: unknown }>;
       };
       expect(Array.isArray(body.data)).toBe(true);
       expect(body.data.length).toBeGreaterThanOrEqual(1);
       // All returned connectors must belong to this tenant (RLS enforces this,
-      // but we assert it explicitly so a regression is immediately obvious)
-      for (const connector of body.data) {
-        if (connector.tenantId !== undefined) {
-          expect(connector.tenantId).toBe(tenantId);
-        }
+      // but we assert it explicitly so a regression is immediately obvious).
+      // Actual response shape is { connector: { tenant_id }, syncState }.
+      for (const item of body.data) {
+        expect(item.connector.tenant_id).toBe(tenantId);
       }
     } finally {
       await cleanupIngestionTenant(db, tenantId);
@@ -164,5 +163,39 @@ describe("Ingestion service — Level 2 HTTP smoke tests", () => {
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  // 7 -----------------------------------------------------------------------
+  it("Tenant B cannot see connectors created by Tenant A", async () => {
+    // Tenant isolation is enforced via RLS. This test asserts the HTTP layer
+    // also reflects isolation — Tenant B's token must not return Tenant A's rows.
+    const tenantA = newTenantId();
+    const tenantB = newTenantId();
+
+    try {
+      // Tenant A creates a connector
+      const createRes = await fetch(`${BASE}/api/v1/connectors`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: await authHeader(tenantA),
+        },
+        body: JSON.stringify(connectorBody({ name: `Cross-tenant-A-${tenantA.slice(0, 8)}` })),
+      });
+      expect(createRes.status).toBe(201);
+
+      // Tenant B lists connectors — must not see Tenant A's connector
+      const listRes = await fetch(`${BASE}/api/v1/connectors`, {
+        headers: { Authorization: await authHeader(tenantB) },
+      });
+      expect(listRes.status).toBe(200);
+
+      const listBody = await listRes.json() as { data: Array<{ connector: { name: string } }> };
+      const names = listBody.data.map((item) => item.connector.name);
+      expect(names.some((n) => n.includes(tenantA.slice(0, 8)))).toBe(false);
+    } finally {
+      await cleanupIngestionTenant(db, tenantA);
+      await cleanupIngestionTenant(db, tenantB);
+    }
   });
 });

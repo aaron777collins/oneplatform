@@ -114,10 +114,10 @@ describe("Ontology service — Level 2 HTTP smoke tests", () => {
       });
       expect(listRes.status).toBe(200);
 
-      const body = await listRes.json() as { entities: Array<{ id: string; name: string }> };
-      expect(Array.isArray(body.entities)).toBe(true);
-      expect(body.entities.length).toBeGreaterThanOrEqual(1);
-      expect(body.entities.some((e) => e.name === "Order")).toBe(true);
+      const body = await listRes.json() as { data: Array<{ id: string; name: string }>; pagination: unknown };
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      expect(body.data.some((e) => e.name === "Order")).toBe(true);
     } finally {
       await cleanupOntologyTenant(db, tenantId);
     }
@@ -191,5 +191,40 @@ describe("Ontology service — Level 2 HTTP smoke tests", () => {
       body: JSON.stringify(entityBody()),
     });
     expect(res.status).toBe(401);
+  });
+
+  // 7 -----------------------------------------------------------------------
+  it("Tenant B cannot see entities created by Tenant A", async () => {
+    // Ontology has no RLS but filters by tenant_id from the JWT claim.
+    // This test asserts the HTTP layer enforces that isolation.
+    const tenantA = newTenantId();
+    const tenantB = newTenantId();
+
+    try {
+      // Tenant A creates an entity with a name that encodes its tenantId for
+      // identification. Same slug is fine since slugs are scoped per tenant.
+      const createRes = await fetch(`${BASE}/api/v1/ontology`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: await authHeader(tenantA),
+        },
+        body: JSON.stringify(entityBody({ name: `TenantA-${tenantA.slice(0, 8)}` })),
+      });
+      expect(createRes.status).toBe(201);
+
+      // Tenant B lists entities — must not see Tenant A's entity
+      const listRes = await fetch(`${BASE}/api/v1/ontology`, {
+        headers: { Authorization: await authHeader(tenantB) },
+      });
+      expect(listRes.status).toBe(200);
+
+      const listBody = await listRes.json() as { data: Array<{ name: string }>; pagination: unknown };
+      const names = listBody.data.map((e) => e.name);
+      expect(names.some((n) => n.includes(tenantA.slice(0, 8)))).toBe(false);
+    } finally {
+      await cleanupOntologyTenant(db, tenantA);
+      await cleanupOntologyTenant(db, tenantB);
+    }
   });
 });

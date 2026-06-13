@@ -20,9 +20,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createCleanupPool, createE2ETenant, cleanupE2ETenant } from "../helpers/e2e-cleanup.js";
+import { getToken } from "../helpers/e2e-auth.js";
 import type pg from "pg";
 
-const AUTH_URL   = "http://localhost:13001";
 const PLUGIN_URL = "http://localhost:13008";
 
 let pool: pg.Pool;
@@ -36,45 +36,12 @@ afterAll(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Helper: register + login, return token
-// ---------------------------------------------------------------------------
-
-async function getToken(tenantId: string, email: string, password: string): Promise<string> {
-  const regRes = await fetch(`${AUTH_URL}/api/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, tenantId }),
-  });
-  if (regRes.status !== 201) {
-    const body = await regRes.text();
-    throw new Error(`Register failed (${regRes.status}): ${body}`);
-  }
-
-  const regBody = await regRes.json() as { data: { accessToken?: string } };
-  if (regBody.data.accessToken !== undefined) {
-    return regBody.data.accessToken;
-  }
-
-  const loginRes = await fetch(`${AUTH_URL}/api/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, tenantId }),
-  });
-  if (loginRes.status !== 200) {
-    const body = await loginRes.text();
-    throw new Error(`Login failed (${loginRes.status}): ${body}`);
-  }
-  const loginBody = await loginRes.json() as { data: { accessToken: string } };
-  return loginBody.data.accessToken;
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("E2E: plugin service API reachability and tenant isolation", () => {
   it("plugin service health endpoint returns 200", async () => {
-    const res = await fetch(`${PLUGIN_URL}/healthz`);
+    const res = await fetch(`${PLUGIN_URL}/health/live`);
     expect(res.status).toBe(200);
   });
 

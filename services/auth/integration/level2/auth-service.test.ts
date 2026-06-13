@@ -40,9 +40,6 @@ let db: pg.Pool;
 let sharedTenantId: string;
 let sharedTenantName: string;
 
-// Track user tenantIds created during tests for cleanup
-const usedTenantIds: string[] = [];
-
 beforeAll(async () => {
   db = new pg.Pool({
     connectionString: process.env["OP_DATABASE_URL"]!,
@@ -53,17 +50,21 @@ beforeAll(async () => {
   // The auth service validates that tenantId exists in auth.tenants.
   sharedTenantId = randomUUID();
   sharedTenantName = `l2-auth-tenant-${sharedTenantId.slice(0, 8)}`;
+
+  // Clean up any leftover state from prior runs — a previous run may have
+  // crashed before afterAll, leaving orphan rows that cause UNIQUE constraint
+  // failures on re-run with the same sharedTenantId.
+  try { await cleanupAuthTenant(db, sharedTenantId); } catch (_) { /* ignore if tenant doesn't exist */ }
+
   await db.query(
-    "INSERT INTO auth.tenants (id, name, created_at) VALUES ($1, $2, NOW())",
-    [sharedTenantId, sharedTenantName],
+    "INSERT INTO auth.tenants (id, name, slug, created_at) VALUES ($1, $2, $3, NOW())",
+    [sharedTenantId, sharedTenantName, `l2-${sharedTenantId.replace(/-/g, "").slice(0, 20)}`],
   );
-  usedTenantIds.push(sharedTenantId);
 });
 
 afterAll(async () => {
-  for (const tid of usedTenantIds) {
-    await cleanupAuthTenant(db, tid);
-  }
+  // Only clean up the shared tenant — per-test tenants are cleaned in their own finally blocks.
+  await cleanupAuthTenant(db, sharedTenantId);
   await db.end();
 });
 
@@ -102,10 +103,9 @@ describe("Auth service — Level 2 HTTP smoke tests", () => {
 
     // Seed a tenant for this test's user
     await db.query(
-      "INSERT INTO auth.tenants (id, name, created_at) VALUES ($1, $2, NOW())",
-      [tenantId, `l2-reg-tenant-${tenantId.slice(0, 8)}`],
+      "INSERT INTO auth.tenants (id, name, slug, created_at) VALUES ($1, $2, $3, NOW())",
+      [tenantId, `l2-reg-tenant-${tenantId.slice(0, 8)}`, `l2-${tenantId.replace(/-/g, "").slice(0, 20)}`],
     );
-    usedTenantIds.push(tenantId);
 
     try {
       const res = await registerUser(email, "Correct-Horse-Battery-Staple-99", tenantId);
@@ -128,9 +128,6 @@ describe("Auth service — Level 2 HTTP smoke tests", () => {
       expect(body.refreshToken).toBeTruthy();
     } finally {
       await cleanupAuthTenant(db, tenantId);
-      // Remove from usedTenantIds since we cleaned up here
-      const idx = usedTenantIds.indexOf(tenantId);
-      if (idx !== -1) usedTenantIds.splice(idx, 1);
     }
   });
 
@@ -221,11 +218,10 @@ describe("Auth service — Level 2 HTTP smoke tests", () => {
     for (let i = 0; i < concurrency; i++) {
       const tid = newTenantId();
       await db.query(
-        "INSERT INTO auth.tenants (id, name, created_at) VALUES ($1, $2, NOW())",
-        [tid, `l2-concurrent-${i}-${tid.slice(0, 8)}`],
+        "INSERT INTO auth.tenants (id, name, slug, created_at) VALUES ($1, $2, $3, NOW())",
+        [tid, `l2-concurrent-${i}-${tid.slice(0, 8)}`, `l2-${tid.replace(/-/g, "").slice(0, 20)}`],
       );
       tenantIds.push(tid);
-      usedTenantIds.push(tid);
     }
 
     try {
@@ -252,8 +248,6 @@ describe("Auth service — Level 2 HTTP smoke tests", () => {
     } finally {
       for (const tid of tenantIds) {
         await cleanupAuthTenant(db, tid);
-        const idx = usedTenantIds.indexOf(tid);
-        if (idx !== -1) usedTenantIds.splice(idx, 1);
       }
     }
   });
