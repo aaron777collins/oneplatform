@@ -74,17 +74,22 @@ export function LoginPage() {
           </CardContent>
         </Card>
 
-        {/* Footer links */}
-        <p className="text-center text-sm text-[var(--color-muted-foreground)]">
-          Have an invite?{" "}
-          <button
-            type="button"
-            className="text-[var(--color-primary)] hover:underline"
-            onClick={() => void navigate({ to: "/login", search: { mode: "register" } })}
-          >
-            Register
-          </button>
-        </p>
+        {/* Registration link — hidden until a /register route and self-serve
+            signup flow are implemented. The server does not expose a public
+            registration endpoint; new users are invited by a tenant admin.
+            Re-enable this once M-17 (registration page) ships. */}
+        {false && (
+          <p className="text-center text-sm text-[var(--color-muted-foreground)]">
+            Have an invite?{" "}
+            <button
+              type="button"
+              className="text-[var(--color-primary)] hover:underline"
+              onClick={() => void navigate({ to: "/login", search: { mode: "register" } })}
+            >
+              Register
+            </button>
+          </p>
+        )}
       </div>
     </main>
   );

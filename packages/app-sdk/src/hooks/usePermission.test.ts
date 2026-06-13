@@ -18,17 +18,13 @@ const mockUseAppContext = vi.mocked(useAppContext);
 // Build a real PermissionCache seeded with test data
 function buildCache(permissions: Array<{ action: string; resource: string; allowed: boolean }>): PermissionCache {
   const cache = new PermissionCache();
-  const mockClient: BffClient = {
-    request: vi.fn().mockResolvedValue({ permissions }),
-    setUnauthorizedHandler: vi.fn(),
-  } as unknown as BffClient;
-  // Synchronously seed via applySnapshot workaround — seed is async so we
-  // call refresh after mounting with a pre-loaded client
-  (cache as unknown as { applySnapshot: (p: typeof permissions) => void }).applySnapshot?.(permissions);
-  // Use the private-access workaround via type cast to populate snapshot directly
-  const snap = new Map(permissions.map((p) => [`${p.action}:${p.resource}`, p.allowed]));
-  (cache as unknown as { snapshot: Map<string, boolean> }).snapshot = snap;
-  void mockClient; // silence unused warning
+  const permMap: Record<string, string[]> = {};
+  for (const p of permissions) {
+    if (p.allowed) {
+      (permMap[p.resource] ??= []).push(p.action);
+    }
+  }
+  (cache as unknown as { applySnapshot: (p: Record<string, string[]>) => void }).applySnapshot(permMap);
   return cache;
 }
 

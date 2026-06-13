@@ -90,6 +90,34 @@ export const listMigrationsQuery = z.object({
 // Mapping rule endpoints
 // ---------------------------------------------------------------------------
 
+// Patterns that indicate attempts to escape the expression sandbox or access
+// Node.js internals. These are blocked at storage time so they never reach
+// the Execution Service. The sandbox also enforces noIo and memoryLimitMb, but
+// defence-in-depth means we reject obviously dangerous inputs before storing them.
+const EXPRESSION_DANGEROUS_PATTERNS = [
+  /\bprocess\b/,       // Node.js process object — env vars, exit, kill
+  /\brequire\b/,       // CommonJS module loader
+  /\bimport\b/,        // Dynamic import()
+  /\b__proto__\b/,     // Prototype pollution
+  /\bconstructor\b/,   // constructor property access for prototype chain escape
+  /\beval\b/,          // eval() inside an expression is doubly dangerous
+  /\bFunction\b/,      // new Function() bypasses expression scope
+  /\bGlobalThis\b/i,   // globalThis reference
+];
+
+function validateExpressionTransform(val: string): boolean {
+  return !EXPRESSION_DANGEROUS_PATTERNS.some((re) => re.test(val));
+}
+
+const safeTransformExpression = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine(validateExpressionTransform, {
+    message:
+      "Expression contains disallowed patterns (process, require, import, __proto__, constructor, eval, Function, globalThis).",
+  });
+
 export const createMappingRuleRequest = z.object({
   connectorId: z.string().uuid(),
   sourceFieldPath: z.string().min(1),
@@ -97,6 +125,27 @@ export const createMappingRuleRequest = z.object({
   transformType: z.enum(["direct", "expression", "constant", "template"]).default("direct"),
   transform: z.string().optional(),
   priority: z.number().int().min(0).default(0),
+}).superRefine((data, ctx) => {
+  if (data.transformType === "expression" && data.transform !== undefined) {
+    if (!validateExpressionTransform(data.transform)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transform"],
+        message:
+          "Expression contains disallowed patterns (process, require, import, __proto__, constructor, eval, Function, globalThis).",
+      });
+    }
+    if (data.transform.length > 4096) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        type: "string",
+        maximum: 4096,
+        inclusive: true,
+        path: ["transform"],
+        message: "Expression transform must not exceed 4096 characters.",
+      });
+    }
+  }
 });
 
 export const updateMappingRuleRequest = z.object({
@@ -105,7 +154,35 @@ export const updateMappingRuleRequest = z.object({
   transform: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
   priority: z.number().int().min(0).optional(),
+}).superRefine((data, ctx) => {
+  // Apply the same expression safety check on updates as on creation.
+  if (
+    (data.transformType === "expression" || data.transformType === undefined) &&
+    data.transform != null
+  ) {
+    if (!validateExpressionTransform(data.transform)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transform"],
+        message:
+          "Expression contains disallowed patterns (process, require, import, __proto__, constructor, eval, Function, globalThis).",
+      });
+    }
+    if (data.transform.length > 4096) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        type: "string",
+        maximum: 4096,
+        inclusive: true,
+        path: ["transform"],
+        message: "Expression transform must not exceed 4096 characters.",
+      });
+    }
+  }
 });
+
+// safeTransformExpression is exported for direct use in unit tests.
+export { safeTransformExpression };
 
 // ---------------------------------------------------------------------------
 // Internal endpoints

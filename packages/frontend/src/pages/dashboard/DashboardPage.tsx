@@ -134,7 +134,9 @@ export default function DashboardPage() {
   // Real-time: invalidate pipeline queries on SSE events
   usePlatformEvents(["pipeline.*", "ingestion.*"]);
 
-  // Fetch apps to determine if Quick Start should show
+  // Fetch apps to determine if Quick Start should show.
+  // TODO: Also check connector count and entity count so Quick Start hides as
+  // soon as the user has any data flowing, not just when an app exists. (M-21)
   const { data: appsData } = useQuery({
     queryKey: ["apps"],
     queryFn: () => client.get<PaginatedResponse<{ id: string }>>("/v1/apps"),

@@ -27,8 +27,6 @@ import type {
   VerifyEmailResult,
 } from "./types.js";
 import {
-  AccountLockedError,
-  AccountDeactivatedError,
   TenantNotFoundError,
   ResetTokenInvalidError,
   ResetTokenExpiredError,
@@ -291,18 +289,21 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       throw new UnauthorizedError("Invalid email or password.");
     }
 
-    // 2. Check account lock — lockout supersedes any other check
+    // 2. Check account lock — lockout supersedes any other check.
+    // We return the generic credential error rather than a lockout-specific
+    // message to prevent user enumeration: a distinct response would confirm
+    // that the email address exists in the system.
     if (user.locked_until !== null && user.locked_until > new Date()) {
-      throw new AccountLockedError(
-        "Account is temporarily locked due to too many failed login attempts."
-      );
+      await passwordService.compareDummy(data.password);
+      throw new UnauthorizedError("Invalid email or password.");
     }
 
-    // 3. Check account active state
+    // 3. Check account active state.
+    // Same generic message to prevent enumeration via deactivation status.
     if (!user.is_active) {
       // Still run bcrypt to prevent timing oracle revealing deactivated accounts
       await passwordService.compareDummy(data.password);
-      throw new AccountDeactivatedError("Account has been deactivated.");
+      throw new UnauthorizedError("Invalid email or password.");
     }
 
     // 4. If account has no password hash (OAuth-only), reject credential login

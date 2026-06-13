@@ -102,15 +102,13 @@ export interface OnePlatformClient {
 }
 
 export function createClient(options: ClientOptions): OnePlatformClient {
-  // --- Validate baseUrl ---
+  // --- Validate and normalise baseUrl ---
   if (!options.baseUrl || options.baseUrl.trim() === '') {
     throw new ConfigurationError('ClientOptions.baseUrl is required and must not be empty.');
   }
-  if (options.baseUrl.endsWith('/')) {
-    throw new ConfigurationError(
-      `ClientOptions.baseUrl must not have a trailing slash. Received: "${options.baseUrl}"`,
-    );
-  }
+  // Silently strip trailing slashes so callers don't have to be careful about
+  // whether they include one. All internal path concatenation assumes no trailing slash.
+  const baseUrl = options.baseUrl.replace(/\/+$/, '');
 
   const isBrowser = isBrowserEnvironment();
 
@@ -139,7 +137,7 @@ export function createClient(options: ClientOptions): OnePlatformClient {
           'BrowserAuthConfig (PKCE) can only be used in browser environments.',
         );
       }
-      authHandler = createPkceHandler(auth.browser, options.baseUrl);
+      authHandler = createPkceHandler(auth.browser, baseUrl);
       authMode = 'browser';
     } else {
       throw new ConfigurationError(
@@ -175,7 +173,7 @@ export function createClient(options: ClientOptions): OnePlatformClient {
   }
 
   const transport = new Transport({
-    baseUrl: options.baseUrl,
+    baseUrl,
     authHandler,
     retry,
     timeout,
@@ -186,7 +184,7 @@ export function createClient(options: ClientOptions): OnePlatformClient {
   });
 
   const resolvedConfig: ResolvedClientConfig = {
-    baseUrl: options.baseUrl,
+    baseUrl,
     timeout,
     logLevel,
     retry,

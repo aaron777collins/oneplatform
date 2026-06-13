@@ -9,8 +9,14 @@ import type { BffClient } from "../client/BffClient.js";
 // ─── Test helpers ──────────────────────────────────────────────────────────────
 
 function makeMockBffClient(permissions: Array<{ action: string; resource: string; allowed: boolean }>): BffClient {
+  const permMap: Record<string, string[]> = {};
+  for (const p of permissions) {
+    if (p.allowed) {
+      (permMap[p.resource] ??= []).push(p.action);
+    }
+  }
   return {
-    request: vi.fn().mockResolvedValue({ permissions }),
+    request: vi.fn().mockResolvedValue({ data: { permissions: permMap } }),
     setUnauthorizedHandler: vi.fn(),
   } as unknown as BffClient;
 }

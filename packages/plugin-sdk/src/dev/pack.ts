@@ -136,7 +136,7 @@ export async function packPlugin(options: PackOptions = {}): Promise<PackResult>
     checksumPath,
     // Use spread pattern — exactOptionalPropertyTypes forbids assigning undefined to optional fields
     ...(signed ? { sigPath: bundlePath + ".sig" } : {}),
-  });
+  }, cwd);
 
   const sizeBytes = fs.statSync(packagePath).size;
 
@@ -322,15 +322,18 @@ async function createOppkg(
     checksumPath: string;
     sigPath?: string;
   },
+  cwd: string,
 ): Promise<void> {
   const pathsToInclude = [files.manifestPath, files.bundlePath, files.checksumPath];
   if (files.sigPath !== undefined && fs.existsSync(files.sigPath)) {
     pathsToInclude.push(files.sigPath);
   }
-  await createTarGz(outputPath, pathsToInclude);
+  // Pass cwd so archive entries use relative paths (e.g. "dist/bundle.js"),
+  // preserving directory structure instead of flattening everything to the root.
+  await createTarGz(outputPath, pathsToInclude, cwd);
 }
 
-async function createTarGz(outputPath: string, filePaths: string[]): Promise<void> {
+async function createTarGz(outputPath: string, filePaths: string[], baseCwd?: string): Promise<void> {
   // Minimal tar.gz creation using Node.js streams + zlib
   // For production use, consider the 'tar' npm package (a peer dependency of the CLI)
   return new Promise<void>((resolve, reject) => {
@@ -357,10 +360,17 @@ async function createTarGz(outputPath: string, filePaths: string[]): Promise<voi
         return;
       }
 
-      const fileName = path.basename(filePath);
+      // Preserve relative paths from the plugin root so the archive has a
+      // proper directory structure (e.g. "dist/bundle.js", not "bundle.js").
+      // Fall back to basename when no base dir is available (e.g. signing step).
+      const entryName =
+        baseCwd !== undefined
+          ? path.relative(baseCwd, filePath)
+          : path.basename(filePath);
+
       const content = fs.readFileSync(filePath);
 
-      const header = buildTarHeader(fileName, content.byteLength);
+      const header = buildTarHeader(entryName, content.byteLength);
       passthrough.write(header);
       passthrough.write(content);
 

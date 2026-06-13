@@ -108,10 +108,9 @@ describe('createClient() auth validation', () => {
     ).toThrow(ConfigurationError);
   });
 
-  it('throws ConfigurationError for trailing slash in baseUrl', () => {
-    expect(() =>
-      createClient({ baseUrl: 'http://localhost/', auth: { apiKey: 'op_live_test' } }),
-    ).toThrow(ConfigurationError);
+  it('silently strips trailing slash from baseUrl', () => {
+    const client = createClient({ baseUrl: 'http://localhost/', auth: { apiKey: 'op_live_test' } });
+    expect(client).toBeDefined();
   });
 
   it('throws ConfigurationError in Node.js environment without auth', () => {

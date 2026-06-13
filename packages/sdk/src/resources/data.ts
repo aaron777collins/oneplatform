@@ -11,6 +11,9 @@ import type { ListOptions, GetOptions, MutationOptions } from '../types/resource
 import type { FilterBuilder } from '../filter-builder/filter-builder.js';
 import type { BulkOperation, BulkResult } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+// ValidationError is the correct type for SDK-side input validation failures;
+// plain Error would bypass the OnePlatformError hierarchy and break instanceof checks.
+import { ValidationError } from '../errors/client-errors.js';
 
 function serializeListQuery(
   options?: ListOptions,
@@ -90,7 +93,7 @@ function createEntityResource<T>(
 
     async get(id: string, options?: GetOptions): Promise<T> {
       if (!id || id.trim() === '') {
-        throw new Error('[OnePlatform SDK] entity.get() requires a non-empty id');
+        throw new ValidationError({ code: 'SDK_INVALID_ARGUMENT', message: '[OnePlatform SDK] entity.get() requires a non-empty id', retryable: false });
       }
       const query: Record<string, string | undefined> = {};
       if (options?.fields !== undefined) {
@@ -116,7 +119,7 @@ function createEntityResource<T>(
 
     async update(id: string, data: Partial<T>, options?: MutationOptions): Promise<T> {
       if (!id || id.trim() === '') {
-        throw new Error('[OnePlatform SDK] entity.update() requires a non-empty id');
+        throw new ValidationError({ code: 'SDK_INVALID_ARGUMENT', message: '[OnePlatform SDK] entity.update() requires a non-empty id', retryable: false });
       }
       return transport.request<T>({
         method: 'PATCH',
@@ -130,7 +133,7 @@ function createEntityResource<T>(
 
     async replace(id: string, data: T, options?: MutationOptions): Promise<T> {
       if (!id || id.trim() === '') {
-        throw new Error('[OnePlatform SDK] entity.replace() requires a non-empty id');
+        throw new ValidationError({ code: 'SDK_INVALID_ARGUMENT', message: '[OnePlatform SDK] entity.replace() requires a non-empty id', retryable: false });
       }
       return transport.request<T>({
         method: 'PUT',
@@ -144,7 +147,7 @@ function createEntityResource<T>(
 
     async delete(id: string): Promise<void> {
       if (!id || id.trim() === '') {
-        throw new Error('[OnePlatform SDK] entity.delete() requires a non-empty id');
+        throw new ValidationError({ code: 'SDK_INVALID_ARGUMENT', message: '[OnePlatform SDK] entity.delete() requires a non-empty id', retryable: false });
       }
       await transport.request<void>({
         method: 'DELETE',
@@ -173,6 +176,7 @@ export interface DataNamespace {
   [entityType: string]: EntityResource<Record<string, unknown>> | ((entityType: string) => EntityResource<Record<string, unknown>>);
 }
 
+// TODO: Add createTypedClient<T>() factory for typed query methods (M-13)
 export function createDataNamespace(transport: Transport): DataNamespace {
   const cache = new Map<string, EntityResource<Record<string, unknown>>>();
 
@@ -196,7 +200,7 @@ export function createDataNamespace(transport: Transport): DataNamespace {
   const base: DataNamespace = {
     entity(entityType: string): EntityResource<Record<string, unknown>> {
       if (!entityType || entityType.trim() === '') {
-        throw new Error('[OnePlatform SDK] entity() requires a non-empty entityType name');
+        throw new ValidationError({ code: 'SDK_INVALID_ARGUMENT', message: '[OnePlatform SDK] entity() requires a non-empty entityType name', retryable: false });
       }
       const existing = cache.get(entityType);
       if (existing !== undefined) return existing;

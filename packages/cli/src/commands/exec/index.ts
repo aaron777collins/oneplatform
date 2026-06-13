@@ -66,7 +66,7 @@ export function registerExec(program: Command): void {
   const exec = program.command("exec").description("Direct code execution (scope: execution:run)");
 
   exec.command("run").description("Execute a code file")
-    .requiredOption("--lang <lang>", "Execution language: js|ts|python")
+    .requiredOption("--lang <lang>", "Execution language: js|ts")
     .requiredOption("--file <code-file>", "Path to source file")
     .option("--input <json>", "JSON string passed as execution input")
     .option("--timeout <ms>", "Execution timeout in milliseconds", "30000")

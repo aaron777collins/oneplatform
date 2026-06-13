@@ -7,7 +7,7 @@ import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import {
   Form,
@@ -50,6 +50,14 @@ type PasswordValues = z.infer<typeof passwordSchema>;
 // ProfilePage component
 // ---------------------------------------------------------------------------
 
+// Shape returned by the auth/me endpoint
+interface MeResponse {
+  data: {
+    displayName: string;
+    email: string;
+  };
+}
+
 export function ProfilePage() {
   const { userId } = useSession();
   const client = useApiClient();
@@ -63,6 +71,22 @@ export function ProfilePage() {
     resolver: zodResolver(passwordSchema),
     defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
   });
+
+  // Fetch current user data and pre-populate the profile form so users see
+  // their existing values rather than blank fields on first load.
+  const meQuery = useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: ({ signal }) => client.get<MeResponse>("/v1/auth/me", undefined, { signal }),
+  });
+
+  React.useEffect(() => {
+    if (meQuery.data) {
+      profileForm.reset({
+        displayName: meQuery.data.data.displayName,
+        email: meQuery.data.data.email,
+      });
+    }
+  }, [meQuery.data, profileForm]);
 
   const updateProfileMutation = useMutation({
     mutationFn: (values: ProfileValues) =>

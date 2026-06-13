@@ -201,10 +201,13 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
       return;
     }
 
-    // Key per tenant; falls back to IP so unauthenticated paths
-    // (e.g. auth login) still receive basic protection.
+    // Key per tenant; falls back to actual TCP source IP so unauthenticated
+    // paths (e.g. auth login) still receive basic protection.
+    // X-Forwarded-For is intentionally NOT used as a fallback — it is a
+    // client-controlled header that can be spoofed to bypass rate limiting.
     const user = c.var.user;
-    const key = user?.tenantId ?? c.req.header("x-forwarded-for") ?? "anonymous";
+    const sourceIp = c.req.raw.socket?.remoteAddress ?? "unknown";
+    const key = user?.tenantId ?? sourceIp;
     const result = await rateLimiter.check(`gateway:${key}`, rateLimitPerMinute);
 
     if (!result.allowed) {

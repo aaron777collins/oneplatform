@@ -1,3 +1,5 @@
+// TODO: Migrate from HS256 to RS256/EdDSA asymmetric signing for better security (M-04)
+
 // JWT issuance, verification, and revocation for access tokens.
 // Refresh token rotation and family-detection replay logic.
 //

@@ -282,27 +282,27 @@ describe("AuthService.login()", () => {
     expect((deps.passwordService.compareDummy as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
-  it("throws AccountLockedError when account is locked", async () => {
+  it("throws generic UnauthorizedError when account is locked (prevents user enumeration)", async () => {
     const { createAuthService } = await import("../services/auth-service.js");
-    const { AccountLockedError } = await import("../services/errors.js");
+    const { UnauthorizedError } = await import("@oneplatform/core");
     const lockedUser = makeUserRow({
-      locked_until: new Date(Date.now() + 10 * 60 * 1000), // locked for 10 more minutes
+      locked_until: new Date(Date.now() + 10 * 60 * 1000),
     });
     const svc = createAuthService(buildLoginDeps(lockedUser));
     await expect(
       svc.login({ email: "alice@example.com", password: "any", tenantId: "tenant-1" }),
-    ).rejects.toThrow(AccountLockedError);
+    ).rejects.toThrow(UnauthorizedError);
   });
 
-  it("throws AccountDeactivatedError and runs compareDummy when account is deactivated", async () => {
+  it("throws generic UnauthorizedError when account is deactivated (prevents user enumeration)", async () => {
     const { createAuthService } = await import("../services/auth-service.js");
-    const { AccountDeactivatedError } = await import("../services/errors.js");
+    const { UnauthorizedError } = await import("@oneplatform/core");
     const deactivatedUser = makeUserRow({ is_active: false });
     const deps = buildLoginDeps(deactivatedUser);
     const svc = createAuthService(deps);
     await expect(
       svc.login({ email: "alice@example.com", password: "any", tenantId: "tenant-1" }),
-    ).rejects.toThrow(AccountDeactivatedError);
+    ).rejects.toThrow(UnauthorizedError);
     expect((deps.passwordService.compareDummy as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 

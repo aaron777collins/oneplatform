@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import { createMiddleware } from "hono/factory";
 import { jwtVerify, importSPKI, type JWTPayload } from "jose";
 import type { UserContext } from "../types.js";
@@ -15,6 +16,44 @@ export interface ServiceAuthConfig {
   servicePublicKeys: Record<string, string>;
 }
 
+// ---------------------------------------------------------------------------
+// X-User-Context HMAC helpers
+//
+// We sign the raw header value with HMAC-SHA256 using OP_JWT_SECRET so that
+// receiving services can confirm the context was set by a trusted peer, not
+// forged by an external caller who somehow obtained a valid service token.
+// ---------------------------------------------------------------------------
+
+function getHmacKey(): string {
+  const secret = process.env["OP_JWT_SECRET"];
+  if (!secret) {
+    throw new Error("OP_JWT_SECRET is required but not set.");
+  }
+  return secret;
+}
+
+/**
+ * Produce an HMAC-SHA256 hex digest over the raw X-User-Context header value.
+ * Exported so callers (BFF / gateway proxy) can attach the signature before forwarding.
+ */
+export function signUserContext(headerValue: string): string {
+  return createHmac("sha256", getHmacKey()).update(headerValue).digest("hex");
+}
+
+/**
+ * Constant-time comparison so an attacker cannot learn the expected signature
+ * length or prefix through response timing.
+ */
+function verifyUserContextSignature(headerValue: string, receivedSig: string): boolean {
+  const expected = signUserContext(headerValue);
+  // Both buffers must be the same byte-length for timingSafeEqual to work.
+  // If lengths differ the signature is already invalid; we still avoid early-exit
+  // to prevent length oracle attacks.
+  const expectedBuf = Buffer.from(expected, "hex");
+  const receivedBuf = Buffer.from(receivedSig.length === expected.length ? receivedSig : expected, "hex");
+  return timingSafeEqual(expectedBuf, receivedBuf) && receivedSig.length === expected.length;
+}
+
 // serviceAuthMiddleware enforces Ed25519 service tokens and the compiled RBAC matrix.
 // Only used on /internal/* routes. X-User-Context is only forwarded to c.var.user
 // when it arrives alongside a valid and authorized X-Service-Token — the two headers
@@ -24,6 +63,8 @@ export function serviceAuthMiddleware(config: ServiceAuthConfig) {
     const requestId: string = c.var["requestId"] ?? "";
     const serviceToken = c.req.header("X-Service-Token");
     const userContextHeader = c.req.header("X-User-Context");
+
+    const userContextSig = c.req.header("X-User-Context-Signature");
 
     // Reject X-User-Context sent without a service token — it would allow any
     // caller to spoof an elevated user context (spec §4 security invariant).
@@ -115,7 +156,16 @@ export function serviceAuthMiddleware(config: ServiceAuthConfig) {
 
     // If X-User-Context is present and the service token is valid, forward the
     // user context. Services use this to act on behalf of a user (BFF pattern).
+    // The accompanying HMAC signature proves the context was set by a trusted
+    // peer that holds OP_JWT_SECRET — not forged by an external caller.
     if (userContextHeader) {
+      // Reject contexts with missing or invalid HMAC signatures before parsing.
+      if (!userContextSig || !verifyUserContextSignature(userContextHeader, userContextSig)) {
+        return c.json(
+          { error: { code: "UNAUTHORIZED", message: "X-User-Context-Signature is missing or invalid.", requestId } },
+          401
+        );
+      }
       try {
         const userJson = Buffer.from(userContextHeader, "base64").toString("utf8");
         const userCtx = JSON.parse(userJson) as UserContext;

@@ -19,6 +19,10 @@ import {
 // hasn't been declared in package.json. Validates required + type constraints
 // from the manifest configSchema. Sufficient for the guard required by B5;
 // full JSON Schema 2020-12 can be added when Ajv is approved as a dependency.
+//
+// TODO: Replace with Ajv (ajv + ajv-formats) once approved as a dependency to
+// gain support for: enum, minimum/maximum, minLength/maxLength, pattern,
+// additionalProperties: false, and recursive $ref schemas. (M-23)
 // ---------------------------------------------------------------------------
 function validateConfigAgainstSchema(
   config: Record<string, unknown>,

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { Redis } from "ioredis";
 import type { UserContext, AppVariables } from "./types.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
@@ -78,6 +79,13 @@ export interface CreateAppConfig {
   targetService: string;
   // servicePublicKeys: loaded from /data/service-keys/ at startup
   servicePublicKeys: Record<string, string>;
+
+  /**
+   * Maximum allowed request body size in bytes. Defaults to 10 MiB.
+   * Requests exceeding this limit receive 413 Payload Too Large before any
+   * business logic runs, preventing memory exhaustion from large uploads.
+   */
+  maxBodySize?: number;
 }
 
 // createApp() is the single entry point for every @oneplatform service.
@@ -98,6 +106,23 @@ export interface CreateAppConfig {
 // here. It will be wired in Task 22 (observability) once the OTEL package is added.
 export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
+
+  // 0. Body size limit — enforced before any auth or business logic to prevent
+  // memory exhaustion from oversized request bodies. 10 MiB default covers all
+  // normal API payloads; services with larger upload needs (e.g. file import)
+  // should configure a higher limit or handle streaming separately.
+  const maxBodySize = config.maxBodySize ?? 10 * 1024 * 1024; // 10 MiB
+  app.use(
+    "*",
+    bodyLimit({
+      maxSize: maxBodySize,
+      onError: (c) =>
+        c.json(
+          { error: { code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds the maximum allowed size." } },
+          413
+        ),
+    })
+  );
 
   // 1. Request ID — propagate or generate
   app.use("*", requestIdMiddleware());

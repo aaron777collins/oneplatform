@@ -38,9 +38,20 @@ read_secret() {
 }
 
 # ── Shared secrets ────────────────────────────────────────────────────────────
-export OP_JWT_SECRET=$(read_secret "$INIT_DIR/jwt.secret")
-export OP_MASTER_KEY=$(read_secret "$INIT_DIR/master.key")
-export OP_CURSOR_SECRET=$(read_secret "$INIT_DIR/cursor.secret")
+# Separate assignment from export so the shell's exit status reflects the
+# read_secret call, not the export. Inline `export foo=$(...)` masks a non-zero
+# exit from the subshell on POSIX sh — the guard below would never trigger.
+OP_JWT_SECRET=$(read_secret "$INIT_DIR/jwt.secret")
+[ -n "$OP_JWT_SECRET" ] || { echo "[service-entrypoint] FATAL: jwt.secret is empty" >&2; exit 1; }
+export OP_JWT_SECRET
+
+OP_MASTER_KEY=$(read_secret "$INIT_DIR/master.key")
+[ -n "$OP_MASTER_KEY" ] || { echo "[service-entrypoint] FATAL: master.key is empty" >&2; exit 1; }
+export OP_MASTER_KEY
+
+OP_CURSOR_SECRET=$(read_secret "$INIT_DIR/cursor.secret")
+[ -n "$OP_CURSOR_SECRET" ] || { echo "[service-entrypoint] FATAL: cursor.secret is empty" >&2; exit 1; }
+export OP_CURSOR_SECRET
 # Bootstrap token may be absent if bootstrap already completed on a previous run.
 # Do not fail if missing — the Auth Service handles the absent-token case.
 if [ -f "$INIT_DIR/bootstrap.token" ]; then
@@ -71,8 +82,6 @@ export OP_REDIS_URL="redis://:${REDIS_PASSWORD}@redis:6379"
 PRIVATE_KEY_PATH="$INIT_DIR/keys/${SERVICE_NAME}/private.pem"
 if [ -f "$PRIVATE_KEY_PATH" ]; then
   export OP_SERVICE_PRIVATE_KEY_PATH="$PRIVATE_KEY_PATH"
-  # Also export the PEM content directly for services that prefer env injection
-  export OP_SERVICE_PRIVATE_KEY=$(cat "$PRIVATE_KEY_PATH")
 else
   echo "[service-entrypoint] WARNING: Private key not found at $PRIVATE_KEY_PATH" >&2
   echo "[service-entrypoint] Service-to-service calls will fail signature generation." >&2

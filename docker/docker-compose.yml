@@ -23,6 +23,12 @@ x-service-common: &service-common
     context: ..
     dockerfile: docker/Dockerfile.service
   restart: unless-stopped
+  stop_grace_period: 45s
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "5"
   networks:
     - oneplatform-internal
   depends_on:
@@ -30,6 +36,16 @@ x-service-common: &service-common
       condition: service_healthy
     redis:
       condition: service_healthy
+  # Container hardening: prevent privilege escalation, drop all Linux capabilities,
+  # and mount the root filesystem read-only. Services write only to explicitly
+  # declared volumes (e.g. app-data, plugin-data) and /tmp via tmpfs.
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:size=100M
 
 services:
 
@@ -137,7 +153,7 @@ services:
       start_period: 15s
     depends_on:
       op-init:
-        condition: service_healthy
+        condition: service_completed_successfully
     restart: unless-stopped
 
   docker-socket-proxy:
@@ -160,7 +176,7 @@ services:
     restart: unless-stopped
     depends_on:
       op-init:
-        condition: service_healthy
+        condition: service_completed_successfully
 
   # ─── Layer 2: Connection Pooler ───────────────────────────────────────────
   pgbouncer:
@@ -219,6 +235,12 @@ services:
       # Each service listens on port 3000 inside its container; host port differs per service.
       ONTOLOGY_SERVICE_URL: http://ontology-service:3000
       INGESTION_SERVICE_URL: http://ingestion-service:3000
+      AUTH_SERVICE_URL: http://auth-service:3000
+      PIPELINE_SERVICE_URL: http://pipeline-service:3000
+      EXECUTION_SERVICE_URL: http://execution-service:3000
+      APP_SERVICE_URL: http://app-service:3000
+      LOGGING_SERVICE_URL: http://logging-service:3000
+      PLUGIN_SERVICE_URL: http://plugin-service:3000
       # OP_* values injected by service-entrypoint.sh from init-data volume
       OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
@@ -419,6 +441,16 @@ services:
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD}
       # Execution service connects to docker-socket-proxy for sandbox management
       DOCKER_HOST: tcp://docker-socket-proxy:2375
+    # x-service-common provides pgbouncer + redis deps, but YAML merge does not
+    # deep-merge maps — overriding depends_on here replaces the whole map, so
+    # pgbouncer and redis must be repeated explicitly alongside docker-socket-proxy.
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -576,21 +608,18 @@ services:
       start_period: 10s
 
 volumes:
+  # Data store persistence
   postgres-data:
   redis-data:
   minio-data:
+  # Secret / key material produced by op-init
   init-data:
-  gateway-data:
-  auth-data:
-  ingestion-data:
-  ontology-data:
-  pipeline-data:
-  execution-data:
-  app-data:
-  logging-data:
-  plugin-data:
-  sandbox-socket:
   shared-pubkeys:
+  # Service-specific data mounts (only volumes actually mounted by a service)
+  app-data:
+  plugin-data:
+  # IPC socket between execution-service and sandbox container
+  sandbox-socket:
 
 networks:
   oneplatform-public:

@@ -43,7 +43,47 @@ export function buildProgram(): Command {
   const program = new Command("op")
     .version(CLI_VERSION, "-V, --version", "Print CLI version")
     .description("OnePlatform CLI — interact with every platform feature from the terminal")
-    .addHelpText("after", "\nRun 'op <group> --help' for group-level help.")
+    // Category headers give `op --help` a structured overview so users can
+    // orient themselves without reading every subcommand description.
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Command categories:",
+        "",
+        "  Auth & Identity",
+        "    auth          Log in, log out, refresh tokens",
+        "    profile       View and update your own profile",
+        "    user          User management (admin)",
+        "    role          Role assignment (admin)",
+        "",
+        "  Data",
+        "    ontology      Manage entity type schemas",
+        "    data          Entity CRUD and bulk operations",
+        "    connector     Connector lifecycle management",
+        "    mapping       Field mapping rules",
+        "    webhook-out   Outbound webhook subscriptions",
+        "    pipeline      Pipeline definitions and triggers",
+        "    schedule      Scheduled pipeline runs",
+        "    dlq           Dead-letter queue inspection and replay",
+        "    exec          Ad-hoc pipeline execution",
+        "",
+        "  Apps & Plugins",
+        "    app           App deployment and management",
+        "    plugin        Plugin lifecycle management",
+        "",
+        "  Admin & Tooling",
+        "    logs          Log and audit trail queries",
+        "    config        CLI configuration profiles",
+        "    status        Platform health status",
+        "    service       Service management",
+        "    sdk           SDK code generation",
+        "    version       Print version information",
+        "    completion    Shell completion scripts",
+        "",
+        "Run 'op <group> --help' for group-level help.",
+      ].join("\n"),
+    )
     // Global flags — visible on every command via .optsWithGlobals()
     .option("--profile <name>", "Credential profile to use (env: OP_PROFILE)")
     .option("-o, --output <fmt>", "Output format: table|json|jsonl|tsv (env: OP_OUTPUT)")

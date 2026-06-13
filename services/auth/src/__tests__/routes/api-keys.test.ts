@@ -132,7 +132,7 @@ describe("POST /api/v1/api-keys", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(validBody),
     });
-    expect(createSpy).toHaveBeenCalledWith("user-1", "tenant-1", expect.any(Object));
+    expect(createSpy).toHaveBeenCalledWith("user-1", "tenant-1", expect.any(Object), MOCK_USER.scopes);
   });
 
   it("accepts an optional expiresAt ISO datetime", async () => {

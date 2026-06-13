@@ -1,3 +1,5 @@
+// TODO: Implement master key rotation — re-encrypt all rows where key_version < CURRENT_KEY_VERSION (M-09)
+
 import { encrypt, decrypt } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import {

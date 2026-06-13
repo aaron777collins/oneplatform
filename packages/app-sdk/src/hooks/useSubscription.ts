@@ -24,6 +24,7 @@ import type {
 } from "../types/entities.js";
 import type { WsStatus } from "../ws/WebSocketManager.js";
 
+// TODO: Auto-invalidate related queries on entity mutation events (M-14)
 export function useSubscription<T = unknown>(
   entity: string,
   options: SubscriptionOptions = {},

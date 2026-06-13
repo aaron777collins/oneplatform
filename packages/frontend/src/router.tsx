@@ -335,6 +335,11 @@ const pluginDetailRoute = createRoute({
 });
 
 // --- Settings ---
+// TODO: Make settings sub-pages children of settingsRoute so the sidebar layout
+// persists across sub-page transitions without a full remount. This requires
+// SettingsPage to render an <Outlet /> for the active sub-page content area and
+// each sub-route to be declared as getParentRoute: () => settingsRoute. The
+// sidebar Link components then become relative paths ('./profile', etc.). (M-18)
 const settingsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/settings",

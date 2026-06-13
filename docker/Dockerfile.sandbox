@@ -54,9 +54,17 @@ USER sandbox
 # The socket path is /run/sandbox/op.sock — mounted from sandbox-socket volume.
 
 ENV NODE_ENV=production
-# Disable V8 optimizations that could be leveraged for sandbox escape.
+# Cap heap size to 512 MB — sandbox jobs should be small and short-lived.
 ENV NODE_OPTIONS=--max-old-space-size=512
 
 # Unix socket listener: accepts JSON-RPC requests from Execution Service.
 # The socket path must match what Execution Service dials.
-CMD ["node", "src/server.js", "--socket", "/run/sandbox/op.sock"]
+#
+# V8 hardening flags:
+#   --disallow-code-generation-from-strings  prevents eval() / new Function()
+#     from compiling strings into executable code, closing a common escape vector.
+#   --jitless  disables the JIT compiler entirely, eliminating JIT-spray attacks
+#     where an attacker sprays executable shellcode through JIT-compiled stubs.
+#   Both are safe for the sandbox workload because user code is executed inside
+#   isolated-vm, not in the outer Node.js process.
+CMD ["node", "--disallow-code-generation-from-strings", "--jitless", "src/server.js", "--socket", "/run/sandbox/op.sock"]

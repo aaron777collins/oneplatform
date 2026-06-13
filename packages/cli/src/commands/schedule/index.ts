@@ -43,7 +43,8 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
   validateCron(opts.cron);
   const body: Record<string, unknown> = {
     pipelineId: opts.pipeline,
-    cron: opts.cron,
+    // Service expects 'cronExpr', not 'cron' (M-11 fix)
+    cronExpr: opts.cron,
   };
   if (opts.name) body["name"] = opts.name;
   body["timezone"] = opts.timezone ?? "UTC";

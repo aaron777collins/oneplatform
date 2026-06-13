@@ -72,6 +72,12 @@ describe("BffClient.request", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
   }
 
+  function createConfiguredClient(): BffClient {
+    const client = new BffClient();
+    client.configure("test-app");
+    return client;
+  }
+
   it("uses credentials: include on every request", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
@@ -81,7 +87,7 @@ describe("BffClient.request", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await client.request("/bff/data/orders");
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -97,7 +103,7 @@ describe("BffClient.request", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await client.request("/bff/me");
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -112,7 +118,7 @@ describe("BffClient.request", () => {
       json: () => Promise.resolve({ error: { code: "PERMISSION_DENIED", message: "Forbidden" } }),
     });
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await expect(client.request("/bff/data/customers")).rejects.toMatchObject({
       code: "PERMISSION_DENIED",
       statusCode: 403,
@@ -122,7 +128,7 @@ describe("BffClient.request", () => {
   it("wraps fetch network errors as NETWORK_ERROR", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await expect(client.request("/bff/me")).rejects.toMatchObject({
       code: "NETWORK_ERROR",
       statusCode: 0,
@@ -138,7 +144,7 @@ describe("BffClient.request", () => {
       json: () => Promise.resolve({ error: { code: "UNAUTHORIZED" } }),
     });
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     const handler = vi.fn();
     client.setUnauthorizedHandler(handler);
 
@@ -157,7 +163,7 @@ describe("BffClient.request", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await client.request("/bff/data/orders", {
       method: "POST",
       body: { total: 99.99 },
@@ -176,7 +182,7 @@ describe("BffClient.request", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await client.request("/bff/data/orders");
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -192,7 +198,7 @@ describe("BffClient.request", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await client.request("/bff/data/orders/o1", { method: "DELETE" });
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -209,7 +215,7 @@ describe("BffClient.request", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const client = new BffClient();
+    const client = createConfiguredClient();
     await client.request("/bff/data/orders", { method: "POST", body: { name: "test" } });
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];

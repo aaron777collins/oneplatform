@@ -45,6 +45,11 @@ export interface WidgetServiceDeps {
 // instance deployments require cross-node consistency.
 // ---------------------------------------------------------------------------
 
+// TODO: Persist widget registry to Postgres (app.widgets table) so that
+// registrations survive service restarts without requiring a full re-deploy
+// event from every installed app. Use the existing db pool from deps and
+// mirror the register/unregister operations to the DB alongside the in-memory
+// map. On startup, seed the in-memory map from the DB. (M-15)
 export function createWidgetService(deps: WidgetServiceDeps): WidgetService {
   const { logger } = deps;
 
