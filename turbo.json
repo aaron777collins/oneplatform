@@ -22,7 +22,7 @@
     },
     "docs:generate": {
       "dependsOn": ["^build"],
-      "outputs": ["docs/**"]
+      "outputs": ["dist/openapi/**", "dist/typedoc/**", "dist/docs/**"]
     },
     "test:integration:level1": {
       "dependsOn": ["build"],
