@@ -79,7 +79,7 @@ export function registerSchedule(program: Command): void {
 
   schedule.command("create").description("Create a cron schedule for a pipeline")
     .requiredOption("--pipeline <id>", "Pipeline ID")
-    .requiredOption("--cron <expr>", "Standard 5-field cron expression")
+    .requiredOption("--cron <expr>", 'Standard 5-field cron expression (minute hour day month weekday). Examples: "0 */6 * * *" (every 6 hours), "30 9 * * 1-5" (weekdays at 09:30)')
     .option("--name <name>", "Display name")
     .option("--timezone <tz>", "IANA timezone string (default: UTC)")
     .action(withContext<[CreateOpts]>(createAction));

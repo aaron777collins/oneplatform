@@ -89,7 +89,7 @@ export function MasterKeyStep({ onNext, onPrev }: MasterKeyStepProps) {
   return (
     <WizardStep
       title="Master encryption key"
-      description="This key protects all secrets stored in the platform. Save it in a password manager now — it cannot be recovered."
+      description="This key protects all secrets stored in the platform. Save it in a password manager now — it cannot be recovered. The display timer pauses automatically while this tab is not focused."
     >
       <div className="space-y-6">
         {fetchState.status === "loading" && (

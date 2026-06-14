@@ -130,7 +130,25 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
     }
 
-    await connectorService.deleteConnector(user.tenantId, c.req.param("id"), masterKey);
+    const connectorId = c.req.param("id");
+
+    // Cancel any in-flight or queued sync job before deleting the connector so
+    // BullMQ workers don't pick up orphaned jobs after the connector row is gone.
+    // last_sync_job_id holds the most recent sync job ID — cancel it if it is
+    // still in a non-terminal state according to the Redis progress key.
+    const { syncState: connectorSyncState } = await connectorService.getConnector(user.tenantId, connectorId);
+    const lastJobId = connectorSyncState.last_sync_job_id;
+    if (lastJobId !== null) {
+      const progress = await syncService.getSyncProgress(lastJobId).catch(() => null);
+      if (progress !== null && (progress.status === "queued" || progress.status === "running")) {
+        await syncService.cancelSync(lastJobId).catch(() => {
+          // Don't block the delete if cancellation fails — the job may have
+          // already completed between the read above and this call.
+        });
+      }
+    }
+
+    await connectorService.deleteConnector(user.tenantId, connectorId, masterKey);
     return c.body(null, 204);
   });
 

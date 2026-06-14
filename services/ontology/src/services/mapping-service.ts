@@ -99,10 +99,19 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
             } else if (rule.transform_type === "template" && rule.transform) {
               transformedValue = rule.transform.replace(/\$\{value\}/g, String(sourceValue ?? ""));
             } else if (rule.transform_type === "expression" && rule.transform) {
-              // Expression transforms would go to Execution Service
-              // For now, fall through to direct mapping
-              transformedValue = sourceValue;
-              if (executionServiceUrl) {
+              if (!executionServiceUrl) {
+                // No Execution Service configured — expression transforms cannot run.
+                // Fall back to direct mapping but surface the skip so rule authors
+                // know their transform is not executing.
+                logger.warn(
+                  `Rule ${rule.id}: expression transform skipped because executionServiceUrl is not configured. ` +
+                  `The source value will be used without transformation.`,
+                );
+                transformedValue = sourceValue;
+              } else {
+                // Default to the source value; overwritten only on a successful execution
+                // response so a timeout or non-ok reply does not silently corrupt data.
+                transformedValue = sourceValue;
                 try {
                   const response = await fetch(`${executionServiceUrl}/internal/execution/run`, {
                     method: "POST",
@@ -120,9 +129,22 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
                   if (response.ok) {
                     const result = await response.json() as { result: unknown };
                     transformedValue = result.result;
+                  } else {
+                    // A non-ok response (e.g. 504 timeout, 422 sandbox error) means
+                    // the transform did not run. Log with rule ID so operators can
+                    // identify which rule is failing rather than hunting through logs.
+                    logger.warn(
+                      `Rule ${rule.id}: expression transform returned HTTP ${response.status} — ` +
+                      `falling back to source value. Check Execution Service logs for details.`,
+                    );
                   }
                 } catch (err) {
-                  logger.warn(`Expression transform failed for rule ${rule.id}: ${String(err)}`);
+                  // Network error or AbortError (client-side timeout). Surface rule ID
+                  // so the failure is actionable without cross-referencing connector config.
+                  logger.warn(
+                    `Rule ${rule.id}: expression transform failed (${String(err)}) — ` +
+                    `falling back to source value.`,
+                  );
                 }
               }
             }

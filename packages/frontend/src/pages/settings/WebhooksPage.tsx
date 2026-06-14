@@ -287,6 +287,10 @@ export function WebhooksPage() {
                     </FormControl>
                     <FormDescription>
                       Used to sign the X-Webhook-Signature header. Leave blank to skip signing.
+                      {/* TODO(OP-webhook-autosecret): If the API is updated to auto-generate a
+                          signing secret on creation, display it in a post-create dialog with
+                          a CopyButton (shared/CopyButton) — the secret is write-only after that
+                          point and cannot be recovered from the API. */}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

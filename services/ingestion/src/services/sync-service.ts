@@ -159,8 +159,10 @@ export interface SyncServiceDeps {
 // sync job reschedules itself rather than flooding the workers.
 const BATCH_QUEUE_MAX = 50_000;
 
-// Progress Redis key TTL: 7 days (matches BullMQ removeOnComplete age)
-const PROGRESS_TTL_SECONDS = 604_800;
+// Progress Redis key TTL applied once a sync reaches a terminal state.
+// Matches BullMQ removeOnComplete age (7 days) so progress keys expire
+// around the same time as the underlying BullMQ job data.
+const PROGRESS_TERMINAL_TTL_SECONDS = 604_800;
 
 const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
 
@@ -221,7 +223,24 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
   async function writeProgress(progress: SyncProgress): Promise<void> {
     const key = `ingestion:sync:${progress.syncJobId}:progress`;
-    await redis.set(key, JSON.stringify(progress), "EX", PROGRESS_TTL_SECONDS);
+
+    // Active syncs (queued/running) must not have a TTL — long-running jobs
+    // (multi-day full syncs) would become unmonitorable if the progress key
+    // expired mid-sync. Only apply the TTL once the job reaches a terminal
+    // state so the key is eventually cleaned up without affecting visibility.
+    const isTerminal =
+      progress.status === "success" ||
+      progress.status === "failed" ||
+      progress.status === "cancelled";
+
+    if (isTerminal) {
+      await redis.set(key, JSON.stringify(progress), "EX", PROGRESS_TERMINAL_TTL_SECONDS);
+    } else {
+      // KEEPTTL preserves an existing TTL if one was somehow set previously;
+      // omitting the option entirely writes with no expiry for fresh keys.
+      await redis.set(key, JSON.stringify(progress));
+    }
+
     await redis.publish(
       `ingestion:sync:${progress.syncJobId}:events`,
       JSON.stringify(progress),

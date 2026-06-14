@@ -18,7 +18,15 @@ const CONNECTOR_COLUMNS = [
 ];
 
 interface ListOpts { plugin?: string; status?: string }
-interface CreateOpts { plugin: string; name: string; config?: string; interactive?: boolean }
+interface CreateOpts {
+  plugin: string;
+  name: string;
+  config?: string;
+  credentials?: string;
+  syncMode?: "full" | "incremental";
+  enabled: boolean;
+  interactive?: boolean;
+}
 interface UpdateOpts { name?: string; config?: string }
 interface TriggerOpts { wait?: boolean }
 
@@ -32,6 +40,7 @@ async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
 
 async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void> {
   let config: Record<string, unknown> = {};
+  let credentials: Record<string, string> = {};
 
   if (opts.interactive) {
     const schema = await ctx.http.get<{ fields: Array<{ name: string; type: string; secret?: boolean }> }>(
@@ -48,10 +57,17 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
     config = JSON.parse(readFileSync(opts.config, "utf8")) as Record<string, unknown>;
   }
 
+  if (opts.credentials) {
+    credentials = JSON.parse(readFileSync(opts.credentials, "utf8")) as Record<string, string>;
+  }
+
   const resp = await ctx.http.post<{ id: string; name: string }>("/api/v1/connectors", {
     pluginId: opts.plugin,
     name: opts.name,
     config,
+    credentials,
+    ...(opts.syncMode !== undefined ? { syncMode: opts.syncMode } : {}),
+    isEnabled: opts.enabled,
   });
   ctx.renderer.success(`Connector '${resp.name}' created (ID: ${resp.id}).`);
 }
@@ -129,6 +145,10 @@ export function registerConnector(program: Command): void {
     .requiredOption("--plugin <plugin-id>", "Plugin ID of the connector plugin")
     .requiredOption("--name <name>", "Connector display name")
     .option("--config <config.json>", "Path to JSON configuration file")
+    .option("--credentials <credentials.json>", "Path to JSON file containing connector credentials (keep this file secure)")
+    .option("--sync-mode <mode>", "Sync mode: full | incremental (default: connector plugin default)")
+    .option("--enabled", "Enable the connector immediately (default: true)", true)
+    .option("--no-enabled", "Create the connector in a disabled state")
     .option("--interactive", "Use interactive prompts for configuration")
     .action(withContext<[CreateOpts]>(createAction));
 
