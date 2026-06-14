@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 
 interface QueryOpts {
   filter?: string; sort?: string; sortDir?: string;
-  limit?: string; offset?: string
+  limit?: string; cursor?: string;
 }
 interface ImportOpts { file: string; format?: string; batchSize?: string; dryRun?: boolean }
 interface ExportOpts { filter?: string; format?: string; out?: string }
@@ -22,13 +22,25 @@ async function queryAction(entityType: string, opts: QueryOpts, ctx: CommandCont
   if (opts.sort) query["sort"] = opts.sort;
   if (opts.sortDir) query["sortDir"] = opts.sortDir;
   if (opts.limit) query["limit"] = opts.limit;
-  if (opts.offset) query["offset"] = opts.offset;
+  // cursor-based pagination: the API does not accept offset.
+  if (opts.cursor) query["cursor"] = opts.cursor;
 
-  const results = await ctx.http.get<unknown[]>(
+  const results = await ctx.http.get<{ data?: unknown[]; nextCursor?: string | null } | unknown[]>(
     `/api/v1/data/${encodeURIComponent(entityType)}`,
     query,
   );
-  ctx.renderer.render(results);
+
+  // The API returns either a paginated envelope { data, nextCursor } or a plain array.
+  // Handle both shapes so this command works regardless of transport unwrapping.
+  if (Array.isArray(results)) {
+    ctx.renderer.render(results);
+  } else {
+    ctx.renderer.render(results.data ?? []);
+    // Print the next cursor to stderr so it can be captured separately from
+    // the data output and passed to the next invocation via --cursor.
+    const next = results.nextCursor ?? null;
+    process.stderr.write(`Next cursor: ${next ?? "(end)"}\n`);
+  }
 }
 
 async function getAction(entityType: string, id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
@@ -121,7 +133,7 @@ export function registerData(program: Command): void {
     .option("--sort <field>", "Sort field")
     .option("--sort-dir <dir>", "Sort direction: asc|desc")
     .option("--limit <n>", "Maximum records to return")
-    .option("--offset <n>", "Pagination offset")
+    .option("--cursor <token>", "Pagination cursor from a previous response (replaces --offset)")
     .action(withContext<[string, QueryOpts]>(queryAction));
 
   data.command("get")

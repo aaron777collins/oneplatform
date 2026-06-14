@@ -11,6 +11,8 @@ import type {
   UpdateConnectorRequest,
   ConnectorTestResult,
   PipelineRun,
+  SyncJob,
+  SyncProgress,
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
@@ -22,6 +24,10 @@ export interface ConnectorNamespace {
   delete(id: string): Promise<void>;
   test(id: string): Promise<ConnectorTestResult>;
   trigger(id: string): Promise<PipelineRun>;
+  /** List sync jobs for a connector in reverse-chronological order. */
+  listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob>;
+  /** Get real-time progress for an in-flight or recently completed sync job. */
+  getSyncProgress(connectorId: string, syncJobId: string): Promise<SyncProgress>;
 }
 
 export function createConnectorNamespace(transport: Transport): ConnectorNamespace {
@@ -75,6 +81,29 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
       return transport.request<PipelineRun>({
         method: 'POST',
         path: `${BASE}/${encodeURIComponent(id)}/trigger`,
+      });
+    },
+
+    listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob> {
+      const pageSize = options?.limit ?? 20;
+      return new Paginator<SyncJob>(async (cursor, limit) => {
+        const result = await transport.request<{
+          items: SyncJob[];
+          nextCursor: string | null;
+          total: number | null;
+        }>({
+          method: 'GET',
+          path: `${BASE}/${encodeURIComponent(connectorId)}/syncs`,
+          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+        });
+        return { ...result, hasMore: result.nextCursor !== null };
+      }, pageSize);
+    },
+
+    async getSyncProgress(connectorId: string, syncJobId: string): Promise<SyncProgress> {
+      return transport.request<SyncProgress>({
+        method: 'GET',
+        path: `${BASE}/${encodeURIComponent(connectorId)}/syncs/${encodeURIComponent(syncJobId)}/progress`,
       });
     },
   };
