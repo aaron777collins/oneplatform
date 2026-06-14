@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+/**
+ * Root-level merge script for documentation artifacts.
+ *
+ * This is a plain Node.js script (not a Turbo task) that runs AFTER
+ * `pnpm turbo docs:generate` completes. It fans-in per-package outputs
+ * from dist/ directories into docs/generated/ for the Starlight site and
+ * the gateway's static spec serving.
+ *
+ * WHY this is not a Turbo task:
+ *   Turbo prohibits output paths that traverse outside a package boundary
+ *   (../../). This script writes to docs/generated/ (the monorepo root),
+ *   which is not within any single package boundary. Running it as a root
+ *   shell script after Turbo is the clean solution. See design doc §7.
+ *
+ * Steps performed:
+ *   1. Run the OpenAPI merger — reads services/{name}/dist/openapi/*.json,
+ *      writes docs/generated/openapi/merged.json and copies per-service files.
+ *   2. (TypeDoc copies — added when TypeDoc is wired in Phase 3)
+ *   3. (CLI docs copy — added when CLI docs:generate writes to dist/docs/)
+ */
+
+import { execSync } from "node:child_process";
+import { cp, mkdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(__dirname, "..", "..");
+
+function run(cmd, description) {
+  console.log(`\n[docs-merge] ${description}`);
+  console.log(`  $ ${cmd}`);
+  execSync(cmd, { stdio: "inherit", cwd: repoRoot });
+}
+
+async function copyPerServiceSpecs() {
+  const servicesDir = join(repoRoot, "services");
+  const outDir = join(repoRoot, "docs", "generated", "openapi");
+
+  await mkdir(outDir, { recursive: true });
+
+  let serviceNames;
+  try {
+    serviceNames = await readdir(servicesDir);
+  } catch {
+    console.warn("[docs-merge] services/ directory not found — skipping per-service copy");
+    return;
+  }
+
+  for (const name of serviceNames) {
+    const srcDir = join(servicesDir, name, "dist", "openapi");
+    let files;
+    try {
+      files = await readdir(srcDir);
+    } catch {
+      // Service has no openapi output yet — skip
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+      const src = join(srcDir, file);
+      const dest = join(outDir, file);
+      await cp(src, dest);
+      console.log(`[docs-merge] Copied ${src} → ${dest}`);
+    }
+  }
+}
+
+async function main() {
+  console.log("[docs-merge] Starting documentation merge...\n");
+
+  // Step 1: Run the OpenAPI merger to produce merged.json
+  run(
+    "npx tsx tools/openapi-gen/src/cli.ts --merge --services-root services/ --out docs/generated/openapi/merged.json",
+    "Merging per-service OpenAPI specs into docs/generated/openapi/merged.json",
+  );
+
+  // Step 2: Copy per-service JSON files to docs/generated/openapi/
+  // These are served by the gateway at /api/v1/openapi/{service}.json
+  await copyPerServiceSpecs();
+
+  console.log("\n[docs-merge] Documentation merge complete.");
+  console.log(
+    "[docs-merge] Next step: pnpm docs:build (builds the Starlight docs site)",
+  );
+}
+
+main().catch((err) => {
+  console.error("[docs-merge] Fatal error:", err.message ?? String(err));
+  process.exit(1);
+});
