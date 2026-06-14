@@ -1,5 +1,8 @@
 /**
  * client.connectors namespace — connector lifecycle management.
+ *
+ * Accessible as `client.connectors`. Connectors pull data from external systems
+ * into OnePlatform and are the source step in most pipelines.
  */
 
 import type { Transport } from '../transport.js';
@@ -16,17 +19,41 @@ import type {
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+/**
+ * Namespace for connector management operations.
+ *
+ * Accessible as `client.connectors`.
+ */
 export interface ConnectorNamespace {
+  /** Lists all connector instances for the tenant. */
   list(options?: ListOptions): PaginatedIterable<ConnectorInstance>;
+  /** Fetches a single connector instance by ID. */
   get(id: string): Promise<ConnectorInstance>;
+  /** Registers a new connector instance. */
   create(data: CreateConnectorRequest): Promise<ConnectorInstance>;
+  /** Updates connector configuration (credentials, schedule, etc.). */
   update(id: string, data: UpdateConnectorRequest): Promise<ConnectorInstance>;
+  /** Deletes a connector instance and stops any scheduled syncs. */
   delete(id: string): Promise<void>;
+
+  /**
+   * Validates connectivity to the external system using the stored credentials.
+   *
+   * @returns A {@link ConnectorTestResult} indicating success or describing the failure.
+   */
   test(id: string): Promise<ConnectorTestResult>;
+
+  /**
+   * Enqueues an immediate out-of-schedule sync for the connector.
+   *
+   * @returns The {@link PipelineRun} created for the triggered sync.
+   */
   trigger(id: string): Promise<PipelineRun>;
-  /** List sync jobs for a connector in reverse-chronological order. */
+
+  /** Lists sync jobs for a connector in reverse-chronological order. */
   listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob>;
-  /** Get real-time progress for an in-flight or recently completed sync job. */
+
+  /** Returns real-time progress for an in-flight or recently completed sync job. */
   getSyncProgress(connectorId: string, syncJobId: string): Promise<SyncProgress>;
 }
 

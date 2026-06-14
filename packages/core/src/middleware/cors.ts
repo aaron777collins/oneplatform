@@ -12,10 +12,18 @@ const EXPOSE_HEADERS =
   "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-RateLimit-Policy, X-OnePlatform-Request-ID";
 const MAX_AGE = "86400";
 
-// corsMiddleware enforces the OP_ALLOWED_ORIGINS allowlist.
-// Requests from unknown origins return 403 ORIGIN_NOT_ALLOWED rather than a
-// normal CORS failure. This prevents leaking endpoint existence to attackers
-// who probe from untrusted origins (spec §6 CORS Policy).
+/**
+ * Hono middleware that enforces the `OP_ALLOWED_ORIGINS` allowlist.
+ *
+ * Requests from unknown origins return `403 ORIGIN_NOT_ALLOWED` rather than
+ * a browser-level CORS failure. This prevents leaking endpoint existence to
+ * attackers probing from untrusted origins (spec §6 CORS Policy).
+ *
+ * Wired automatically by {@link createApp}; export is for services that need a
+ * custom middleware stack.
+ *
+ * @param config - Explicit list of permitted origins.
+ */
 export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
   const originSet = new Set(config.allowedOrigins);
 

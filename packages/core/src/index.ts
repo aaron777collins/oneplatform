@@ -1,4 +1,32 @@
-// @oneplatform/core — public API surface
+/**
+ * @packageDocumentation
+ * @oneplatform/core — Shared infrastructure for all OnePlatform services.
+ *
+ * Every service imports from this package rather than from internal paths.
+ * It provides the Hono app factory, database/Redis clients, BullMQ queue helpers,
+ * structured logging, middleware stack, error hierarchy, and configuration loader.
+ *
+ * ## Typical service bootstrap
+ * ```ts
+ * import { createApp, loadConfig, createDbClient, createRedisClient } from '@oneplatform/core';
+ *
+ * const config = loadConfig();
+ * const redis = createRedisClient({ url: config.OP_REDIS_URL });
+ * const db = createDbClient({ connectionString: config.OP_DATABASE_URL, maxConnections: 10 });
+ *
+ * const app = createApp({
+ *   serviceName: 'my-service',
+ *   version: '1.0.0',
+ *   jwtSecret: config.OP_JWT_SECRET,
+ *   redis,
+ *   validateApiKey: async (key) => { ... },
+ *   allowedOrigins: config.OP_ALLOWED_ORIGINS,
+ *   publicRoutes: ['/healthz', '/readyz'],
+ *   targetService: 'my-service',
+ *   servicePublicKeys: {},
+ * });
+ * ```
+ */
 // Services import everything from "@oneplatform/core", not from internal paths.
 
 // ---------------------------------------------------------------------------

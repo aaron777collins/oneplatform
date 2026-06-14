@@ -16,13 +16,13 @@
  * Steps performed:
  *   1. Run the OpenAPI merger — reads services/{name}/dist/openapi/*.json,
  *      writes docs/generated/openapi/merged.json and copies per-service files.
- *   2. (TypeDoc copies — added when TypeDoc is wired in Phase 3)
+ *   2. Copy TypeDoc markdown output for the 4 SDK packages.
  *   3. (CLI docs copy — added when CLI docs:generate writes to dist/docs/)
  */
 
 import { execSync } from "node:child_process";
 import { cp, mkdir } from "node:fs/promises";
-import { readdir } from "node:fs/promises";
+import { readdir, access } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,6 +68,33 @@ async function copyPerServiceSpecs() {
   }
 }
 
+/**
+ * Copies TypeDoc markdown output from packages/{pkg}/dist/typedoc to
+ * docs/generated/typedoc/{pkg}. Skips any package whose dist/typedoc
+ * directory does not exist yet (e.g. first run before pnpm docs:generate).
+ */
+async function copyTypedocOutput() {
+  const sdkPackages = ["sdk", "app-sdk", "plugin-sdk", "core"];
+
+  for (const pkg of sdkPackages) {
+    const srcDir = join(repoRoot, "packages", pkg, "dist", "typedoc");
+    const destDir = join(repoRoot, "docs", "generated", "typedoc", pkg);
+
+    try {
+      await access(srcDir);
+    } catch {
+      console.warn(
+        `[docs-merge] packages/${pkg}/dist/typedoc not found — skipping (run pnpm docs:generate first)`,
+      );
+      continue;
+    }
+
+    await mkdir(destDir, { recursive: true });
+    await cp(srcDir, destDir, { recursive: true });
+    console.log(`[docs-merge] Copied packages/${pkg}/dist/typedoc → docs/generated/typedoc/${pkg}`);
+  }
+}
+
 async function main() {
   console.log("[docs-merge] Starting documentation merge...\n");
 
@@ -80,6 +107,9 @@ async function main() {
   // Step 2: Copy per-service JSON files to docs/generated/openapi/
   // These are served by the gateway at /api/v1/openapi/{service}.json
   await copyPerServiceSpecs();
+
+  // Step 3: Copy TypeDoc output for the 4 SDK packages
+  await copyTypedocOutput();
 
   console.log("\n[docs-merge] Documentation merge complete.");
   console.log(

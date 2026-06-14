@@ -1,8 +1,14 @@
 import { Redis } from "ioredis";
 import type { Redis as RedisType } from "ioredis";
 
+/** Configuration for {@link createRedisClient}. */
 export interface RedisClientConfig {
+  /** Redis connection URL (e.g. `redis://host:6379`). */
   url: string;
+  /**
+   * Maximum number of retries per command before the command is rejected.
+   * Defaults to 3. Set to `null` to retry indefinitely (not recommended).
+   */
   maxRetriesPerRequest?: number;
 }
 
@@ -15,6 +21,15 @@ function retryStrategy(times: number): number | null {
   return Math.min(100 * Math.pow(2, times), 30_000);
 }
 
+/**
+ * Creates an ioredis `Redis` client configured for OnePlatform services.
+ *
+ * Uses `lazyConnect` so startup succeeds even when Redis is momentarily
+ * unavailable. Reconnects with exponential backoff capped at 30 s, giving
+ * up after 10 consecutive failures to surface hard outages quickly.
+ *
+ * @param config - Redis URL and optional per-command retry limit.
+ */
 export function createRedisClient(config: RedisClientConfig): RedisType {
   return new Redis(config.url, {
     // lazyConnect defers the TCP handshake until the first command, which lets

@@ -1,5 +1,8 @@
 /**
  * client.plugins namespace — plugin lifecycle management.
+ *
+ * Accessible as `client.plugins`. Plugins extend the platform with connectors,
+ * transformers, destinations, auth providers, and widgets.
  */
 
 import type { Transport } from '../transport.js';
@@ -8,11 +11,21 @@ import type { ListOptions } from '../types/resources.js';
 import type { Plugin, CreatePluginRequest, UpdatePluginRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+/**
+ * Namespace for plugin management operations.
+ *
+ * Accessible as `client.plugins`.
+ */
 export interface PluginNamespace {
+  /** Lists all installed plugins for the tenant. */
   list(options?: ListOptions): PaginatedIterable<Plugin>;
+  /** Fetches a single plugin by ID or slug. */
   get(id: string): Promise<Plugin>;
+  /** Installs a new plugin from a registry bundle or URL. */
   create(data: CreatePluginRequest): Promise<Plugin>;
+  /** Updates plugin configuration or triggers a version upgrade. */
   update(id: string, data: UpdatePluginRequest): Promise<Plugin>;
+  /** Uninstalls a plugin; running connectors using it will fail after deletion. */
   delete(id: string): Promise<void>;
 }
 

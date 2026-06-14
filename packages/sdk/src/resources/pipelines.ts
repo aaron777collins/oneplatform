@@ -1,5 +1,8 @@
 /**
  * client.pipelines namespace — pipeline CRUD and run management.
+ *
+ * Accessible as `client.pipelines`. Pipelines orchestrate multi-step data
+ * workflows composed of connectors, transformers, and destinations.
  */
 
 import type { Transport } from '../transport.js';
@@ -14,16 +17,45 @@ import type {
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+/**
+ * Namespace for pipeline management operations.
+ *
+ * Accessible as `client.pipelines`.
+ */
 export interface PipelineNamespace {
+  /** Lists all pipelines, newest first. */
   list(options?: ListOptions): PaginatedIterable<Pipeline>;
+  /** Fetches a single pipeline by ID or slug. */
   get(id: string): Promise<Pipeline>;
+  /** Creates a new pipeline definition. */
   create(data: CreatePipelineRequest): Promise<Pipeline>;
+  /** Applies a partial update to an existing pipeline. */
   update(id: string, data: UpdatePipelineRequest): Promise<Pipeline>;
+  /** Permanently deletes a pipeline and all its run history. */
   delete(id: string): Promise<void>;
+
+  /**
+   * Enqueues an immediate run of the pipeline.
+   *
+   * @param id - Pipeline ID or slug.
+   * @param input - Optional key-value pairs passed to the first step.
+   */
   trigger(id: string, input?: Record<string, unknown>): Promise<PipelineRun>;
+
+  /** Fetches a single run record. */
   getRun(pipelineId: string, runId: string): Promise<PipelineRun>;
+  /** Lists all runs for a pipeline in reverse-chronological order. */
   listRuns(pipelineId: string, options?: ListOptions): PaginatedIterable<PipelineRun>;
+
+  /**
+   * Requests cancellation of an in-progress run.
+   *
+   * Returns the updated run record; status transitions asynchronously to
+   * `cancelled` once the currently executing step finishes.
+   */
   cancelRun(pipelineId: string, runId: string): Promise<PipelineRun>;
+
+  /** Streams log lines for a run in cursor-paginated pages. */
   streamRunLogs(pipelineId: string, runId: string): PaginatedIterable<LogEntry>;
 }
 

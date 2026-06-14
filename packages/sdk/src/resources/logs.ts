@@ -1,5 +1,8 @@
 /**
  * client.logs namespace — log queries and audit trail.
+ *
+ * Accessible as `client.logs`. Provides access to structured service logs and
+ * the immutable audit trail of all user and system actions.
  */
 
 import type { Transport } from '../transport.js';
@@ -8,9 +11,32 @@ import type { LogQueryOptions, TailOptions, AuditQueryOptions } from '../types/r
 import type { LogEntry, AuditEntry } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+/**
+ * Namespace for log and audit trail queries.
+ *
+ * Accessible as `client.logs`.
+ */
 export interface LogNamespace {
+  /**
+   * Queries historical structured logs within a time window.
+   *
+   * @param options - Filter by service, level, and ISO-8601 time range.
+   */
   query(options: LogQueryOptions): PaginatedIterable<LogEntry>;
+
+  /**
+   * Returns the most recent log lines, suitable for live-tail display.
+   *
+   * Unlike `query()`, `tail()` starts from the newest entries rather than the
+   * oldest; pagination moves backwards in time.
+   */
   tail(options?: TailOptions): PaginatedIterable<LogEntry>;
+
+  /**
+   * Queries the immutable audit trail of user and system actions.
+   *
+   * @param options - Filter by actor, resource type, and time range.
+   */
   queryAudit(options: AuditQueryOptions): PaginatedIterable<AuditEntry>;
 }
 

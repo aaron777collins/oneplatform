@@ -1,6 +1,9 @@
 /**
  * client.ontologies namespace — ontology schema management.
  *
+ * Accessible as `client.ontologies`. Ontologies define the entity types,
+ * fields, and relationships that structure data in the platform.
+ *
  * Canonical API base path: /api/v1/ontology (singular, matching the service routes).
  */
 
@@ -18,20 +21,52 @@ import type {
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+/**
+ * Namespace for ontology schema management.
+ *
+ * Accessible as `client.ontologies`.
+ */
 export interface OntologyNamespace {
+  /** Lists all ontology schemas for the tenant. */
   list(options?: ListOptions): PaginatedIterable<OntologySchema>;
+  /** Fetches a single schema by ID. */
   get(id: string): Promise<OntologySchema>;
+  /** Creates a new ontology schema. */
   create(data: CreateOntologyRequest): Promise<OntologySchema>;
+  /** Updates an existing schema (adding or modifying fields). */
   update(id: string, data: UpdateOntologyRequest): Promise<OntologySchema>;
+  /** Deletes a schema. Fails if any connector or pipeline references it. */
   delete(id: string): Promise<void>;
+
+  /**
+   * Validates a proposed schema change without persisting it.
+   *
+   * @returns A {@link ValidationResult} listing any constraint violations.
+   */
   validate(data: ValidateOntologyRequest): Promise<ValidationResult>;
   /**
-   * @deprecated Use diff(entityTypeId, proposedSchema) instead.
+   * @deprecated Use `diff(entityTypeId, proposedSchema)` instead.
    * Will be removed in SDK v1.0.
+   *
+   * @param fromVersion - The base version identifier.
+   * @param toVersion   - The target version identifier.
    */
   diff(fromVersion: string, toVersion: string): Promise<OntologyDiff>;
-  /** Compute a non-destructive diff of proposedSchema against the live entity schema. */
+
+  /**
+   * Computes a non-destructive field-level diff of `proposedSchema` against the
+   * live entity schema.
+   *
+   * @param entityTypeId   - The entity type to diff against.
+   * @param proposedSchema - The proposed schema changes.
+   */
   diff(entityTypeId: string, proposedSchema: UpdateOntologyRequest): Promise<OntologyDiff>;
+
+  /**
+   * Returns the status of the background migration job triggered by a schema update.
+   *
+   * Poll until `status === 'complete'` or `status === 'failed'`.
+   */
   getMigrationStatus(id: string): Promise<MigrationStatus>;
 }
 

@@ -1,17 +1,28 @@
 /**
  * Root provider component for OnePlatform hosted apps.
  *
- * Every hosted app must wrap its component tree in AppProvider. It performs
+ * Every hosted app must wrap its component tree in `AppProvider`. It performs
  * platform initialisation at mount:
  *
- *   1. Reads and validates window.__OP_APP_CONFIG__
- *   2. Fetches /bff/me and /bff/permissions in parallel
- *   3. Seeds PermissionCache from the permissions response
- *   4. Connects the WebSocket via WebSocketManager
- *   5. Sets isReady = true so hooks can begin rendering data
+ * 1. Reads and validates `window.__OP_APP_CONFIG__`
+ * 2. Fetches `/bff/me` and `/bff/permissions` in parallel
+ * 3. Seeds `PermissionCache` from the permissions response
+ * 4. Connects the WebSocket via `WebSocketManager`
+ * 5. Sets `isReady = true` so hooks can begin rendering data
  *
- * Children are withheld until isReady is true (C-4) to prevent hooks from
+ * Children are withheld until `isReady` is `true` (C-4) to prevent hooks from
  * rendering data before permission state is available.
+ *
+ * @example
+ * ```tsx
+ * function Root() {
+ *   return (
+ *     <AppProvider loadingFallback={<Spinner />}>
+ *       <App />
+ *     </AppProvider>
+ *   );
+ * }
+ * ```
  */
 
 import React from "react";

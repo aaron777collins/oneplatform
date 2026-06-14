@@ -124,9 +124,14 @@ export type PluginServiceConfig = z.infer<typeof pluginConfigSchema>;
 // ─── Config loader ────────────────────────────────────────────────────────────
 
 /**
- * Parse and validate process.env against the provided Zod schema.
- * Each service passes its own service-specific schema so startup fails only
- * when THAT service's required vars are absent, not vars belonging to other services.
+ * Loads and validates environment variables against the provided service-specific schema.
+ *
+ * Each service passes its own schema so startup fails only when THAT service's
+ * required vars are absent, not vars belonging to other services.
+ *
+ * @throws `Error` with a human-readable list of all validation failures when
+ *   any required variable is missing or malformed. The error message is
+ *   designed to be read directly from container logs.
  *
  * @example
  *   import { loadConfig, gatewayConfigSchema } from "@oneplatform/core";

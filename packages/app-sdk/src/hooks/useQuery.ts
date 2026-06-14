@@ -1,15 +1,29 @@
 /**
  * Data fetching hook for platform entities.
  *
- * Fetches GET /bff/data/{entity} with filtering, sorting, and cursor pagination.
- * Implements stale-while-revalidate: cached data is returned immediately while
- * a background refetch runs if the entry is older than staleTime.
+ * Fetches `GET /bff/data/{entity}` with filtering, sorting, and cursor
+ * pagination. Implements stale-while-revalidate: cached data is returned
+ * immediately while a background refetch runs if the entry is older than
+ * `staleTime`.
  *
- * Deduplication: concurrent useQuery calls with the same (entity, options) key
- * share one in-flight fetch via the module-level QueryCache singleton.
+ * Deduplication: concurrent `useQuery` calls with the same `(entity, options)`
+ * key share one in-flight fetch via the module-level `QueryCache` singleton.
  *
- * fetchNextPage appends to the existing data[] rather than replacing it —
+ * `fetchNextPage` appends to the existing `data[]` rather than replacing it —
  * callers accumulate pages incrementally (infinite scroll pattern).
+ *
+ * @param entity  - The ontology entity type name (e.g. `'Product'`).
+ * @param options - Filtering, sorting, field selection, and cache control.
+ * @returns A {@link QueryResult} containing `data`, loading state, and pagination helpers.
+ *
+ * @example
+ * ```tsx
+ * const { data, isLoading, fetchNextPage } = useQuery<Product>('Product', {
+ *   filter: { status: { eq: 'active' } },
+ *   sort: ['-createdAt'],
+ *   limit: 20,
+ * });
+ * ```
  */
 
 import React from "react";

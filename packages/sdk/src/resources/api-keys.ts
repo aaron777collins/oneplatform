@@ -11,10 +11,37 @@ import type { ListOptions } from '../types/resources.js';
 import type { ApiKey, CreatedApiKey, CreateApiKeyRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 
+/**
+ * Namespace for API key lifecycle management.
+ *
+ * Accessible as `client.apiKeys`.
+ *
+ * **Security:** `create()` and `rotate()` return a {@link CreatedApiKey} that
+ * contains the full key value. The secret is returned exactly once — store it
+ * in a secrets manager immediately.
+ */
 export interface ApiKeyNamespace {
+  /** Lists all API keys for the tenant (secrets are never included in list responses). */
   list(options?: ListOptions): PaginatedIterable<ApiKey>;
+
+  /**
+   * Creates a new API key.
+   *
+   * @returns A {@link CreatedApiKey} containing the plaintext secret. Store it immediately.
+   */
   create(data: CreateApiKeyRequest): Promise<CreatedApiKey>;
+
+  /**
+   * Permanently revokes an API key. Any request authenticated with it will
+   * receive 401 after revocation.
+   */
   revoke(id: string): Promise<void>;
+
+  /**
+   * Replaces an existing key with a freshly generated one.
+   *
+   * @returns A {@link CreatedApiKey} containing the new plaintext secret.
+   */
   rotate(id: string): Promise<CreatedApiKey>;
 }
 
