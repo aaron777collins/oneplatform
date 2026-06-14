@@ -189,7 +189,17 @@ async function createDockerContainer(
     throw new Error(`Docker create failed with status ${result.status}: ${result.body}`);
   }
 
-  const parsed = JSON.parse(result.body) as { Id: string };
+  // Wrap in try-catch so a malformed Docker API response surfaces a clear error
+  // rather than a cryptic "Unexpected token" from a bare JSON.parse.
+  let parsed: { Id: string };
+  try {
+    parsed = JSON.parse(result.body) as { Id: string };
+  } catch (err) {
+    const truncated = result.body.slice(0, 200);
+    throw new Error(
+      `Failed to parse Docker create response: ${err instanceof Error ? err.message : String(err)} — raw: ${truncated}`,
+    );
+  }
   return parsed.Id;
 }
 

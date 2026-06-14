@@ -229,7 +229,15 @@ export function createWebhookReceiveService(
       });
 
     if (signingSecret === null) {
-      // Cannot verify — drop the event without revealing why.
+      // The decryption error was already logged above. We additionally log
+      // at WARN here so the event drop is visible as an audit trail entry
+      // separate from the underlying crypto failure — ops can filter on
+      // WEBHOOK_CREDENTIAL_FAILURE to detect credential misconfiguration.
+      logger.warn("Webhook event dropped due to credential failure", {
+        webhookId: receiverId,
+        code: "WEBHOOK_CREDENTIAL_FAILURE",
+        reason: "signing_secret_unavailable",
+      });
       return { received: true };
     }
 

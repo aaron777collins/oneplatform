@@ -18,10 +18,24 @@ export const listConnectorsQuery = z.object({
 // A valid standard cron expression has exactly 5 space-separated fields:
 //   minute  hour  day-of-month  month  day-of-week
 //
-// Each field is a non-empty sequence of digits, *, /, -, and comma characters.
-// This regex is intentionally permissive for the character set within each
-// field — semantic validation (e.g. minute 0-59) is left to the scheduler,
-// which provides better error messages than a generic regex.
+// Each field is validated both structurally (allowed syntax) and semantically
+// (numeric values must fall within the field's accepted range). This catches
+// expressions like "99 99 99 99 99" or "0 25 * * *" that are syntactically
+// plausible but would fail or silently misbehave at runtime.
+//
+// Supported syntax per field:
+//   *           — any value
+//   */n         — step (e.g. */15 means every 15 units)
+//   n           — exact value
+//   n-m         — range
+//   n,m,...     — list of exact values or ranges
+//
+// Field ranges:
+//   minute       0–59
+//   hour         0–23
+//   day-of-month 1–31
+//   month        1–12
+//   day-of-week  0–7  (0 and 7 are both Sunday, per POSIX cron)
 //
 // Examples of valid values:
 //   "0 9 * * 1-5"    — every weekday at 09:00
@@ -29,12 +43,75 @@ export const listConnectorsQuery = z.object({
 //   "0 0 1 * *"      — midnight on the 1st of every month
 // ---------------------------------------------------------------------------
 
-const CRON_FIELD_RE = /^(\*|[0-9][0-9,\-/]*)$/;
+interface CronFieldSpec {
+  min: number;
+  max: number;
+}
+
+// Ordered to match the 5 cron fields left-to-right.
+const CRON_FIELD_SPECS: CronFieldSpec[] = [
+  { min: 0, max: 59 }, // minute
+  { min: 0, max: 23 }, // hour
+  { min: 1, max: 31 }, // day-of-month
+  { min: 1, max: 12 }, // month
+  { min: 0, max: 7  }, // day-of-week (0 and 7 both represent Sunday)
+];
+
+/**
+ * Validate a single numeric token (after splitting on commas) against a field's
+ * allowed range. Handles plain integers, step expressions (e.g. *\/15), and
+ * hyphenated ranges (e.g. 1-5).
+ */
+function isCronTokenValid(token: string, spec: CronFieldSpec): boolean {
+  // Wildcard — always valid.
+  if (token === "*") return true;
+
+  // Step expression: either "*/n" or "base/n"
+  if (token.includes("/")) {
+    const [base, stepStr, ...extra] = token.split("/");
+    if (extra.length > 0) return false; // more than one slash is illegal
+    const step = Number(stepStr);
+    if (!Number.isInteger(step) || step < 1) return false;
+    // The base may be "*" or a plain integer within range.
+    if (base !== "*") {
+      const baseNum = Number(base);
+      if (!Number.isInteger(baseNum) || baseNum < spec.min || baseNum > spec.max) return false;
+    }
+    return true;
+  }
+
+  // Hyphenated range: "n-m"
+  if (token.includes("-")) {
+    const [startStr, endStr, ...extra] = token.split("-");
+    if (extra.length > 0) return false; // more than one hyphen is illegal
+    const start = Number(startStr);
+    const end = Number(endStr);
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
+    if (start < spec.min || start > spec.max) return false;
+    if (end < spec.min || end > spec.max) return false;
+    if (start > end) return false; // inverted range
+    return true;
+  }
+
+  // Plain integer.
+  const n = Number(token);
+  return Number.isInteger(n) && n >= spec.min && n <= spec.max;
+}
 
 function isValidCronExpression(value: string): boolean {
   const fields = value.trim().split(/\s+/);
   if (fields.length !== 5) return false;
-  return fields.every((field) => CRON_FIELD_RE.test(field));
+
+  return fields.every((field, index) => {
+    const spec = CRON_FIELD_SPECS[index];
+    // Guard: spec is always defined because we checked fields.length === 5 above.
+    if (!spec) return false;
+
+    // A field may be a comma-separated list; each token is validated independently.
+    const tokens = field.split(",");
+    if (tokens.length === 0 || tokens.some((t) => t === "")) return false;
+    return tokens.every((token) => isCronTokenValid(token, spec));
+  });
 }
 
 const cronExpressionSchema = z

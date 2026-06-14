@@ -2,13 +2,14 @@ import { randomBytes } from "node:crypto";
 import { hash as bcryptHash, compare as bcryptCompare } from "bcryptjs";
 import { encrypt, ForbiddenError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
-import { WebhookReceiverNotFoundError } from "./errors.js";
+import { WebhookReceiverNotFoundError, ConnectorNotFoundError } from "./errors.js";
 import type {
   WebhookReceiverRepository,
   WebhookReceiverRow,
   UpdateWebhookReceiverData,
 } from "./webhook-receive-service.js";
 import type { CredentialService } from "./credential-service.js";
+import type { ConnectorRepository } from "../repositories/connector-repository.js";
 
 export interface WebhookReceiverInfo {
   id: string;
@@ -53,7 +54,8 @@ export interface WebhookManagementService {
     input: {
       name?: string;
       description?: string;
-      connectorId?: string;
+      // null explicitly clears the linked connector; undefined leaves it unchanged.
+      connectorId?: string | null;
       hmacAlgorithm?: "sha256" | "sha512";
       headerName?: string;
       isEnabled?: boolean;
@@ -72,6 +74,7 @@ export interface WebhookManagementService {
 
 export interface WebhookManagementServiceDeps {
   receiverRepo: WebhookReceiverRepository;
+  connectorRepo: ConnectorRepository;
   credentialService: CredentialService;
   baseUrl: string;
   logger: Logger;
@@ -98,7 +101,7 @@ function toInfo(row: WebhookReceiverRow, baseUrl: string): WebhookReceiverInfo {
 export function createWebhookManagementService(
   deps: WebhookManagementServiceDeps,
 ): WebhookManagementService {
-  const { receiverRepo, credentialService, baseUrl, logger } = deps;
+  const { receiverRepo, connectorRepo, credentialService, baseUrl, logger } = deps;
 
   async function createReceiver(
     tenantId: string,
@@ -112,6 +115,18 @@ export function createWebhookManagementService(
     },
     masterKey: Buffer,
   ): Promise<{ receiver: WebhookReceiverInfo; secret: string }> {
+    // A connectorId is optional but when provided must reference a live connector
+    // owned by this tenant — prevents orphaned receivers pointing at deleted connectors.
+    if (input.connectorId !== undefined) {
+      const connector = await connectorRepo.findByTenantAndId(tenantId, input.connectorId);
+      if (connector === null) {
+        throw new ConnectorNotFoundError(
+          `Connector ${input.connectorId} not found.`,
+          { connectorId: input.connectorId, tenantId },
+        );
+      }
+    }
+
     const rawSecret = randomBytes(32).toString("hex");
     const secretHash = await bcryptHash(rawSecret, 12);
 
@@ -167,7 +182,7 @@ export function createWebhookManagementService(
     input: {
       name?: string;
       description?: string;
-      connectorId?: string;
+      connectorId?: string | null;
       hmacAlgorithm?: "sha256" | "sha512";
       headerName?: string;
       isEnabled?: boolean;
@@ -176,6 +191,18 @@ export function createWebhookManagementService(
     const existing = await receiverRepo.findByTenantAndId(tenantId, id);
     if (!existing) {
       throw new WebhookReceiverNotFoundError(`Webhook receiver ${id} not found`);
+    }
+
+    // When a new connectorId is being linked, verify it exists and belongs to
+    // this tenant. null is allowed to explicitly unlink the connector.
+    if (input.connectorId !== undefined && input.connectorId !== null) {
+      const connector = await connectorRepo.findByTenantAndId(tenantId, input.connectorId);
+      if (connector === null) {
+        throw new ConnectorNotFoundError(
+          `Connector ${input.connectorId} not found.`,
+          { connectorId: input.connectorId, tenantId },
+        );
+      }
     }
 
     const updateData: UpdateWebhookReceiverData = {};

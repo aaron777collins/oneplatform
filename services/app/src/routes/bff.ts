@@ -175,8 +175,10 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       );
     }
 
-    const data = await resp.json() as unknown;
-    return c.json({ data });
+    // The execution service already returns a `{ data: [...] }` envelope.
+    // Pass it through directly to avoid double-wrapping as `{ data: { data: [...] } }`.
+    const envelope = await resp.json() as unknown;
+    return c.json(envelope);
   });
 
   routes.post("/data/:entity", async (c) => {
@@ -220,8 +222,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       );
     }
 
-    const data = await resp.json() as unknown;
-    return c.json({ data }, 201);
+    // Pass through the execution service envelope unchanged (single `{ data: ... }` layer).
+    const envelope = await resp.json() as unknown;
+    return c.json(envelope, 201);
   });
 
   // -------------------------------------------------------------------------
@@ -276,8 +279,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       );
     }
 
-    const data = await resp.json() as unknown;
-    return c.json({ data });
+    // Pass through the execution service envelope unchanged (single `{ data: ... }` layer).
+    const envelope = await resp.json() as unknown;
+    return c.json(envelope);
   });
 
   routes.put("/data/:entity/:id", async (c) => {
@@ -321,8 +325,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       );
     }
 
-    const data = await resp.json() as unknown;
-    return c.json({ data });
+    // Pass through the execution service envelope unchanged (single `{ data: ... }` layer).
+    const envelope = await resp.json() as unknown;
+    return c.json(envelope);
   });
 
   routes.delete("/data/:entity/:id", async (c) => {
@@ -408,8 +413,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       );
     }
 
-    const data = await resp.json() as unknown;
-    return c.json({ data }, 201);
+    // Pass through the execution service envelope unchanged (single `{ data: ... }` layer).
+    const envelope = await resp.json() as unknown;
+    return c.json(envelope, 201);
   });
 
   // -------------------------------------------------------------------------

@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, ForbiddenError, NotFoundError } from "@oneplatform/core";
 import type { MappingRuleRepository } from "../repositories/mapping-rule-repository.js";
+import type { MappingErrorRepository } from "../repositories/mapping-error-repository.js";
 import type { EntityRepository } from "../repositories/entity-repository.js";
 import { createMappingRuleRequest, updateMappingRuleRequest } from "../schemas/index.js";
 
 export interface MappingRuleRouteDeps {
   mappingRuleRepo: MappingRuleRepository;
+  mappingErrorRepo: MappingErrorRepository;
   entityRepo: EntityRepository;
 }
 
@@ -15,7 +17,7 @@ const REQUIRED_WRITE_SCOPE = "ontology:write";
 
 export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { mappingRuleRepo, entityRepo } = deps;
+  const { mappingRuleRepo, mappingErrorRepo, entityRepo } = deps;
 
   routes.get("/api/v1/ontology/:entityType/mappings", async (c) => {
     const user = c.var.user;
@@ -123,6 +125,47 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
     if (!deleted) throw new NotFoundError("Mapping rule not found.");
 
     return new Response(null, { status: 204 });
+  });
+
+  // Returns recent mapping errors scoped to a specific rule. Errors are stored
+  // per-connector in the mapping_errors table, so we look up the rule first to
+  // get its connector_id and then return errors for that connector.
+  // Cursor-based pagination uses the error ID (descending by created_at).
+  routes.get("/api/v1/ontology/mappings/:id/errors", async (c) => {
+    const user = c.var.user;
+    if (!user.scopes.includes(REQUIRED_READ_SCOPE) && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("ontology:read scope is required.");
+    }
+
+    const rule = await mappingRuleRepo.findById(c.req.param("id"));
+    if (!rule) throw new NotFoundError("Mapping rule not found.");
+
+    // Tenant isolation: the rule must belong to the requesting tenant.
+    if (rule.tenant_id !== user.tenantId) {
+      throw new ForbiddenError("You do not have access to this mapping rule.");
+    }
+
+    const rawLimit = c.req.query("limit");
+    const limit = rawLimit !== undefined ? Math.min(parseInt(rawLimit, 10) || 50, 200) : 50;
+    const cursor = c.req.query("cursor");
+
+    const errors = await mappingErrorRepo.findByConnectorId(rule.connector_id, cursor, limit);
+
+    return c.json({
+      data: errors.map((e) => ({
+        id: e.id,
+        connectorId: e.connector_id,
+        batchId: e.batch_id,
+        rawId: e.raw_id,
+        entityType: e.entity_type,
+        errorFields: e.error_fields,
+        errorDetails: e.error_details,
+        createdAt: e.created_at.toISOString(),
+      })),
+      pagination: {
+        nextCursor: errors.length === limit ? (errors[errors.length - 1]?.id ?? null) : null,
+      },
+    });
   });
 
   return routes;

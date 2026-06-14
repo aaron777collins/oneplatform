@@ -182,12 +182,16 @@ export const ${entrypoint}: Connector = {
       throw new PluginConfigError("baseUrl is required", "baseUrl");
     }
 
+    // Retrieve and validate the API key credential up front so that a missing
+    // credential fails fast at connect time rather than silently during fetches.
     const apiKey = await context.credentials.get("apiKey");
-    void apiKey; // TODO: use apiKey in actual requests
+    if (!apiKey) {
+      throw new PluginAuthError("Missing required credential: apiKey");
+    }
 
     return {
       connectionId: \`conn-\${Date.now()}\`,
-      metadata: { baseUrl },
+      metadata: { baseUrl, authenticated: true },
     };
   },
 
@@ -197,10 +201,10 @@ export const ${entrypoint}: Connector = {
     context: PluginContext,
   ): Promise<BatchResult> {
     const offset = cursor !== null ? parseInt(cursor, 10) : 0;
-    context.logger.info("Fetching batch", { offset });
+    context.logger.info("Fetching batch", { offset, baseUrl: handle.metadata["baseUrl"] });
 
-    // TODO: implement actual API call using handle.metadata.baseUrl
-
+    // Minimal scaffold: returns an empty page to signal end-of-stream.
+    // Replace this with an actual HTTP call to handle.metadata["baseUrl"].
     return {
       records: [],
       nextCursor: null,
@@ -252,7 +256,8 @@ export const ${entrypoint}: Transformer = {
       throw new PluginDataError("Record missing sourceId", record);
     }
 
-    // TODO: implement actual transformation
+    // Minimal scaffold: pass the record through unchanged.
+    // Replace with field-level transformations as needed.
     return record;
   },
 };
@@ -296,8 +301,8 @@ export const ${entrypoint}: Destination = {
   ): Promise<WriteResult> {
     context.logger.info("Writing batch", { count: records.length });
 
-    // TODO: implement actual write logic
-
+    // Minimal scaffold: acknowledges all records as written without sending them.
+    // Replace with actual HTTP delivery to context.config["endpointUrl"].
     return {
       written: records.length,
       failed: 0,
@@ -341,12 +346,16 @@ export const ${entrypoint}: AuthProvider = {
     };
   },
 
-  getAuthorizationUrl(state: string, options: AuthOptions): string {
+  getAuthorizationUrl(state: string, options: AuthOptions, config: Record<string, unknown>): string {
+    const clientId = config["clientId"];
+    if (typeof clientId !== "string" || !clientId) {
+      throw new PluginAuthError("Missing required config: clientId");
+    }
     const params = new URLSearchParams({
       response_type: "code",
+      client_id: clientId,
       state,
       redirect_uri: options.redirectUri,
-      // TODO: add client_id from config
     });
     return \`https://auth.example.com/oauth/authorize?\${params.toString()}\`;
   },
@@ -358,21 +367,24 @@ export const ${entrypoint}: AuthProvider = {
     if (params.error) {
       throw new PluginAuthError(\`Auth provider returned error: \${params.error}\`);
     }
+    if (!params.code) {
+      throw new PluginAuthError("Callback is missing authorization code");
+    }
 
     context.logger.info("Handling OAuth callback");
 
-    // TODO: exchange params.code for tokens
-
-    return {
-      accessToken: "TODO",
-      claims: {},
-      platformRoles: [],
-      providerUserId: "TODO",
-    };
+    // Minimal scaffold: exchange params.code for tokens via your provider's token endpoint.
+    // The implementation below throws so that the auth flow fails visibly rather than
+    // silently returning placeholder tokens that look like valid credentials.
+    throw new PluginAuthError(
+      "handleCallback is not yet implemented. " +
+      "Exchange params.code for access/refresh tokens via your provider's token endpoint.",
+    );
   },
 
   mapClaimsToRoles(claims: Record<string, unknown>): string[] {
-    // TODO: map provider claims to platform role names
+    // Minimal scaffold: no role mapping by default.
+    // Inspect claims and return matching platform role names as needed.
     void claims;
     return [];
   },
@@ -426,7 +438,8 @@ export const ${entrypoint}: Widget = {
   },
 
   declareDataRequirements(): DataQuery[] {
-    // TODO: declare entity queries this widget needs
+    // Minimal scaffold: no data queries by default.
+    // Add DataQuery objects here to request entity data from the platform.
     return [];
   },
 

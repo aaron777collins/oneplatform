@@ -170,10 +170,17 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
 
   const webhookManagementService = createWebhookManagementService({
     receiverRepo: webhookReceiverRepo,
+    connectorRepo,
     credentialService,
     baseUrl: config.baseUrl,
     logger,
   });
+
+  // On startup, any sync_state row still in 'running' belongs to a job that was
+  // interrupted by the previous process crash. Reset them to 'failed' immediately
+  // so connectors are not permanently blocked from triggering new syncs.
+  // We pass staleThresholdMs=0 so all running rows are eligible regardless of age.
+  await syncService.runWatchdog(0);
 
   // Cleanup hooks registered by optional startup code (e.g. watchdog timer).
   const extraCleanupFns: Array<() => void> = [];

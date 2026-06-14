@@ -529,7 +529,12 @@ async function processNdjsonStream(
   try {
     while (true) {
       const read = await reader.read();
-      const chunk = read.done ? "" : decoder.decode(read.value, { stream: !read.done });
+      // When done, flush the TextDecoder to emit any buffered bytes from an
+      // incomplete multi-byte sequence at the end of the stream. Without this
+      // flush the final character of a non-ASCII line could be silently dropped.
+      const chunk = read.done
+        ? decoder.decode()
+        : decoder.decode(read.value, { stream: true });
 
       // Split on newlines, keeping the last incomplete fragment in `remainder`.
       const segment = remainder + chunk;

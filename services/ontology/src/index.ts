@@ -197,6 +197,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     inferenceService,
     migrationRepo,
     mappingRuleRepo,
+    mappingErrorRepo,
     entityRepo,
     draftRepo,
     servicePublicKeys,

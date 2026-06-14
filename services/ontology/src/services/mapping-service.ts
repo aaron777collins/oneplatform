@@ -85,7 +85,15 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
             if (rule.transform_type === "constant") {
               try {
                 transformedValue = JSON.parse(rule.transform ?? "null");
-              } catch {
+              } catch (parseErr) {
+                // The stored transform value is not valid JSON — treat it as a raw string
+                // and warn so that misconfigured rules surface in logs rather than silently
+                // producing unexpected output types for downstream validation.
+                logger.warn(
+                  `Rule ${rule.id}: constant transform value is not valid JSON ` +
+                  `(transform=${JSON.stringify(rule.transform)}); using raw string. ` +
+                  `Parse error: ${String(parseErr)}`,
+                );
                 transformedValue = rule.transform;
               }
             } else if (rule.transform_type === "template" && rule.transform) {

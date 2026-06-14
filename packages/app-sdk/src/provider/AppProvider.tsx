@@ -25,6 +25,37 @@ import type { UserContext } from "../types/entities.js";
 // Injected by the build tool. Guards sensitive error detail from production bundles.
 declare const __OP_DEV__: boolean | undefined;
 
+// ─── Retry helper ─────────────────────────────────────────────────────────────
+
+const BFF_MAX_RETRIES = 3;
+const BFF_RETRY_BASE_MS = 500; // 500ms → 1000ms → 2000ms
+
+/**
+ * Calls `fn` up to BFF_MAX_RETRIES times with exponential backoff between
+ * attempts. Returns the resolved value on the first success. Throws the last
+ * error if all attempts fail.
+ *
+ * Retry is appropriate here because the BFF seed calls (me + permissions) are
+ * idempotent GETs and transient network blips should not permanently brick the
+ * app — the alternative is a full page reload by the user.
+ */
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= BFF_MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < BFF_MAX_RETRIES) {
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, BFF_RETRY_BASE_MS * Math.pow(2, attempt)),
+        );
+      }
+    }
+  }
+  throw lastErr;
+}
+
 // ─── Config reader ────────────────────────────────────────────────────────────
 
 /**
@@ -100,6 +131,9 @@ export function AppProvider({
   const [initState, setInitState] = React.useState<AppProviderInitState>({
     status: "loading",
   });
+  // Incrementing retryCount re-runs the init effect so the user can recover
+  // from a failed initialisation without a full page reload.
+  const [retryCount, setRetryCount] = React.useState(0);
   const [user, setUser] = React.useState<UserContext | null>(null);
 
   // appId and tenantId are read once at mount. Stored in ref because they
@@ -108,6 +142,10 @@ export function AppProvider({
 
   React.useEffect(() => {
     let cancelled = false;
+
+    // Reset to loading state at the start of each (re)try so the UI shows the
+    // loading fallback rather than a stale error while requests are in-flight.
+    setInitState({ status: "loading" });
 
     async function init(): Promise<void> {
       // Step 1: read and validate config
@@ -138,12 +176,16 @@ export function AppProvider({
         window.location.href = `/login?redirect=${redirect}`;
       });
 
-      // Step 4: fetch /bff/me and /bff/permissions in parallel (C-4)
+      // Step 4: fetch /bff/me and /bff/permissions in parallel (C-4).
+      // Wrapped in withRetry so transient BFF/network blips do not permanently
+      // break the app — three attempts with exponential backoff before giving up.
       try {
-        const [meResult] = await Promise.all([
-          bffClient.request<UserContext>("/bff/me"),
-          permissionCache.seed(bffClient),
-        ]);
+        const [meResult] = await withRetry(() =>
+          Promise.all([
+            bffClient.request<UserContext>("/bff/me"),
+            permissionCache.seed(bffClient),
+          ]),
+        );
 
         if (cancelled) return;
 
@@ -155,7 +197,8 @@ export function AppProvider({
         setInitState({ status: "ready" });
       } catch (err) {
         // 401 is handled by the unauthorized handler above (which redirects).
-        // Non-401 errors render an inline error UI.
+        // Non-401 errors render an inline error UI with a retry button after
+        // all BFF_MAX_RETRIES attempts have been exhausted.
         if (cancelled) return;
         const msg =
           err instanceof Error ? err.message : "Platform initialisation failed";
@@ -171,8 +214,8 @@ export function AppProvider({
       wsManager.destroy();
       permissionCache.destroy();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally runs once; test overrides are stable
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryCount drives re-runs; test overrides are stable
+  }, [retryCount]);
 
   // Step 5: re-seed permissions on visibility change.
   // Debounced 2 seconds so we don't hammer the BFF immediately on tab switch.
@@ -209,6 +252,13 @@ export function AppProvider({
             {initState.message}
           </pre>
         )}
+        <button
+          type="button"
+          onClick={() => setRetryCount((n) => n + 1)}
+          style={{ marginTop: "0.75rem", display: "block", cursor: "pointer" }}
+        >
+          Retry
+        </button>
       </div>
     );
   }
