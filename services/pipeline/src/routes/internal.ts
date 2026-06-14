@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { timingSafeEqual, createHmac } from "node:crypto";
 import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
+import { ForbiddenError } from "@oneplatform/core";
 import type { RunService } from "../services/run-service.js";
 import type { TriggerRepository } from "../services/trigger-service.js";
 import { TriggerSignatureInvalidError } from "../services/errors.js";
@@ -48,7 +49,7 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   routes.post("/pipeline/trigger", async (c) => {
     const user = c.var.user;
     if (!user?.isService) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const body = await c.req.json().catch(() => null);

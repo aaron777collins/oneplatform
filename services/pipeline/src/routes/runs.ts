@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError } from "@oneplatform/core";
 import type { RunService } from "../services/run-service.js";
 
 // ---------------------------------------------------------------------------
@@ -22,7 +23,7 @@ export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/:runId", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const result = await runService.getRun(user.tenantId, c.req.param("runId"));
@@ -33,7 +34,7 @@ export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariab
   routes.post("/:runId/cancel", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     await runService.cancelRun(user.tenantId, c.req.param("runId"));
@@ -44,7 +45,7 @@ export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/:runId/logs", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const runId = c.req.param("runId");

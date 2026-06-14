@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError } from "@oneplatform/core";
 import type { PipelineService } from "../services/pipeline-service.js";
 import type { RunService } from "../services/run-service.js";
 import {
@@ -33,7 +34,7 @@ export function createPipelineRoutes(
   routes.get("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const parsed = ListPipelinesQuery.safeParse(c.req.query());
@@ -60,7 +61,7 @@ export function createPipelineRoutes(
   routes.post("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json().catch(() => null);
@@ -90,7 +91,7 @@ export function createPipelineRoutes(
   routes.get("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const pipeline = await pipelineService.getPipeline(user.tenantId, c.req.param("id"));
@@ -101,7 +102,7 @@ export function createPipelineRoutes(
   routes.patch("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json().catch(() => null);
@@ -134,7 +135,7 @@ export function createPipelineRoutes(
   routes.delete("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     await pipelineService.deletePipeline(user.tenantId, c.req.param("id"));
@@ -145,7 +146,7 @@ export function createPipelineRoutes(
   routes.post("/:id/trigger", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json().catch(() => ({}));
@@ -178,7 +179,7 @@ export function createPipelineRoutes(
   routes.get("/:id/runs", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // Verify pipeline ownership

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { Queue } from "bullmq";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError, ValidationError } from "@oneplatform/core";
 import type { UploadService, ObjectStorageClient, FileParseJobPayload } from "../services/upload-service.js";
 import { UploadFileTooLargeError, UploadUnsupportedTypeError } from "../services/errors.js";
 
@@ -41,16 +42,14 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
   routes.post("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const formData = await c.req.parseBody();
     const file = formData["file"];
 
     if (!file || !(file instanceof File)) {
-      return c.json({
-        error: { code: "VALIDATION_ERROR", message: "A file field is required." },
-      }, 400);
+      throw new ValidationError("A file field is required.");
     }
 
     if (file.size > maxFileSize) {
@@ -115,7 +114,7 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
   routes.get("/:id/status", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const row = await uploadService.getUploadStatus(user.tenantId, c.req.param("id"));

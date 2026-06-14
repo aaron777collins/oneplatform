@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { ValidationError, UnauthorizedError, NotFoundError } from "@oneplatform/core";
 import type { BuildService } from "../services/build-service.js";
 import type { AppService } from "../services/app-service.js";
 import type { Redis } from "ioredis";
@@ -26,11 +27,11 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
   // POST /builds — trigger build
   routes.post("/builds", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
 
     const body = await c.req.json().catch(() => ({}));
@@ -45,11 +46,11 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
   // GET /builds — list builds
   routes.get("/builds", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
 
     const query = PaginationSchema.safeParse({
@@ -77,11 +78,11 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
   // GET /builds/:buildId
   routes.get("/builds/:buildId", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
 
     const build = await buildService.getBuild(user.tenantId, appId, c.req.param("buildId"));
@@ -96,11 +97,11 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
   // GET /builds/:buildId/logs/stream — SSE build log stream
   routes.get("/builds/:buildId/logs/stream", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
     const buildId = c.req.param("buildId");
 
@@ -181,11 +182,11 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
   // DELETE /builds/:buildId
   routes.delete("/builds/:buildId", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
 
     await buildService.deleteBuild(user.tenantId, appId, c.req.param("buildId"));

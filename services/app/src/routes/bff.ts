@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { decrypt } from "@oneplatform/core";
+import { decrypt, ValidationError, UnauthorizedError } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type { Logger } from "@oneplatform/core";
 import type { AppRepository } from "../repositories/app-repository.js";
@@ -54,14 +54,14 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/me", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // Fetch roles for the app identified by the X-App-Id header.
     // The SDK sets this header on every BFF request.
     const appId = c.req.header("x-app-id");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     // Verify the app belongs to the user's tenant (or is accessible via share)
@@ -93,12 +93,12 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/permissions", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId = c.req.header("x-app-id");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -139,13 +139,13 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/data/:entity", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId  = c.req.header("x-app-id");
     const entity = c.req.param("entity");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -184,13 +184,13 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.post("/data/:entity", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId  = c.req.header("x-app-id");
     const entity = c.req.param("entity");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -241,14 +241,14 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.patch("/data/:entity/:id", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId  = c.req.header("x-app-id");
     const entity = c.req.param("entity");
     const itemId = c.req.param("id");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -287,14 +287,14 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.put("/data/:entity/:id", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId  = c.req.header("x-app-id");
     const entity = c.req.param("entity");
     const itemId = c.req.param("id");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -333,14 +333,14 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.delete("/data/:entity/:id", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId  = c.req.header("x-app-id");
     const entity = c.req.param("entity");
     const itemId = c.req.param("id");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -376,13 +376,13 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.post("/data/:entity/bulk", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId  = c.req.header("x-app-id");
     const entity = c.req.param("entity");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -427,16 +427,16 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/storage/:key", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId = c.req.header("x-app-id");
     const key   = c.req.param("key");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
     if (key === "" || key === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Storage key is required." } }, 400);
+      throw new ValidationError("Storage key is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -464,22 +464,22 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.put("/storage/:key", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId = c.req.header("x-app-id");
     const key   = c.req.param("key");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
     if (key === "" || key === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Storage key is required." } }, 400);
+      throw new ValidationError("Storage key is required.");
     }
 
     const body   = await c.req.json().catch(() => null);
     const parsed = StoragePutSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -517,16 +517,16 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.delete("/storage/:key", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId = c.req.header("x-app-id");
     const key   = c.req.param("key");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
     if (key === "" || key === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Storage key is required." } }, 400);
+      throw new ValidationError("Storage key is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);
@@ -547,12 +547,12 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/runtime-config", async (c) => {
     const user = c.var.user;
     if (user === undefined) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const appId = c.req.header("x-app-id");
     if (appId === undefined || appId === "") {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "X-App-Id header is required." } }, 400);
+      throw new ValidationError("X-App-Id header is required.");
     }
 
     const accessible = await permService.canTenantAccessApp(appId, user.tenantId);

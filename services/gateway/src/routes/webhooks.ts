@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError } from "@oneplatform/core";
 import {
   createWebhookRequest,
   updateWebhookRequest,
@@ -22,7 +23,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.post("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json();
@@ -48,7 +49,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.get("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const query = listWebhooksQuery.safeParse(c.req.query());
@@ -68,7 +69,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.get("/:webhookId", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const webhook = await webhookService.getWebhook(user.tenantId, c.req.param("webhookId"));
@@ -78,7 +79,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.patch("/:webhookId", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json();
@@ -108,7 +109,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.delete("/:webhookId", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     await webhookService.deleteWebhook(user.tenantId, c.req.param("webhookId"));
@@ -118,7 +119,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.get("/:webhookId/deliveries", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     await webhookService.getWebhook(user.tenantId, c.req.param("webhookId"));
@@ -141,7 +142,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   routes.post("/:webhookId/test", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // Verify tenant ownership before sending test

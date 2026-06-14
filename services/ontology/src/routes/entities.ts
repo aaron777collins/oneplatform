@@ -44,19 +44,27 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     const query = listEntitiesQuery.parse(Object.fromEntries(new URL(c.req.url).searchParams));
     const result = await entityService.listEntities(user.tenantId, query.cursor, query.limit);
 
+    // Nest pagination fields inside `data` so the SDK transport unwraps the outer
+    // envelope and the Paginator callback receives { items, nextCursor, total, hasMore }
+    // directly — matching the PageFetcher<T> contract without losing cursor info.
+    const items = result.data.map((e) => ({
+      id: e.id,
+      name: e.name,
+      slug: e.slug,
+      version: e.version,
+      description: e.description,
+      isPublic: e.isPublic,
+      fieldCount: e.fields.length,
+      createdAt: e.createdAt,
+      updatedAt: e.updatedAt,
+    }));
     return c.json({
-      data: result.data.map((e) => ({
-        id: e.id,
-        name: e.name,
-        slug: e.slug,
-        version: e.version,
-        description: e.description,
-        isPublic: e.isPublic,
-        fieldCount: e.fields.length,
-        createdAt: e.createdAt,
-        updatedAt: e.updatedAt,
-      })),
-      pagination: { nextCursor: result.nextCursor, total: result.data.length },
+      data: {
+        items,
+        nextCursor: result.nextCursor,
+        total: items.length,
+        hasMore: result.nextCursor !== null,
+      },
     });
   });
 
@@ -202,6 +210,38 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
 
     const result = await entityService.validateRecord(user.tenantId, entityType, parsed.data.data);
     return c.json(result);
+  });
+
+  // DE-2: non-mutating diff preview — requires only ontology:read scope.
+  routes.post("/api/v1/ontology/:entityType/diff", async (c) => {
+    const user = c.var.user;
+    if (!user.scopes.includes(REQUIRED_READ_SCOPE) && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("ontology:read scope is required.");
+    }
+
+    const entityType = c.req.param("entityType");
+    const body = await c.req.json();
+    const parsed = patchEntityRequest.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid diff request body", parsed.error.issues);
+    }
+
+    const input = stripUndefined({
+      name: parsed.data.name,
+      description: parsed.data.description,
+      isPublic: parsed.data.isPublic,
+      addFields: parsed.data.addFields,
+      removeFieldSlugs: parsed.data.removeFieldSlugs,
+      renameFields: parsed.data.renameFields,
+      updateFields: parsed.data.updateFields,
+    });
+
+    const result = await entityService.diffEntity(user.tenantId, entityType, input);
+    return c.json({
+      changes: result.changes,
+      isBreaking: result.isBreaking,
+      requiresMigration: result.requiresMigration,
+    });
   });
 
   routes.post("/api/v1/ontology/:entityType/relationships", async (c) => {

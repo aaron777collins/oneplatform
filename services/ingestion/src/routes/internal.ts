@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError, ForbiddenError } from "@oneplatform/core";
 import type { ConnectorService, SyncService, CredentialService } from "../services/index.js";
 import type { ConnectorRepository } from "../services/connector-service.js";
 import {
@@ -22,7 +23,7 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   routes.post("/ingestion/connectors", async (c) => {
     const user = c.var.user;
     if (!user?.isService) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const body = await c.req.json();
@@ -49,7 +50,7 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   routes.delete("/ingestion/connectors/instance/:instanceId", async (c) => {
     const user = c.var.user;
     if (!user?.isService) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const instanceId = c.req.param("instanceId");
@@ -63,7 +64,7 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   routes.delete("/ingestion/connectors/plugin/:pluginId", async (c) => {
     const user = c.var.user;
     if (!user?.isService) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const pluginId = c.req.param("pluginId");
@@ -85,14 +86,14 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   routes.get("/ingestion/credentials/:credentialBundleId/field/:key", async (c) => {
     const user = c.var.user;
     if (!user?.isService) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
     // Credentials are decrypted on behalf of the Execution Service only.
     // user.userId carries the service name for service-to-service tokens
     // (claims.sub = the caller's service identity, set in serviceAuthMiddleware).
     // Any other internal caller is denied to enforce least-privilege access.
     if (user.userId !== "execution-service") {
-      return c.json({ error: { code: "FORBIDDEN", message: "Credential access is restricted to execution-service." } }, 403);
+      throw new ForbiddenError("Credential access is restricted to execution-service.");
     }
 
     const connectorId = c.req.param("credentialBundleId");
@@ -105,7 +106,7 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   routes.post("/ingestion/sync", async (c) => {
     const user = c.var.user;
     if (!user?.isService) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const body = await c.req.json();
