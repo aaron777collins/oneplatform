@@ -1,0 +1,63 @@
+---
+title: Plugin Service API
+description: Plugin installation, lifecycle management, and hook configuration.
+sidebar:
+  order: 10
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Plugin Service manages the full lifecycle of platform plugins: installation from
+`.oppkg` bundles, hook registration, activation/deactivation, upgrades, and rollback.
+Plugins are tenant-scoped — each tenant has its own independent set of installed plugins.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/plugin.json > plugin.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Plugins
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/plugins` | Bearer + `plugins:manage` | Install a plugin from a bundle |
+| `GET` | `/api/v1/plugins` | Bearer | List installed plugins |
+| `GET` | `/api/v1/plugins/{id}` | Bearer | Get a plugin |
+| `DELETE` | `/api/v1/plugins/{id}` | Bearer + `plugins:manage` | Remove a plugin |
+| `POST` | `/api/v1/plugins/{id}/activate` | Bearer + `plugins:manage` | Activate a plugin |
+| `POST` | `/api/v1/plugins/{id}/deactivate` | Bearer + `plugins:manage` | Deactivate a plugin |
+| `POST` | `/api/v1/plugins/{id}/upgrade` | Bearer + `plugins:manage` | Upgrade to a new bundle |
+| `POST` | `/api/v1/plugins/{id}/rollback` | Bearer + `plugins:manage` | Roll back to the previous version |
+
+## Plugin bundle format
+
+Plugins are installed from `.oppkg` files — ZIP archives containing:
+
+| File | Required | Description |
+|------|----------|-------------|
+| `dist/bundle.js` | Yes | Compiled ES module plugin entry point |
+| `plugin.manifest.json` | Yes | Plugin metadata, hooks, and permissions |
+
+## Dev mode
+
+Installing with `?dev=true` enables dev mode:
+- Requires only `plugins:manage` scope (not `platform-admin`)
+- Plugin is tenant-scoped and expires after 7 days
+- Used for local development and testing before production promotion
+
+## Hook points
+
+Plugins register handlers for named hooks in `plugin.manifest.json`:
+
+| Hook | Trigger |
+|------|---------|
+| `before:ingestion.receive` | Before a record is stored from a connector |
+| `after:ingestion.receive` | After a record is stored |
+| `before:pipeline.step` | Before each pipeline step executes |
+| `after:pipeline.step` | After each pipeline step completes |
+| `before:app.request` | Before a BFF request is forwarded to an app |

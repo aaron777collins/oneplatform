@@ -1,0 +1,95 @@
+---
+title: OnePlatform Documentation
+description: The unified data platform — API reference, SDK docs, CLI reference, and architecture guides.
+template: splash
+hero:
+  tagline: Build on a unified data platform. Connect sources, define your ontology, deploy apps and plugins.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Platform Admin Quickstart
+      link: /getting-started/platform-admin
+      icon: rocket
+      variant: primary
+    - text: API Reference
+      link: /api/
+      icon: open-book
+      variant: secondary
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+## What is OnePlatform?
+
+OnePlatform is a self-hosted, API-first data platform built for teams that need to
+connect multiple data sources, define a shared data ontology, and expose that data
+through apps and plugins — all behind a single authenticated gateway.
+
+<CardGrid>
+  <Card title="9 Microservices" icon="puzzle">
+    Gateway, Auth, Ingestion, Ontology, Pipeline, Execution, App, Logging, and Plugin
+    services — each with its own OpenAPI specification.
+  </Card>
+  <Card title="3 SDKs" icon="seti:javascript">
+    `@oneplatform/sdk` for server-side automation, `@oneplatform/app-sdk` for React apps,
+    and `@oneplatform/plugin-sdk` for platform extensions.
+  </Card>
+  <Card title="CLI" icon="terminal">
+    The `op` CLI covers every platform operation — from bootstrapping a fresh install to
+    deploying apps and managing plugins.
+  </Card>
+  <Card title="Extensible" icon="add-document">
+    Plugins hook into the ingestion, pipeline, and execution lifecycle. Apps run inside
+    the platform's sandboxed BFF environment.
+  </Card>
+</CardGrid>
+
+## Get started
+
+<CardGrid>
+  <LinkCard
+    title="Platform Admin"
+    description="Get the stack running and create the first admin user."
+    href="/getting-started/platform-admin"
+  />
+  <LinkCard
+    title="Data Engineer"
+    description="Connect a source, define your ontology, and run a sync."
+    href="/getting-started/data-engineer"
+  />
+  <LinkCard
+    title="App Developer"
+    description="Scaffold an app, query entity data from React."
+    href="/getting-started/app-developer"
+  />
+  <LinkCard
+    title="Plugin Developer"
+    description="Create a plugin, simulate hooks locally, and install it."
+    href="/getting-started/plugin-developer"
+  />
+</CardGrid>
+
+## Explore the docs
+
+<CardGrid>
+  <LinkCard
+    title="API Reference"
+    description="Interactive OpenAPI explorer for all 9 services."
+    href="/api/"
+  />
+  <LinkCard
+    title="SDK Reference"
+    description="TypeDoc-generated API docs for all SDK packages."
+    href="/sdk/sdk"
+  />
+  <LinkCard
+    title="CLI Reference"
+    description="Full command reference for the op CLI."
+    href="/cli"
+  />
+  <LinkCard
+    title="Architecture Decisions"
+    description="ADRs and service design documents."
+    href="/architecture/decisions"
+  />
+</CardGrid>

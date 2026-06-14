@@ -1,0 +1,65 @@
+---
+title: Ingestion Service API
+description: Connectors, sync scheduling, field mapping, and manual record ingestion.
+sidebar:
+  order: 4
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Ingestion Service manages data source connectors, sync scheduling, and field mapping
+rules. It is responsible for pulling records from external systems and landing them in
+the platform's internal read store after applying mapping transforms and plugin hooks.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/ingestion.json > ingestion.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Connectors
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/connectors` | Bearer + `connectors:manage` | Create a connector |
+| `GET` | `/api/v1/connectors` | Bearer | List connectors |
+| `GET` | `/api/v1/connectors/{id}` | Bearer | Get a connector |
+| `PATCH` | `/api/v1/connectors/{id}` | Bearer + `connectors:manage` | Update a connector |
+| `DELETE` | `/api/v1/connectors/{id}` | Bearer + `connectors:manage` | Delete a connector |
+| `POST` | `/api/v1/connectors/{id}/trigger` | Bearer + `connectors:manage` | Trigger a manual sync |
+| `GET` | `/api/v1/connectors/{id}/status` | Bearer | Get sync status |
+
+### Mapping Rules
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/mappings` | Bearer + `connectors:manage` | Create a field mapping rule |
+| `GET` | `/api/v1/mappings` | Bearer | List mapping rules |
+| `GET` | `/api/v1/mappings/{id}` | Bearer | Get a mapping rule |
+| `PATCH` | `/api/v1/mappings/{id}` | Bearer + `connectors:manage` | Update a mapping rule |
+| `DELETE` | `/api/v1/mappings/{id}` | Bearer + `connectors:manage` | Delete a mapping rule |
+
+### Manual Ingestion
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/ingest/{entityType}` | Bearer + `connectors:manage` | Ingest records directly |
+
+## Connector types
+
+| Type | Sync modes |
+|------|-----------|
+| `postgres` | `full`, `incremental` |
+| `mysql` | `full`, `incremental` |
+| `rest` | `full`, `incremental` |
+| `csv` | `full` |
+| `s3` | `full` |
+
+## Sync scheduling
+
+Set `--schedule-cron` on a connector to enable automatic syncing. Cron expressions
+follow the standard 5-field format (`minute hour day month weekday`).

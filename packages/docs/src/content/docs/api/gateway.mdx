@@ -1,0 +1,98 @@
+---
+title: Gateway Service API
+description: Proxy, rate limiting, webhooks, server-sent events, and data routing.
+sidebar:
+  order: 2
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Gateway is the single entry point for all client traffic. It handles authentication
+validation, rate limiting, service proxying, webhook delivery, and real-time event
+streaming via SSE. The data routing layer (`/api/v1/data/*`) serves entity records
+directly from the read store without an extra service hop.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service to use with code generators or the Scalar desktop app:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/gateway.json > gateway.json
+  ```
+</Aside>
+
+## Base URL
+
+All routes are served directly from the Gateway. There is no path prefix per service —
+the Gateway is the host.
+
+```
+http://localhost:3000
+```
+
+## Endpoint groups
+
+### Health
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/healthz` | None | Liveness probe |
+| `GET` | `/readyz` | None | Readiness probe (checks all upstream services) |
+
+### Data
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/data/{entityType}` | Bearer | List entity records (paginated) |
+| `GET` | `/api/v1/data/{entityType}/{recordId}` | Bearer | Get a single entity record |
+| `GET` | `/api/v1/data/{entityType}/{recordId}/{relation}` | Bearer | Get related records |
+
+Available `entityType` values are defined per tenant via the Ontology Service. Use
+`GET /api/v1/openapi.json` with your Bearer token to receive a spec that lists your
+tenant's concrete entity type paths.
+
+### Webhooks
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/webhooks` | Bearer | Create a webhook endpoint |
+| `GET` | `/api/v1/webhooks` | Bearer | List webhook endpoints |
+| `GET` | `/api/v1/webhooks/{id}` | Bearer | Get a webhook endpoint |
+| `PATCH` | `/api/v1/webhooks/{id}` | Bearer | Update a webhook endpoint |
+| `DELETE` | `/api/v1/webhooks/{id}` | Bearer | Delete a webhook endpoint |
+| `GET` | `/api/v1/webhooks/{id}/deliveries` | Bearer | List delivery attempts |
+| `POST` | `/api/v1/webhooks/{id}/deliveries/{deliveryId}/redeliver` | Bearer | Retry a failed delivery |
+
+### Events (SSE)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/events` | Bearer | Server-sent event stream for real-time platform events |
+
+### Admin
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/admin/rate-limits` | Bearer + `admin` scope | List rate limit configuration |
+| `PUT` | `/api/v1/admin/rate-limits` | Bearer + `admin` scope | Update rate limit configuration |
+
+### OpenAPI Meta
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/openapi.json` | Optional Bearer | Tenant-specific combined spec |
+| `GET` | `/api/v1/openapi/base.json` | None | Static base spec |
+| `GET` | `/api/v1/openapi/{service}.json` | None | Per-service spec |
+
+## Rate limiting
+
+The Gateway enforces per-tenant rate limits on all authenticated routes. The default
+limits are 1000 requests/minute per tenant. Headers in each response:
+
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 987
+X-RateLimit-Reset: 1718323200
+```
+
+A 429 response is returned when the limit is exceeded. The `Retry-After` header
+indicates the number of seconds to wait.

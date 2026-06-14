@@ -1,0 +1,64 @@
+---
+title: Ontology Service API
+description: Entity type definitions, field schemas, and validation rules.
+sidebar:
+  order: 5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Ontology Service is the schema registry for the platform. It stores entity type
+definitions (e.g., `customer`, `order`, `product`) and their field schemas. Changes
+to ontology definitions are propagated to the Gateway's in-process cache via Redis
+pub/sub and used to generate tenant-specific OpenAPI paths.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/ontology.json > ontology.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Entity Types
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/ontology/entities` | Bearer + `ontology:write` | Create an entity type |
+| `GET` | `/api/v1/ontology/entities` | Bearer | List entity types |
+| `GET` | `/api/v1/ontology/entities/{id}` | Bearer | Get an entity type |
+| `PATCH` | `/api/v1/ontology/entities/{id}` | Bearer + `ontology:write` | Update an entity type |
+| `DELETE` | `/api/v1/ontology/entities/{id}` | Bearer + `ontology:write` | Delete an entity type |
+
+### Fields
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/ontology/entities/{id}/fields` | Bearer + `ontology:write` | Add a field to an entity type |
+| `GET` | `/api/v1/ontology/entities/{id}/fields` | Bearer | List fields |
+| `PATCH` | `/api/v1/ontology/entities/{id}/fields/{fieldId}` | Bearer + `ontology:write` | Update a field |
+| `DELETE` | `/api/v1/ontology/entities/{id}/fields/{fieldId}` | Bearer + `ontology:write` | Remove a field |
+
+### Validation Rules
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/ontology/entities/{id}/rules` | Bearer + `ontology:write` | Add a validation rule |
+| `GET` | `/api/v1/ontology/entities/{id}/rules` | Bearer | List validation rules |
+| `DELETE` | `/api/v1/ontology/entities/{id}/rules/{ruleId}` | Bearer + `ontology:write` | Remove a validation rule |
+
+## Field types
+
+| Type | Description |
+|------|-------------|
+| `string` | UTF-8 text |
+| `number` | 64-bit float |
+| `integer` | 64-bit integer |
+| `boolean` | true/false |
+| `date` | ISO 8601 date |
+| `datetime` | ISO 8601 datetime with timezone |
+| `uuid` | UUID v4 |
+| `json` | Arbitrary JSON object |
+| `relation` | Reference to another entity type |

@@ -1,0 +1,39 @@
+/*
+ * OnePlatform brand colors for the Starlight docs site.
+ *
+ * Starlight exposes CSS custom properties for every color token.
+ * We override the accent (interactive) color to match the indigo brand
+ * palette and keep the rest of Starlight's default design system intact.
+ */
+
+:root {
+  /* Primary brand: indigo-500 */
+  --sl-color-accent-low: #e0e7ff;
+  --sl-color-accent: #6366f1;
+  --sl-color-accent-high: #4338ca;
+
+  /* Slightly warmer white for light mode backgrounds */
+  --sl-color-white: #f8f8ff;
+
+  /* Dark mode nav background */
+  --sl-color-gray-6: #0f0e1a;
+  --sl-color-gray-7: #0a0917;
+}
+
+[data-theme="dark"] {
+  --sl-color-accent-low: #1e1b4b;
+  --sl-color-accent: #818cf8;
+  --sl-color-accent-high: #a5b4fc;
+}
+
+/* Widen the main content area for API reference pages */
+.sl-markdown-content pre {
+  max-width: 100%;
+}
+
+/* Ensure the Scalar iframe fills the page width */
+.scalar-container {
+  width: 100%;
+  min-height: 80vh;
+  border: none;
+}
