@@ -59,7 +59,18 @@ const configSchema = z.object({
   OP_S3_SECRET_KEY: z.string().optional(),
   OP_S3_REGION: z.string().optional(),
   OP_MINIO_USER: z.string().default("minioadmin"),
-  OP_MINIO_PASSWORD: z.string().optional(),
+  // Secondary validation for non-Compose deployments (Kubernetes, bare Node.js)
+  // where service-entrypoint.sh does not run. The primary guard is in
+  // docker/service-entrypoint.sh. See OA-1 in docs/designs/friction-fixes.md.
+  OP_MINIO_PASSWORD: z.string().optional().refine(
+    (v) => {
+      if (process.env["NODE_ENV"] === "production" && (!v || v === "CHANGE_ME_minio")) {
+        return false;
+      }
+      return true;
+    },
+    { message: "OP_MINIO_PASSWORD must be set to a non-placeholder value in production" }
+  ),
 
   OP_WEBHOOK_ALLOW_HTTP: z
     .string()

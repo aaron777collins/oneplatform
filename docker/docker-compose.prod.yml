@@ -1,0 +1,173 @@
+# docker/docker-compose.prod.yml
+#
+# Production override for the OnePlatform Docker Compose stack.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d
+#
+# This file ONLY contains production overrides. It is intentionally minimal —
+# it does not redefine services from scratch. Run it alongside docker-compose.yml.
+#
+# Required env vars: set these in your .env file before running.
+#   OP_MINIO_PASSWORD   — MinIO admin password (openssl rand -hex 32)
+#   POSTGRES_PASSWORD   — Postgres superuser password (openssl rand -hex 32)
+#   OP_ALLOWED_ORIGINS  — Comma-separated list of allowed CORS origins
+#   OP_BASE_URL         — Public base URL (e.g. https://platform.example.com)
+#   OP_JWT_SECRET       — JWT signing secret (min 32 chars)
+#   OP_MASTER_KEY       — Master encryption key
+#
+# ── Scaling note ────────────────────────────────────────────────────────────
+# This file does NOT set deploy.replicas. In standalone Docker Compose,
+# the deploy: key is silently ignored. For horizontal scaling, use:
+#   - Docker Swarm:     docker stack deploy -c docker-compose.yml \
+#                                          -c docker-compose.prod.yml op
+#   - Kubernetes:       convert with kompose and set replicaCount in Helm values
+# The resource limits below (memory/cpu) ARE respected in standalone Compose.
+
+services:
+
+  # ── Postgres: require a strong superuser password ──────────────────────────
+  postgres:
+    environment:
+      # :? syntax causes Docker Compose to fail with a clear error if unset.
+      # The dev default (dev_postgres_superuser) is not safe for production.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Must set a strong POSTGRES_PASSWORD for production. Generate with: openssl rand -hex 32}"
+
+  # ── Gateway: require production-critical env vars ─────────────────────────
+  gateway-service:
+    environment:
+      NODE_ENV: production
+      OP_ALLOWED_ORIGINS: "${OP_ALLOWED_ORIGINS:?Must set OP_ALLOWED_ORIGINS for production (comma-separated list of allowed origins)}"
+      OP_BASE_URL: "${OP_BASE_URL:?Must set OP_BASE_URL for production (e.g. https://platform.example.com)}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          # Gateway handles all inbound traffic — give it more headroom.
+          memory: 1g
+          cpus: "1"
+
+  # ── Auth service ──────────────────────────────────────────────────────────
+  auth-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  # ── Ingestion service ──────────────────────────────────────────────────────
+  ingestion-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          # Ingestion handles large data volumes — raise memory ceiling.
+          memory: 2g
+          cpus: "2"
+
+  # ── Ontology service ───────────────────────────────────────────────────────
+  ontology-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  # ── Pipeline service ───────────────────────────────────────────────────────
+  pipeline-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1"
+
+  # ── Execution service ──────────────────────────────────────────────────────
+  execution-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2"
+
+  # ── App service ────────────────────────────────────────────────────────────
+  app-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1"
+
+  # ── Logging service ────────────────────────────────────────────────────────
+  logging-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  # ── Plugin service ─────────────────────────────────────────────────────────
+  plugin-service:
+    environment:
+      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"

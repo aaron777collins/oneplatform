@@ -71,4 +71,31 @@ describe("loadConfig", () => {
       "https://app.example.com",
     ]);
   });
+
+  it("throws when OP_MINIO_PASSWORD is the placeholder in production", async () => {
+    // Defense-in-depth: the Zod check catches deployments that bypass
+    // service-entrypoint.sh (e.g., Kubernetes, bare Node.js). See OA-1.
+    setMinimalEnv();
+    process.env.NODE_ENV = "production";
+    process.env.OP_MINIO_PASSWORD = "CHANGE_ME_minio";
+    const { loadConfig } = await import("../config.js");
+    expect(() => loadConfig()).toThrow(/OP_MINIO_PASSWORD/);
+  });
+
+  it("throws when OP_MINIO_PASSWORD is empty in production", async () => {
+    setMinimalEnv();
+    process.env.NODE_ENV = "production";
+    process.env.OP_MINIO_PASSWORD = "";
+    const { loadConfig } = await import("../config.js");
+    expect(() => loadConfig()).toThrow(/OP_MINIO_PASSWORD/);
+  });
+
+  it("accepts a set OP_MINIO_PASSWORD in production", async () => {
+    setMinimalEnv();
+    process.env.NODE_ENV = "production";
+    process.env.OP_MINIO_PASSWORD = "a-strong-random-secret-value";
+    const { loadConfig } = await import("../config.js");
+    const config = loadConfig();
+    expect(config.OP_MINIO_PASSWORD).toBe("a-strong-random-secret-value");
+  });
 });

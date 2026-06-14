@@ -297,8 +297,11 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3001:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # Internal services reach auth-service via the oneplatform-internal Docker
+    # network using the service name. No host binding is needed at runtime.
+    # ports:
+    #   - "127.0.0.1:3001:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -334,8 +337,9 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3002:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3002:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -371,8 +375,9 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3003:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3003:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -406,8 +411,9 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3004:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3004:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -459,8 +465,9 @@ services:
     networks:
       - oneplatform-internal
       - oneplatform-sandbox
-    ports:
-      - "3005:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3005:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -496,8 +503,9 @@ services:
       - shared-pubkeys:/data/service-keys:ro
       - app-data:/data/app
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3006:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3006:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -531,8 +539,9 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3007:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3007:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -567,8 +576,9 @@ services:
       - shared-pubkeys:/data/service-keys:ro
       - plugin-data:/data/plugin
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3008:3000"
+    # Debug: uncomment to expose service directly (127.0.0.1 only — never 0.0.0.0)
+    # ports:
+    #   - "127.0.0.1:3008:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
       interval: 10s
@@ -626,6 +636,10 @@ networks:
     driver: bridge
   oneplatform-internal:
     driver: bridge
+    # Security: internal=true prevents direct access from the host network.
+    # Only the gateway and frontend are on both oneplatform-public and
+    # oneplatform-internal networks. All service-to-service traffic stays on
+    # this isolated bridge and is never reachable from the host.
     internal: true
   oneplatform-sandbox:
     driver: bridge

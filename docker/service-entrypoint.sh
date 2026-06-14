@@ -88,6 +88,19 @@ else
   echo "[service-entrypoint] Service-to-service calls will fail signature generation." >&2
 fi
 
+# ── Guard: MinIO password must not be the placeholder ────────────────────────
+# OP_MINIO_PASSWORD is injected via Docker Compose environment: and is never
+# written to the init-data volume, so op-init's CHANGE_ME scan cannot catch it.
+# Validate it here before secrets are loaded. Both an empty value and the exact
+# placeholder string from .env.example are rejected. This is defense-in-depth —
+# the Zod config schema in packages/core/src/config.ts adds a second check for
+# non-Compose deployment topologies (Kubernetes, bare Node.js).
+if [ -z "${OP_MINIO_PASSWORD:-}" ] || [ "${OP_MINIO_PASSWORD:-}" = "CHANGE_ME_minio" ]; then
+  echo "[service-entrypoint] FATAL: OP_MINIO_PASSWORD is unset or still set to the placeholder value." >&2
+  echo "[service-entrypoint] Set a strong password in .env before running docker compose up." >&2
+  exit 1
+fi
+
 echo "[service-entrypoint] Secrets loaded for ${SERVICE_NAME}. Starting node..."
 
 # exec replaces the shell process so Node.js is PID 1 (receives SIGTERM correctly)
