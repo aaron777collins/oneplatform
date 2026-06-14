@@ -80,8 +80,20 @@ const configSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 });
 
+/** Validated configuration derived from environment variables. */
 export type Config = z.infer<typeof configSchema>;
 
+/**
+ * Loads and validates all required environment variables.
+ *
+ * Reads from `process.env`, validates each variable against the schema, and
+ * returns a fully-typed `Config` object. Call once at service startup — the
+ * result is safe to pass around freely.
+ *
+ * @throws `Error` with a human-readable list of all validation failures when
+ *   any required variable is missing or malformed. The error message is
+ *   designed to be read directly from container logs.
+ */
 export function loadConfig(): Config {
   const result = configSchema.safeParse(process.env);
   if (!result.success) {

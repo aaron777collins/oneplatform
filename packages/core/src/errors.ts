@@ -4,6 +4,14 @@ import type { ApiError } from "./types.js";
 // Base class
 // ---------------------------------------------------------------------------
 
+/**
+ * Base class for all OnePlatform service errors.
+ *
+ * Throw a subclass from any route handler or middleware — the
+ * `errorHandlerMiddleware` catches it and formats it as `{ error: {...} }`.
+ * Use `instanceof AppError` to distinguish platform errors from unexpected
+ * exceptions in catch blocks.
+ */
 export abstract class AppError extends Error {
   abstract readonly code: string;
   abstract readonly statusCode: number;

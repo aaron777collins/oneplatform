@@ -79,12 +79,23 @@ export interface WriteFileRequest {
 // AppNamespace interface
 // ---------------------------------------------------------------------------
 
+/**
+ * Namespace for hosted application management.
+ *
+ * Accessible as `client.apps`. Covers full app lifecycle: CRUD, server-side
+ * builds, deployments, and the virtual file system used by in-platform editors.
+ */
 export interface AppNamespace {
   // Core CRUD
+  /** Lists all apps for the tenant. */
   list(options?: ListOptions): PaginatedIterable<App>;
+  /** Fetches a single app by ID or slug. */
   get(id: string): Promise<App>;
+  /** Creates a new app definition. */
   create(data: CreateAppRequest): Promise<App>;
+  /** Updates app metadata (name, description, settings). */
   update(id: string, data: UpdateAppRequest): Promise<App>;
+  /** Permanently deletes an app and all its builds. */
   delete(id: string): Promise<void>;
 
   // Build management

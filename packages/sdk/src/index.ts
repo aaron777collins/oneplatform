@@ -1,5 +1,21 @@
 /**
- * @oneplatform/sdk — Public API surface.
+ * @packageDocumentation
+ * @oneplatform/sdk — TypeScript client for the OnePlatform API.
+ *
+ * ## Quick start
+ * ```ts
+ * import { createClient } from '@oneplatform/sdk';
+ *
+ * const client = createClient({
+ *   baseUrl: 'https://api.example.com',
+ *   auth: { apiKey: 'op_live_...' },
+ * });
+ *
+ * const products = client.data.entity('Product').list();
+ * for await (const page of products) {
+ *   console.log(page.items);
+ * }
+ * ```
  *
  * Only types and values that external consumers need are re-exported here.
  * Transport internals, auth handler implementations, and platform-type

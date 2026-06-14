@@ -1,5 +1,25 @@
 /**
- * Public API barrel for @oneplatform/app-sdk.
+ * @packageDocumentation
+ * @oneplatform/app-sdk — React hooks and context for OnePlatform hosted apps.
+ *
+ * ## Quick start
+ * ```tsx
+ * import { AppProvider, useQuery, useMutation } from '@oneplatform/app-sdk';
+ *
+ * function Root() {
+ *   return (
+ *     <AppProvider>
+ *       <ProductList />
+ *     </AppProvider>
+ *   );
+ * }
+ *
+ * function ProductList() {
+ *   const { data, isLoading } = useQuery('Product');
+ *   if (isLoading) return <div>Loading...</div>;
+ *   return <ul>{data?.map(p => <li key={p.id}>{p.name}</li>)}</ul>;
+ * }
+ * ```
  *
  * Only the seven public exports and their associated types are re-exported here.
  * Internal modules (client/, cache/, ws/) are not accessible from package consumers.

@@ -1,4 +1,6 @@
 /**
+ * @module client
+ *
  * createClient() — the single entry point for SDK consumers.
  *
  * Construction is synchronous and performs no I/O. Connection errors surface
@@ -51,56 +53,99 @@ function isBrowserEnvironment(): boolean {
   );
 }
 
+/**
+ * The fully-initialised OnePlatform API client.
+ *
+ * Obtain an instance via {@link createClient}. Each namespace corresponds to a
+ * top-level resource group in the REST API (e.g. `client.apps` maps to
+ * `GET /api/v1/apps`).
+ */
 export interface OnePlatformClient {
-  /** Ontology-typed entity CRUD. Access as client.data.entity('Product') or client.data.Product */
+  /**
+   * Ontology-typed entity CRUD.
+   *
+   * Access a resource with `client.data.entity('Product')` or, with generated
+   * typed clients, `client.data.Product`.
+   */
   readonly data: DataNamespace;
 
-  /** Pipeline management — create, trigger, monitor runs. */
+  /** Pipeline management — create, trigger, and monitor runs. */
   readonly pipelines: PipelineNamespace;
 
-  /** Connector lifecycle management. */
+  /** Connector lifecycle management — register, test, and trigger syncs. */
   readonly connectors: ConnectorNamespace;
 
-  /** Ontology schema management. */
+  /** Ontology schema management — define, validate, and migrate schemas. */
   readonly ontologies: OntologyNamespace;
 
-  /** Real-time event subscriptions via SSE. */
+  /** Real-time entity event subscriptions via Server-Sent Events. */
   readonly events: EventNamespace;
 
-  /** Application management. */
+  /** Application management — CRUD, build, and deploy hosted apps. */
   readonly apps: AppNamespace;
 
-  /** Plugin lifecycle management. */
+  /** Plugin lifecycle management — install and configure plugins. */
   readonly plugins: PluginNamespace;
 
-  /** API key management. */
+  /** API key management — create and revoke API keys. */
   readonly apiKeys: ApiKeyNamespace;
 
-  /** User management (admin-only operations). */
+  /** User management (admin-only) — provision and update user accounts. */
   readonly users: UserNamespace;
 
-  /** Log and audit trail queries. */
+  /** Log and audit trail queries — stream logs and fetch audit entries. */
   readonly logs: LogNamespace;
 
   /**
    * Returns the resolved options this client was constructed with.
-   * Auth tokens are redacted.
+   * Auth tokens are redacted from the returned object.
    */
   getConfig(): Readonly<ResolvedClientConfig>;
 
   /**
-   * Verifies connectivity and authentication by calling GET /api/v1/auth/whoami.
-   * Resolves with the current user identity or throws an error.
+   * Verifies connectivity and authentication.
+   *
+   * Calls `GET /api/v1/auth/whoami` and resolves with the current user
+   * identity, or throws an {@link AuthError} if the credentials are invalid.
    */
   ping(): Promise<WhoAmIResponse>;
 
   /**
-   * Terminates all active SSE subscriptions and in-flight requests.
-   * The client must not be reused after calling destroy().
+   * Terminates all active SSE subscriptions and aborts in-flight requests.
+   *
+   * The client must not be reused after calling `destroy()`. Create a new
+   * client instance if you need to make further requests.
    */
   destroy(): void;
 }
 
+/**
+ * Creates a new OnePlatform API client.
+ *
+ * Construction is synchronous and performs no I/O — connection errors surface
+ * on the first API call. Multiple independent client instances can coexist in
+ * the same process (zero global state).
+ *
+ * @param options - Client configuration including `baseUrl` and `auth`.
+ * @returns A fully-initialised {@link OnePlatformClient}.
+ * @throws {@link ConfigurationError} when required options are missing or invalid.
+ *
+ * @example Node.js with API key
+ * ```ts
+ * const client = createClient({
+ *   baseUrl: 'https://api.example.com',
+ *   auth: { apiKey: 'op_live_...' },
+ * });
+ * ```
+ *
+ * @example Browser with PKCE
+ * ```ts
+ * const client = createClient({
+ *   baseUrl: 'https://api.example.com',
+ *   auth: { browser: { clientId: 'my-app' } },
+ * });
+ * ```
+ */
 export function createClient(options: ClientOptions): OnePlatformClient {
   // --- Validate and normalise baseUrl ---
   if (!options.baseUrl || options.baseUrl.trim() === '') {

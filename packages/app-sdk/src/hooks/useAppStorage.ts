@@ -1,19 +1,28 @@
 /**
  * Per-app, per-user persistent storage hook.
  *
- * Persists values as JSON through the App Service BFF (/bff/storage/{key}).
+ * Persists values as JSON through the App Service BFF (`/bff/storage/{key}`).
  * Values survive browser refresh because they are stored server-side, not in
- * localStorage or sessionStorage.
+ * `localStorage` or `sessionStorage`.
  *
- * Constraints (C-7):
- * - Keys: 1-128 characters, alphanumeric plus hyphens and underscores
+ * **Constraints (C-7):**
+ * - Keys: 1–128 characters, alphanumeric plus hyphens and underscores
  * - Values: serialisable as JSON, max 64 KB (enforced client-side before PUT)
  *
- * Optimistic updates: the local state is updated immediately on setValue,
+ * Optimistic updates: the local state is updated immediately on `setValue`,
  * before the PUT resolves, so the UI responds without waiting for the network.
  *
  * Guest sessions: the BFF stores values in short-lived guest session records.
- * useAppStorage behaves identically — expiry semantics are a server concern.
+ * `useAppStorage` behaves identically — expiry semantics are a server concern.
+ *
+ * @param key          - Storage key (1–128 alphanumeric, hyphen, or underscore characters).
+ * @param defaultValue - Value to use until the BFF fetch completes or on error.
+ * @returns A `[value, setValue, meta]` tuple.
+ *
+ * @example
+ * ```tsx
+ * const [theme, setTheme, { isLoading }] = useAppStorage('ui-theme', 'light');
+ * ```
  */
 
 import React from "react";

@@ -1,15 +1,28 @@
 /**
  * Data mutation hook for platform entities.
  *
- * Provides create, update (PATCH), replace (PUT), remove (DELETE), and bulkCreate
- * operations. All mutations:
+ * Provides `create`, `update` (PATCH), `replace` (PUT), `remove` (DELETE),
+ * and `bulkCreate` operations. All mutations:
  *
- * 1. Apply an optimistic update to QueryCache before the network call
+ * 1. Apply an optimistic update to `QueryCache` before the network call
  * 2. Revert to the pre-mutation snapshot on error
  * 3. Are serialised via a per-hook mutation queue to prevent race conditions
  *    when multiple mutations fire concurrently on the same entity
- * 4. Invalidate all QueryCache entries for the entity on success, triggering
- *    fresh fetches in any mounted useQuery instances for that entity
+ * 4. Invalidate all `QueryCache` entries for the entity on success, triggering
+ *    fresh fetches in any mounted `useQuery` instances for that entity
+ *
+ * @param entity - The ontology entity type name (e.g. `'Product'`).
+ * @returns A {@link MutationResult} with `create`, `update`, `replace`, `remove`,
+ *   `bulkCreate`, and `reset` methods plus loading/error state.
+ *
+ * @example
+ * ```tsx
+ * const { create, isLoading, error } = useMutation<Product>('Product');
+ *
+ * async function handleSubmit(data: Partial<Product>) {
+ *   await create(data);
+ * }
+ * ```
  */
 
 import React from "react";

@@ -23,6 +23,18 @@ const GRACEFUL_SHUTDOWN_MS = 5_000;
 // both to guarantee every fatal error is logged before the process exits.
 let processErrorHandlersInstalled = false;
 
+/**
+ * Registers global handlers for uncaught exceptions and unhandled rejections.
+ *
+ * Call once per process at startup. The function is idempotent — subsequent
+ * calls are no-ops so services can call it unconditionally during bootstrap.
+ *
+ * All fatal errors are written to `process.stderr` as structured JSON before
+ * the process exits, ensuring container runtimes capture them even when the
+ * structured logger itself is unavailable.
+ *
+ * @param logger - Optional structured logger; used in addition to stderr output.
+ */
 export function setupProcessErrorHandlers(logger?: {
   error(msg: string, meta?: Record<string, unknown>): void;
 }): void {
@@ -59,51 +71,70 @@ export function setupProcessErrorHandlers(logger?: {
   });
 }
 
+/**
+ * Configuration for {@link createApp}.
+ *
+ * Passed once at startup; all fields are immutable for the lifetime of the app.
+ */
 export interface CreateAppConfig {
+  /** Human-readable service name used in logs and telemetry (e.g. `'ontology-service'`). */
   serviceName: string;
+  /** Semver version string included in log output for traceability. */
   version: string;
 
   // Auth middleware dependencies
+  /** HS256 secret used to verify and sign JWTs (`OP_JWT_SECRET`). */
   jwtSecret: string;
+  /** Redis client used by the auth middleware for token blocklist lookups. */
   redis: Redis;
+  /**
+   * Callback that resolves an API key to a `UserContext`, or `null` if the key
+   * is invalid. Called on every request that presents an `X-API-Key` header.
+   */
   validateApiKey: (key: string) => Promise<UserContext | null>;
 
-  // CORS configuration (OP_ALLOWED_ORIGINS)
+  /** Allowed CORS origins from `OP_ALLOWED_ORIGINS`; requests from other origins receive 403. */
   allowedOrigins: string[];
 
-  // Routes that bypass user auth (healthz, readyz, bootstrap, public OAuth callbacks)
+  /**
+   * Routes that bypass JWT/API-key authentication.
+   * Typically `['/healthz', '/readyz']` plus any public OAuth callback paths.
+   */
   publicRoutes: string[];
 
-  // Service-to-service auth configuration
-  // targetService: the name of THIS service (e.g. "ontology-service")
+  /** The name of *this* service used to verify incoming service-to-service tokens. */
   targetService: string;
-  // servicePublicKeys: loaded from /data/service-keys/ at startup
+  /** Ed25519 public keys keyed by service name, loaded from `/data/service-keys/` at startup. */
   servicePublicKeys: Record<string, string>;
 
   /**
    * Maximum allowed request body size in bytes. Defaults to 10 MiB.
-   * Requests exceeding this limit receive 413 Payload Too Large before any
-   * business logic runs, preventing memory exhaustion from large uploads.
+   *
+   * Requests exceeding this limit receive `413 Payload Too Large` before any
+   * business logic runs, preventing memory exhaustion from oversized uploads.
    */
   maxBodySize?: number;
 }
 
-// createApp() is the single entry point for every @oneplatform service.
-// It wires the 11-middleware stack in the order defined in spec §5.
-// Middleware order is intentional — do NOT reorder without updating the spec:
-//
-//  1. requestId           — must run first (requestId is needed by all others)
-//  2. securityHeaders     — HSTS, CSP, etc. set before anything else touches the response
-//  3. cors                — must run before auth (preflight returns early)
-//  4. auth                — validates user credentials, sets c.var.user
-//  5. serviceAuth         — on /internal/* routes, validates Ed25519 token + RBAC
-//  6. responseEnvelope    — wraps 2xx JSON responses in { data: T }
-//  7. errorHandler        — catches thrown errors, formats them as { error: {...} }
-//  8. rateLimitHeaders    — appends X-RateLimit-* to responses (Gateway sets c.var.rateLimitInfo)
-//  9. deprecationHeaders  — appends Deprecation/Sunset/Link for deprecated routes
-//
-// OTEL instrumentation (middleware position 2 in the spec) is left as a stub
-// here. It will be wired in Task 22 (observability) once the OTEL package is added.
+/**
+ * Creates the standard Hono application for an OnePlatform service.
+ *
+ * Wires the 11-layer middleware stack defined in spec §5. Middleware order
+ * is load-bearing — do NOT reorder without updating the spec:
+ *
+ * 1. `requestId`          — must run first; propagated to every other layer
+ * 2. `securityHeaders`    — HSTS, CSP, etc. applied before any handler runs
+ * 3. `cors`               — validates Origin; preflight returns early
+ * 4. `auth`               — validates JWT/API key; sets `c.var.user`
+ * 5. `serviceAuth`        — on `/internal/*`, validates Ed25519 token + RBAC
+ * 6. `responseEnvelope`   — wraps 2xx JSON in `{ data: T }`
+ * 7. `errorHandler`       — catches thrown errors → `{ error: {...} }`
+ * 8. `rateLimitHeaders`   — appends `X-RateLimit-*` headers
+ * 9. `deprecationHeaders` — appends RFC 8594 headers for deprecated routes
+ *
+ * @param config - Service-specific configuration; see {@link CreateAppConfig}.
+ * @returns A Hono app instance with the full middleware stack applied. Mount routes on it.
+ */
 export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
 

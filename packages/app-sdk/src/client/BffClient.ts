@@ -1,12 +1,14 @@
 /**
- * BFF HTTP client (internal — not exported from package index).
+ * BFF HTTP client — internal, not exported from the package index.
  *
- * Wraps fetch with:
- * - Consistent credentials handling (httpOnly cookie, no explicit auth headers)
- * - Strict redirect policy (redirect: "error") to prevent open redirect attacks (C-5)
- * - Structured error parsing so all errors emerge as AppSDKError
+ * Wraps `fetch` with:
+ * - Consistent credentials handling (`credentials: "include"`, httpOnly cookie)
+ * - Strict redirect policy (`redirect: "error"`) to prevent open redirect attacks (C-5)
+ * - Structured error parsing so all errors emerge as {@link AppSDKError}
  * - Global 401 interception for seamless session expiry handling
  * - Query parameter serialisation following the BFF bracket notation contract
+ *
+ * @internal
  */
 
 import type { AppSDKError, FilterSpec } from "../types/entities.js";

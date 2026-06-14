@@ -1,18 +1,30 @@
 /**
  * Real-time entity subscription hook.
  *
- * Opens (or reuses) a shared WebSocket connection via WebSocketManager and
+ * Opens (or reuses) a shared WebSocket connection via `WebSocketManager` and
  * registers interest in a specific entity. Delivers incoming events via the
- * lastEvent state value and the optional onEvent callback.
+ * `lastEvent` state value and the optional `onEvent` callback.
  *
- * Connection state (isConnected, reconnectAttempts) reflects the shared
+ * Connection state (`isConnected`, `reconnectAttempts`) reflects the shared
  * WebSocket connection — not per-subscription status.
  *
- * Options stability note: options.filter, options.events, and options.onEvent
- * are intentionally excluded from the useEffect dependency array. This prevents
+ * **Options stability:** `options.filter`, `options.events`, and `options.onEvent`
+ * are intentionally excluded from the `useEffect` dependency array. This prevents
  * re-registering the subscription on every render when callers pass inline
  * object/function literals. App developers who need dynamic filter changes must
- * memoize their options object with useMemo.
+ * memoize their options object with `useMemo`.
+ *
+ * @param entity  - The ontology entity type name to subscribe to.
+ * @param options - Optional event type filter and `onEvent` callback.
+ * @returns A {@link SubscriptionResult} with the last received event and connection status.
+ *
+ * @example
+ * ```tsx
+ * const { lastEvent, isConnected } = useSubscription<Product>('Product', {
+ *   events: ['created', 'updated'],
+ *   onEvent: (e) => console.log(e.type, e.data),
+ * });
+ * ```
  */
 
 import React from "react";

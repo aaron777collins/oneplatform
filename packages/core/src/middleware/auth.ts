@@ -27,8 +27,16 @@ export interface AuthMiddlewareConfig {
   publicRoutes?: string[];
 }
 
-// authMiddleware is the primary user-facing authentication layer.
-// It runs after requestId and cors, before serviceAuth (spec §5 middleware stack).
+/**
+ * Primary user-facing authentication middleware.
+ *
+ * Accepts either a `Bearer` JWT or an `X-API-Key` header. Sets `c.var.user`
+ * to the resolved {@link UserContext} on success. Bypasses auth for routes
+ * listed in `config.publicRoutes`.
+ *
+ * Runs after `requestId` and `cors`, before `serviceAuth` (spec §5).
+ * Wired automatically by {@link createApp}.
+ */
 export function authMiddleware(config: AuthMiddlewareConfig) {
   const secretBytes = new TextEncoder().encode(config.jwtSecret);
   const publicRouteSet = new Set(config.publicRoutes ?? []);

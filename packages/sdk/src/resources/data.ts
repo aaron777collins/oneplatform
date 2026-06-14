@@ -44,13 +44,70 @@ function serializeListQuery(
   return { ...query, ...filterParams } as Record<string, string | string[] | number | boolean | undefined>;
 }
 
+/**
+ * CRUD operations for a single ontology-typed entity.
+ *
+ * Obtain an instance via `client.data.entity('Product')` or the Proxy shorthand
+ * `client.data.Product`. The generic `T` defaults to `Record<string, unknown>`;
+ * generated typed clients narrow it to the schema-defined shape.
+ */
 export interface EntityResource<T> {
+  /**
+   * Returns a paginated iterable over all records of this entity type.
+   *
+   * @param options - Filtering, sorting, field selection, and pagination options.
+   */
   list(options?: ListOptions): PaginatedIterable<T>;
+
+  /**
+   * Fetches a single record by ID.
+   *
+   * @param id - The entity record ID.
+   * @param options - Optional field projection.
+   * @throws {@link NotFoundError} when no record with the given ID exists.
+   */
   get(id: string, options?: GetOptions): Promise<T>;
+
+  /**
+   * Creates a new entity record.
+   *
+   * @param data - The fields to set on the new record.
+   * @param options - Optional idempotency key to prevent duplicate creates.
+   */
   create(data: Partial<T>, options?: MutationOptions): Promise<T>;
+
+  /**
+   * Applies a partial update (PATCH) to an existing record.
+   *
+   * @param id - The entity record ID.
+   * @param data - The fields to update; unspecified fields are left unchanged.
+   * @param options - Optional idempotency key.
+   */
   update(id: string, data: Partial<T>, options?: MutationOptions): Promise<T>;
+
+  /**
+   * Replaces an existing record in full (PUT).
+   *
+   * @param id - The entity record ID.
+   * @param data - The complete replacement record.
+   * @param options - Optional idempotency key.
+   */
   replace(id: string, data: T, options?: MutationOptions): Promise<T>;
+
+  /**
+   * Permanently deletes a record.
+   *
+   * @param id - The entity record ID.
+   * @throws {@link NotFoundError} when no record with the given ID exists.
+   */
   delete(id: string): Promise<void>;
+
+  /**
+   * Executes a bulk create, update, or delete operation in a single request.
+   *
+   * @param operation - The operation descriptor including records and mode.
+   * @returns Per-item results; partial failures do not abort the whole batch.
+   */
   bulk(operation: BulkOperation<T>): Promise<BulkResult<T>>;
 }
 
@@ -165,10 +222,27 @@ function createEntityResource<T>(
   };
 }
 
+/**
+ * Namespace for ontology-typed entity CRUD operations.
+ *
+ * Accessible as `client.data`. Supports two calling styles:
+ * - `client.data.entity('Product')` — explicit, works with any string type name
+ * - `client.data.Product` — Proxy shorthand, identical behaviour
+ */
 export interface DataNamespace {
   /**
-   * Access a typed entity resource by entity type name.
-   * Example: client.data.entity('Product').list()
+   * Returns an {@link EntityResource} for the given entity type name.
+   *
+   * @param entityType - The ontology entity type name (e.g. `'Product'`).
+   * @throws {@link ValidationError} when `entityType` is empty.
+   *
+   * @example
+   * ```ts
+   * const products = client.data.entity('Product').list();
+   * for await (const page of products) {
+   *   console.log(page.items);
+   * }
+   * ```
    */
   entity(entityType: string): EntityResource<Record<string, unknown>>;
 
