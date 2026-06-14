@@ -72,19 +72,47 @@ export function createPluginRoutes(
   });
 
   // POST /api/v1/plugins — install plugin (spec §3.2)
+  //
+  // When ?devMode=true is present, the endpoint applies relaxed authorization:
+  // - Requires plugins:manage scope instead of platform-admin role.
+  // - Forces tenantId to the caller's own tenant (never trusted from request body).
+  // - Sets dev: true and expiresAt: 7 days from now on the installation record.
   routes.post("/", async (c) => {
     const user = c.var.user;
-    if (!user?.roles.includes("platform-admin")) {
-      return c.json(
-        {
-          error: {
-            code: "FORBIDDEN",
-            message: "Platform admin role required to install plugins.",
-            requestId: c.var.requestId,
+    const isDevMode = new URL(c.req.url).searchParams.get("devMode") === "true";
+
+    if (isDevMode) {
+      // Dev-mode: requires only plugins:manage scope, not platform-admin.
+      const hasManageScope =
+        user?.scopes?.includes("plugins:manage") ||
+        user?.scopes?.includes("admin") ||
+        user?.roles?.includes("admin");
+      if (!hasManageScope) {
+        return c.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "plugins:manage scope is required for dev-mode plugin installation.",
+              requestId: c.var.requestId,
+            },
           },
-        },
-        403
-      );
+          403,
+        );
+      }
+    } else {
+      // Normal install: requires platform-admin role.
+      if (!user?.roles.includes("platform-admin")) {
+        return c.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "Platform admin role required to install plugins.",
+              requestId: c.var.requestId,
+            },
+          },
+          403,
+        );
+      }
     }
 
     // Parse multipart form — bundle file is required.
@@ -100,8 +128,35 @@ export function createPluginRoutes(
             requestId: c.var.requestId,
           },
         },
-        400
+        400,
       );
+    }
+
+    if (isDevMode) {
+      // Tenant enforcement: reject any attempt to install for a different tenant.
+      // tenantId in the body is optional; if present it MUST match the caller's own tenant.
+      // This prevents cross-tenant dev plugin installation even if the caller constructs
+      // a raw HTTP request with a different tenantId field.
+      const requestedTenantId = formData.get("tenantId");
+      if (
+        requestedTenantId !== null &&
+        typeof requestedTenantId === "string" &&
+        requestedTenantId !== user!.tenantId
+      ) {
+        return c.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message:
+                `Dev-mode plugins can only be installed for your own tenant. ` +
+                `Requested tenantId "${requestedTenantId}" does not match ` +
+                `authenticated tenantId "${user!.tenantId}".`,
+              requestId: c.var.requestId,
+            },
+          },
+          403,
+        );
+      }
     }
 
     const bundleFile = formData.get("bundle");
@@ -114,12 +169,13 @@ export function createPluginRoutes(
             requestId: c.var.requestId,
           },
         },
-        400
+        400,
       );
     }
 
     const approveUrls = formData.get("approveUrls") === "true";
-    const platformWide = formData.get("platformWide") === "true";
+    // Dev-mode installations are always tenant-scoped (not platform-wide).
+    const platformWide = !isDevMode && formData.get("platformWide") === "true";
 
     // Write bundle to a temp file so bundle-service can stream it.
     const tmpDir = join("/tmp", "oneplatform-plugins", randomUUID());
@@ -128,12 +184,25 @@ export function createPluginRoutes(
     const bytes = await bundleFile.arrayBuffer();
     await writeFile(bundlePath, Buffer.from(bytes));
 
+    // For dev-mode installs, tenantId is always the caller's own tenant —
+    // derived from the authenticated JWT, never from the request body.
+    const expiresAt = isDevMode
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      : undefined;
+
     const { plugin, approvedUrls, requiresUrlApproval, urlPatterns } =
       await pluginService.installPlugin({
         bundlePath,
         approveUrls,
         platformWide,
-        installedBy: user.userId,
+        installedBy: user!.userId,
+        ...(isDevMode
+          ? {
+              tenantId: user!.tenantId,
+              dev: true,
+              expiresAt,
+            }
+          : {}),
       });
 
     if (requiresUrlApproval) {
@@ -147,7 +216,7 @@ export function createPluginRoutes(
           })),
           message: "Resubmit with approveUrls=true to install.",
         },
-        202
+        202,
       );
     }
 
@@ -159,6 +228,13 @@ export function createPluginRoutes(
         version: plugin.version,
         type: plugin.type,
         status: plugin.status,
+        ...(isDevMode
+          ? {
+              dev: true,
+              expiresAt: expiresAt!.toISOString(),
+              tenantId: user!.tenantId,
+            }
+          : {}),
         ...(approvedUrls.length > 0
           ? {
               requiredApprovals: approvedUrls.map((u) => ({
@@ -168,7 +244,7 @@ export function createPluginRoutes(
             }
           : {}),
       },
-      201
+      201,
     );
   });
 

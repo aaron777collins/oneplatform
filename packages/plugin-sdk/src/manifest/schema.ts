@@ -53,8 +53,12 @@ export const PluginManifestSchema = z.object({
 
   type: z.enum(["connector", "transformer", "destination", "auth-provider", "widget"]),
 
-  // 500 aligns with BaseMetadata's description limit in types/metadata.ts
-  description: z.string().min(10).max(500),
+  // 500 aligns with BaseMetadata's description limit in types/metadata.ts.
+  // min(10) enforces a minimum meaningful description — scaffold generates >10 chars.
+  description: z
+    .string()
+    .min(10, { message: "Plugin description (minimum 10 characters)" })
+    .max(500),
 
   author: z.string().min(1).max(200),
 
