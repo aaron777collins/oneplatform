@@ -49,10 +49,33 @@ export {
 } from "./errors.js";
 
 // ---------------------------------------------------------------------------
-// Config loader
+// Config loader and per-service schemas (OA-6)
 // ---------------------------------------------------------------------------
 export { loadConfig } from "./config.js";
-export type { Config } from "./config.js";
+export {
+  baseConfigSchema,
+  gatewayConfigSchema,
+  authConfigSchema,
+  ingestionConfigSchema,
+  ontologyConfigSchema,
+  pipelineConfigSchema,
+  executionConfigSchema,
+  appConfigSchema,
+  loggingConfigSchema,
+  pluginConfigSchema,
+} from "./config.js";
+export type {
+  BaseConfig,
+  GatewayConfig,
+  AuthConfig,
+  IngestionConfig,
+  OntologyConfig,
+  PipelineConfig,
+  ExecutionConfig,
+  AppServiceConfig,
+  LoggingConfig,
+  PluginServiceConfig,
+} from "./config.js";
 
 // ---------------------------------------------------------------------------
 // Database client

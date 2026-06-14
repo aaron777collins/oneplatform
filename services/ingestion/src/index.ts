@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Worker } from "bullmq";
 import {
   loadConfig,
+  ingestionConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -331,7 +332,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
 }
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig(ingestionConfigSchema);
   const masterKey = loadMasterKey();
 
   const { app, cleanup } = await createServiceApp({

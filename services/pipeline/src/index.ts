@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Worker } from "bullmq";
 import {
   loadConfig,
+  pipelineConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -351,7 +352,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig(pipelineConfigSchema);
   const masterKey = loadMasterKey();
   void masterKey; // Available for future use in this service
 

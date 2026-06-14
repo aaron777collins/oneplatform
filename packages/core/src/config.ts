@@ -15,80 +15,130 @@ const originsSchema = z
     { message: "Wildcard (*) is not allowed in OP_ALLOWED_ORIGINS in production" }
   );
 
-const configSchema = z.object({
+// Secondary validation for non-Compose deployments (Kubernetes, bare Node.js)
+// where service-entrypoint.sh does not run. The primary guard is in
+// docker/service-entrypoint.sh. See OA-1 in docs/designs/friction-fixes.md.
+const minioPasswordSchema = z.string().optional().refine(
+  (v) => {
+    if (process.env["NODE_ENV"] === "production" && (!v || v === "CHANGE_ME_minio")) {
+      return false;
+    }
+    return true;
+  },
+  { message: "OP_MINIO_PASSWORD must be set to a non-placeholder value in production" }
+);
+
+// ─── Base schema — every service requires these vars ──────────────────────────
+// All per-service schemas extend this via .extend() so common validation is DRY.
+export const baseConfigSchema = z.object({
   OP_MASTER_KEY: z.string().min(1),
   OP_JWT_SECRET: z.string().min(32),
   OP_CURSOR_SECRET: z.string().min(32),
-
   OP_BASE_URL: z.string().url(),
   OP_ALLOWED_ORIGINS: originsSchema.optional().default("http://localhost:3000"),
-  OP_WILDCARD_DOMAIN: z.string().optional(),
-  OP_GATEWAY_REPLICAS: z.coerce.number().int().positive().optional(),
-
   OP_DATABASE_URL: z.string().url(),
   OP_REDIS_URL: z.string().url(),
+});
 
+// ─── Per-service schemas — extend base with service-specific vars ─────────────
+// Services only fail at startup when THEIR required vars are missing, not vars
+// that belong to other services. Fixes OA-6 where the logging service would
+// reject a deployment that had no OP_SMTP_* vars even though it never reads them.
+
+export const gatewayConfigSchema = baseConfigSchema.extend({
   OP_GLOBAL_RATE_LIMIT: z.coerce.number().int().positive().default(10000),
+  OP_GATEWAY_REPLICAS: z.coerce.number().int().positive().optional(),
+  OP_WEBHOOK_ALLOW_HTTP: z.string().transform((v) => v === "true").default("false"),
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
 
-  OP_SANDBOX_POOL_SIZE: z.coerce.number().int().positive().default(5),
-  OP_CONNECTOR_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(300),
-
-  OP_INGESTION_BATCH_SIZE: z.coerce.number().int().positive().max(10000).default(1000),
-  OP_LARGE_SYNC_CONCURRENCY: z.coerce.number().int().positive().default(3),
-
-  OP_MIGRATION_TIMEOUT: z.coerce.number().int().positive().default(3600),
-  OP_ONTOLOGY_POLL_INTERVAL: z.coerce.number().int().positive().default(15),
-
-  OP_REQUIRE_EMAIL_VERIFICATION: z
-    .string()
-    .transform((v) => v === "true")
-    .default("false"),
-
+export const authConfigSchema = baseConfigSchema.extend({
+  OP_REQUIRE_EMAIL_VERIFICATION: z.string().transform((v) => v === "true").default("false"),
   OP_SMTP_HOST: z.string().optional(),
   OP_SMTP_PORT: z.coerce.number().int().optional(),
   OP_SMTP_USER: z.string().optional(),
   OP_SMTP_PASS: z.string().optional(),
   OP_SMTP_FROM: z.string().email().optional(),
-  OP_SMTP_SECURE: z
-    .string()
-    .transform((v) => v === "true")
-    .default("true"),
-
-  OP_S3_ENDPOINT: z.string().url().optional(),
-  OP_S3_ACCESS_KEY: z.string().optional(),
-  OP_S3_SECRET_KEY: z.string().optional(),
-  OP_S3_REGION: z.string().optional(),
+  OP_SMTP_SECURE: z.string().transform((v) => v === "true").default("true"),
   OP_MINIO_USER: z.string().default("minioadmin"),
-  // Secondary validation for non-Compose deployments (Kubernetes, bare Node.js)
-  // where service-entrypoint.sh does not run. The primary guard is in
-  // docker/service-entrypoint.sh. See OA-1 in docs/designs/friction-fixes.md.
-  OP_MINIO_PASSWORD: z.string().optional().refine(
-    (v) => {
-      if (process.env["NODE_ENV"] === "production" && (!v || v === "CHANGE_ME_minio")) {
-        return false;
-      }
-      return true;
-    },
-    { message: "OP_MINIO_PASSWORD must be set to a non-placeholder value in production" }
-  ),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
 
-  OP_WEBHOOK_ALLOW_HTTP: z
-    .string()
-    .transform((v) => v === "true")
-    .default("false"),
+export const ingestionConfigSchema = baseConfigSchema.extend({
+  OP_INGESTION_BATCH_SIZE: z.coerce.number().int().positive().max(10000).default(1000),
+  OP_LARGE_SYNC_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
 
+export const ontologyConfigSchema = baseConfigSchema.extend({
+  OP_MIGRATION_TIMEOUT: z.coerce.number().int().positive().default(3600),
+  OP_ONTOLOGY_POLL_INTERVAL: z.coerce.number().int().positive().default(15),
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
+
+export const pipelineConfigSchema = baseConfigSchema.extend({
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
+
+export const executionConfigSchema = baseConfigSchema.extend({
+  OP_SANDBOX_POOL_SIZE: z.coerce.number().int().positive().default(5),
+  OP_CONNECTOR_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(300),
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
+
+export const appConfigSchema = baseConfigSchema.extend({
+  OP_WILDCARD_DOMAIN: z.string().optional(),
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
+
+export const loggingConfigSchema = baseConfigSchema.extend({
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 });
 
-export type Config = z.infer<typeof configSchema>;
+export const pluginConfigSchema = baseConfigSchema.extend({
+  OP_MINIO_USER: z.string().default("minioadmin"),
+  OP_MINIO_PASSWORD: minioPasswordSchema,
+});
 
-export function loadConfig(): Config {
-  const result = configSchema.safeParse(process.env);
+// ─── Derived types ────────────────────────────────────────────────────────────
+
+export type BaseConfig = z.infer<typeof baseConfigSchema>;
+export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
+export type AuthConfig = z.infer<typeof authConfigSchema>;
+export type IngestionConfig = z.infer<typeof ingestionConfigSchema>;
+export type OntologyConfig = z.infer<typeof ontologyConfigSchema>;
+export type PipelineConfig = z.infer<typeof pipelineConfigSchema>;
+export type ExecutionConfig = z.infer<typeof executionConfigSchema>;
+export type AppServiceConfig = z.infer<typeof appConfigSchema>;
+export type LoggingConfig = z.infer<typeof loggingConfigSchema>;
+export type PluginServiceConfig = z.infer<typeof pluginConfigSchema>;
+
+// ─── Config loader ────────────────────────────────────────────────────────────
+
+/**
+ * Parse and validate process.env against the provided Zod schema.
+ * Each service passes its own service-specific schema so startup fails only
+ * when THAT service's required vars are absent, not vars belonging to other services.
+ *
+ * @example
+ *   import { loadConfig, gatewayConfigSchema } from "@oneplatform/core";
+ *   const config = loadConfig(gatewayConfigSchema);
+ */
+export function loadConfig<S extends z.ZodTypeAny>(serviceSchema: S): z.infer<S> {
+  const result = serviceSchema.safeParse(process.env);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join(".")}: ${i.message}`)
       .join("\n");
     throw new Error(`Configuration validation failed:\n${issues}`);
   }
-  return result.data;
+  return result.data as z.infer<S>;
 }

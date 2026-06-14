@@ -23,6 +23,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   loadConfig,
+  authConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -285,7 +286,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
 
 async function main(): Promise<void> {
   // Step 1: Validate configuration — throws loudly if any required env var is missing.
-  const config = loadConfig();
+  const config = loadConfig(authConfigSchema);
 
   // Step 2: Load master key for AES-256-GCM credential encryption.
   const masterKey = loadMasterKey();
