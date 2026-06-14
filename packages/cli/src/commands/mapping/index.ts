@@ -63,6 +63,59 @@ interface PreviewOpts {
 }
 
 // ---------------------------------------------------------------------------
+// Field slug resolution
+// ---------------------------------------------------------------------------
+
+// Process-scoped cache keyed on entityType. A single CLI invocation is always
+// for one platform/tenant, so we don't need to include credentials in the key.
+// The cache is never evicted — it lives only for the duration of this process.
+const entitySchemaCache = new Map<string, Array<{ id: string; slug: string; name: string }>>();
+
+/**
+ * Resolves a target field identifier to its UUID.
+ *
+ * Accepts either a UUID (returned as-is) or a field slug/name. When a slug is
+ * given the entity schema is fetched and the field is looked up by slug then
+ * name. The schema is cached in-process so that bulk mapping creation (e.g.
+ * via a shell loop) targeting the same entity type only incurs one GET call.
+ */
+async function resolveFieldId(
+  entityType: string,
+  fieldSlugOrId: string,
+  ctx: CommandContext,
+): Promise<string> {
+  // Already a UUID — no resolution needed.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fieldSlugOrId)) {
+    return fieldSlugOrId;
+  }
+
+  let fields = entitySchemaCache.get(entityType);
+  if (!fields) {
+    const entity = await ctx.http.get<{
+      fields: Array<{ id: string; slug: string; name: string }>;
+    }>(`/api/v1/ontology/${encodeURIComponent(entityType)}`);
+    fields = entity.fields ?? [];
+    entitySchemaCache.set(entityType, fields);
+  }
+
+  const field = fields.find(
+    (f) => f.slug === fieldSlugOrId || f.name.toLowerCase() === fieldSlugOrId.toLowerCase(),
+  );
+
+  if (!field) {
+    const available = fields.map((f) => f.slug).join(", ") || "(none)";
+    throw new CliError(
+      `Field "${fieldSlugOrId}" not found on entity "${entityType}". ` +
+      `Run "op ontology get ${entityType}" to list available field slugs. ` +
+      `Available: ${available}`,
+      EXIT.GENERAL,
+    );
+  }
+
+  return field.id;
+}
+
+// ---------------------------------------------------------------------------
 // Action implementations
 // ---------------------------------------------------------------------------
 
@@ -99,10 +152,13 @@ async function createAction(entityType: string, opts: CreateOpts, ctx: CommandCo
     );
   }
 
+  // Resolve slug/name to UUID — no-ops if opts.targetField is already a UUID.
+  const resolvedTargetFieldId = await resolveFieldId(entityType, opts.targetField, ctx);
+
   const body: Record<string, unknown> = {
     connectorId: opts.connector,
     sourceFieldPath: opts.sourceField,
-    targetFieldId: opts.targetField,
+    targetFieldId: resolvedTargetFieldId,
     transformType,
     ...(opts.transform !== undefined ? { transform: opts.transform } : {}),
     ...(opts.priority !== undefined ? { priority: parseInt(opts.priority, 10) } : {}),
@@ -207,7 +263,7 @@ export function registerMapping(program: Command): void {
     .argument("<entity-type>", "Ontology entity type slug")
     .requiredOption("--connector <connector-id>", "Connector ID whose data this rule applies to")
     .requiredOption("--source-field <path>", "Dot-path into the connector record, e.g. contact.email")
-    .requiredOption("--target-field <field-id>", "UUID of the target ontology entity field")
+    .requiredOption("--target-field <field-id>", "UUID or slug of the target ontology entity field (slug is resolved to UUID automatically)")
     .option(
       "--transform-type <type>",
       "How to map the value: direct|expression|constant|template (default: direct)",

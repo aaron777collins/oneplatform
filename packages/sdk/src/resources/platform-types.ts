@@ -82,6 +82,24 @@ export interface ConnectorTestResult {
   readonly details?: Record<string, unknown>;
 }
 
+export interface SyncJob {
+  readonly syncJobId: string;
+  readonly connectorId: string;
+  readonly status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+  readonly recordsProcessed: number;
+  readonly errorMessage: string | null;
+}
+
+export interface SyncProgress {
+  readonly syncJobId: string;
+  readonly status: string;
+  readonly progress: number; // 0–100
+  readonly recordsProcessed: number;
+  readonly estimatedCompletionAt: string | null;
+}
+
 // --- Ontologies ---
 
 export interface OntologyField {

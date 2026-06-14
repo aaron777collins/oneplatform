@@ -26,9 +26,33 @@ interface CreateOpts {
   syncMode?: "full" | "incremental";
   enabled: boolean;
   interactive?: boolean;
+  scheduleCron?: string;
 }
-interface UpdateOpts { name?: string; config?: string }
+interface UpdateOpts {
+  name?: string;
+  config?: string;
+  credentials?: string;
+  syncMode?: "full" | "incremental";
+  enabled?: boolean;
+  description?: string;
+  scheduleCron?: string;
+}
 interface TriggerOpts { wait?: boolean }
+
+// Validates that a cron expression has exactly 5 space-separated fields.
+// Full semantic validation is performed server-side; this catches obvious typos
+// before sending a round-trip to the API.
+function validateCronFieldCount(expr: string): void {
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length !== 5) {
+    throw new CliError(
+      `Invalid --schedule-cron "${expr}": expected 5 space-separated fields ` +
+      `(minute hour day-of-month month day-of-week), got ${fields.length}. ` +
+      `Example: '0 9 * * 1-5' for weekdays at 9am UTC.`,
+      EXIT.GENERAL,
+    );
+  }
+}
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -61,6 +85,10 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
     credentials = JSON.parse(readFileSync(opts.credentials, "utf8")) as Record<string, string>;
   }
 
+  if (opts.scheduleCron !== undefined) {
+    validateCronFieldCount(opts.scheduleCron);
+  }
+
   const resp = await ctx.http.post<{ id: string; name: string }>("/api/v1/connectors", {
     pluginId: opts.plugin,
     name: opts.name,
@@ -68,6 +96,7 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
     credentials,
     ...(opts.syncMode !== undefined ? { syncMode: opts.syncMode } : {}),
     isEnabled: opts.enabled,
+    ...(opts.scheduleCron !== undefined ? { scheduleCron: opts.scheduleCron } : {}),
   });
   ctx.renderer.success(`Connector '${resp.name}' created (ID: ${resp.id}).`);
 }
@@ -81,6 +110,23 @@ async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): 
   const body: Record<string, unknown> = {};
   if (opts.name) body["name"] = opts.name;
   if (opts.config) body["config"] = JSON.parse(readFileSync(opts.config, "utf8")) as unknown;
+  if (opts.credentials) {
+    body["credentials"] = JSON.parse(readFileSync(opts.credentials, "utf8")) as Record<string, string>;
+  }
+  if (opts.syncMode) body["syncMode"] = opts.syncMode;
+  // Commander's --enabled / --no-enabled pair sets opts.enabled to true/false;
+  // undefined means neither flag was passed so we omit the field.
+  if (opts.enabled !== undefined) body["isEnabled"] = opts.enabled;
+  if (opts.description !== undefined) body["description"] = opts.description;
+  if (opts.scheduleCron !== undefined) {
+    if (opts.scheduleCron === "") {
+      // Empty string explicitly clears the cron schedule on the server.
+      body["scheduleCron"] = null;
+    } else {
+      validateCronFieldCount(opts.scheduleCron);
+      body["scheduleCron"] = opts.scheduleCron;
+    }
+  }
   await ctx.http.patch(`/api/v1/connectors/${encodeURIComponent(id)}`, body);
   ctx.renderer.success(`Connector ${id} updated.`);
 }
@@ -150,6 +196,10 @@ export function registerConnector(program: Command): void {
     .option("--enabled", "Enable the connector immediately (default: true)", true)
     .option("--no-enabled", "Create the connector in a disabled state")
     .option("--interactive", "Use interactive prompts for configuration")
+    .option(
+      "--schedule-cron <expr>",
+      "Cron schedule for automatic syncs, e.g. '0 9 * * 1-5' for weekdays at 9am UTC (5 fields required)",
+    )
     .action(withContext<[CreateOpts]>(createAction));
 
   connector.command("get")
@@ -162,6 +212,15 @@ export function registerConnector(program: Command): void {
     .argument("<id>", "Connector ID")
     .option("--name <name>", "New display name")
     .option("--config <config.json>", "Path to updated JSON configuration")
+    .option("--credentials <credentials.json>", "Path to JSON file with updated credentials (keep this file secure)")
+    .option("--sync-mode <mode>", "New sync mode: full | incremental", /^(full|incremental)$/)
+    .option("--enabled", "Enable the connector")
+    .option("--no-enabled", "Disable the connector")
+    .option("--description <text>", "Update the connector description (pass empty string to clear)")
+    .option(
+      "--schedule-cron <expr>",
+      "Update cron schedule for automatic syncs, e.g. '0 9 * * 1-5' (5 fields required; pass empty string to clear)",
+    )
     .action(withContext<[string, UpdateOpts]>(updateAction));
 
   connector.command("delete")

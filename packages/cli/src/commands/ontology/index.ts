@@ -20,6 +20,13 @@ interface ExportOpts { format?: string; out?: string }
 interface ImportOpts { file: string; onConflict?: string }
 interface MigrateOpts { wait?: boolean; timeout?: string }
 interface DiffOpts { file: string }
+interface CreateOpts {
+  file?: string;
+  name?: string;
+  slug?: string;
+  description?: string;
+  public?: boolean;
+}
 
 async function listAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const entities = await ctx.http.get<unknown[]>("/api/v1/ontology/entities");
@@ -31,8 +38,29 @@ async function getAction(entityType: string, _opts: Record<string, never>, ctx: 
   ctx.renderer.json(entity);
 }
 
-async function createAction(opts: { file: string }, ctx: CommandContext): Promise<void> {
-  const schema = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
+async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void> {
+  let schema: unknown;
+
+  if (opts.file) {
+    schema = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
+  } else if (opts.name) {
+    // Inline creation: derive slug from name when not explicitly provided.
+    const derivedSlug = opts.slug ?? opts.name.toLowerCase().replace(/\s+/g, "-");
+    schema = {
+      name: opts.name,
+      slug: derivedSlug,
+      description: opts.description ?? "",
+      isPublic: opts.public ?? false,
+      fields: [],
+    };
+  } else {
+    throw new CliError(
+      "Either --file <schema.json> or --name <name> is required. " +
+      "Use --file for a full schema or --name for a minimal inline entity.",
+      EXIT.GENERAL,
+    );
+  }
+
   const resp = await ctx.http.post<{ entityType: string }>("/api/v1/ontology/entities", schema);
   ctx.renderer.success(`Entity type '${resp.entityType}' created.`);
 }
@@ -146,9 +174,14 @@ export function registerOntology(program: Command): void {
     .argument("<entity-type>", "Entity type name")
     .action(withContext<[string, Record<string, never>]>(getAction));
 
-  ont.command("create").description("Create a new entity type from schema file")
-    .requiredOption("--file <schema.json>", "Path to JSON schema file")
-    .action(withContext<[{ file: string }]>(createAction));
+  ont.command("create")
+    .description("Create a new entity type from schema file or inline options")
+    .option("--file <schema.json>", "Path to JSON schema file (full schema definition)")
+    .option("--name <name>", "Entity type display name (enables inline creation without a file)")
+    .option("--slug <slug>", "URL slug in kebab-case (derived from --name if omitted)")
+    .option("--description <desc>", "Entity description")
+    .option("--public", "Make entity publicly readable (default: false)")
+    .action(withContext<[CreateOpts]>(createAction));
 
   ont.command("update").description("Update an entity type schema")
     .argument("<entity-type>", "Entity type name")
