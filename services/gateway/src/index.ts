@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   loadConfig,
@@ -25,6 +27,7 @@ import { createSseRoutes } from "./routes/sse.js";
 import { createDataRoutes } from "./routes/data.js";
 import { createAdminRoutes } from "./routes/admin.js";
 import { createHealthRoutes } from "./routes/health.js";
+import { createOpenApiRoutes } from "./routes/openapi.js";
 
 async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
@@ -256,6 +259,23 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
 
   const adminRoutes = createAdminRoutes({ rateLimitConfigRepo });
   app.route("/api/v1/admin", adminRoutes);
+
+  // OpenAPI spec endpoints must be registered before the catch-all proxy routes
+  // so that /api/v1/openapi.json is never intercepted by the proxy.
+  //
+  // Spec paths are resolved relative to this file's location:
+  //   services/gateway/src/index.ts  →  ../../../../docs/generated/openapi/
+  // Both can be overridden via environment variables so that Docker Compose
+  // can mount the generated directory to a predictable location.
+  const gatewayDir = dirname(fileURLToPath(import.meta.url));
+  const defaultSpecPath = join(gatewayDir, "../../../../docs/generated/openapi/merged.json");
+  const defaultSpecDir = join(gatewayDir, "../../../../docs/generated/openapi/");
+  const openApiRoutes = createOpenApiRoutes({
+    specPath: process.env["OP_OPENAPI_SPEC_PATH"] ?? defaultSpecPath,
+    specDir: process.env["OP_OPENAPI_SPEC_DIR"] ?? defaultSpecDir,
+    ontologyCache,
+  });
+  app.route("/", openApiRoutes);
 
   const proxyRoutes = createProxyRoutes({
     proxyService,

@@ -149,6 +149,12 @@ export const meta: ServiceOpenApiMeta = {
   servers: [{ url: "http://localhost:3000", description: "Local (direct)" }],
   tags: [
     {
+      name: "Meta",
+      description:
+        "OpenAPI spec endpoints. Serve the pre-built merged spec and, for " +
+        "authenticated requests, a tenant-specific overlay with concrete entity paths.",
+    },
+    {
       name: "Webhooks",
       description:
         "Outbound webhook subscriptions. The platform delivers events to registered URLs " +
@@ -172,6 +178,69 @@ export const meta: ServiceOpenApiMeta = {
     },
   ],
   routes: [
+    // -----------------------------------------------------------------------
+    // OpenAPI spec endpoints (self-documenting)
+    // -----------------------------------------------------------------------
+    {
+      method: "GET",
+      path: "/api/v1/openapi.json",
+      summary: "Combined OpenAPI spec (tenant-specific)",
+      description:
+        "When called with a valid Bearer token, returns the platform OpenAPI spec " +
+        "merged with auto-generated paths for the requesting tenant's ontology entity " +
+        "types. Without authentication, returns the static base spec with generic " +
+        "templated data paths. `op sdk generate` calls this endpoint with the stored " +
+        "Bearer token to receive the full tenant-specific spec.",
+      tags: ["Meta"],
+      security: [],
+      response: {
+        200: z.unknown().describe("OpenAPI303Document"),
+        503: z.object({ error: z.object({ code: z.string(), message: z.string() }) })
+          .describe("SpecNotGeneratedError"),
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/v1/openapi/base.json",
+      summary: "Static base OpenAPI spec",
+      description:
+        "Returns the static merged OpenAPI spec for all platform-owned routes. " +
+        "No tenant overlay applied. No authentication required. " +
+        "Suitable for the Scalar API explorer in the docs site and for SDK " +
+        "generation without tenant context.",
+      tags: ["Meta"],
+      security: [],
+      response: {
+        200: z.unknown().describe("OpenAPI303BaseDocument"),
+        503: z.object({ error: z.object({ code: z.string(), message: z.string() }) })
+          .describe("BaseSpecNotGeneratedError"),
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/v1/openapi/{service}.json",
+      summary: "Per-service OpenAPI spec",
+      description:
+        "Returns the OpenAPI spec for a single platform service. " +
+        "Allowed values: gateway, auth, ingestion, ontology, pipeline, execution, " +
+        "app, logging, plugin. No authentication required.",
+      tags: ["Meta"],
+      security: [],
+      params: {
+        service: z.enum([
+          "gateway", "auth", "ingestion", "ontology", "pipeline",
+          "execution", "app", "logging", "plugin",
+        ]).describe("ServiceName"),
+      },
+      response: {
+        200: z.unknown().describe("ServiceOpenAPI303Document"),
+        404: z.object({ error: z.object({ code: z.string(), message: z.string() }) })
+          .describe("UnknownServiceError"),
+        503: z.object({ error: z.object({ code: z.string(), message: z.string() }) })
+          .describe("ServiceSpecNotGeneratedError"),
+      },
+    },
+
     // -----------------------------------------------------------------------
     // Outbound Webhooks
     // -----------------------------------------------------------------------
