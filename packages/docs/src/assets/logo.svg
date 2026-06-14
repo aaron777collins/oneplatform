@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" fill="none">
+  <!-- Hexagon mark -->
+  <polygon
+    points="18,4 30,11 30,25 18,32 6,25 6,11"
+    fill="#6366f1"
+  />
+  <polygon
+    points="18,10 25,14 25,22 18,26 11,22 11,14"
+    fill="#ffffff"
+    opacity="0.9"
+  />
+  <!-- Wordmark -->
+  <text
+    x="42"
+    y="26"
+    font-family="system-ui, -apple-system, sans-serif"
+    font-size="18"
+    font-weight="700"
+    fill="#1e1b4b"
+    letter-spacing="-0.5"
+  >One<tspan fill="#6366f1">Platform</tspan></text>
+</svg>

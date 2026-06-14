@@ -1,0 +1,56 @@
+---
+title: Logging Service API
+description: Structured log ingestion, querying, and export.
+sidebar:
+  order: 9
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Logging Service collects structured logs from all platform services and app code,
+stores them with indexed fields for fast querying, and exposes query endpoints used by
+the `op log` CLI and the admin UI.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/logging.json > logging.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Logs
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/logs` | Bearer | Query logs with filters |
+| `GET` | `/api/v1/logs/stream` | Bearer | Stream logs via SSE |
+| `GET` | `/api/v1/logs/{traceId}` | Bearer | Get logs for a trace ID |
+
+## Query parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `level` | `debug \| info \| warn \| error \| audit` | Filter by log level |
+| `service` | string | Filter by service name |
+| `traceId` | string | Filter by trace ID |
+| `from` | ISO 8601 datetime | Start of time range |
+| `to` | ISO 8601 datetime | End of time range |
+| `limit` | integer (1–1000) | Max results (default: 100) |
+| `cursor` | string | Pagination cursor from previous response |
+
+## Log entry format
+
+```json
+{
+  "id": "<uuid>",
+  "timestamp": "2026-06-14T12:00:00.000Z",
+  "level": "info",
+  "service": "ingestion-service",
+  "traceId": "<uuid>",
+  "message": "Sync completed",
+  "data": { "connectorId": "<uuid>", "recordCount": 1247 }
+}
+```

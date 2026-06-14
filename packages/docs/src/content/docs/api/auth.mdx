@@ -1,0 +1,91 @@
+---
+title: Auth Service API
+description: Authentication, authorization, API keys, roles, and user management.
+sidebar:
+  order: 3
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Auth Service handles all platform authentication and authorization: login/logout,
+token refresh, password reset, OAuth 2.0 provider flows, API key management, RBAC
+role definitions, and user management.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/auth.json > auth.json
+  ```
+</Aside>
+
+## Base URL
+
+```
+http://localhost:3000
+```
+
+All auth routes are proxied by the Gateway from the internal Auth Service.
+
+## Endpoint groups
+
+### Bootstrap
+
+One-time platform initialization. Returns `410 Gone` after the first admin is created.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/auth/bootstrap/status` | None | Check if platform is bootstrapped |
+| `POST` | `/api/v1/auth/bootstrap` | Bootstrap token | Create the first admin user and tenant |
+
+### Authentication
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/auth/register` | None | Register a new user account |
+| `POST` | `/api/v1/auth/login` | None | Login and receive access + refresh tokens |
+| `POST` | `/api/v1/auth/refresh` | Refresh token | Exchange a refresh token for a new access token |
+| `POST` | `/api/v1/auth/logout` | Bearer | Revoke the current session |
+| `POST` | `/api/v1/auth/forgot-password` | None | Request a password reset email |
+| `POST` | `/api/v1/auth/reset-password` | Reset token | Complete a password reset |
+
+### OAuth 2.0
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/auth/oauth/{provider}/authorize` | None | Initiate OAuth flow |
+| `GET` | `/api/v1/auth/oauth/{provider}/callback` | None | OAuth callback handler |
+
+### API Keys
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/auth/api-keys` | Bearer | Create an API key |
+| `GET` | `/api/v1/auth/api-keys` | Bearer | List API keys for the current user |
+| `DELETE` | `/api/v1/auth/api-keys/{id}` | Bearer | Revoke an API key |
+
+### Roles
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/auth/roles` | Bearer + `roles:manage` | Create a role |
+| `GET` | `/api/v1/auth/roles` | Bearer | List roles |
+| `GET` | `/api/v1/auth/roles/{id}` | Bearer | Get a role |
+| `PATCH` | `/api/v1/auth/roles/{id}` | Bearer + `roles:manage` | Update a role |
+| `DELETE` | `/api/v1/auth/roles/{id}` | Bearer + `roles:manage` | Delete a role |
+| `PUT` | `/api/v1/auth/roles/{id}/permissions` | Bearer + `roles:manage` | Set role permissions |
+| `GET` | `/api/v1/auth/roles/{id}/permissions` | Bearer | Get role permissions |
+
+### Users
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/auth/users` | Bearer + `users:read` | List users in the tenant |
+| `GET` | `/api/v1/auth/users/{id}` | Bearer + `users:read` | Get a user |
+| `PATCH` | `/api/v1/auth/users/{id}` | Bearer + `users:manage` | Update a user |
+| `DELETE` | `/api/v1/auth/users/{id}` | Bearer + `users:manage` | Delete a user |
+
+## Token format
+
+Access tokens are signed JWTs valid for 15 minutes. Refresh tokens are opaque and valid
+for 30 days. Store refresh tokens in `HttpOnly` cookies or secure server-side storage.

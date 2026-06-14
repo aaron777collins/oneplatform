@@ -1,0 +1,62 @@
+---
+title: Pipeline Service API
+description: ETL pipeline definitions, step configuration, and scheduling.
+sidebar:
+  order: 6
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Pipeline Service manages ETL pipeline definitions. A pipeline is a directed graph
+of steps — action steps (transform, filter, enrich) and parallel steps (fan-out to
+multiple branches). Pipelines are executed by the Execution Service.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/pipeline.json > pipeline.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Pipelines
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/pipelines` | Bearer + `pipelines:manage` | Create a pipeline |
+| `GET` | `/api/v1/pipelines` | Bearer | List pipelines |
+| `GET` | `/api/v1/pipelines/{id}` | Bearer | Get a pipeline |
+| `PATCH` | `/api/v1/pipelines/{id}` | Bearer + `pipelines:manage` | Update a pipeline |
+| `DELETE` | `/api/v1/pipelines/{id}` | Bearer + `pipelines:manage` | Delete a pipeline |
+| `POST` | `/api/v1/pipelines/{id}/run` | Bearer + `pipelines:run` | Trigger a pipeline run |
+
+## Step types
+
+### Action step
+
+```json
+{
+  "type": "action",
+  "action": "transform",
+  "config": { "mapping": { "email": "$.email_address" } }
+}
+```
+
+Available actions: `transform`, `filter`, `enrich`, `validate`, `emit`.
+
+### Parallel step
+
+```json
+{
+  "type": "parallel",
+  "branches": [
+    { "type": "action", "action": "emit", "config": { "target": "warehouse" } },
+    { "type": "action", "action": "emit", "config": { "target": "notifications" } }
+  ]
+}
+```
+
+Branches execute concurrently. All branches must complete before the pipeline moves
+to the next step.

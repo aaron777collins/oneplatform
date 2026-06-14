@@ -1,0 +1,117 @@
+---
+title: API Reference
+description: OpenAPI reference for all OnePlatform microservices.
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+OnePlatform exposes a unified HTTP API across 9 microservices, all accessible through
+the Gateway at a single host.
+
+## Authentication
+
+All API endpoints (except `/api/v1/auth/login`, `/api/v1/auth/register`, and
+`/api/v1/auth/bootstrap`) require a Bearer token:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Obtain a token via `POST /api/v1/auth/login` or the `op auth login` CLI command.
+API keys are also accepted with the `ApiKey <key>` prefix.
+
+## OpenAPI Specifications
+
+The live OpenAPI spec is available from a running gateway:
+
+| URL | Description |
+|-----|-------------|
+| `GET /api/v1/openapi.json` | Tenant-specific combined spec (requires auth) |
+| `GET /api/v1/openapi/base.json` | Static base spec (no tenant overlay, public) |
+| `GET /api/v1/openapi/{service}.json` | Per-service spec |
+
+Download the merged spec for use with code generators:
+
+```sh
+# With authentication (includes your tenant's entity type routes)
+curl -H "Authorization: Bearer $(op auth token)" \
+  http://localhost:3000/api/v1/openapi.json > openapi.json
+
+# Without authentication (generic routes only)
+curl http://localhost:3000/api/v1/openapi/base.json > openapi-base.json
+```
+
+Generate a TypeScript SDK from the spec:
+
+```sh
+op sdk generate-types
+```
+
+## Services
+
+<CardGrid>
+  <LinkCard
+    title="Gateway"
+    description="Proxy, rate limiting, webhooks, SSE, data routing."
+    href="/api/gateway"
+  />
+  <LinkCard
+    title="Auth"
+    description="Authentication, authorization, API keys, roles, users."
+    href="/api/auth"
+  />
+  <LinkCard
+    title="Ingestion"
+    description="Connectors, sync scheduling, field mapping."
+    href="/api/ingestion"
+  />
+  <LinkCard
+    title="Ontology"
+    description="Entity type definitions, field schemas, validation rules."
+    href="/api/ontology"
+  />
+  <LinkCard
+    title="Pipeline"
+    description="ETL pipeline definitions and step configuration."
+    href="/api/pipeline"
+  />
+  <LinkCard
+    title="Execution"
+    description="Run pipelines, track execution status and logs."
+    href="/api/execution"
+  />
+  <LinkCard
+    title="App"
+    description="App lifecycle, VFS, BFF, environment variables."
+    href="/api/app"
+  />
+  <LinkCard
+    title="Logging"
+    description="Structured log ingestion, query, and export."
+    href="/api/logging"
+  />
+  <LinkCard
+    title="Plugin"
+    description="Plugin installation, lifecycle, and hook configuration."
+    href="/api/plugin"
+  />
+</CardGrid>
+
+## Error format
+
+All error responses follow the same envelope:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Human-readable description",
+    "details": {}
+  }
+}
+```
+
+Common codes: `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404),
+`VALIDATION_ERROR` (422), `INTERNAL_ERROR` (500).

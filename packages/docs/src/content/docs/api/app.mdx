@@ -1,0 +1,57 @@
+---
+title: App Service API
+description: App lifecycle, virtual filesystem, BFF endpoints, and environment variables.
+sidebar:
+  order: 8
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The App Service manages the full lifecycle of platform apps: registration, bundle
+storage (via the internal virtual filesystem), serving, and environment variable
+injection. It also hosts the Backend-for-Frontend (BFF) endpoints used by
+`@oneplatform/app-sdk` at runtime.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/app.json > app.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Apps
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/apps` | Bearer + `apps:manage` | Register an app |
+| `GET` | `/api/v1/apps` | Bearer | List apps |
+| `GET` | `/api/v1/apps/{id}` | Bearer | Get an app |
+| `PATCH` | `/api/v1/apps/{id}` | Bearer + `apps:manage` | Update app metadata |
+| `DELETE` | `/api/v1/apps/{id}` | Bearer + `apps:manage` | Delete an app |
+| `POST` | `/api/v1/apps/{id}/deploy` | Bearer + `apps:manage` | Deploy a new bundle version |
+| `GET` | `/api/v1/apps/{id}/versions` | Bearer | List deployed versions |
+
+### Environment Variables
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `PUT` | `/api/v1/apps/{id}/env` | Bearer + `apps:manage` | Set environment variables |
+| `GET` | `/api/v1/apps/{id}/env` | Bearer + `apps:manage` | List environment variables |
+| `DELETE` | `/api/v1/apps/{id}/env/{key}` | Bearer + `apps:manage` | Remove an environment variable |
+
+## Bundle requirements
+
+Apps are deployed as single ES module bundles:
+
+| Requirement | Value |
+|-------------|-------|
+| File type | `.js` (single file) |
+| Module format | ES module |
+| Default export | React component (no props) |
+| Max size | 50 MB |
+| Externals | `@oneplatform/app-sdk` must not be bundled |
+
+The platform provides `@oneplatform/app-sdk` at runtime via the BFF injection layer.

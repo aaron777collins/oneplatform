@@ -1,0 +1,58 @@
+---
+title: Execution Service API
+description: Run pipelines, track execution status and logs.
+sidebar:
+  order: 7
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Execution Service schedules and runs pipeline jobs. It accepts a run request,
+provisions a sandboxed runtime, executes each pipeline step in order, and records
+the result. Run results (including per-step logs) are queryable after completion.
+
+<Aside type="tip">
+  Download the OpenAPI spec for this service:
+
+  ```sh
+  curl http://localhost:3000/api/v1/openapi/execution.json > execution.json
+  ```
+</Aside>
+
+## Endpoint groups
+
+### Runs
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/runs` | Bearer + `pipelines:run` | Start a pipeline run |
+| `GET` | `/api/v1/runs` | Bearer | List runs |
+| `GET` | `/api/v1/runs/{id}` | Bearer | Get run status and result |
+| `DELETE` | `/api/v1/runs/{id}` | Bearer + `pipelines:run` | Cancel a running job |
+| `GET` | `/api/v1/runs/{id}/logs` | Bearer | Stream logs for a run |
+
+## Run request
+
+```json
+{
+  "pipelineId": "<uuid>",
+  "input": { "entityType": "customer", "cursor": null },
+  "timeout": 300
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pipelineId` | UUID | Yes | The pipeline to run |
+| `input` | object | No | Input data passed to the first step |
+| `timeout` | integer | No | Max execution time in seconds (default: 300, max: 3600) |
+
+## Run statuses
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Queued, waiting for a worker |
+| `running` | Actively executing |
+| `succeeded` | Completed successfully |
+| `failed` | Completed with an error |
+| `cancelled` | Cancelled by a user or timeout |
