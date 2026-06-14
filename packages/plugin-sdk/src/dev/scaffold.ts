@@ -452,6 +452,8 @@ export const ${entrypoint}: Widget = {
 
 function buildTestSource(opts: ScaffoldOptions, entrypoint: string): string {
   return `import { describe, it, expect } from "vitest";
+// @oneplatform/plugin-sdk/testing is available once the SDK is installed (npm install).
+// If the SDK is used from a workspace link, run \`pnpm build\` in packages/plugin-sdk first.
 import { createMockContext } from "@oneplatform/plugin-sdk/testing";
 import { ${entrypoint} } from "../index.js";
 
@@ -482,14 +484,24 @@ function buildPackageJson(opts: ScaffoldOptions): string {
     type: "module",
     main: "./dist/bundle.js",
     scripts: {
-      build: "tsc --project tsconfig.json",
-      dev: "tsc --project tsconfig.json --watch",
+      // esbuild bundles src/index.ts into the single-file dist/bundle.js that
+      // the platform loads at runtime. --packages=external keeps @oneplatform/plugin-sdk
+      // out of the bundle — the execution environment injects it at runtime.
+      build:
+        "esbuild src/index.ts --bundle --format=esm --outfile=dist/bundle.js --packages=external",
+      "build:types": "tsc --emitDeclarationOnly",
+      dev: "esbuild src/index.ts --bundle --format=esm --outfile=dist/bundle.js --packages=external --watch",
       test: "vitest run",
       "test:watch": "vitest",
-      pack: "op plugin pack",
+      // npx ensures the CLI is resolved from the registry without a global install.
+      // See README.md for instructions on installing @oneplatform/cli globally.
+      pack: "npx @oneplatform/cli plugin pack",
+      "type-check": "tsc --noEmit",
     },
     devDependencies: {
       "@oneplatform/plugin-sdk": "*",
+      // esbuild is the bundler used by `npm run build` and `npm run dev`.
+      esbuild: "^0.21.0",
       typescript: "^5.5.0",
       vitest: "^1.6.0",
     },
@@ -514,6 +526,55 @@ function buildTsConfig(): string {
     exclude: ["node_modules", "dist"],
   };
   return JSON.stringify(config, null, 2) + "\n";
+}
+
+function buildReadme(opts: ScaffoldOptions): string {
+  return `# ${opts.name}
+
+A OnePlatform **${opts.type}** plugin scaffolded with \`op plugin create\`.
+
+## Getting started
+
+\`\`\`bash
+npm install          # install dependencies
+npm run build        # bundle src/index.ts → dist/bundle.js
+npm run dev          # watch mode — rebuilds on every save
+npm test             # run vitest tests
+npm run type-check   # TypeScript type checking (no emit)
+\`\`\`
+
+## Packaging and installing
+
+To create a \`.oppkg\` archive for installation:
+
+\`\`\`bash
+npm run pack
+# or, if @oneplatform/cli is installed globally:
+op plugin pack
+\`\`\`
+
+### Installing \`@oneplatform/cli\`
+
+The \`npm run pack\` script uses \`npx @oneplatform/cli\` so no global install is required.
+For a faster workflow, install the CLI globally:
+
+\`\`\`bash
+npm install -g @oneplatform/cli
+op plugin pack
+op plugin install ./dist/${opts.id}.oppkg --dev
+\`\`\`
+
+The \`--dev\` flag installs in development mode — only requires \`plugins:manage\` scope,
+scoped to your tenant, and expires after 7 days.
+
+## Plugin ID
+
+\`${opts.id}\`
+
+## Author
+
+${opts.author}
+`;
 }
 
 function buildGitIgnore(): string {
@@ -553,6 +614,7 @@ export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
     { relativePath: "src/index.ts", content: buildSource(opts, entrypoint) },
     { relativePath: "src/__tests__/index.test.ts", content: buildTestSource(opts, entrypoint) },
     { relativePath: ".gitignore", content: buildGitIgnore() },
+    { relativePath: "README.md", content: buildReadme(opts) },
   ];
 
   return { outputDir: opts.outputDir, files };

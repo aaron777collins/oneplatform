@@ -23,7 +23,9 @@ const PLUGIN_COLUMNS = [
 ];
 
 interface ListOpts { type?: string; status?: string }
-interface InstallOpts { tenant?: string; yes?: boolean }
+interface InstallOpts { tenant?: string; yes?: boolean; dev?: boolean }
+interface UpgradeOpts { tenant?: string; yes?: boolean }
+interface RollbackOpts { yes?: boolean }
 interface PluginTenantOpts { tenant?: string }
 interface PackOpts { out?: string; sign?: string }
 interface SimulateOpts {
@@ -89,10 +91,14 @@ async function installAction(source: string, opts: InstallOpts, ctx: CommandCont
     form.append("bundle", new Blob([content]), "plugin.oppkg");
     if (opts.tenant) form.append("tenantId", opts.tenant);
 
+    // Dev mode: append query param so the service applies relaxed scope requirements
+    // (plugins:manage instead of platform-admin) and enforces tenant scoping + 7-day expiry.
+    const installUrl = opts.dev ? "/api/v1/plugins?devMode=true" : "/api/v1/plugins";
+
     const resp = await ctx.http.postMultipart<{
       id: string; name: string; version: string;
       permissions: string[]; externalUrls: string[]
-    }>("/api/v1/plugins", form);
+    }>(installUrl, form);
 
     // Show approval prompt
     ctx.renderer.info(`Plugin: ${resp.name} v${resp.version}`);
@@ -103,7 +109,14 @@ async function installAction(source: string, opts: InstallOpts, ctx: CommandCont
       ctx.renderer.info(`External URLs:\n  ${resp.externalUrls.join("\n  ")}`);
     }
 
-    if (ctx.yes) {
+    if (opts.dev) {
+      // Dev installs skip the approval prompt — they are scoped to the caller's
+      // tenant only and expire automatically after 7 days.
+      ctx.renderer.warn(
+        "Dev-mode installation active: scoped to your tenant, expires in 7 days. " +
+          "Re-run `op plugin install --dev` to renew.",
+      );
+    } else if (ctx.yes) {
       ctx.renderer.warn("Auto-approving plugin installation (--yes). This is logged to audit.");
     } else {
       await confirmDestructive(`Install plugin '${resp.name}'?`, false);
@@ -117,6 +130,74 @@ async function installAction(source: string, opts: InstallOpts, ctx: CommandCont
       try { unlinkSync(tempFileToClean); } catch { /* best-effort */ }
     }
   }
+}
+
+async function upgradeAction(source: string, opts: UpgradeOpts, ctx: CommandContext): Promise<void> {
+  let filePath = source;
+  let tempFileToClean: string | null = null;
+
+  if (source.startsWith("http://")) {
+    throw new CliError(
+      "Insecure URL rejected. Plugin sources must use HTTPS (https://). Plain HTTP is not allowed.",
+      EXIT.GENERAL,
+    );
+  }
+
+  if (source.startsWith("https://")) {
+    ctx.renderer.info(`Downloading ${source}...`);
+    const resp = await fetch(source);
+    if (!resp.ok) {
+      throw new CliError(`Failed to download plugin: HTTP ${resp.status}`, EXIT.NETWORK);
+    }
+    const arrayBuffer = await resp.arrayBuffer();
+    const { tmpdir } = await import("node:os");
+    const { randomBytes } = await import("node:crypto");
+    filePath = join(tmpdir(), `op-plugin-${randomBytes(8).toString("hex")}.oppkg`);
+    tempFileToClean = filePath;
+    writeFileSync(filePath, Buffer.from(arrayBuffer));
+    ctx.renderer.info("Download complete.");
+  }
+
+  try {
+    const content = readFileSync(filePath);
+    const form = new FormData();
+    form.append("bundle", new Blob([content]), "plugin.oppkg");
+    // Signal to the service that this is an upgrade, not a fresh install.
+    form.append("upgrade", "true");
+    if (opts.tenant) form.append("tenantId", opts.tenant);
+
+    if (!ctx.yes) {
+      await confirmDestructive("Upgrade plugin? This will replace the active version.", false);
+    }
+
+    const resp = await ctx.http.postMultipart<{
+      id: string; name: string; version: string;
+    }>("/api/v1/plugins", form);
+
+    ctx.renderer.success(`Plugin '${resp.name}' upgraded to v${resp.version} (ID: ${resp.id}).`);
+  } finally {
+    if (tempFileToClean !== null) {
+      try { unlinkSync(tempFileToClean); } catch { /* best-effort */ }
+    }
+  }
+}
+
+async function rollbackAction(pluginId: string, opts: RollbackOpts, ctx: CommandContext): Promise<void> {
+  if (!ctx.yes) {
+    await confirmDestructive(
+      `Roll back plugin '${pluginId}' to the previous version?`,
+      false,
+    );
+  }
+
+  const resp = await ctx.http.post<{ manifestId: string; fromVersion: string; toVersion: string }>(
+    `/api/v1/plugins/${encodeURIComponent(pluginId)}/rollback`,
+    {},
+  );
+
+  ctx.renderer.success(
+    `Plugin '${resp.manifestId}' rolled back from v${resp.fromVersion} to v${resp.toVersion}.`,
+  );
 }
 
 async function enableAction(pluginId: string, opts: PluginTenantOpts, ctx: CommandContext): Promise<void> {
@@ -295,8 +376,21 @@ export function registerPlugin(program: Command): void {
 
   plugin.command("install").description("Install a plugin from file, URL, or registry reference")
     .argument("<source>", "Local .oppkg path, HTTPS URL, or registry reference")
-    .option("--tenant <id>", "Install for specific tenant")
+    .option("--tenant <id>", "Install for specific tenant (ignored in --dev mode; always uses your own tenant)")
+    .option(
+      "--dev",
+      "Install in development mode: requires only plugins:manage scope, scoped to your tenant, expires in 7 days",
+    )
     .action(withContext<[string, InstallOpts]>(installAction));
+
+  plugin.command("upgrade").description("Upload a new plugin version (replaces the active version)")
+    .argument("<source>", "Local .oppkg path or HTTPS URL of the updated plugin package")
+    .option("--tenant <id>", "Target tenant for the upgrade")
+    .action(withContext<[string, UpgradeOpts]>(upgradeAction));
+
+  plugin.command("rollback").description("Roll back a plugin to its previous version")
+    .argument("<plugin-id>", "Plugin manifest ID to roll back")
+    .action(withContext<[string, RollbackOpts]>(rollbackAction));
 
   plugin.command("enable").description("Enable an installed plugin")
     .argument("<plugin-id>", "Plugin ID")

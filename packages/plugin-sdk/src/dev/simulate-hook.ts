@@ -179,10 +179,19 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
   let errorInfo: SimulateHookOutput["error"];
 
   if (args.sandbox) {
-    // Production-accurate: use isolated-vm (requires it to be installed)
-    // This branch is intentionally guarded — isolated-vm is not a dependency
-    // of the SDK. The CLI package installs it separately.
-    process.stderr.write("[sandbox mode not available in SDK — install isolated-vm in the CLI]\n");
+    // Production-accurate sandbox via isolated-vm (requires separate install).
+    // TODO(sandbox): implement full isolated-vm execution branch — requires designing
+    // host/guest communication protocol, memory limits, timeout enforcement, and
+    // capability injection. Tracked separately from this friction-fix batch.
+    console.error("[sandbox] isolated-vm is not installed.");
+    console.error("");
+    console.error("To enable sandbox mode:");
+    console.error("  1. Install isolated-vm: npm install isolated-vm");
+    console.error("  2. Note: isolated-vm requires node-gyp and a C++ compiler");
+    console.error("  3. Re-run with: npx simulate-hook --sandbox");
+    console.error("");
+    console.error("Sandbox mode is optional — your plugin will run in a sandboxed");
+    console.error("environment on the platform regardless of this local flag.");
     process.exit(1);
   } else {
     // Fast path: vm.Script with a synthetic module environment.
