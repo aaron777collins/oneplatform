@@ -116,6 +116,19 @@ export interface PatchEntityInput {
   }>;
 }
 
+export interface OntologyDiffChange {
+  op: "add" | "remove" | "modify";
+  path: string;
+  from?: unknown;
+  to?: unknown;
+}
+
+export interface OntologyDiffResult {
+  changes: OntologyDiffChange[];
+  isBreaking: boolean;
+  requiresMigration: boolean;
+}
+
 export interface EntityService {
   createEntity(tenantId: string, userId: string, input: CreateEntityInput): Promise<EntityDetail>;
   getEntity(tenantId: string, entityType: string): Promise<EntityDetail>;
@@ -127,6 +140,11 @@ export interface EntityService {
   }>;
   deleteEntity(tenantId: string, entityType: string, confirm?: boolean): Promise<void>;
   validateRecord(tenantId: string, entityType: string, data: Record<string, unknown>): Promise<{ valid: boolean; errors: Array<{ field: string; code: string; message: string }> }>;
+  /**
+   * Compute a non-destructive diff of `patch` against the current live schema for
+   * `entityType`. Returns the set of logical changes without applying them.
+   */
+  diffEntity(tenantId: string, entityType: string, patch: PatchEntityInput): Promise<OntologyDiffResult>;
 }
 
 export function createEntityService(deps: EntityServiceDeps): EntityService {
@@ -547,6 +565,63 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
       }));
 
       return { valid: false, errors };
+    },
+
+    async diffEntity(tenantId, entityType, patch) {
+      const entity = await entityRepo.findBySlug(tenantId, entityType);
+      if (!entity) throw new EntityNotFoundError(`Entity '${entityType}' not found.`);
+
+      const existingFields = await fieldRepo.findByEntityId(entity.id);
+
+      // Build the EntityDiff shape that classifyChange understands, without
+      // mutating the database (this is a read-only preview operation).
+      const diff: EntityDiff = {
+        ...(patch.addFields ? {
+          addFields: patch.addFields.map((f) => ({
+            slug: f.slug ?? deriveSlug(f.name),
+            fieldType: f.fieldType,
+            required: f.required ?? false,
+            nullable: f.nullable ?? true,
+            ...(f.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
+          })),
+        } : {}),
+        ...(patch.removeFieldSlugs ? { removeFieldSlugs: patch.removeFieldSlugs } : {}),
+        ...(patch.renameFields ? { renameFields: patch.renameFields } : {}),
+        ...(patch.updateFields ? { updateFields: patch.updateFields } : {}),
+        ...(patch.name !== undefined ? { nameChanged: true } : {}),
+        ...(patch.description !== undefined ? { descriptionChanged: true } : {}),
+        ...(patch.isPublic !== undefined ? { isPublicChanged: true } : {}),
+        ...(!patch.addFields?.length && !patch.removeFieldSlugs?.length &&
+          !patch.renameFields?.length && !patch.updateFields?.length
+          ? { metadataOnly: true }
+          : {}),
+      };
+
+      // hasData check is required by classifyChange to determine whether adding a
+      // required-no-default field is breaking. A read on countDataRows is cheaper
+      // than a full table scan — it queries the pg_stat metadata table.
+      const hasData = await entityRepo.countDataRows(tenantSchemaName(tenantId), entity.slug) > 0;
+      const { classification, changes } = classifyChange(diff, existingFields, hasData);
+
+      // Map the internal ChangeDescription list to the canonical diff change shape.
+      const diffChanges: OntologyDiffChange[] = changes.map((c) => {
+        if (c.type === "add_field" || c.type === "add_required_field_no_default") {
+          return { op: "add" as const, path: `/fields/${c.fieldSlug ?? ""}` };
+        }
+        if (c.type === "remove_field") {
+          return { op: "remove" as const, path: `/fields/${c.fieldSlug ?? ""}` };
+        }
+        if (c.type === "rename_field") {
+          return { op: "modify" as const, path: `/fields/${c.fieldSlug ?? ""}`, to: c.details };
+        }
+        return { op: "modify" as const, path: c.details ?? c.type };
+      });
+
+      return {
+        changes: diffChanges,
+        isBreaking: classification === "breaking",
+        requiresMigration: classification === "breaking",
+      };
     },
   };
 }

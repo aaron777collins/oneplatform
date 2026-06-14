@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError, ForbiddenError, ValidationError } from "@oneplatform/core";
 import { updateRateLimitConfigRequest } from "../schemas/index.js";
 import type { RateLimitConfigRepository } from "../repositories/rate-limit-config-repository.js";
 
@@ -14,7 +15,7 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
   routes.get("/rate-limits", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // 'admin' is a scope granted exclusively to the platform-admin role (token-service.ts
@@ -22,7 +23,7 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
     // the role is named 'platform-admin'. Checking the scope is the correct approach
     // and is consistent with how other routes guard admin operations.
     if (!user.scopes?.includes("admin")) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Admin role required." } }, 403);
+      throw new ForbiddenError("Admin role required.");
     }
 
     const config = await rateLimitConfigRepo.findByTenantId(user.tenantId);
@@ -32,7 +33,7 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
   routes.put("/rate-limits", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // 'admin' is a scope granted exclusively to the platform-admin role (token-service.ts
@@ -40,15 +41,13 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
     // the role is named 'platform-admin'. Checking the scope is the correct approach
     // and is consistent with how other routes guard admin operations.
     if (!user.scopes?.includes("admin")) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Admin role required." } }, 403);
+      throw new ForbiddenError("Admin role required.");
     }
 
     const body = await c.req.json();
     const parsed = updateRateLimitConfigRequest.safeParse(body);
     if (!parsed.success) {
-      return c.json({
-        error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() },
-      }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const config = await rateLimitConfigRepo.upsert(user.tenantId, {

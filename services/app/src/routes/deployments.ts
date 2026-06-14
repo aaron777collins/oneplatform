@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { ValidationError, UnauthorizedError, NotFoundError } from "@oneplatform/core";
 import type { DeployService } from "../services/deploy-service.js";
 import { DeploySchema, RollbackSchema } from "../schemas/index.js";
 
@@ -22,17 +23,17 @@ export function createDeploymentRoutes(deps: DeploymentRouteDeps): Hono<{ Variab
   // POST /deploy
   routes.post("/deploy", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
 
     const body = await c.req.json().catch(() => ({}));
     const parsed = DeploySchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const result = await deployService.deployApp(
@@ -48,17 +49,17 @@ export function createDeploymentRoutes(deps: DeploymentRouteDeps): Hono<{ Variab
   // POST /rollback
   routes.post("/rollback", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const appId = c.req.param("appId") ?? c.req.param("id");
     if (appId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing appId in route." } }, 400);
+      throw new NotFoundError("Missing appId in route.");
     }
 
     const body = await c.req.json().catch(() => null);
     const parsed = RollbackSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const result = await deployService.rollbackApp(

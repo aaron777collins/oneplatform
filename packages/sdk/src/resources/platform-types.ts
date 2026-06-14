@@ -3,6 +3,22 @@
  * These represent server-returned shapes that the SDK wraps.
  */
 
+// --- Error shapes ---
+
+/**
+ * Canonical error response shape returned by all OnePlatform service routes.
+ * Every 4xx/5xx response body matches this structure, allowing clients to
+ * reliably parse error details without pattern-matching on status codes alone.
+ */
+export interface ApiErrorResponse {
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+    requestId: string;
+  };
+}
+
 // --- Identity ---
 
 export interface WhoAmIResponse {
@@ -132,12 +148,14 @@ export interface ValidationResult {
 }
 
 export interface OntologyDiff {
-  readonly fromVersion: string;
-  readonly toVersion: string;
-  readonly added: OntologyField[];
-  readonly removed: OntologyField[];
-  readonly modified: Array<{ before: OntologyField; after: OntologyField }>;
-  readonly breaking: boolean;
+  readonly changes: Array<{
+    readonly op: 'add' | 'remove' | 'modify';
+    readonly path: string;
+    readonly from?: unknown;
+    readonly to?: unknown;
+  }>;
+  readonly isBreaking: boolean;
+  readonly requiresMigration: boolean;
 }
 
 export interface MigrationStatus {

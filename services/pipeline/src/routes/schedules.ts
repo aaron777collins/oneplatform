@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError } from "@oneplatform/core";
 import type { ScheduleService } from "../services/schedule-service.js";
 import {
   CreateScheduleSchema,
@@ -29,7 +30,7 @@ export function createScheduleRoutes(
   routes.get("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const parsed = ListSchedulesQuery.safeParse(c.req.query());
@@ -53,7 +54,7 @@ export function createScheduleRoutes(
   routes.post("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json().catch(() => null);
@@ -81,7 +82,7 @@ export function createScheduleRoutes(
   routes.get("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const schedule = await scheduleService.getSchedule(user.tenantId, c.req.param("id"));
@@ -92,7 +93,7 @@ export function createScheduleRoutes(
   routes.patch("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json().catch(() => null);
@@ -124,7 +125,7 @@ export function createScheduleRoutes(
   routes.delete("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     await scheduleService.deleteSchedule(user.tenantId, c.req.param("id"));

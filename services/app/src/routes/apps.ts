@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { ValidationError, UnauthorizedError } from "@oneplatform/core";
 import { sha256hex, validateFilePath } from "../services/app-service.js";
 import type { AppService } from "../services/app-service.js";
 import type { PermissionService } from "../services/permission-service.js";
@@ -48,7 +49,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // GET / — list apps
   routes.get("/", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const query = PaginationSchema.safeParse({
       cursor: c.req.query("cursor"),
@@ -73,12 +74,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // POST / — create app
   routes.post("/", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = CreateAppSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const app = await appService.createApp(user.tenantId, user.userId, {
@@ -94,7 +95,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // GET /:id
   routes.get("/:id", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
     return c.json({ data: formatAppDetail(app) });
@@ -103,12 +104,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // PATCH /:id
   routes.patch("/:id", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = PatchAppSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const app = await appService.updateApp(user.tenantId, c.req.param("id"), {
@@ -125,7 +126,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // DELETE /:id
   routes.delete("/:id", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     await appService.deleteApp(user.tenantId, c.req.param("id"));
     return new Response(null, { status: 204 });
@@ -138,7 +139,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // GET /:id/files
   routes.get("/:id/files", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     // Verify app ownership
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
@@ -161,7 +162,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // GET /:id/files/:path
   routes.get("/:id/files/:path{.+}", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
     const filePath = `/${decodeURIComponent(c.req.param("path") ?? "")}`;
@@ -184,12 +185,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // PUT /:id/files/:path
   routes.put("/:id/files/:path{.+}", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = WriteFileSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
@@ -256,7 +257,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // DELETE /:id/files/:path
   routes.delete("/:id/files/:path{.+}", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
     const filePath = `/${decodeURIComponent(c.req.param("path") ?? "")}`;
@@ -275,12 +276,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   // POST /:id/files/rename
   routes.post("/:id/files/rename", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = RenameFileSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
@@ -322,7 +323,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.get("/:id/roles", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const roles = await permService.listRoles(user.tenantId, c.req.param("id"));
     return c.json({ data: roles.map(formatRole) });
@@ -330,12 +331,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.post("/:id/roles", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = CreateRoleSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const role = await permService.createRole(user.tenantId, c.req.param("id"), {
@@ -348,12 +349,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.patch("/:id/roles/:roleId", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = PatchRoleSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const role = await permService.updateRole(
@@ -371,7 +372,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.delete("/:id/roles/:roleId", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     await permService.deleteRole(user.tenantId, c.req.param("id"), c.req.param("roleId"));
     return new Response(null, { status: 204 });
@@ -383,12 +384,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.post("/:id/share", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = ShareAppSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const share = await permService.shareApp(
@@ -416,7 +417,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.get("/:id/env-vars", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const envVars = await permService.listEnvVars(user.tenantId, c.req.param("id"));
     return c.json({ data: envVars });
@@ -424,12 +425,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.put("/:id/env-vars/:key", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = EnvVarSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const envVar = await permService.upsertEnvVar(
@@ -444,7 +445,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.delete("/:id/env-vars/:key", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     await permService.deleteEnvVar(user.tenantId, c.req.param("id"), c.req.param("key"));
     return new Response(null, { status: 204 });
@@ -456,12 +457,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.patch("/:id/oauth", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const body = await c.req.json().catch(() => null);
     const parsed = PatchOAuthSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() } }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     // Verify app ownership
@@ -481,7 +482,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.delete("/:id/oauth/dev-redirect-uris", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     await appService.getApp(user.tenantId, c.req.param("id"));
     // Forward to Auth Service to remove dev redirect URIs
@@ -495,7 +496,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
   routes.get("/:id/type-declarations", async (c) => {
     const user = c.var.user;
-    if (user === undefined) return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
 

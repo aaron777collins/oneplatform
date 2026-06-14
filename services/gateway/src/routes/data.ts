@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError, NotFoundError } from "@oneplatform/core";
 import type { OntologyCache } from "../services/ontology-cache.js";
 import type { ProxyService } from "../services/proxy-service.js";
 import type { CircuitBreaker } from "../utils/circuit-breaker.js";
@@ -29,12 +30,12 @@ async function handleDataRoute(
 ): Promise<Response> {
   const user = c.var.user;
   if (!user?.tenantId) {
-    return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+    throw new UnauthorizedError("Authentication required.");
   }
 
   const entityType = c.req.param("entityType");
   if (!entityType) {
-    return c.json({ error: { code: "NOT_FOUND", message: "Entity type is required." } }, 404);
+    throw new NotFoundError("Entity type is required.");
   }
 
   const entry = deps.ontologyCache.getEntry(user.tenantId);

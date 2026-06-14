@@ -22,31 +22,32 @@ interface MigrateOpts { wait?: boolean; timeout?: string }
 interface DiffOpts { file: string }
 
 async function listAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  const entities = await ctx.http.get<unknown[]>("/api/v1/ontology/entities");
+  const entities = await ctx.http.get<unknown[]>("/api/v1/ontology");
   ctx.renderer.render(entities, ONTOLOGY_COLUMNS);
 }
 
 async function getAction(entityType: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  const entity = await ctx.http.get<unknown>(`/api/v1/ontology/entities/${encodeURIComponent(entityType)}`);
+  const entity = await ctx.http.get<unknown>(`/api/v1/ontology/${encodeURIComponent(entityType)}`);
   ctx.renderer.json(entity);
 }
 
 async function createAction(opts: { file: string }, ctx: CommandContext): Promise<void> {
   const schema = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
-  const resp = await ctx.http.post<{ entityType: string }>("/api/v1/ontology/entities", schema);
+  const resp = await ctx.http.post<{ entityType: string }>("/api/v1/ontology", schema);
   ctx.renderer.success(`Entity type '${resp.entityType}' created.`);
 }
 
 async function updateAction(entityType: string, opts: { file: string }, ctx: CommandContext): Promise<void> {
   const schema = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
-  await ctx.http.put(`/api/v1/ontology/entities/${encodeURIComponent(entityType)}`, schema);
+  // Service uses PATCH (partial update) not PUT (full replacement) — aligning verb to the service contract.
+  await ctx.http.patch(`/api/v1/ontology/${encodeURIComponent(entityType)}`, schema);
   ctx.renderer.success(`Entity type '${entityType}' updated.`);
 }
 
 async function deleteAction(entityType: string, opts: { confirm?: boolean }, ctx: CommandContext): Promise<void> {
   const yes = ctx.yes || opts.confirm === true;
   await confirmDestructive(`Delete entity type '${entityType}'? This cannot be undone.`, yes);
-  await ctx.http.delete(`/api/v1/ontology/entities/${encodeURIComponent(entityType)}`);
+  await ctx.http.delete(`/api/v1/ontology/${encodeURIComponent(entityType)}`);
   ctx.renderer.success(`Entity type '${entityType}' deleted.`);
 }
 
@@ -64,19 +65,26 @@ async function validateAction(opts: { file: string }, ctx: CommandContext): Prom
 
 async function diffAction(entityType: string, opts: DiffOpts, ctx: CommandContext): Promise<void> {
   const schema = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
-  const resp = await ctx.http.post<{ diff: Array<{ op: string; path: string; value?: unknown }> }>(
-    `/api/v1/ontology/entities/${encodeURIComponent(entityType)}/diff`,
+  const resp = await ctx.http.post<{
+    changes: Array<{ op: string; path: string; from?: unknown; to?: unknown }>;
+    isBreaking: boolean;
+    requiresMigration: boolean;
+  }>(
+    `/api/v1/ontology/${encodeURIComponent(entityType)}/diff`,
     schema,
   );
-  for (const change of resp.diff) {
+  for (const change of resp.changes) {
     const prefix = change.op === "add" ? "+" : change.op === "remove" ? "-" : "~";
     ctx.renderer.info(`${prefix} ${change.path}`);
+  }
+  if (resp.isBreaking) {
+    ctx.renderer.info("This change is BREAKING and will require a migration.");
   }
 }
 
 async function migrateAction(entityType: string, opts: MigrateOpts, ctx: CommandContext): Promise<void> {
   const resp = await ctx.http.post<{ migrationId: string; rowCount: number }>(
-    `/api/v1/ontology/entities/${encodeURIComponent(entityType)}/migrate`,
+    `/api/v1/ontology/${encodeURIComponent(entityType)}/migrate`,
   );
   ctx.renderer.info(`Migration ${resp.migrationId} started (${resp.rowCount} rows to migrate)`);
 

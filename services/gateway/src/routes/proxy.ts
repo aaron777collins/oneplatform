@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { NotFoundError } from "@oneplatform/core";
 import type { ProxyService } from "../services/proxy-service.js";
 import type { CircuitBreaker } from "../utils/circuit-breaker.js";
 
@@ -13,8 +14,8 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
   const routes = new Hono<{ Variables: AppVariables }>();
   const { proxyService, circuitBreakers, serviceToken } = deps;
 
-  routes.all("/internal/*", (c) => {
-    return c.json({ error: { code: "NOT_FOUND", message: "Internal routes are not accessible via the Gateway." } }, 404);
+  routes.all("/internal/*", (_c) => {
+    throw new NotFoundError("Internal routes are not accessible via the Gateway.");
   });
 
   routes.all("/*", async (c) => {

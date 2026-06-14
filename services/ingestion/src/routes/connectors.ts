@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError, ValidationError } from "@oneplatform/core";
 import type {
   ConnectorService,
   SyncService,
@@ -26,15 +27,13 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.get("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const raw = c.req.query();
     const parsed = listConnectorsQuery.safeParse(raw);
     if (!parsed.success) {
-      return c.json({
-        error: { code: "VALIDATION_ERROR", message: "Invalid query parameters.", details: parsed.error.flatten() },
-      }, 400);
+      throw new ValidationError("Invalid query parameters.", parsed.error.issues);
     }
 
     const q = parsed.data;
@@ -52,15 +51,13 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.post("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json();
     const parsed = createConnectorRequest.safeParse(body);
     if (!parsed.success) {
-      return c.json({
-        error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() },
-      }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const d = parsed.data;
@@ -81,7 +78,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.get("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const connector = await connectorService.getConnector(user.tenantId, c.req.param("id"));
@@ -91,15 +88,13 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.patch("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const body = await c.req.json();
     const parsed = patchConnectorRequest.safeParse(body);
     if (!parsed.success) {
-      return c.json({
-        error: { code: "VALIDATION_ERROR", message: "Invalid request body.", details: parsed.error.flatten() },
-      }, 400);
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
     }
 
     const d = parsed.data;
@@ -127,7 +122,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.delete("/:id", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const connectorId = c.req.param("id");
@@ -155,7 +150,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.post("/:id/test", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     let overrides: { config?: Record<string, unknown>; credentials?: Record<string, string> } | undefined;
@@ -178,7 +173,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.post("/:id/trigger", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     let options: { mode?: "full" | "incremental"; force?: boolean } | undefined;
@@ -202,7 +197,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.get("/:id/syncs", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // Verify tenant ownership
@@ -211,9 +206,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
     const raw = c.req.query();
     const parsed = listSyncsQuery.safeParse(raw);
     if (!parsed.success) {
-      return c.json({
-        error: { code: "VALIDATION_ERROR", message: "Invalid query parameters.", details: parsed.error.flatten() },
-      }, 400);
+      throw new ValidationError("Invalid query parameters.", parsed.error.issues);
     }
 
     const q = parsed.data;
@@ -229,7 +222,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
   routes.get("/:id/syncs/:syncId/progress", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     // Verify tenant ownership

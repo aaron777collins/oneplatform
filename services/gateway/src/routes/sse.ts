@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import type { AppVariables } from "@oneplatform/core";
+import { UnauthorizedError } from "@oneplatform/core";
 import { sseQuery } from "../schemas/index.js";
 import type { SseService } from "../services/sse-service.js";
 
@@ -18,7 +19,7 @@ export function createSseRoutes(deps: SseRouteDeps): Hono<{ Variables: AppVariab
   routes.get("/", async (c) => {
     const user = c.var.user;
     if (!user?.tenantId) {
-      return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      throw new UnauthorizedError("Authentication required.");
     }
 
     const query = sseQuery.safeParse(c.req.query());

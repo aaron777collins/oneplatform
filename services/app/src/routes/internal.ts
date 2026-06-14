@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
+import { ForbiddenError, NotFoundError } from "@oneplatform/core";
 import type { AppService } from "../services/app-service.js";
 import type { AppRepository } from "../repositories/app-repository.js";
 import type { PermissionRepository } from "../repositories/permission-repository.js";
@@ -36,14 +37,14 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   // performs a direct lookup without tenant filtering (B7 fix).
   routes.get("/app/apps/:appId", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const appId = c.req.param("appId");
     const app   = await appRepo.findById(appId);
 
     if (app === null) {
-      return c.json({ error: { code: "APP_NOT_FOUND", message: `App "${appId}" not found.` } }, 404);
+      throw new NotFoundError(`App "${appId}" not found.`);
     }
 
     return c.json({
@@ -69,7 +70,7 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
   // Design spec §12.3
   routes.get("/app/runtime-config/:appId", async (c) => {
     if (!requireServiceToken(c)) {
-      return c.json({ error: { code: "FORBIDDEN", message: "Service token required." } }, 403);
+      throw new ForbiddenError("Service token required.");
     }
 
     const appId      = c.req.param("appId");
