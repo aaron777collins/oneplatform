@@ -7,9 +7,16 @@
  * - Global fetch mock
  * - EventSource polyfill for SSE tests in jsdom
  */
-import "@testing-library/jest-dom/vitest";
-import { afterEach, vi, type MockInstance } from "vitest";
+
+// jest-dom/vitest imports its own `expect` from vitest which can be a different
+// module instance than the global `expect` injected into test files when
+// globals: true is set. Importing the matchers directly and calling
+// expect.extend() here guarantees we extend the same `expect` that tests use.
+import { expect, afterEach, vi, type MockInstance } from "vitest";
+import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 import { cleanup } from "@testing-library/react";
+
+expect.extend(jestDomMatchers);
 
 // Always clean up React trees between tests to prevent state leakage
 afterEach(() => {
