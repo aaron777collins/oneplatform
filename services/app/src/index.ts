@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Queue, Worker } from "bullmq";
 import {
   loadConfig,
+  appConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -620,7 +621,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 async function main(): Promise<void> {
   // Step 1: Load config and master key once at startup (W10 — never call
   // loadMasterKey() per-request; it reads a file on each invocation).
-  const config    = loadConfig();
+  const config    = loadConfig(appConfigSchema);
   const masterKey = loadMasterKey();
 
   const appConfig: AppConfig = {

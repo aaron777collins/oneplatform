@@ -1,0 +1,67 @@
+# Vector log aggregation configuration for OnePlatform
+#
+# Strategy: file-based collection from Docker container JSON log files.
+# We do NOT use the docker_logs source because that requires POST access to the
+# Docker Engine API, which violates the ADR security model (docker-socket-proxy
+# only grants read-only CONTAINERS=1 access; Vector's docker_logs needs POST).
+#
+# Instead, Vector tails the host's Docker JSON log files directly (read-only mount).
+# The Docker daemon writes logs to /var/lib/docker/containers/<id>/<id>-json.log
+# using the json-file driver configured in docker-compose.yml.
+#
+# Ref: OA-5 in docs/designs/friction-fixes.md
+
+sources:
+  docker_file_logs:
+    type: file
+    # Tail all Docker container JSON log files from the host mount.
+    include:
+      - /var/lib/docker/containers/**/*-json.log
+    # Start from the end of existing files so we don't replay historical logs
+    # on Vector restart. Historical logs remain on disk in the Docker log files.
+    read_from: end
+
+transforms:
+  parse_docker_json:
+    type: remap
+    inputs:
+      - docker_file_logs
+    source: |
+      # Docker json-file format: {"log":"...\n","stream":"stdout","time":"..."}
+      # Parse the outer envelope first to extract the raw log line.
+      parsed, err = parse_json(.message)
+      if err == null {
+        .message = strip_whitespace(string!(parsed.log) ?? "")
+        .stream  = string(parsed.stream) ?? "stdout"
+        .time    = string(parsed.time) ?? ""
+      }
+
+      # Attempt to parse the log line itself as structured JSON (our services
+      # emit JSON logs via createLogger). If it parses, merge the fields so
+      # that level, requestId, tenantId etc. are top-level for downstream sinks.
+      inner, err2 = parse_json(.message)
+      if err2 == null {
+        . = merge(., inner)
+      }
+
+      # Extract the container ID from the source file path for per-service routing.
+      # Path format: /var/lib/docker/containers/<container-id>/<container-id>-json.log
+      container_id_match = parse_regex(.file, r'/var/lib/docker/containers/(?P<id>[a-f0-9]+)/.+')
+      if is_ok(container_id_match) {
+        .container_id = container_id_match.ok.id
+      }
+
+sinks:
+  # Write parsed logs to per-container log files on the log-data named volume.
+  # Downstream tooling (log shippers, alerting) reads from /var/log/oneplatform/.
+  # To route to Loki or Elasticsearch, add additional sinks here alongside this one.
+  file:
+    type: file
+    inputs:
+      - parse_docker_json
+    # Use container_id for the filename since we cannot resolve container names
+    # without docker.sock access. A separate labeling step can be added later.
+    path: /var/log/oneplatform/{{ container_id }}.log
+    encoding:
+      codec: json
+    compression: none

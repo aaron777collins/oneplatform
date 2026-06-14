@@ -15,17 +15,17 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono {
   const routes = new Hono();
   const { pool, redis, bundleService, serviceStartedAt, isReady } = deps;
 
-  // GET /health/live — liveness (always 200 if the process is alive).
-  routes.get("/health/live", (c) => {
+  // GET /healthz — liveness (always 200 if the process is alive).
+  routes.get("/healthz", (c) => {
     return c.json({
       status: "ok",
       uptime: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
     });
   });
 
-  // GET /health/ready — readiness (checks DB, MinIO, Redis).
+  // GET /readyz — readiness (checks DB, MinIO, Redis).
   // Returns 503 when any critical dependency is unreachable.
-  routes.get("/health/ready", async (c) => {
+  routes.get("/readyz", async (c) => {
     const checks: Record<string, "ok" | "fail"> = {};
 
     try {

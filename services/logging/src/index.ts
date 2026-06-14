@@ -27,6 +27,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   loadConfig,
+  loggingConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -228,7 +229,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
 
 async function main(): Promise<void> {
   // Step 1: Validate configuration — throws loudly on missing required vars.
-  const config = loadConfig();
+  const config = loadConfig(loggingConfigSchema);
   const masterKey = loadMasterKey();
 
   const { app, cleanup } = await createServiceApp({

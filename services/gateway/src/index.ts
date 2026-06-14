@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   loadConfig,
+  gatewayConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -284,7 +285,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig(gatewayConfigSchema);
   const masterKey = loadMasterKey();
 
   const serviceToken = process.env["OP_SERVICE_TOKEN"];

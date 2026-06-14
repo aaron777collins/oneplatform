@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Redis } from "ioredis";
 import {
   loadConfig,
+  pluginConfigSchema,
   createDbClient,
   createLogger,
   createApp,
@@ -312,7 +313,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     redis,
     validateApiKey: async () => null,
     allowedOrigins,
-    publicRoutes: ["/health/live", "/health/ready"],
+    publicRoutes: ["/healthz", "/readyz"],
     targetService: "plugin-service",
     servicePublicKeys,
     maxBodySize: 50 * 1024 * 1024,
@@ -367,7 +368,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig(pluginConfigSchema);
   const masterKey = loadMasterKey();
   void masterKey; // Reserved for future field-level config encryption (spec §15.4)
 

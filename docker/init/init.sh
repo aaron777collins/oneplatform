@@ -71,6 +71,35 @@ else
   echo "[op-init] OP_CURSOR_SECRET already exists, skipping"
 fi
 
+# ── Database Role Password Naming Convention ────────────────────────────────
+# Password files are named: db_password_<service-short-name>.txt
+# where <service-short-name> = service name with the "-service" suffix removed.
+# Examples:
+#   gateway-service   → db_password_gateway.txt
+#   auth-service      → db_password_auth.txt
+#   ingestion-service → db_password_ingestion.txt
+#   ontology-service  → db_password_ontology.txt
+#   pipeline-service  → db_password_pipeline.txt
+#   execution-service → db_password_execution.txt
+#   app-service       → db_password_app.txt
+#   logging-service   → db_password_logging.txt
+#   plugin-service    → db_password_plugin.txt
+#
+# The service-entrypoint.sh reads these files and sets:
+#   OP_DATABASE_URL=postgres://<service>_service_role:<password>@pgbouncer:5433/oneplatform_<service>
+#
+# The pgbouncer-entrypoint.sh reads the same files and writes userlist.txt
+# so PgBouncer can authenticate each service role with its own password.
+#
+# The postgres set-passwords.sh reads the same files and applies them to each
+# role via ALTER ROLE … PASSWORD '…' on first boot.
+#
+# If you add a new service, you must:
+# 1. Add it to the loop below to generate its password file.
+# 2. Add a matching database alias in docker/pgbouncer/pgbouncer.ini [databases].
+# 3. Add a matching role creation in docker/postgres/init.sql.
+# 4. Add a matching line in docker/postgres/set-passwords.sh.
+
 # ── Per-Service Database Passwords ──────────────────────────────────────────
 # Each of the 9 service roles gets a unique 32-character alphanumeric password.
 # Generated here and written to individual files so postgres/init.sql can be

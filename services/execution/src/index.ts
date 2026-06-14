@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   loadConfig,
+  executionConfigSchema,
   createDbClient,
   createLogger,
   createApp,
@@ -306,7 +307,7 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig(executionConfigSchema);
   const masterKey = loadMasterKey();
   void masterKey; // Available for future on-disk cache encryption (spec §10.3)
 

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   loadConfig,
+  ontologyConfigSchema,
   createDbClient,
   createRedisClient,
   createLogger,
@@ -219,7 +220,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
 }
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig(ontologyConfigSchema);
   const masterKey = loadMasterKey();
 
   const { app, cleanup } = await createServiceApp({

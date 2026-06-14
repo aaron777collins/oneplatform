@@ -258,7 +258,7 @@ services:
       - oneplatform-internal
       - oneplatform-public
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -303,7 +303,7 @@ services:
     # ports:
     #   - "127.0.0.1:3001:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -341,7 +341,7 @@ services:
     # ports:
     #   - "127.0.0.1:3002:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -379,7 +379,7 @@ services:
     # ports:
     #   - "127.0.0.1:3003:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -415,7 +415,7 @@ services:
     # ports:
     #   - "127.0.0.1:3004:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -469,7 +469,7 @@ services:
     # ports:
     #   - "127.0.0.1:3005:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -507,7 +507,7 @@ services:
     # ports:
     #   - "127.0.0.1:3006:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -543,7 +543,7 @@ services:
     # ports:
     #   - "127.0.0.1:3007:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -580,7 +580,7 @@ services:
     # ports:
     #   - "127.0.0.1:3008:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -590,6 +590,29 @@ services:
         limits:
           memory: 512m
           cpus: "0.5"
+
+  # ─── Log Aggregation: Vector ──────────────────────────────────────────────
+  # File-based log collection — does NOT mount docker.sock (see ADR security model).
+  # Vector tails Docker container JSON log files from the host path and writes
+  # parsed, structured logs to the log-data named volume.
+  vector:
+    image: timberio/vector:0.39.0-alpine
+    container_name: oneplatform-vector
+    # Must run as root to read /var/lib/docker/containers on the host.
+    # Vector has no network access to the Docker daemon and cannot create containers.
+    user: "0:0"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - log-data:/var/log/oneplatform
+    networks:
+      - oneplatform-internal
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
 
   # ─── Layer 4: Frontend ────────────────────────────────────────────────────
   frontend:
@@ -630,6 +653,8 @@ volumes:
   plugin-data:
   # IPC socket between execution-service and sandbox container
   sandbox-socket:
+  # Aggregated structured logs written by Vector from all service containers
+  log-data:
 
 networks:
   oneplatform-public:
