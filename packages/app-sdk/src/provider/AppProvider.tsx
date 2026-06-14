@@ -101,13 +101,16 @@ function debounce<T extends () => void>(fn: T, ms: number): T {
 // ─── Singletons ───────────────────────────────────────────────────────────────
 // These are created once per AppProvider mount and destroyed on unmount.
 // We use useRef to hold them so they survive re-renders without recreation.
+//
+// bffBaseUrl is captured at first render only — changing it after mount has
+// no effect, which is intentional: the client's base URL is immutable once set.
 
-function useProviderSingletons() {
+function useProviderSingletons(bffBaseUrl?: string) {
   const bffClientRef = React.useRef<BffClient | null>(null);
   const permissionCacheRef = React.useRef<PermissionCache | null>(null);
   const wsManagerRef = React.useRef<WebSocketManager | null>(null);
 
-  if (!bffClientRef.current) bffClientRef.current = new BffClient();
+  if (!bffClientRef.current) bffClientRef.current = new BffClient(bffBaseUrl);
   if (!permissionCacheRef.current) permissionCacheRef.current = new PermissionCache();
   if (!wsManagerRef.current) wsManagerRef.current = new WebSocketManager();
 
@@ -123,10 +126,11 @@ function useProviderSingletons() {
 export function AppProvider({
   children,
   loadingFallback = null,
+  bffBaseUrl,
   _testAppId,
   _testTenantId,
 }: AppProviderProps): React.JSX.Element {
-  const { bffClient, permissionCache, wsManager } = useProviderSingletons();
+  const { bffClient, permissionCache, wsManager } = useProviderSingletons(bffBaseUrl);
 
   const [initState, setInitState] = React.useState<AppProviderInitState>({
     status: "loading",
@@ -245,20 +249,62 @@ export function AppProvider({
     const isDev = typeof __OP_DEV__ !== "undefined" ? __OP_DEV__ : true;
 
     return (
-      <div role="alert" style={{ padding: "1rem", color: "red" }}>
-        <strong>[OnePlatform] Failed to initialise app SDK</strong>
-        {isDev && (
-          <pre style={{ marginTop: "0.5rem", fontSize: "0.875rem" }}>
-            {initState.message}
-          </pre>
-        )}
-        <button
-          type="button"
-          onClick={() => setRetryCount((n) => n + 1)}
-          style={{ marginTop: "0.75rem", display: "block", cursor: "pointer" }}
+      <div
+        role="alert"
+        aria-live="assertive"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100dvh",
+          fontFamily: "system-ui, sans-serif",
+          padding: "2rem",
+          backgroundColor: "var(--op-error-bg, #fff8f8)",
+          color: "var(--op-error-fg, #333)",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "480px",
+            border: "1px solid var(--op-error-border, #fca5a5)",
+            borderRadius: "8px",
+            padding: "1.5rem",
+            backgroundColor: "var(--op-error-surface, #fff)",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+          }}
         >
-          Retry
-        </button>
+          <p style={{ margin: "0 0 0.5rem", fontWeight: 600, fontSize: "1rem" }}>
+            Unable to load the application
+          </p>
+          <p
+            style={{
+              margin: "0 0 1rem",
+              fontSize: "0.875rem",
+              color: "var(--op-error-subtext, #666)",
+            }}
+          >
+            {isDev
+              ? initState.message
+              : "The application failed to start. Please try again or contact support if the issue persists."}
+          </p>
+          <button
+            type="button"
+            aria-label="Retry loading the application"
+            onClick={() => setRetryCount((n) => n + 1)}
+            style={{
+              padding: "0.5rem 1.25rem",
+              borderRadius: "6px",
+              border: "1px solid var(--op-error-btn-border, #d1d5db)",
+              background: "var(--op-error-btn-bg, #f9fafb)",
+              cursor: "pointer",
+              fontSize: "0.875rem",
+              fontWeight: 500,
+            }}
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }

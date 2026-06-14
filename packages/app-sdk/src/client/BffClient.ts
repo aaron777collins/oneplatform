@@ -80,8 +80,9 @@ export function buildFilterParams(
 // ─── BffClient class ──────────────────────────────────────────────────────────
 
 export class BffClient {
-  // The base URL is always the same origin — constructed from window.location.origin
-  // at instantiation so it is captured once and never changes (C-6 analogue for HTTP).
+  // The base URL is resolved once at construction time and never changes
+  // (C-6 analogue for HTTP). Defaults to window.location.origin; can be
+  // overridden via the bffBaseUrl AppProvider prop for cross-origin BFF hosts.
   private readonly baseUrl: string;
 
   // Registered by AppProvider after reading window.__OP_APP_CONFIG__.
@@ -93,8 +94,37 @@ export class BffClient {
   // where AppProvider may not be fully wired.
   private onUnauthorized: (() => void) | null = null;
 
-  constructor() {
-    this.baseUrl = window.location.origin;
+  constructor(bffBaseUrl?: string) {
+    // Fall back to window.location.origin in browser environments.
+    // SSR / test environments that supply no origin and no override get an
+    // empty string, which will fail loudly at the first request() call via
+    // the URL constructor — an acceptable trade-off for non-browser contexts.
+    const resolved =
+      bffBaseUrl ?? (typeof window !== "undefined" ? window.location.origin : "");
+
+    if (resolved !== "") {
+      // Validate early so a misconfigured bffBaseUrl surfaces at construction
+      // time, not buried inside the first failing HTTP request.
+      let parsed: URL;
+      try {
+        parsed = new URL(resolved);
+      } catch (e) {
+        throw new Error(
+          `[BffClient] bffBaseUrl "${resolved}" is not a valid URL. ` +
+            `Provide an absolute URL such as "https://api.example.com". ` +
+            `(${(e as Error).message})`,
+        );
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error(
+          `[BffClient] bffBaseUrl must use http or https, got "${parsed.protocol}" ` +
+            `in URL "${resolved}".`,
+        );
+      }
+    }
+
+    // Strip trailing slash so path concatenation is always "/path" not "//path".
+    this.baseUrl = resolved.replace(/\/$/, "");
   }
 
   /**

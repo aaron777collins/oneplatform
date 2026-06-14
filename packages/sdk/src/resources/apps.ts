@@ -13,6 +13,22 @@ import type { App, CreateAppRequest, UpdateAppRequest } from './platform-types.j
 import { Paginator } from '../pagination/paginator.js';
 
 // ---------------------------------------------------------------------------
+// Deployment types
+// ---------------------------------------------------------------------------
+
+/**
+ * Result returned by uploadAndDeploy() after a successful bundle upload.
+ * Shape mirrors the DeployResult type from the app service's deploy-service.ts.
+ */
+export interface Deployment {
+  readonly appId: string;
+  readonly buildId: string;
+  readonly versionNumber: number;
+  readonly deployedAt: string;
+  readonly previousBuildId: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Build types
 // ---------------------------------------------------------------------------
 
@@ -83,6 +99,25 @@ export interface AppNamespace {
    * Equivalent to a deployment/promotion step.
    */
   deploy(id: string, buildId: string): Promise<App>;
+
+  /**
+   * Upload a pre-built bundle and trigger an immediate deployment.
+   *
+   * Use this instead of `deploy()` when you have a local bundle file (produced
+   * by `vite build` + `tar -czf`) rather than a build triggered server-side.
+   *
+   * The bundle must be a .tar.gz archive containing: index.html plus bundled
+   * JS/CSS assets. Build with: vite build && tar -czf bundle.tar.gz -C dist .
+   *
+   * @param id      App ID or slug
+   * @param bundle  Pre-built bundle as a Blob or Uint8Array (Node.js Buffer extends Uint8Array)
+   * @param opts    Optional deployment options (e.g. env label)
+   */
+  uploadAndDeploy(
+    id: string,
+    bundle: Blob | Uint8Array,
+    opts?: { env?: string },
+  ): Promise<Deployment>;
 
   // Virtual file system
   listFiles(id: string): Promise<AppFileSummary[]>;
@@ -177,6 +212,34 @@ export function createAppNamespace(transport: Transport): AppNamespace {
         method: 'PATCH',
         path: `${BASE}/${encodeURIComponent(id)}`,
         body: { currentBuildId: buildId },
+      });
+    },
+
+    async uploadAndDeploy(
+      id: string,
+      bundle: Blob | Uint8Array,
+      opts: { env?: string } = {},
+    ): Promise<Deployment> {
+      // Normalise Uint8Array (which Node's Buffer extends) → Blob so that
+      // FormData.append() receives a Blob in both Node 18+ and browser environments.
+      // We copy the bytes into a fresh ArrayBuffer via Uint8Array.from() to satisfy
+      // TypeScript's strict BlobPart constraint — ArrayBufferLike (which includes
+      // SharedArrayBuffer) is not accepted by new Blob(), but a plain ArrayBuffer is.
+      // The filename "bundle.tar.gz" hints to the server for content inspection;
+      // octet-stream avoids any browser-side content sniffing.
+      const blob =
+        bundle instanceof Uint8Array
+          ? new Blob([Uint8Array.from(bundle)], { type: 'application/octet-stream' })
+          : bundle;
+
+      const form = new FormData();
+      form.append('bundle', blob, 'bundle.tar.gz');
+      if (opts.env !== undefined) form.append('env', opts.env);
+
+      return transport.requestMultipart<Deployment>({
+        method: 'POST',
+        path: `${BASE}/${encodeURIComponent(id)}/deploy`,
+        body: form,
       });
     },
 

@@ -208,6 +208,103 @@ export class Transport {
     return result;
   }
 
+  /**
+   * Sends a multipart/form-data request (e.g. file upload).
+   *
+   * Unlike `request()`, this method does NOT serialize the body as JSON and does
+   * NOT set a Content-Type header — the browser/Node FormData implementation sets
+   * it automatically with the correct multipart boundary.
+   *
+   * Retries are disabled for multipart uploads because FormData streams are
+   * not replayable once consumed by fetch(). Callers that need retry semantics
+   * must construct a fresh FormData on each attempt.
+   */
+  async requestMultipart<T>(requestOptions: Omit<RequestOptions, 'body'> & { body: FormData }): Promise<T> {
+    const { method, path, query, body } = requestOptions;
+    const url = this.buildUrl(path, query);
+
+    this.logger.debug(`${method} ${path} (multipart)`);
+
+    return this.executeMultipartRequest<T>(method, url, body);
+  }
+
+  private async executeMultipartRequest<T>(
+    method: string,
+    url: string,
+    form: FormData,
+  ): Promise<T> {
+    const controller = new AbortController();
+    const timeoutMs = this.opts.timeout;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    if (timeoutMs > 0) {
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    }
+
+    try {
+      const authHeaders = await this.opts.authHandler.getHeaders();
+      // Omit Content-Type intentionally — fetch sets it automatically for FormData
+      // with the multipart boundary value. Manually setting it would omit the boundary
+      // and cause the server to reject the upload.
+      const headers: Record<string, string> = {
+        ...this.opts.customHeaders,
+        ...authHeaders,
+        Accept: 'application/json',
+        'X-SDK-Version': `@oneplatform/sdk/${SDK_VERSION}`,
+        'X-Request-ID': generateRequestId(),
+        ...(this.opts.isBrowser ? { 'X-Requested-With': 'XMLHttpRequest' } : {}),
+      };
+
+      let response: Response;
+      try {
+        response = await this.opts.fetch(url, {
+          method,
+          headers,
+          body: form,
+          signal: controller.signal,
+        });
+      } catch (fetchErr) {
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          throw new NetworkError({
+            message: `Multipart request timed out after ${timeoutMs}ms`,
+            reason: 'timeout',
+            timeoutMs,
+            cause: fetchErr,
+          });
+        }
+        throw new NetworkError({
+          message: fetchErr instanceof Error ? fetchErr.message : 'fetch() threw an unknown error',
+          reason: 'fetch-failed',
+          cause: fetchErr,
+        });
+      }
+
+      if (response.status === 204) return undefined as T;
+
+      if (!response.ok) {
+        throw await mapResponseToError(response);
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = await response.json();
+      } catch (parseErr) {
+        throw new NetworkError({
+          message: 'Failed to parse JSON response body',
+          reason: 'parse-failed',
+          cause: parseErr,
+        });
+      }
+
+      // Unwrap the { data: T } envelope, consistent with request()
+      const envelope = parsed as { data?: T };
+      if (envelope.data !== undefined) return envelope.data;
+      return parsed as T;
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    }
+  }
+
   private async executeRequest<T>(
     method: string,
     url: string,

@@ -10,8 +10,10 @@ import { confirmDestructive } from "../../lib/prompts.js";
 import { streamSse } from "../../lib/streaming.js";
 import { colorizeLogLevel } from "../../lib/output.js";
 import { startLocalWatcher, applyRemoteChange, type ConflictResolution } from "../../lib/file-sync.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:http";
+import { generateAppScaffold, toKebabCase } from "../../lib/app-scaffold.js";
 
 const APP_COLUMNS = [
   { header: "Slug", key: "slug" },
@@ -24,11 +26,55 @@ const APP_COLUMNS = [
 
 interface ListOpts { status?: string }
 interface CreateOpts { name: string; template?: string; slug?: string }
+interface InitOpts { name: string; slug?: string; out?: string }
 interface DeployOpts { file?: string; env?: string; wait?: boolean }
 interface DevOpts { port?: string; preferLocal?: boolean; preferRemote?: boolean }
 interface LogsOpts { follow?: boolean; from?: string; level?: string }
 interface EnvSetOpts {}
 interface RollbackOpts { to?: string }
+
+async function initAction(opts: InitOpts, ctx: CommandContext): Promise<void> {
+  if (!opts.name || opts.name.trim().length === 0) {
+    throw new CliError("--name is required and must be non-empty.", EXIT.GENERAL);
+  }
+
+  const slug = opts.slug ?? toKebabCase(opts.name);
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    throw new CliError(
+      `Slug "${slug}" must contain only lowercase letters, digits, and hyphens. ` +
+        `Provide a valid slug with --slug or choose a name without special characters.`,
+      EXIT.GENERAL,
+    );
+  }
+
+  const outputDir = opts.out ?? join(process.cwd(), slug);
+
+  if (existsSync(outputDir)) {
+    throw new CliError(
+      `Directory "${outputDir}" already exists. ` +
+        `Choose a different name or specify a non-existing path with --out.`,
+      EXIT.GENERAL,
+    );
+  }
+
+  const scaffold = generateAppScaffold({ name: opts.name, slug, outputDir });
+
+  // Write all scaffold files, creating intermediate directories as needed.
+  for (const file of scaffold.files) {
+    const fullPath = join(outputDir, file.relativePath);
+    const dir = join(outputDir, file.relativePath.split("/").slice(0, -1).join("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(fullPath, file.content, "utf8");
+  }
+
+  ctx.renderer.success(`App project scaffolded at ${outputDir}`);
+  ctx.renderer.info("Next steps:");
+  ctx.renderer.info(`  cd ${slug}`);
+  ctx.renderer.info("  npm install");
+  ctx.renderer.info("  npm run build");
+  ctx.renderer.info(`  op app create --name "${opts.name}" --slug ${slug}`);
+  ctx.renderer.info(`  op app deploy ${slug} --file dist/bundle.js`);
+}
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -228,6 +274,13 @@ async function rollbackAction(slug: string, opts: RollbackOpts, ctx: CommandCont
 export function registerApp(program: Command): void {
   const app = program.command("app").description("App management");
 
+  app.command("init")
+    .description("Scaffold a new app project locally (no platform connection required)")
+    .requiredOption("--name <name>", "App display name")
+    .option("--slug <slug>", "URL slug (kebab-case; derived from name if omitted)")
+    .option("--out <dir>", "Output directory (default: ./<slug>)")
+    .action(withContext<[InitOpts]>(initAction));
+
   app.command("list").description("List all apps")
     .option("--status <status>", "Filter by status: draft|building|deployed|failed")
     .action(withContext<[ListOpts]>(listAction));
@@ -242,9 +295,19 @@ export function registerApp(program: Command): void {
     .option("--slug <slug>", "URL slug (auto-derived from name if omitted)")
     .action(withContext<[CreateOpts]>(createAction));
 
-  app.command("deploy").description("Deploy an app")
+  app.command("deploy")
+    .description(
+      "Deploy an app. Without --file, triggers a server-side build from the registered source.\n" +
+      "With --file, uploads a pre-built bundle (.tar.gz). " +
+      "Bundle must contain: index.html, bundled JS/CSS. " +
+      "Build with: vite build && tar -czf bundle.tar.gz -C dist .",
+    )
     .argument("<slug>", "App URL slug")
-    .option("--file <bundle-path>", "Local bundle path")
+    .option(
+      "--file <bundle-path>",
+      "Path to app bundle (.tar.gz). Bundle must contain: index.html, bundled JS/CSS. " +
+        "Build with: vite build && tar -czf bundle.tar.gz -C dist .",
+    )
     .option("--env <env>", "Deployment environment: production|preview")
     .option("--wait", "Poll build until complete, stream build logs to stderr")
     .action(withContext<[string, DeployOpts]>(deployAction));
