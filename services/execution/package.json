@@ -18,10 +18,12 @@
     "test:integration:level1": "vitest run --config vitest.integration.ts",
     "test:integration:level2": "vitest run --config vitest.integration-l2.ts",
     "lint": "eslint src",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "docs:generate": "npx tsx ../../tools/openapi-gen/src/cli.ts --service execution --meta src/openapi-meta.ts --out dist/openapi/execution.json"
   },
   "dependencies": {
     "@oneplatform/core": "workspace:*",
+    "@oneplatform/openapi-gen": "workspace:*",
     "hono": "^4.0.0",
     "lru-cache": "^10.0.0",
     "pg": "^8.0.0",

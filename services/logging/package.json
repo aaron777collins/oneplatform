@@ -18,10 +18,12 @@
     "test:integration:level1": "vitest run --config vitest.integration.ts",
     "test:integration:level2": "vitest run --config vitest.integration-l2.ts",
     "lint": "eslint src",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "docs:generate": "npx tsx ../../tools/openapi-gen/src/cli.ts --service logging --meta src/openapi-meta.ts --out dist/openapi/logging.json"
   },
   "dependencies": {
     "@oneplatform/core": "workspace:*",
+    "@oneplatform/openapi-gen": "workspace:*",
     "bullmq": "^5.0.0",
     "hono": "^4.0.0",
     "ioredis": "^5.0.0",
