@@ -17,7 +17,7 @@
  *   1. Run the OpenAPI merger — reads services/{name}/dist/openapi/*.json,
  *      writes docs/generated/openapi/merged.json and copies per-service files.
  *   2. Copy TypeDoc markdown output for the 4 SDK packages.
- *   3. (CLI docs copy — added when CLI docs:generate writes to dist/docs/)
+ *   3. Copy CLI docs from packages/cli/dist/docs/ to docs/generated/cli/.
  */
 
 import { execSync } from "node:child_process";
@@ -95,6 +95,33 @@ async function copyTypedocOutput() {
   }
 }
 
+/**
+ * Copies CLI docs from packages/cli/dist/docs/ to docs/generated/cli/.
+ *
+ * The CLI's docs:generate script writes to dist/docs/ (within the package
+ * boundary so Turbo can cache the output).  This step fans the output into
+ * the shared docs/generated/ directory that the Starlight site reads from.
+ * Skips gracefully if the source directory does not exist yet (e.g. first
+ * run before `pnpm turbo docs:generate` has been executed).
+ */
+async function copyCLIDocs() {
+  const srcDir = join(repoRoot, "packages", "cli", "dist", "docs");
+  const destDir = join(repoRoot, "docs", "generated", "cli");
+
+  try {
+    await access(srcDir);
+  } catch {
+    console.warn(
+      "[docs-merge] packages/cli/dist/docs not found — skipping (run pnpm turbo docs:generate first)",
+    );
+    return;
+  }
+
+  await mkdir(destDir, { recursive: true });
+  await cp(srcDir, destDir, { recursive: true });
+  console.log(`[docs-merge] Copied packages/cli/dist/docs → docs/generated/cli`);
+}
+
 async function main() {
   console.log("[docs-merge] Starting documentation merge...\n");
 
@@ -110,6 +137,9 @@ async function main() {
 
   // Step 3: Copy TypeDoc output for the 4 SDK packages
   await copyTypedocOutput();
+
+  // Step 4: Copy CLI reference docs from within-package dist/ to shared generated dir
+  await copyCLIDocs();
 
   console.log("\n[docs-merge] Documentation merge complete.");
   console.log(

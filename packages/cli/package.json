@@ -29,7 +29,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint src",
     "clean": "rm -rf dist",
-    "docs:generate": "tsx src/lib/docs-generator.ts"
+    "docs:generate": "tsx src/lib/docs-generator.ts --out dist/docs"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.9",
