@@ -10,6 +10,8 @@ import {
   createApp,
   loadMasterKey,
   createQueue,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -203,6 +205,10 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     logger,
   });
 
+  const serviceKeysDir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
+  const privateKeyPem = await loadServicePrivateKey("pipeline-service", serviceKeysDir);
+  const serviceTokenSigner = await createServiceTokenSigner("pipeline-service", privateKeyPem);
+
   const executionEngine = createExecutionEngine({
     runRepo,
     runStepRepo,
@@ -215,6 +221,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     stepDefaultTimeoutMs,
     hookDefaultTimeoutMs,
     logger,
+    serviceTokenSigner,
   });
 
   // Workers are optional so tests can wire the app without consuming Redis connections

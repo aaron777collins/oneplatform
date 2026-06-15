@@ -349,7 +349,11 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     query: ListSyncsOptions,
   ): Promise<ListSyncsResult> {
     const states: Array<"completed" | "failed" | "active"> = ["completed", "failed", "active"];
-    const jobs = await syncQueue.getJobs(states, 0, 100);
+    // BullMQ returns jobs newest-first. We fetch up to 10,000 to ensure the
+    // cursor-based page window can reach any historical job. Fetching only 100
+    // (the old limit) meant jobs beyond position 100 were unreachable regardless
+    // of the cursor the caller supplied.
+    const jobs = await syncQueue.getJobs(states, 0, 10_000);
 
     const filtered = jobs
       .filter((job) => job.data.connectorId === connectorId)
@@ -586,7 +590,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
           progress.lastBatchAt = new Date().toISOString();
           await writeProgress(progress);
 
-          await batchQueue.add("batch", {
+          const jobPayload: BatchJobPayload = {
             syncJobId,
             connectorId,
             tenantId,
@@ -596,7 +600,28 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             cursor,
             recordCount: records.length,
             records,
-          });
+          };
+
+          // Guard against Redis memory exhaustion from oversized payloads.
+          // Batches over 1 MB indicate a connector returning excessively large
+          // records; fail loudly so the issue is caught early rather than
+          // silently bloating the queue.
+          const payloadBytes = Buffer.byteLength(JSON.stringify(jobPayload), "utf8");
+          if (payloadBytes > 1_048_576) {
+            logger.error("Batch job payload exceeds 1 MB — aborting sync to protect Redis memory", {
+              syncJobId,
+              connectorId,
+              batchSeqNum,
+              payloadBytes,
+              recordCount: records.length,
+            });
+            throw new Error(
+              `Batch payload too large: ${payloadBytes} bytes (${records.length} records). ` +
+              "Reduce connector batch size to keep BullMQ payloads under 1 MB.",
+            );
+          }
+
+          await batchQueue.add("batch", jobPayload);
         }
 
         cursor = nextCursor;

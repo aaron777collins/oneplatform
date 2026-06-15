@@ -1,5 +1,5 @@
 /**
- * ApiKeysPage — API key management: create/revoke keys, scope selection, last used.
+ * ApiKeysPage — API key management: create/revoke/rotate keys, scope selection, last used.
  *
  * Route: /settings/api-keys
  *
@@ -10,7 +10,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Trash2, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import {
   Form,
@@ -30,6 +30,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.js";
 import {
   Table,
   TableBody,
@@ -54,9 +61,10 @@ interface ApiKey {
   id: string;
   name: string;
   scopes: string[];
+  expiresAt?: string | null;
   lastUsedAt?: string;
   createdAt: string;
-  /** Only present immediately after creation */
+  /** Only present immediately after creation or rotation */
   key?: string;
 }
 
@@ -65,12 +73,39 @@ const createKeySchema = z.object({
 });
 type CreateKeyValues = z.infer<typeof createKeySchema>;
 
+type ExpiryPreset = "never" | "30d" | "90d" | "1y" | "custom";
+
+function expiryPresetToDate(preset: ExpiryPreset): string | undefined {
+  if (preset === "never" || preset === "custom") return undefined;
+  const now = new Date();
+  switch (preset) {
+    case "30d": now.setDate(now.getDate() + 30); break;
+    case "90d": now.setDate(now.getDate() + 90); break;
+    case "1y": now.setFullYear(now.getFullYear() + 1); break;
+  }
+  return now.toISOString();
+}
+
 const AVAILABLE_SCOPES = [
   "data:read",
   "data:write",
-  "pipelines:run",
+  "ontology:read",
+  "ontology:write",
+  "pipelines:read",
+  "pipelines:trigger",
+  "pipelines:manage",
+  "apps:read",
   "apps:deploy",
-  "connectors:manage",
+  "apps:manage",
+  "plugins:read",
+  "plugins:manage",
+  "users:read",
+  "users:manage",
+  "logs:read",
+  "webhooks:manage",
+  "execution:read",
+  "execution:run",
+  "admin",
 ];
 
 // ---------------------------------------------------------------------------
@@ -83,9 +118,15 @@ export function ApiKeysPage() {
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [revokeTarget, setRevokeTarget] = React.useState<ApiKey | null>(null);
+  const [rotateTarget, setRotateTarget] = React.useState<ApiKey | null>(null);
   const [newKey, setNewKey] = React.useState<string | null>(null);
+  const [rotatedKey, setRotatedKey] = React.useState<string | null>(null);
   const [showKey, setShowKey] = React.useState(false);
+  const [showRotatedKey, setShowRotatedKey] = React.useState(false);
   const [selectedScopes, setSelectedScopes] = React.useState<string[]>([]);
+  const [expiryPreset, setExpiryPreset] = React.useState<ExpiryPreset>("never");
+  const [customExpiry, setCustomExpiry] = React.useState("");
+  const [searchQuery, setSearchQuery] = React.useState("");
 
   const keysQuery = useQuery({
     queryKey: ["api-keys"],
@@ -93,7 +134,10 @@ export function ApiKeysPage() {
       client.get<PaginatedResponse<ApiKey>>("/v1/api-keys", undefined, { signal }),
   });
 
-  const keys = keysQuery.data?.data ?? [];
+  const allKeys = keysQuery.data?.data ?? [];
+  const keys = searchQuery
+    ? allKeys.filter((k) => k.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : allKeys;
 
   const form = useForm<CreateKeyValues>({
     resolver: zodResolver(createKeySchema),
@@ -101,11 +145,19 @@ export function ApiKeysPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (values: CreateKeyValues) =>
-      client.post<{ data: ApiKey }>("/v1/api-keys", {
+    mutationFn: (values: CreateKeyValues) => {
+      let expiresAt: string | undefined;
+      if (expiryPreset === "custom" && customExpiry) {
+        expiresAt = new Date(customExpiry).toISOString();
+      } else {
+        expiresAt = expiryPresetToDate(expiryPreset);
+      }
+      return client.post<{ data: ApiKey }>("/v1/api-keys", {
         ...values,
         scopes: selectedScopes,
-      }),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      });
+    },
     onSuccess: (response) => {
       if (response.data.key !== undefined) {
         setNewKey(response.data.key);
@@ -134,6 +186,22 @@ export function ApiKeysPage() {
     },
   });
 
+  const rotateMutation = useMutation({
+    mutationFn: (keyId: string) =>
+      client.post<{ id: string; key: string; keyPrefix: string; scopes: string[]; createdAt: string }>(
+        `/v1/api-keys/${keyId}/rotate`,
+      ),
+    onSuccess: (response) => {
+      setRotateTarget(null);
+      setRotatedKey(response.key);
+      void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+    onError: (error) => {
+      const message = error instanceof ApiError ? error.message : "Rotation failed.";
+      toast({ title: "Rotation failed", description: message, variant: "destructive" });
+    },
+  });
+
   function toggleScope(scope: string) {
     setSelectedScopes((prev) =>
       prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
@@ -146,6 +214,13 @@ export function ApiKeysPage() {
     setShowKey(false);
     form.reset();
     setSelectedScopes([]);
+    setExpiryPreset("never");
+    setCustomExpiry("");
+  }
+
+  function handleCloseRotatedKeyDialog() {
+    setRotatedKey(null);
+    setShowRotatedKey(false);
   }
 
   return (
@@ -162,6 +237,17 @@ export function ApiKeysPage() {
       />
 
       <div className="mt-6">
+        <div className="mb-4 flex items-center gap-2">
+          <div className="relative max-w-sm flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted-foreground)]" aria-hidden="true" />
+            <Input
+              placeholder="Search keys..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
@@ -204,15 +290,26 @@ export function ApiKeysPage() {
                     <RelativeTime value={key.createdAt} />
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-[var(--color-destructive)]"
-                      onClick={() => setRevokeTarget(key)}
-                      aria-label={`Revoke key "${key.name}"`}
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setRotateTarget(key)}
+                        aria-label={`Rotate key "${key.name}"`}
+                      >
+                        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-[var(--color-destructive)]"
+                        onClick={() => setRevokeTarget(key)}
+                        aria-label={`Revoke key "${key.name}"`}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -295,6 +392,36 @@ export function ApiKeysPage() {
                   </div>
                 </fieldset>
 
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Expires</label>
+                  <Select
+                    value={expiryPreset}
+                    onValueChange={(v) => {
+                      setExpiryPreset(v as ExpiryPreset);
+                      if (v !== "custom") setCustomExpiry("");
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="never">Never</SelectItem>
+                      <SelectItem value="30d">30 days</SelectItem>
+                      <SelectItem value="90d">90 days</SelectItem>
+                      <SelectItem value="1y">1 year</SelectItem>
+                      <SelectItem value="custom">Custom date</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {expiryPreset === "custom" && (
+                    <Input
+                      type="date"
+                      value={customExpiry}
+                      onChange={(e) => setCustomExpiry(e.target.value)}
+                      min={new Date().toISOString().split("T")[0]}
+                    />
+                  )}
+                </div>
+
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={handleCloseCreateDialog}>
                     Cancel
@@ -324,6 +451,50 @@ export function ApiKeysPage() {
         }}
         isLoading={revokeMutation.isPending}
       />
+
+      <ConfirmDialog
+        open={rotateTarget !== null}
+        onOpenChange={(open) => { if (!open) setRotateTarget(null); }}
+        title="Rotate API key"
+        description={`Rotating "${rotateTarget?.name ?? "this key"}" will generate a new key value. The old key will stop working immediately. Continue?`}
+        confirmLabel="Rotate key"
+        onConfirm={() => {
+          if (rotateTarget !== null) rotateMutation.mutate(rotateTarget.id);
+        }}
+        isLoading={rotateMutation.isPending}
+      />
+
+      <Dialog open={rotatedKey !== null} onOpenChange={(open) => { if (!open) handleCloseRotatedKeyDialog(); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Key rotated — save the new key now</DialogTitle>
+            <DialogDescription>
+              This is the only time the new key will be shown. Copy it to a safe place.
+            </DialogDescription>
+          </DialogHeader>
+          {rotatedKey !== null && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 rounded-md bg-[var(--color-muted)] px-3 py-2">
+                <code className="min-w-0 flex-1 truncate font-mono text-xs">
+                  {showRotatedKey ? rotatedKey : "op_" + "•".repeat(rotatedKey.length - 3)}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => setShowRotatedKey((v) => !v)}
+                  className="shrink-0 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+                  aria-label={showRotatedKey ? "Hide key" : "Reveal key"}
+                >
+                  {showRotatedKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+                <CopyButton value={rotatedKey} label="Copy API key" />
+              </div>
+              <DialogFooter>
+                <Button onClick={handleCloseRotatedKeyDialog}>Done</Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

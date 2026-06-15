@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AppVariables } from "@oneplatform/core";
+import type { AppVariables, ServiceTokenSigner } from "@oneplatform/core";
 import { decrypt, ValidationError, UnauthorizedError } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type { Logger } from "@oneplatform/core";
@@ -31,11 +31,7 @@ export interface BffRouteDeps {
   masterKey:      Buffer;
   redis:          Redis;
   logger:         Logger;
-}
-
-// Service token for inter-service calls (W3)
-function serviceToken(): string {
-  return process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+  serviceTokenSigner: ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +40,7 @@ function serviceToken(): string {
 
 export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { appRepo, permRepo, permService, authServiceUrl, masterKey, redis, logger } = deps;
+  const { appRepo, permRepo, permService, authServiceUrl, masterKey, redis, logger, serviceTokenSigner } = deps;
 
   // -------------------------------------------------------------------------
   // GET /bff/me
@@ -70,8 +66,13 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
 
-    // Resolve roles for this user within the app
-    const roles = await permRepo.listRolesByApp(appId);
+    // Resolve roles for this user within the app.
+    // listRolesByApp returns all roles defined for the app; filter to only the
+    // roles the authenticated user actually holds (user.roles carries the names
+    // embedded in the session token by the Auth Service).
+    const allAppRoles = await permRepo.listRolesByApp(appId);
+    const userRoleNames = new Set(user.roles);
+    const roles = allAppRoles.filter((r) => userRoleNames.has(r.name));
 
     return c.json({
       data: {
@@ -106,10 +107,15 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
 
-    const roles = await permRepo.listRolesByApp(appId);
+    // Filter to only the roles the authenticated user holds before aggregating
+    // permissions — without this filter every user would see every role's
+    // permissions regardless of their actual assignments.
+    const allAppRoles = await permRepo.listRolesByApp(appId);
+    const userRoleNames = new Set(user.roles);
+    const roles = allAppRoles.filter((r) => userRoleNames.has(r.name));
 
-    // Aggregate all permissions across all roles — the SDK uses this flat map
-    // for permission checks without needing to understand role hierarchy.
+    // Aggregate permissions across the user's roles only — the SDK uses this
+    // flat map for permission checks without needing to understand role hierarchy.
     const permissionMap: Record<string, string[]> = {};
     for (const role of roles) {
       const perms = role.permissions as Array<{ entity: string; actions: string[] }>;
@@ -161,7 +167,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     // W3: include service token on inter-service calls
     const resp = await fetch(upstreamUrl, {
       headers: {
-        "X-Service-Token": serviceToken(),
+        "X-Service-Token": await serviceTokenSigner.sign(),
         "X-User-Id":       user.userId,
         "X-Tenant-Id":     user.tenantId,
       },
@@ -207,7 +213,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       method:  "POST",
       headers: {
         "Content-Type":    "application/json",
-        "X-Service-Token": serviceToken(),
+        "X-Service-Token": await serviceTokenSigner.sign(),
         "X-User-Id":       user.userId,
         "X-Tenant-Id":     user.tenantId,
       },
@@ -264,7 +270,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       method:  "PATCH",
       headers: {
         "Content-Type":    "application/json",
-        "X-Service-Token": serviceToken(),
+        "X-Service-Token": await serviceTokenSigner.sign(),
         "X-User-Id":       user.userId,
         "X-Tenant-Id":     user.tenantId,
       },
@@ -310,7 +316,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       method:  "PUT",
       headers: {
         "Content-Type":    "application/json",
-        "X-Service-Token": serviceToken(),
+        "X-Service-Token": await serviceTokenSigner.sign(),
         "X-User-Id":       user.userId,
         "X-Tenant-Id":     user.tenantId,
       },
@@ -354,7 +360,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     const resp = await fetch(upstreamUrl, {
       method:  "DELETE",
       headers: {
-        "X-Service-Token": serviceToken(),
+        "X-Service-Token": await serviceTokenSigner.sign(),
         "X-User-Id":       user.userId,
         "X-Tenant-Id":     user.tenantId,
       },
@@ -398,7 +404,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       method:  "POST",
       headers: {
         "Content-Type":    "application/json",
-        "X-Service-Token": serviceToken(),
+        "X-Service-Token": await serviceTokenSigner.sign(),
         "X-User-Id":       user.userId,
         "X-Tenant-Id":     user.tenantId,
       },
@@ -560,6 +566,23 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
 
+    // Check Redis cache before hitting the DB. The cache is written below on
+    // every miss with a 60 s TTL, so back-to-back SDK init calls share one DB
+    // round-trip per minute per app rather than one per request.
+    const cacheKey = `bff:runtime-config:${appId}`;
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached !== null) {
+      try {
+        const { envVars, allowedModules } = JSON.parse(cached) as {
+          envVars: Record<string, string>;
+          allowedModules: unknown;
+        };
+        return c.json({ data: { appId, envVars, allowedModules } });
+      } catch {
+        // Malformed cache entry — fall through to DB path and overwrite it.
+      }
+    }
+
     const app = await appRepo.findById(appId);
     if (app === null) {
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId });
@@ -584,10 +607,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
         })
     );
 
-    // Cache the runtime config in Redis for 60 s to avoid repeated DB round-
-    // trips on high-frequency SDK init calls.
-    const cacheKey = `bff:runtime-config:${appId}`;
-    void redis.setex(cacheKey, 60, JSON.stringify(envVars)).catch(() => {
+    // Cache both envVars and allowedModules for 60 s so cache hits return a
+    // complete response without touching the DB.
+    void redis.setex(cacheKey, 60, JSON.stringify({ envVars, allowedModules: app.allowed_modules })).catch(() => {
       /* non-fatal */
     });
 

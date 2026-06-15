@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cronExpressionSchema } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // Shared primitives
@@ -173,14 +174,14 @@ export const TriggerPipelineSchema = z.object({
 
 export const CreateScheduleSchema = z.object({
   pipelineId: UUIDSchema,
-  cronExpr: z.string().min(1).max(100),
+  cronExpr: cronExpressionSchema,
   timezone: z.string().min(1).max(64).default("UTC"),
   enabled: z.boolean().default(true),
   inputTemplate: z.record(z.unknown()).default({}),
 });
 
 export const PatchScheduleSchema = z.object({
-  cronExpr: z.string().min(1).max(100).optional(),
+  cronExpr: cronExpressionSchema.optional(),
   timezone: z.string().min(1).max(64).optional(),
   enabled: z.boolean().optional(),
   inputTemplate: z.record(z.unknown()).optional(),

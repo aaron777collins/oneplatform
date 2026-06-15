@@ -1,5 +1,3 @@
-// TODO: Implement master key rotation — re-encrypt all rows where key_version < CURRENT_KEY_VERSION (M-09)
-
 import { encrypt, decrypt } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import {
@@ -34,6 +32,13 @@ export interface CredentialRepository {
   findByConnectorId(connectorId: string): Promise<CredentialRow[]>;
   findByConnectorIdAndField(connectorId: string, fieldName: string): Promise<CredentialRow | null>;
   deleteByConnectorId(connectorId: string): Promise<number>;
+  updateKeyVersion(
+    id: string,
+    newEncryptedBlob: string,
+    newKeyVersion: number,
+    oldKeyVersion: number,
+  ): Promise<boolean>;
+  findOutstandingForRotation(targetKeyVersion: number): Promise<CredentialRow[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,8 +52,42 @@ export interface CredentialAccessor {
 }
 
 // ---------------------------------------------------------------------------
+// Key version resolution — supports multiple encryption keys loaded from env
+// vars: OP_CREDENTIAL_KEY_V1, OP_CREDENTIAL_KEY_V2, etc. V1 falls back to
+// OP_CREDENTIAL_ENCRYPTION_KEY for backward compatibility.
+// ---------------------------------------------------------------------------
+
+function resolveKeyVersion(): number {
+  const raw = process.env["OP_CREDENTIAL_KEY_VERSION"];
+  if (!raw) return 1;
+  const parsed = parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 1) return 1;
+  return parsed;
+}
+
+function loadKeyForVersion(version: number, fallbackKey: Buffer): Buffer {
+  const envName = `OP_CREDENTIAL_KEY_V${version}`;
+  const raw = process.env[envName];
+  if (raw) return Buffer.from(raw, "base64");
+  if (version === 1) {
+    const legacyRaw = process.env["OP_CREDENTIAL_ENCRYPTION_KEY"];
+    if (legacyRaw) return Buffer.from(legacyRaw, "base64");
+    return fallbackKey;
+  }
+  throw new Error(
+    `Encryption key for version ${version} not found. Set ${envName} in the environment.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CredentialService — public interface
 // ---------------------------------------------------------------------------
+
+export interface RotationResult {
+  rotated: number;
+  skipped: number;
+  failed: number;
+}
 
 export interface CredentialService {
   storeCredentials(
@@ -67,6 +106,10 @@ export interface CredentialService {
     connectorId: string,
     masterKey: Buffer,
   ): CredentialAccessor;
+  rotateCredentials(
+    masterKey: Buffer,
+    newKeyVersion?: number,
+  ): Promise<RotationResult>;
 }
 
 export interface CredentialServiceDeps {
@@ -74,10 +117,7 @@ export interface CredentialServiceDeps {
   logger: Logger;
 }
 
-// The key version written to new rows. Bump this constant (and implement a
-// rotation job) whenever the master key changes — the partial index on
-// key_version < max efficiently locates rows needing re-encryption.
-const CURRENT_KEY_VERSION = 1;
+const CURRENT_KEY_VERSION = resolveKeyVersion();
 
 export function createCredentialService(
   deps: CredentialServiceDeps,
@@ -123,6 +163,13 @@ export function createCredentialService(
   // get a clear message rather than a null-dereference downstream.
   // -------------------------------------------------------------------------
 
+  function resolveDecryptionKey(
+    keyVersion: number,
+    fallbackKey: Buffer,
+  ): Buffer {
+    return loadKeyForVersion(keyVersion, fallbackKey);
+  }
+
   async function getDecryptedCredential(
     connectorId: string,
     fieldName: string,
@@ -140,17 +187,17 @@ export function createCredentialService(
       );
     }
 
+    const decryptionKey = resolveDecryptionKey(row.key_version, masterKey);
+
     try {
-      return await decrypt(row.encrypted_blob, masterKey);
+      return await decrypt(row.encrypted_blob, decryptionKey);
     } catch (err) {
-      // AES-GCM auth tag mismatch: the blob was either tampered with or was
-      // encrypted with a different master key. Surface as a typed error so the
-      // caller can emit the correct security audit event.
       throw new CredentialDecryptFailedError(
         `Failed to decrypt credential field "${fieldName}" for connector ${connectorId}.`,
         {
           connectorId,
           fieldName,
+          keyVersion: row.key_version,
           cause: err instanceof Error ? err.message : String(err),
         },
       );
@@ -209,11 +256,76 @@ export function createCredentialService(
     };
   }
 
+  // -------------------------------------------------------------------------
+  // rotateCredentials — re-encrypts all credentials that are still on an
+  // older key version. For each row: decrypt with the old version's key,
+  // re-encrypt with the target version's key, and atomically update the row
+  // (optimistic lock on old key_version prevents double-rotation).
+  // -------------------------------------------------------------------------
+
+  async function rotateCredentials(
+    masterKey: Buffer,
+    newKeyVersion: number = CURRENT_KEY_VERSION,
+  ): Promise<RotationResult> {
+    const rows = await credentialRepo.findOutstandingForRotation(newKeyVersion);
+    if (rows.length === 0) {
+      logger.info("Key rotation: no outstanding credentials to rotate", {
+        targetKeyVersion: newKeyVersion,
+      });
+      return { rotated: 0, skipped: 0, failed: 0 };
+    }
+
+    const newKey = loadKeyForVersion(newKeyVersion, masterKey);
+    let rotated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const row of rows) {
+      try {
+        const oldKey = resolveDecryptionKey(row.key_version, masterKey);
+        const plaintext = await decrypt(row.encrypted_blob, oldKey);
+        const newBlob = await encrypt(plaintext, newKey);
+        const updated = await credentialRepo.updateKeyVersion(
+          row.id,
+          newBlob,
+          newKeyVersion,
+          row.key_version,
+        );
+        if (updated) {
+          rotated++;
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        failed++;
+        logger.error("Key rotation: failed to rotate credential", {
+          credentialId: row.id,
+          connectorId: row.connector_id,
+          fieldName: row.field_name,
+          oldKeyVersion: row.key_version,
+          newKeyVersion,
+          cause: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    logger.info("Key rotation complete", {
+      targetKeyVersion: newKeyVersion,
+      rotated,
+      skipped,
+      failed,
+      total: rows.length,
+    });
+
+    return { rotated, skipped, failed };
+  }
+
   return {
     storeCredentials,
     getDecryptedCredential,
     listFieldNames,
     deleteByConnectorId,
     createCredentialAccessor,
+    rotateCredentials,
   };
 }

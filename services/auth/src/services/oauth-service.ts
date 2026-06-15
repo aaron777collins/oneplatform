@@ -7,7 +7,7 @@
 // security invariants (PKCE, constant-time state compare, upsert logic) are
 // fully implemented here.
 
-import { randomBytes, createHash, timingSafeEqual } from "crypto";
+import { randomBytes, randomUUID, createHash, timingSafeEqual } from "crypto";
 import type { Redis } from "ioredis";
 import type pg from "pg";
 import type { Logger, EventPublisher } from "@oneplatform/core";
@@ -299,8 +299,8 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
       throw new Error(`User ${userId} not found after OAuth upsert.`);
     }
 
-    const familyId = crypto.randomUUID();
-    const sessionId = crypto.randomUUID();
+    const familyId = randomUUID();
+    const sessionId = randomUUID();
     const expiresAt = new Date(
       Date.now() + getRefreshTokenTtlSeconds() * 1_000
     );
@@ -309,7 +309,7 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
       `INSERT INTO auth.sessions
          (id, user_id, tenant_id, refresh_token_jti, family_id, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [sessionId, userId, tenantId, crypto.randomUUID(), familyId, expiresAt]
+      [sessionId, userId, tenantId, randomUUID(), familyId, expiresAt]
     );
 
     const accessToken = await tokenService.issueAccessToken({

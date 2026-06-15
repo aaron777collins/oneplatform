@@ -350,8 +350,8 @@ describe("ApiKeyService.revoke()", () => {
       return { rows: [] };
     });
     const svc = createApiKeyService(makeDeps({ db, redis }));
-    await svc.revoke("key-id-1", "user-1");
-    expect(redis.set).toHaveBeenCalledWith("auth:apikey:revocation:key-id-1", "1");
+    await svc.revoke("key-id-1", "user-1", "tenant-1");
+    expect(redis.set).toHaveBeenCalledWith("auth:apikey:revocation:key-id-1", "1", "EX", 2592000);
   });
 
   it("throws NotFoundError when key does not exist or is already revoked", async () => {
@@ -359,7 +359,7 @@ describe("ApiKeyService.revoke()", () => {
     const { NotFoundError } = await import("@oneplatform/core");
     const db = makeDb(() => ({ rows: [] })); // UPDATE returns no rows
     const svc = createApiKeyService(makeDeps({ db }));
-    await expect(svc.revoke("nonexistent-key", "user-1")).rejects.toThrow(NotFoundError);
+    await expect(svc.revoke("nonexistent-key", "user-1", "tenant-1")).rejects.toThrow(NotFoundError);
   });
 
   it("publishes auth.key.revoked event", async () => {
@@ -372,7 +372,7 @@ describe("ApiKeyService.revoke()", () => {
       return { rows: [] };
     });
     const svc = createApiKeyService(makeDeps({ db, events }));
-    await svc.revoke("key-id-1", "user-1");
+    await svc.revoke("key-id-1", "user-1", "tenant-1");
     expect(events.publish).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "auth.key.revoked" }),
     );
@@ -415,7 +415,7 @@ describe("ApiKeyService.rotate()", () => {
 
     const redis = makeRedis();
     const svc = createApiKeyService(makeDeps({ db, redis, events }));
-    const { apiKey, keyRecord } = await svc.rotate("key-id-1", "user-1");
+    const { apiKey, keyRecord } = await svc.rotate("key-id-1", "user-1", "tenant-1");
 
     expect(apiKey).toMatch(/^op_live_/);
     expect(keyRecord.id).toBe("new-key-id");
@@ -423,7 +423,7 @@ describe("ApiKeyService.rotate()", () => {
       expect.objectContaining({ eventType: "auth.key.created" }),
     );
     // Old key should be revoked in Redis
-    expect(redis.set).toHaveBeenCalledWith("auth:apikey:revocation:key-id-1", "1");
+    expect(redis.set).toHaveBeenCalledWith("auth:apikey:revocation:key-id-1", "1", "EX", 2592000);
   });
 
   it("throws NotFoundError when the key to rotate does not exist", async () => {
@@ -431,7 +431,7 @@ describe("ApiKeyService.rotate()", () => {
     const { NotFoundError } = await import("@oneplatform/core");
     const db = makeDb(() => ({ rows: [] }));
     const svc = createApiKeyService(makeDeps({ db }));
-    await expect(svc.rotate("nonexistent-key", "user-1")).rejects.toThrow(NotFoundError);
+    await expect(svc.rotate("nonexistent-key", "user-1", "tenant-1")).rejects.toThrow(NotFoundError);
   });
 
   it("throws ForbiddenError when user does not own the key", async () => {
@@ -444,6 +444,6 @@ describe("ApiKeyService.rotate()", () => {
       return { rows: [] };
     });
     const svc = createApiKeyService(makeDeps({ db }));
-    await expect(svc.rotate("key-id-1", "user-1")).rejects.toThrow(ForbiddenError);
+    await expect(svc.rotate("key-id-1", "user-1", "tenant-1")).rejects.toThrow(ForbiddenError);
   });
 });

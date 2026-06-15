@@ -7,6 +7,7 @@ import type { AppVariables, UserContext } from "@oneplatform/core";
 import { errorHandlerMiddleware, ConflictError, UnauthorizedError } from "@oneplatform/core";
 import type { AuthService } from "../../services/index.js";
 import type { TokenService } from "../../services/token-service.js";
+import type { UserRepository } from "../../repositories/index.js";
 import { createAuthRoutes } from "../../routes/auth.js";
 import {
   AccountLockedError,
@@ -31,10 +32,33 @@ const MOCK_USER: UserContext = {
 // Test app factory
 // ---------------------------------------------------------------------------
 
+function makeUserRepository(overrides: Partial<UserRepository> = {}): UserRepository {
+  return {
+    findById: vi.fn().mockResolvedValue({
+      id: "user-1",
+      tenant_id: "tenant-1",
+      email: "alice@example.com",
+      password_hash: null,
+      email_verified: true,
+      is_active: true,
+      display_name: "Alice",
+      roles: ["viewer"],
+      created_at: new Date(),
+      updated_at: new Date(),
+      last_login_at: null,
+      failed_login_count: 0,
+      locked_until: null,
+      metadata: {},
+    }),
+    ...overrides,
+  } as UserRepository;
+}
+
 function buildApp(
   authService: AuthService,
   tokenService: TokenService,
   authedUser?: UserContext,
+  userRepository?: UserRepository,
 ): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   app.onError(errorHandlerMiddleware());
@@ -46,7 +70,11 @@ function buildApp(
     });
   }
 
-  const routes = createAuthRoutes({ authService, tokenService });
+  const routes = createAuthRoutes({
+    authService,
+    tokenService,
+    userRepository: userRepository ?? makeUserRepository(),
+  });
   app.route("/", routes);
   return app;
 }

@@ -1,4 +1,4 @@
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type { AppRepository } from "../repositories/app-repository.js";
 import type { DeploymentRepository } from "../repositories/deployment-repository.js";
@@ -54,6 +54,7 @@ export interface DeployServiceDeps {
   authServiceUrl: string;
   baseUrl:        string;
   logger:         Logger;
+  serviceTokenSigner: ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +62,7 @@ export interface DeployServiceDeps {
 // ---------------------------------------------------------------------------
 
 export function createDeployService(deps: DeployServiceDeps): DeployService {
-  const { appRepo, buildRepo, permRepo, redis, authServiceUrl, baseUrl, logger } = deps;
+  const { appRepo, buildRepo, permRepo, redis, authServiceUrl, baseUrl, logger, serviceTokenSigner } = deps;
 
   async function deployApp(
     tenantId: string,
@@ -254,12 +255,12 @@ export function createDeployService(deps: DeployServiceDeps): DeployService {
       accessMode:     app.access_mode,
     };
 
-    // W3: include service token so Auth Service can authenticate the caller
+    const token = await serviceTokenSigner.sign();
     const response = await fetch(`${authServiceUrl}/internal/oauth/clients`, {
       method:  "POST",
       headers: {
         "Content-Type":    "application/json",
-        "X-Service-Token": process.env["OP_SERVICE_TOKEN_SECRET"] ?? "",
+        "X-Service-Token": token,
       },
       body: JSON.stringify(body),
     });

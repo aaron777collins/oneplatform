@@ -62,10 +62,11 @@ export interface ApiKeyService {
   ): Promise<{ apiKey: string; keyRecord: ApiKeyRecord }>;
   validate(key: string): Promise<UserContext | null>;
   list(userId: string): Promise<ApiKeyRecord[]>;
-  revoke(keyId: string, revokedBy: string): Promise<void>;
+  revoke(keyId: string, revokedBy: string, tenantId: string): Promise<void>;
   rotate(
     keyId: string,
-    userId: string
+    userId: string,
+    tenantId: string
   ): Promise<{ apiKey: string; keyRecord: ApiKeyRecord }>;
 }
 
@@ -220,9 +221,15 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
       return null;
     }
 
-    // Step 5: Non-blocking last_used_at update — fire and forget
-    // Using setImmediate defers this to the next iteration of the event loop
-    // so it doesn't add to the request's critical path latency.
+    // Step 5: Fetch the user's roles from auth.users so RBAC role-based checks work
+    const userResult = await db.query<{ roles: string[]; email_verified: boolean }>(
+      "SELECT roles, email_verified FROM auth.users WHERE id = $1",
+      [matchedRow.user_id]
+    );
+    const userRoles = userResult.rows[0]?.roles ?? [];
+    const emailVerified = userResult.rows[0]?.email_verified ?? true;
+
+    // Step 6: Non-blocking last_used_at update — fire and forget
     setImmediate(() => {
       db.query(
         "UPDATE auth.api_keys SET last_used_at = now() WHERE id = $1",
@@ -235,15 +242,15 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
       });
     });
 
-    // Step 6: Build UserContext for downstream middleware
+    // Step 7: Build UserContext for downstream middleware
     return {
       userId: matchedRow.user_id,
       tenantId: matchedRow.tenant_id,
-      roles: [],
+      roles: userRoles,
       scopes: matchedRow.scopes,
       isGuest: false,
       isService: false,
-      emailVerified: true,
+      emailVerified,
     };
   }
 
@@ -265,13 +272,13 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
   // Revoke
   // -------------------------------------------------------------------------
 
-  async function revoke(keyId: string, revokedBy: string): Promise<void> {
+  async function revoke(keyId: string, revokedBy: string, tenantId: string): Promise<void> {
     const result = await db.query<{ id: string; tenant_id: string; user_id: string }>(
       `UPDATE auth.api_keys
        SET revoked_at = now(), revoked_by = $1
-       WHERE id = $2 AND revoked_at IS NULL
+       WHERE id = $2 AND tenant_id = $3 AND revoked_at IS NULL
        RETURNING id, tenant_id, user_id`,
-      [revokedBy, keyId]
+      [revokedBy, keyId, tenantId]
     );
 
     if (result.rows.length === 0) {
@@ -283,8 +290,10 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
       throw new NotFoundError(`API key ${keyId} not found.`);
     }
 
-    // Set Redis revocation flag (no TTL — persists until key row is hard-deleted)
-    await redis.set(`auth:apikey:revocation:${keyId}`, "1");
+    // Set Redis revocation flag with 30-day TTL to prevent unbounded memory growth.
+    // After 30 days the DB check (revoked_at IS NULL) is authoritative.
+    const REVOCATION_TTL_SECONDS = 30 * 24 * 60 * 60;
+    await redis.set(`auth:apikey:revocation:${keyId}`, "1", "EX", REVOCATION_TTL_SECONDS);
 
     await events.publish({
       eventType: "auth.key.revoked",
@@ -301,13 +310,14 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
 
   async function rotate(
     keyId: string,
-    userId: string
+    userId: string,
+    tenantId: string
   ): Promise<{ apiKey: string; keyRecord: ApiKeyRecord }> {
-    // Fetch the existing key to verify ownership and get its metadata
+    // Fetch the existing key to verify ownership and tenant membership
     const existingResult = await db.query<ApiKeyRow>(
       `SELECT * FROM auth.api_keys
-       WHERE id = $1 AND revoked_at IS NULL`,
-      [keyId]
+       WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL`,
+      [keyId, tenantId]
     );
     const existing = existingResult.rows[0];
 
@@ -355,8 +365,8 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
         throw new Error("Key rotation INSERT returned no row.");
       }
 
-      // Revoke old key in Redis after transaction commits
-      await redis.set(`auth:apikey:revocation:${keyId}`, "1");
+      const REVOCATION_TTL_SECONDS = 30 * 24 * 60 * 60;
+      await redis.set(`auth:apikey:revocation:${keyId}`, "1", "EX", REVOCATION_TTL_SECONDS);
 
       await events.publish({
         eventType: "auth.key.created",

@@ -9,6 +9,8 @@ import {
   createEventPublisher,
   createApp,
   loadMasterKey,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -153,10 +155,24 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     logger, draftRepo,
   });
 
+  // Load the ontology service's own private key to sign outbound calls to the
+  // execution service.  Key absence is non-fatal in development (expression
+  // transforms will warn but fall back to the source value), so we swallow
+  // the error rather than crashing the whole service.
+  const serviceKeysDir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
+  let serviceTokenSigner: Awaited<ReturnType<typeof createServiceTokenSigner>> | undefined;
+  try {
+    const privateKeyPem = await loadServicePrivateKey("ontology-service", serviceKeysDir);
+    serviceTokenSigner = await createServiceTokenSigner("ontology-service", privateKeyPem);
+  } catch {
+    console.warn("Ontology service: service private key not found — expression transform calls to the execution service will not carry X-Service-Token");
+  }
+
   const mappingService = createMappingService({
     db, redis, logger,
     mappingRuleRepo, mappingErrorRepo, entityRepo, fieldRepo,
     ...(config.executionServiceUrl ? { executionServiceUrl: config.executionServiceUrl } : {}),
+    ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
   });
 
   const cleanupService = createCleanupService({

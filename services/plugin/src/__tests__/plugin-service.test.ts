@@ -199,12 +199,25 @@ describe("PluginService.activatePlugin", () => {
     service = createPluginService(makeDeps({ pluginRepo }));
   });
 
-  it("returns the plugin row when found", async () => {
-    const expected = makePluginRow({ status: "installed" });
-    pluginRepo.findById.mockResolvedValue(expected);
+  it("sets status to active and returns the updated row", async () => {
+    const installedRow = makePluginRow({ status: "installed" });
+    const activeRow = makePluginRow({ status: "active" });
+    pluginRepo.findById.mockResolvedValue(installedRow);
+    pluginRepo.update.mockResolvedValue(activeRow);
 
     const result = await service.activatePlugin("plugin-uuid", "user-001");
-    expect(result).toBe(expected);
+    expect(result).toBe(activeRow);
+    expect(pluginRepo.update).toHaveBeenCalledWith("plugin-uuid", { status: "active" });
+  });
+
+  it("falls back to the found row when update returns null", async () => {
+    // update() returning null is an edge case (row disappeared between read and update).
+    const installedRow = makePluginRow({ status: "installed" });
+    pluginRepo.findById.mockResolvedValue(installedRow);
+    pluginRepo.update.mockResolvedValue(null);
+
+    const result = await service.activatePlugin("plugin-uuid", "user-001");
+    expect(result).toBe(installedRow);
   });
 
   it("throws PluginNotFoundError when plugin does not exist", async () => {

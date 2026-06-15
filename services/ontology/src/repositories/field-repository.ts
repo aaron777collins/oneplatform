@@ -5,11 +5,14 @@ export interface FieldRepository {
   create(data: CreateFieldData, client?: pg.PoolClient): Promise<FieldRow>;
   createMany(fields: CreateFieldData[], client?: pg.PoolClient): Promise<FieldRow[]>;
   findByEntityId(entityId: string): Promise<FieldRow[]>;
+  /** Batch-load fields for multiple entities in a single query, eliminating N+1 on list operations. */
+  findByEntityIds(entityIds: string[]): Promise<Map<string, FieldRow[]>>;
   findBySlug(entityId: string, slug: string): Promise<FieldRow | null>;
   findById(id: string): Promise<FieldRow | null>;
   update(id: string, data: UpdateFieldData): Promise<FieldRow | null>;
   softDelete(id: string): Promise<boolean>;
   softDeleteByEntityId(entityId: string): Promise<number>;
+  hardDeleteByEntityId(entityId: string): Promise<number>;
 }
 
 export function createFieldRepository(db: pg.Pool): FieldRepository {
@@ -55,6 +58,27 @@ export function createFieldRepository(db: pg.Pool): FieldRepository {
         [entityId],
       );
       return result.rows;
+    },
+
+    async findByEntityIds(entityIds) {
+      // Empty input: skip the query entirely — ANY($1::uuid[]) would match nothing.
+      if (entityIds.length === 0) return new Map();
+
+      const result = await db.query<FieldRow>(
+        `SELECT * FROM ontology.fields
+         WHERE entity_id = ANY($1::uuid[]) AND deleted_at IS NULL
+         ORDER BY entity_id, sort_order, created_at`,
+        [entityIds],
+      );
+
+      // Group into a Map keyed by entity_id so callers get O(1) lookup per entity.
+      const grouped = new Map<string, FieldRow[]>();
+      for (const row of result.rows) {
+        const bucket = grouped.get(row.entity_id) ?? [];
+        bucket.push(row);
+        grouped.set(row.entity_id, bucket);
+      }
+      return grouped;
     },
 
     async findBySlug(entityId, slug) {
@@ -123,6 +147,14 @@ export function createFieldRepository(db: pg.Pool): FieldRepository {
       const result = await db.query(
         `UPDATE ontology.fields SET deleted_at = now(), updated_at = now()
          WHERE entity_id = $1 AND deleted_at IS NULL`,
+        [entityId],
+      );
+      return result.rowCount ?? 0;
+    },
+
+    async hardDeleteByEntityId(entityId) {
+      const result = await db.query(
+        `DELETE FROM ontology.fields WHERE entity_id = $1`,
         [entityId],
       );
       return result.rowCount ?? 0;

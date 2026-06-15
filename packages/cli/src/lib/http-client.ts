@@ -61,6 +61,7 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
     // connections for the lifetime of this process, not just calls to platformUrl.
     // Bun handles this differently via its own TLS options.
     process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
+    console.warn("Warning: TLS verification disabled for all connections in this session");
   }
 
   async function request<T>(
@@ -74,7 +75,7 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
     const timer = setTimeout(() => controller.abort(), timeout);
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...authHeaders(apiKey),
     };
 

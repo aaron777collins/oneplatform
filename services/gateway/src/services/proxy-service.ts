@@ -10,29 +10,29 @@ import type { AppVariables } from "@oneplatform/core";
 // ---------------------------------------------------------------------------
 
 const SERVICE_MAP: Record<string, string> = {
-  auth: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3001",
+  auth: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
   connectors:
-    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
+    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
   "webhooks/inbound":
-    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
+    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
   uploads:
-    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
+    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
   ontology:
-    process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3003",
+    process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3000",
   pipelines:
-    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3004",
+    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
   "pipeline-runs":
-    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3004",
+    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
   schedules:
-    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3004",
-  exec: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
-  apps: process.env["APP_SERVICE_URL"] ?? "http://app-service:3006",
-  logs: process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3007",
+    process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
+  exec: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3000",
+  apps: process.env["APP_SERVICE_URL"] ?? "http://app-service:3000",
+  logs: process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
   "audit-events":
-    process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3007",
-  plugins: process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3008",
-  // roles route is owned by the auth service
-  roles: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3001",
+    process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
+  plugins: process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3000",
+  roles: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
+  users: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
 };
 
 // Per-service timeout defaults (L2 §6.4).
@@ -75,6 +75,8 @@ const HEADERS_TO_STRIP = new Set([
   "x-user-context",
   "x-user-context-signature",
   "x-real-ip",
+  "x-forwarded-for",
+  "x-forwarded-proto",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -192,13 +194,16 @@ export function createProxyService(): ProxyService {
       }
     });
 
-    // Inject identity and tracing headers
-    const clientIp = c.req.header("x-forwarded-for");
-    if (clientIp !== undefined) {
-      outboundHeaders.set("x-forwarded-for", clientIp);
-    }
+    // Set x-forwarded-for from the actual TCP connection, not from client-supplied headers.
+    // Client-supplied x-forwarded-for is already stripped via HEADERS_TO_STRIP.
+    const remoteAddress = (c.req.raw as unknown as { socket?: { remoteAddress?: string } })
+      .socket?.remoteAddress ?? "unknown";
+    outboundHeaders.set("x-forwarded-for", remoteAddress);
 
-    outboundHeaders.set("x-forwarded-proto", "https");
+    // Detect actual protocol from the inbound request instead of hardcoding https
+    const isHttps = c.req.url.startsWith("https://")
+      || process.env["OP_FORCE_HTTPS"] === "true";
+    outboundHeaders.set("x-forwarded-proto", isHttps ? "https" : "http");
     outboundHeaders.set("x-oneplatform-request-id", requestId);
 
     if (tenantId !== undefined) {

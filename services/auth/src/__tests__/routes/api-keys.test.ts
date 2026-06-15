@@ -207,7 +207,7 @@ describe("DELETE /api/v1/api-keys/:id", () => {
     const revokeSpy = vi.fn().mockResolvedValue(undefined);
     const app = buildApp(makeApiKeyService({ revoke: revokeSpy }), MOCK_USER);
     await app.request("/api/v1/api-keys/key-id-1", { method: "DELETE" });
-    expect(revokeSpy).toHaveBeenCalledWith("key-id-1", "user-1");
+    expect(revokeSpy).toHaveBeenCalledWith("key-id-1", "user-1", "tenant-1");
   });
 });
 
@@ -251,6 +251,6 @@ describe("POST /api/v1/api-keys/:id/rotate", () => {
     });
     const app = buildApp(makeApiKeyService({ rotate: rotateSpy }), MOCK_USER);
     await app.request("/api/v1/api-keys/key-id-1/rotate", { method: "POST" });
-    expect(rotateSpy).toHaveBeenCalledWith("key-id-1", "user-1");
+    expect(rotateSpy).toHaveBeenCalledWith("key-id-1", "user-1", "tenant-1");
   });
 });

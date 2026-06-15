@@ -139,6 +139,7 @@ export interface EntityService {
     changeType: "backward_compatible" | "breaking";
   }>;
   deleteEntity(tenantId: string, entityType: string, confirm?: boolean): Promise<void>;
+  cleanupDeletedEntities(tenantId: string, retentionDays?: number): Promise<{ cleaned: number }>;
   validateRecord(tenantId: string, entityType: string, data: Record<string, unknown>): Promise<{ valid: boolean; errors: Array<{ field: string; code: string; message: string }> }>;
   /**
    * Compute a non-destructive diff of `patch` against the current live schema for
@@ -345,11 +346,11 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
 
     async listEntities(tenantId, cursor, limit = 50) {
       const entities = await entityRepo.findByTenantId(tenantId, cursor, limit);
-      const data: EntityDetail[] = [];
-      for (const e of entities) {
-        const fields = await fieldRepo.findByEntityId(e.id);
-        data.push(toEntityDetail(e, fields));
-      }
+      // Batch-load all fields in a single query instead of one query per entity (N+1).
+      const fieldsByEntityId = await fieldRepo.findByEntityIds(entities.map((e) => e.id));
+      const data: EntityDetail[] = entities.map((e) =>
+        toEntityDetail(e, fieldsByEntityId.get(e.id) ?? []),
+      );
       const nextCursor = data.length === limit && data.length > 0 ? data[data.length - 1]!.id : null;
       return { data, nextCursor };
     },
@@ -546,6 +547,36 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
       logger.info(`Soft-deleted entity ${entityType} for tenant ${tenantId}`);
     },
 
+    async cleanupDeletedEntities(tenantId, retentionDays = 7) {
+      const schemaName = tenantSchemaName(tenantId);
+      const staleEntities = await entityRepo.findDeletedOlderThan(tenantId, retentionDays);
+
+      let cleaned = 0;
+      for (const entity of staleEntities) {
+        const client = await db.connect();
+        try {
+          await client.query("BEGIN");
+
+          const tableName = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(entity.slug)}`;
+          await client.query(`DROP TABLE IF EXISTS ${tableName}`);
+
+          await fieldRepo.hardDeleteByEntityId(entity.id);
+          await entityRepo.hardDelete(entity.id);
+
+          await client.query("COMMIT");
+          cleaned++;
+          logger.info(`Cleaned up deleted entity table ${entity.slug} for tenant ${tenantId}`);
+        } catch (err) {
+          await client.query("ROLLBACK").catch(() => {});
+          logger.error(`Failed to clean up deleted entity ${entity.slug}: ${String(err)}`);
+        } finally {
+          client.release();
+        }
+      }
+
+      return { cleaned };
+    },
+
     async validateRecord(tenantId, entityType, data) {
       const { buildCreateInputSchema } = await import("./field-service.js");
       const entity = await entityRepo.findBySlug(tenantId, entityType);
@@ -643,7 +674,7 @@ function buildMigrationFieldSpec(
   if (diff.addFields) {
     for (const f of diff.addFields) {
       const defaultExpr = f.defaultValue !== undefined
-        ? (typeof f.defaultValue === "string" ? `'${f.defaultValue}'` : String(f.defaultValue))
+        ? (typeof f.defaultValue === "string" ? `'${f.defaultValue.replace(/'/g, "''")}'` : String(f.defaultValue))
         : "NULL";
       specs.push({ slug: f.slug, isNew: true, defaultExpression: defaultExpr });
     }

@@ -8,9 +8,10 @@
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { ValidationError } from "@oneplatform/core";
+import { ValidationError, NotFoundError } from "@oneplatform/core";
 import type { AuthService } from "../services/index.js";
 import type { TokenService } from "../services/token-service.js";
+import type { UserRepository } from "../repositories/index.js";
 import {
   registerRequest,
   loginRequest,
@@ -23,11 +24,12 @@ import {
 export interface AuthRouteDeps {
   authService: AuthService;
   tokenService: TokenService;
+  userRepository: UserRepository;
 }
 
 export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { authService, tokenService } = deps;
+  const { authService, tokenService, userRepository } = deps;
 
   // POST /api/v1/auth/register — public
   routes.post("/api/v1/auth/register", async (c) => {
@@ -84,6 +86,25 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
     }
 
     return c.json(result);
+  });
+
+  // GET /api/v1/auth/me — requires auth
+  // Returns the current user's identity. Used by the CLI (login --key, status,
+  // whoami) and any client that needs a "who am I?" check.
+  routes.get("/api/v1/auth/me", async (c) => {
+    const user = c.var.user;
+    const found = await userRepository.findById(user.userId);
+    if (!found) {
+      throw new NotFoundError("User not found.");
+    }
+    return c.json({
+      id: found.id,
+      email: found.email,
+      displayName: found.display_name ?? "",
+      tenantId: found.tenant_id,
+      tenantName: found.tenant_id,
+      roles: found.roles,
+    });
   });
 
   // POST /api/v1/auth/logout — requires auth (JWT in c.var.user)

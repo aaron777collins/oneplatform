@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Redis } from "ioredis";
 import type { Queue } from "bullmq";
 
@@ -110,9 +111,10 @@ export function createLogger(config: LoggerConfig): Logger {
 
       async audit(event) {
         if (!config.auditQueue) {
-          throw new Error(
-            "auditQueue is required to emit audit events. Pass it to createLogger()."
+          console.warn(
+            "auditQueue is not configured — audit event dropped. Pass auditQueue to createLogger() to enable audit logging."
           );
+          return;
         }
         const full: AuditEvent = {
           ...event,
@@ -136,5 +138,5 @@ export function createLogger(config: LoggerConfig): Logger {
     };
   }
 
-  return makeLogger("");
+  return makeLogger(randomUUID());
 }

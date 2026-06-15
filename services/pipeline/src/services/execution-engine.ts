@@ -1,4 +1,4 @@
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import type { Job } from "bullmq";
 import type { Pool, PoolClient } from "pg";
 import type { Redis } from "ioredis";
@@ -143,6 +143,28 @@ async function releaseAdvisoryLock(
 }
 
 // ---------------------------------------------------------------------------
+// JSONata timeout helper
+// ---------------------------------------------------------------------------
+
+// Conditional step expressions are already wrapped with a 100ms timeout.
+// Webhook body templates and response mappings use the same evaluator but
+// can produce larger data and are afforded a generous 5-second budget before
+// being treated as a DoS attempt via a maliciously crafted expression.
+const JSONATA_WEBHOOK_TIMEOUT_MS = 5_000;
+
+function evaluateWithTimeout(expr: ReturnType<typeof jsonata>, data: unknown): Promise<unknown> {
+  return Promise.race([
+    expr.evaluate(data),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`JSONata expression timed out after ${JSONATA_WEBHOOK_TIMEOUT_MS}ms`)),
+        JSONATA_WEBHOOK_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
+
+// ---------------------------------------------------------------------------
 // SSRF check for webhook steps (re-checked at execution time per design spec)
 // ---------------------------------------------------------------------------
 
@@ -187,6 +209,7 @@ export interface ExecutionEngineDeps {
   stepDefaultTimeoutMs: number;
   hookDefaultTimeoutMs: number;
   logger: Logger;
+  serviceTokenSigner: ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +229,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     stepDefaultTimeoutMs,
     hookDefaultTimeoutMs,
     logger,
+    serviceTokenSigner,
   } = deps;
 
   // -------------------------------------------------------------------------
@@ -234,7 +258,10 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
   async function resolveHookChain(stage: string, tenantId: string): Promise<HookRef[]> {
     const url = `${pluginServiceUrl}/internal/plugins/hooks?stage=${encodeURIComponent(stage)}&tenantId=${encodeURIComponent(tenantId)}`;
-    const response = await fetch(url);
+    const token = await serviceTokenSigner.sign();
+    const response = await fetch(url, {
+      headers: { "X-Service-Token": token },
+    });
     if (!response.ok) {
       logger.warn("Failed to resolve hook chain from Plugin Service", {
         stage,
@@ -300,9 +327,13 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
   // -------------------------------------------------------------------------
 
   async function callExecutionService(request: ExecutionRequest): Promise<ExecutionResponse> {
+    const token = await serviceTokenSigner.sign();
     const response = await fetch(`${executionServiceUrl}/internal/execution/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Service-Token": token,
+      },
       body: JSON.stringify(request),
     });
 
@@ -419,9 +450,13 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     ctx: RunContext,
     resolvedInput: Record<string, unknown>,
   ): Promise<{ output: Record<string, unknown> }> {
+    const token = await serviceTokenSigner.sign();
     const response = await fetch(`${ingestionServiceUrl}/internal/ingestion/sync`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Service-Token": token,
+      },
       body: JSON.stringify({
         connectorInstanceId: step.connectorInstanceId,
         tenantId: ctx.tenantId,
@@ -467,7 +502,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     let body: unknown = step.body;
     if (typeof step.body === "string" && step.body.startsWith("=")) {
       const expr = jsonata(step.body.slice(1));
-      body = await expr.evaluate({ input: resolvedInput });
+      body = await evaluateWithTimeout(expr, { input: resolvedInput });
     }
 
     const controller = new AbortController();
@@ -503,7 +538,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     // Apply responseMapping JSONata expression if configured
     if (step.responseMapping !== undefined) {
       const expr = jsonata(step.responseMapping);
-      const mapped = await expr.evaluate(output);
+      const mapped = await evaluateWithTimeout(expr, output);
       output = (mapped as Record<string, unknown>) ?? output;
     }
 

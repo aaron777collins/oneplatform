@@ -345,13 +345,26 @@ export function createBundleService(config: BundleServiceConfig): BundleService 
       const hash = createHash("sha256");
       const stream = createReadStream(bundlePath);
 
+      const CHECKSUM_TIMEOUT_MS = 30_000;
+
       // Stream through the hash without buffering the whole file.
-      await pipeline(stream, async function* (source) {
+      // Wrap in a timeout so large bundles (up to 50MB) cannot block indefinitely.
+      const hashPromise = pipeline(stream, async function* (source) {
         for await (const chunk of source) {
           hash.update(chunk as Buffer);
           yield chunk;
         }
       });
+
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => {
+          stream.destroy();
+          reject(new Error(`Checksum verification timed out after ${CHECKSUM_TIMEOUT_MS}ms`));
+        }, CHECKSUM_TIMEOUT_MS);
+        hashPromise.finally(() => clearTimeout(timer));
+      });
+
+      await Promise.race([hashPromise, timeoutPromise]);
 
       const actual = hash.digest("hex");
 

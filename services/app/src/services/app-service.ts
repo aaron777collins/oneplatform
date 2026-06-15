@@ -23,7 +23,7 @@ function renderDefaultTemplate(appName: string, slug: string): Record<string, st
         dependencies: {
           react: "^18.2.0",
           "react-dom": "^18.2.0",
-          "@oneplatform/app-sdk": "workspace:*",
+          "@oneplatform/app-sdk": "^1.0.0",
         },
       },
       null,
@@ -32,7 +32,7 @@ function renderDefaultTemplate(appName: string, slug: string): Record<string, st
     "/tsconfig.json": JSON.stringify(
       {
         compilerOptions: {
-          target: "ES2020",
+          target: "ES2022",
           module: "ESNext",
           moduleResolution: "bundler",
           jsx: "react-jsx",
@@ -84,7 +84,16 @@ function renderDefaultTemplate(appName: string, slug: string): Record<string, st
 // ---------------------------------------------------------------------------
 
 const ALLOWED_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".json", ".css", ".html", ".md", ".svg",
+  // Code
+  ".ts", ".tsx", ".js", ".jsx", ".json", ".css", ".html", ".md",
+  // Images
+  ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico",
+  // Fonts
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  // Config & data
+  ".yaml", ".yml", ".env.example", ".graphql", ".gql", ".xml", ".txt", ".csv",
+  // Source maps
+  ".map",
 ]);
 
 export function validateFilePath(path: string): void {

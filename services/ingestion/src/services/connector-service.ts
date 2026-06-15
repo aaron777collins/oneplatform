@@ -103,6 +103,7 @@ export interface SyncStateRepository {
     rows_total?: number;
   }): Promise<SyncStateRow>;
   findByConnectorId(connectorId: string): Promise<SyncStateRow | null>;
+  findByConnectorIds(connectorIds: string[]): Promise<Map<string, SyncStateRow>>;
   updateStatus(
     connectorId: string,
     status: "never_run" | "running" | "success" | "failed" | "cancelled",
@@ -375,13 +376,21 @@ export function createConnectorService(
       connectorRows = connectorRows.filter((c) => c.is_enabled === wantEnabled);
     }
 
-    // Join sync state for each connector in parallel.
-    const items = await Promise.all(
-      connectorRows.map(async (connector): Promise<ConnectorWithSyncState> => {
-        const syncState = await requireSyncState(connector.id, connector.sync_mode);
-        return { connector, syncState };
-      }),
-    );
+    // Batch-fetch sync state for all connectors in a single query.
+    const connectorIds = connectorRows.map((c) => c.id);
+    const syncStateMap = await syncStateRepo.findByConnectorIds(connectorIds);
+
+    const items: ConnectorWithSyncState[] = [];
+    for (const connector of connectorRows) {
+      let syncState = syncStateMap.get(connector.id);
+      if (syncState === undefined) {
+        logger.warn("sync_state missing for connector — synthesising default", {
+          connectorId: connector.id,
+        });
+        syncState = await syncStateRepo.upsert({ connector_id: connector.id, sync_mode: connector.sync_mode });
+      }
+      items.push({ connector, syncState });
+    }
 
     const total = await connectorRepo.countByTenantId(tenantId);
     const nextCursor =

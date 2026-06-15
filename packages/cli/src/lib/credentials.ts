@@ -8,9 +8,10 @@
  * either in the OS keychain (tier 1) or derived at runtime (tier 2).
  */
 import { createCipheriv, createDecipheriv, randomBytes, createHmac } from "node:crypto";
+import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { mkdirSync } from "node:fs";
 
 const CONFIG_DIR = join(homedir(), ".config", "oneplatform");
@@ -84,13 +85,36 @@ async function keytarSet(service: string, account: string, password: string): Pr
 // ─── Machine-ID derivation (HKDF-SHA256) ───────────────────────────────────
 
 function readMachineId(): string {
+  // User-configurable override for CI/headless environments
+  const override = process.env["OP_MACHINE_ID"];
+  if (override) return override;
+
+  // Linux: /etc/machine-id or /var/lib/dbus/machine-id
   const candidates = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
   for (const path of candidates) {
     if (existsSync(path)) {
       return readFileSync(path, "utf8").trim();
     }
   }
-  // Fallback: use a hash of the hostname + username (not ideal, but functional)
+
+  // macOS: IOPlatformUUID
+  if (platform() === "darwin") {
+    try {
+      const output = execSync(
+        "ioreg -rd1 -c IOPlatformExpertDevice | grep IOPlatformUUID",
+      ).toString();
+      const match = output.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+      if (match?.[1]) return match[1];
+    } catch {
+      // ioreg not available — fall through to weak fallback
+    }
+  }
+
+  // Weak fallback using hostname + username
+  console.warn(
+    "Warning: Using weak machine identifier for credential encryption. " +
+      "Set OP_MACHINE_ID env var for stronger protection.",
+  );
   return createHmac("sha256", "oneplatform-fallback")
     .update(`${process.env["HOSTNAME"] ?? "localhost"}:${process.env["USER"] ?? "user"}`)
     .digest("hex");

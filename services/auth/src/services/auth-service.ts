@@ -191,14 +191,14 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
           userId,
           tenantId: data.tenantId,
         });
-      } else if (process.env["NODE_ENV"] === "production") {
-        // In production without SMTP, the token cannot be delivered safely.
+      } else if (process.env["NODE_ENV"] !== "development" && process.env["NODE_ENV"] !== "test") {
+        // Outside dev/test without SMTP, the token cannot be delivered safely.
         // Returning it in the response would expose a signed JWT to any caller
         // and allow account takeover. Fail loudly so operators configure SMTP.
         throw new Error(
           "OP_SMTP_HOST is not configured. Email verification links cannot be " +
-          "returned in API responses in production. Configure SMTP to enable " +
-          "email verification."
+          "returned in API responses outside development/test. Configure SMTP " +
+          "to enable email verification."
         );
       } else {
         logger.warn(
@@ -207,14 +207,14 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         );
       }
 
+      const isDev = process.env["NODE_ENV"] === "development" || process.env["NODE_ENV"] === "test";
       return {
         userId,
         email: data.email,
         tenantId: data.tenantId,
         roles: ["viewer"],
         requiresEmailVerification: true,
-        // Only include verifyLink outside production and when SMTP is absent
-        ...(hasSmtp() || process.env["NODE_ENV"] === "production" ? {} : { verifyLink }),
+        ...(hasSmtp() || !isDev ? {} : { verifyLink }),
       };
     }
 
@@ -548,14 +548,15 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       return { message };
     }
 
-    if (process.env["NODE_ENV"] === "production") {
-      // Returning a signed reset token in the API response in production
+    const nodeEnv = process.env["NODE_ENV"];
+    if (nodeEnv !== "development" && nodeEnv !== "test") {
+      // Returning a signed reset token in the API response outside dev/test
       // exposes it to any intermediary (logs, proxies, CDNs). Fail loudly
       // so operators are forced to configure SMTP before going live.
       throw new Error(
         "OP_SMTP_HOST is not configured. Password reset links cannot be " +
-        "returned in API responses in production. Configure SMTP to enable " +
-        "password reset."
+        "returned in API responses outside development/test. Configure SMTP " +
+        "to enable password reset."
       );
     }
 

@@ -51,18 +51,44 @@ const BLOCKED_CIDR_BLOCKS: CidrBlock[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Returns true when `ip` falls within any blocked IPv4 CIDR range or is
- * the IPv6 loopback address. Handles both IPv4 and IPv6 (::1) inputs.
+ * Returns true when `ip` falls within any blocked IPv4 CIDR range or is a
+ * blocked IPv6 address. Handles IPv4, IPv4-mapped IPv6 (both dotted-decimal
+ * and compact-hex forms), IPv6 loopback, link-local, and unique-local ranges.
  */
 export function isBlockedIpRange(ip: string): boolean {
-  // IPv6 loopback
-  if (ip === "::1") return true;
+  const lower = ip.toLowerCase();
 
-  // IPv4-mapped IPv6 (::ffff:x.x.x.x) — extract the dotted-decimal portion
-  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-  const candidate = mapped?.[1] ?? ip;
+  // IPv6 loopback — normalised form returned by Node's dns.resolve6()
+  if (lower === "::1") return true;
 
-  const asInt = ipv4ToInt(candidate);
+  // Link-local IPv6: fe80::/10 — covers fe80:: through febf::
+  // The first 10 bits of the address must be 1111111010 (0xfe80 with mask 0xffc0).
+  // We match on the prefix characters; any address starting with fe8/fe9/fea/feb
+  // that has the top 10 bits set falls in this range.
+  if (/^fe[89ab][0-9a-f]/i.test(lower)) return true;
+
+  // Unique-local IPv6: fc00::/7 — covers fc00:: through fdff::
+  if (/^f[cd][0-9a-f]{2}/i.test(lower)) return true;
+
+  // IPv4-mapped IPv6 — dotted-decimal form: ::ffff:x.x.x.x
+  const mappedDotted = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedDotted) {
+    const asInt = ipv4ToInt(mappedDotted[1] ?? "");
+    return asInt !== -1 && BLOCKED_CIDR_BLOCKS.some((block) => (asInt & block.mask) === block.base);
+  }
+
+  // IPv4-mapped IPv6 — compact-hex form: ::ffff:aabb:ccdd
+  // e.g. ::ffff:7f00:0001 represents 127.0.0.1
+  const mappedHex = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const high = parseInt(mappedHex[1] ?? "0", 16);
+    const low = parseInt(mappedHex[2] ?? "0", 16);
+    const asInt = (((high << 16) | low) >>> 0);
+    return BLOCKED_CIDR_BLOCKS.some((block) => (asInt & block.mask) === block.base);
+  }
+
+  // Plain IPv4
+  const asInt = ipv4ToInt(lower);
   if (asInt === -1) return false; // not a parseable IPv4 address; not blocked
 
   return BLOCKED_CIDR_BLOCKS.some(

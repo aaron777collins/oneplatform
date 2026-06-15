@@ -76,6 +76,24 @@ export class SyncStateRepository {
     return result.rows[0] ?? null;
   }
 
+  async findByConnectorIds(connectorIds: string[]): Promise<Map<string, SyncStateRow>> {
+    const map = new Map<string, SyncStateRow>();
+    if (connectorIds.length === 0) return map;
+
+    const placeholders = connectorIds.map((_, i) => `$${i + 1}`).join(", ");
+    const result = await this.pool.query<SyncStateRow>(
+      `SELECT ${SYNC_STATE_COLUMNS}
+         FROM ingestion.sync_state
+        WHERE connector_id IN (${placeholders})`,
+      connectorIds,
+    );
+
+    for (const row of result.rows) {
+      map.set(row.connector_id, row);
+    }
+    return map;
+  }
+
   // Transitions the sync status. Returns null if the connector has no
   // sync_state row yet (caller should call upsert first).
   async updateStatus(

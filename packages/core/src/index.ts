@@ -156,6 +156,17 @@ export { encrypt, decrypt, loadMasterKey } from "./encryption.js";
 export { isServiceCallAllowed } from "./service-rbac.js";
 
 // ---------------------------------------------------------------------------
+// Cron expression validation
+// ---------------------------------------------------------------------------
+export { isValidCronExpression, cronExpressionSchema } from "./cron.js";
+
+// ---------------------------------------------------------------------------
+// Service token signing (Ed25519 JWT for inter-service auth)
+// ---------------------------------------------------------------------------
+export { createServiceTokenSigner, loadServicePrivateKey } from "./service-token.js";
+export type { ServiceTokenSigner } from "./service-token.js";
+
+// ---------------------------------------------------------------------------
 // Middleware (exported for services that need to compose custom stacks)
 // ---------------------------------------------------------------------------
 export { requestIdMiddleware } from "./middleware/request-id.js";

@@ -74,7 +74,11 @@ export function createRetentionService(
       const pageLimit = 100;
 
       do {
-        const page = await connectorRepo.list("", {
+        // Pass "*" for cross-tenant iteration — the repository contract treats
+        // both "" and "*" as "all tenants", but "*" is the explicit sentinel
+        // documented in ConnectorRepository.list() and avoids any ambiguity
+        // about an accidental empty-string tenant filter.
+        const page = await connectorRepo.list("*", {
           limit: pageLimit,
           sort: "createdAt",
           ...(cursor !== undefined ? { cursor } : {}),

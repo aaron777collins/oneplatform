@@ -143,6 +143,7 @@ function makeDeps(
     authServiceUrl: "http://auth-service",
     baseUrl:        "https://platform.example.com",
     logger:         overrides?.logger ?? makeLogger(),
+    serviceTokenSigner: { sign: async () => "mock-service-token" },
   };
 }
 

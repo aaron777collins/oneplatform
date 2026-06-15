@@ -1,6 +1,6 @@
 import type pg from "pg";
 import type { Redis } from "ioredis";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import type { MappingRuleRepository } from "../repositories/mapping-rule-repository.js";
 import type { MappingErrorRepository } from "../repositories/mapping-error-repository.js";
 import type { EntityRepository } from "../repositories/entity-repository.js";
@@ -19,6 +19,7 @@ export interface MappingServiceDeps {
   entityRepo: EntityRepository;
   fieldRepo: FieldRepository;
   executionServiceUrl?: string;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 export interface MapResult {
@@ -36,7 +37,7 @@ export interface MappingService {
 }
 
 export function createMappingService(deps: MappingServiceDeps): MappingService {
-  const { db, redis, logger, mappingRuleRepo, mappingErrorRepo, entityRepo, fieldRepo, executionServiceUrl } = deps;
+  const { db, redis, logger, mappingRuleRepo, mappingErrorRepo, entityRepo, fieldRepo, executionServiceUrl, serviceTokenSigner } = deps;
 
   return {
     async mapBatch(tenantId, connectorId, batchId, records) {
@@ -113,9 +114,16 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
                 // response so a timeout or non-ok reply does not silently corrupt data.
                 transformedValue = sourceValue;
                 try {
+                  // Sign every call to the internal execution endpoint.  Without
+                  // the service token the execution service will reject the request
+                  // with 401, so we fall back gracefully if no signer is wired.
+                  const serviceToken = serviceTokenSigner ? await serviceTokenSigner.sign() : undefined;
                   const response = await fetch(`${executionServiceUrl}/internal/execution/run`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...(serviceToken !== undefined ? { "X-Service-Token": serviceToken } : {}),
+                    },
                     body: JSON.stringify({
                       tenantId,
                       code: `(function(value, context) { return (${rule.transform}); })(value, context)`,

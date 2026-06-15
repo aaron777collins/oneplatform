@@ -14,6 +14,19 @@ interface LoginOpts { platform?: string; key?: string }
 interface GenerateKeyOpts { name: string; scopes: string; expires?: string }
 interface RotateKeyOpts { overlap?: string }
 
+const VALID_SCOPES = new Set([
+  "data:read", "data:write",
+  "ontology:read", "ontology:write",
+  "pipelines:read", "pipelines:trigger", "pipelines:manage",
+  "apps:read", "apps:deploy", "apps:manage",
+  "plugins:read", "plugins:manage",
+  "users:read", "users:manage",
+  "logs:read",
+  "webhooks:manage",
+  "execution:read", "execution:run",
+  "admin",
+]);
+
 async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> {
   const platformUrl = opts.platform ?? ctx.config.platformUrl;
   if (!platformUrl) {
@@ -40,12 +53,13 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
     // Interactive mode
     const email = await promptText("Email:");
     const pass = await promptPassword("Password:");
-    const resp = await ctx.http.post<{ apiKey: string; email: string }>(
+    // Auth service login returns { accessToken, user: { email } } — not apiKey.
+    const resp = await ctx.http.post<{ accessToken: string; user: { email: string } }>(
       "/api/v1/auth/login",
       { email, password: pass },
     );
-    apiKey = resp.apiKey;
-    ctx.renderer.success(`Logged in as ${resp.email} on ${platformUrl}`);
+    apiKey = resp.accessToken;
+    ctx.renderer.success(`Logged in as ${resp.user.email} on ${platformUrl}`);
   }
 
   // Persist the profile and encrypted credential
@@ -112,9 +126,18 @@ async function whoamiAction(_opts: Record<string, never>, ctx: CommandContext): 
 }
 
 async function generateKeyAction(opts: GenerateKeyOpts, ctx: CommandContext): Promise<void> {
+  const scopes = opts.scopes.split(",").map((s) => s.trim());
+  const invalid = scopes.filter((s) => !VALID_SCOPES.has(s));
+  if (invalid.length > 0) {
+    throw new CliError(
+      `Invalid scope(s): ${invalid.join(", ")}. Valid scopes: ${[...VALID_SCOPES].join(", ")}`,
+      EXIT.GENERAL,
+    );
+  }
+
   const body: Record<string, unknown> = {
     name: opts.name,
-    scopes: opts.scopes.split(",").map((s) => s.trim()),
+    scopes,
   };
   if (opts.expires) body["expiresAt"] = opts.expires;
 
@@ -198,7 +221,7 @@ export function registerAuth(program: Command): void {
   auth.command("generate-key")
     .description("Generate a new API key")
     .requiredOption("--name <name>", "Human-readable label for the key")
-    .requiredOption("--scopes <scopes>", "Comma-separated scope list")
+    .requiredOption("--scopes <scopes>", "Comma-separated scopes (valid: data:read, data:write, ontology:read, ontology:write, pipelines:read, pipelines:trigger, pipelines:manage, apps:read, apps:deploy, apps:manage, plugins:read, plugins:manage, users:read, users:manage, logs:read, webhooks:manage, execution:read, execution:run, admin)")
     .option("--expires <ISO-date>", "Expiry date (ISO 8601); omit for non-expiring key")
     .action(withContext<[GenerateKeyOpts]>(generateKeyAction));
 

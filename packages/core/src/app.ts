@@ -59,15 +59,12 @@ export function setupProcessErrorHandlers(logger?: {
 
   process.on("uncaughtException", (err: Error) => {
     logFatal("uncaughtException", err);
-    // Allow 5 s for any pending I/O (DB/Redis) to flush before hard exit.
     setTimeout(() => process.exit(1), GRACEFUL_SHUTDOWN_MS).unref();
-    process.exit(1);
   });
 
   process.on("unhandledRejection", (reason: unknown) => {
     logFatal("unhandledRejection", reason);
     setTimeout(() => process.exit(1), GRACEFUL_SHUTDOWN_MS).unref();
-    process.exit(1);
   });
 }
 

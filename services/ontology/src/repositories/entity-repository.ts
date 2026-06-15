@@ -9,6 +9,8 @@ export interface EntityRepository {
   updateOptimistic(id: string, tenantId: string, expectedVersion: number, data: UpdateEntityData): Promise<EntityRow | null>;
   bumpVersion(id: string): Promise<EntityRow | null>;
   softDelete(id: string, tenantId: string): Promise<boolean>;
+  hardDelete(id: string): Promise<boolean>;
+  findDeletedOlderThan(tenantId: string, days: number): Promise<EntityRow[]>;
   countDataRows(schemaName: string, entitySlug: string): Promise<number>;
 }
 
@@ -106,6 +108,24 @@ export function createEntityRepository(db: pg.Pool): EntityRepository {
         [id, tenantId],
       );
       return result.rowCount !== null && result.rowCount > 0;
+    },
+
+    async hardDelete(id) {
+      const result = await db.query(
+        `DELETE FROM ontology.entities WHERE id = $1`,
+        [id],
+      );
+      return result.rowCount !== null && result.rowCount > 0;
+    },
+
+    async findDeletedOlderThan(tenantId, days) {
+      const result = await db.query<EntityRow>(
+        `SELECT * FROM ontology.entities
+         WHERE tenant_id = $1 AND deleted_at IS NOT NULL AND deleted_at < now() - ($2 || ' days')::interval
+         ORDER BY deleted_at`,
+        [tenantId, String(days)],
+      );
+      return result.rows;
     },
 
     async countDataRows(schemaName, entitySlug) {

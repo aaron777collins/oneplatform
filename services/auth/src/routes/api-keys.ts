@@ -84,7 +84,7 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
   routes.delete("/api/v1/api-keys/:id", async (c) => {
     const id = c.req.param("id");
     const user = c.var.user;
-    await apiKeyService.revoke(id, user.userId);
+    await apiKeyService.revoke(id, user.userId, user.tenantId);
     return new Response(null, { status: 204 });
   });
 
@@ -92,7 +92,7 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
   routes.post("/api/v1/api-keys/:id/rotate", async (c) => {
     const id = c.req.param("id");
     const user = c.var.user;
-    const { apiKey, keyRecord } = await apiKeyService.rotate(id, user.userId);
+    const { apiKey, keyRecord } = await apiKeyService.rotate(id, user.userId, user.tenantId);
 
     return c.json({
       id: keyRecord.id,

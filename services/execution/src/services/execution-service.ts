@@ -25,6 +25,7 @@ import {
   ServiceDrainingError,
 } from "./errors.js";
 import type { UserContext } from "@oneplatform/core";
+import { ForbiddenError } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // ExecutionService — main orchestrator for execution lifecycle
@@ -163,6 +164,10 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     request: RunRequest,
     user: UserContext,
   ): Promise<RunExecutionResult> {
+    if (!user.scopes.includes("execution:run")) {
+      throw new ForbiddenError("Scope 'execution:run' is required.");
+    }
+
     const traceId = randomUUID();
     const codeHash = createHash("sha256").update(request.code).digest("hex");
 

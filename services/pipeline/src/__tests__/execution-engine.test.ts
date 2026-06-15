@@ -16,11 +16,15 @@ import type { PipelineDefinition } from "../services/pipeline-service.js";
 import type { Pool, PoolClient } from "pg";
 import type { Redis } from "ioredis";
 import type { Job } from "bullmq";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // Mock factory helpers
 // ---------------------------------------------------------------------------
+
+function makeServiceTokenSigner(): ServiceTokenSigner {
+  return { sign: vi.fn().mockResolvedValue("mock-service-token") };
+}
 
 function makeLogger(): Logger {
   return {
@@ -189,6 +193,7 @@ describe("advisory lock key derivation", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger: makeLogger(),
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
 
     expect(engine.processRun).toBeDefined();
@@ -230,6 +235,7 @@ describe("processRun — idempotency guards", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger,
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
   });
 
@@ -311,6 +317,7 @@ describe("processRun — advisory lock", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger,
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
   });
 
@@ -420,6 +427,7 @@ describe("processRun — successful code step execution", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger,
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
   });
 
@@ -545,6 +553,7 @@ describe("processRun — cancellation", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger,
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
   });
 
@@ -641,6 +650,7 @@ describe("processRun — step failure propagation", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger: makeLogger(),
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
   });
 
@@ -681,6 +691,7 @@ describe("execution engine — SSRF constants", () => {
       stepDefaultTimeoutMs: 30_000,
       hookDefaultTimeoutMs: 5_000,
       logger: makeLogger(),
+      serviceTokenSigner: makeServiceTokenSigner(),
     });
 
     expect(typeof engine.processRun).toBe("function");

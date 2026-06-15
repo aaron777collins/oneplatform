@@ -317,8 +317,27 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
           await client.query(
             `DELETE FROM ${targetTable} WHERE "_id" IN (SELECT "_id" FROM ${shadowTable})`,
           );
+
+          const targetColsResult = await client.query<{ column_name: string }>(
+            `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`,
+            [schemaName, entity.slug],
+          );
+          const shadowColsResult = await client.query<{ column_name: string }>(
+            `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`,
+            [batch.schema_name, batch.table_name],
+          );
+
+          const targetCols = new Set(targetColsResult.rows.map((r) => r.column_name));
+          const shadowCols = new Set(shadowColsResult.rows.map((r) => r.column_name));
+          const commonCols = [...targetCols].filter((c) => shadowCols.has(c));
+
+          if (commonCols.length === 0) {
+            throw new Error(`No common columns between ${targetTable} and ${shadowTable}`);
+          }
+
+          const columnList = commonCols.map((c) => quotePgIdentifier(c)).join(", ");
           await client.query(
-            `INSERT INTO ${targetTable} SELECT * FROM ${shadowTable}`,
+            `INSERT INTO ${targetTable} (${columnList}) SELECT ${columnList} FROM ${shadowTable}`,
           );
           await client.query("COMMIT");
           await shadowRegistryRepo.updateStatus(batch.id, "dropped");

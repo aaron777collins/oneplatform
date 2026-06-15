@@ -174,25 +174,21 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       }
       await redis.del(`auth:user-sessions:${id}`);
 
-      // 3. Add access token JTIs to the revocation blocklist.
-      // The blocklist TTL mirrors the JWT expiry so entries are self-cleaning.
+      // 3. Blocklist ALL access tokens for this user via a per-user revocation key.
+      // Access token JTIs are embedded in the JWT and not stored in the sessions
+      // table, so per-JTI blocklisting is not possible. Instead, the auth middleware
+      // checks revocation:user:{userId} — any active access token for this user
+      // will be rejected. TTL matches the max JWT lifetime so the entry self-cleans.
       const jwtExpirySeconds = parseInt(
         process.env["OP_JWT_EXPIRY_SECONDS"] ?? "900",
         10
       );
-      for (const session of activeSessionsResult.rows) {
-        if (session.refresh_token_jti !== null) {
-          // The refresh_token_jti stored on the session row is the JTI of the
-          // most-recently-issued access token for this session. Blocklisting it
-          // ensures the current access token is rejected on the next request.
-          await redis.set(
-            `revocation:${session.refresh_token_jti}`,
-            "1",
-            "EX",
-            jwtExpirySeconds
-          );
-        }
-      }
+      await redis.set(
+        `revocation:user:${id}`,
+        "1",
+        "EX",
+        jwtExpirySeconds
+      );
     }
 
     return c.json({

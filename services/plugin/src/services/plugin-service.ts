@@ -392,12 +392,37 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       }
     },
 
-    async activatePlugin(pluginId: string, _activatedBy: string): Promise<PluginRow> {
+    async activatePlugin(pluginId: string, activatedBy: string): Promise<PluginRow> {
       const plugin = await pluginRepo.findById(pluginId);
       if (plugin === null) {
         throw new PluginNotFoundError(`Plugin ${pluginId} not found`);
       }
-      return plugin;
+
+      // Transition installed → active (first activation) or staged → active (post-upgrade).
+      // If the plugin is already active, the update is a no-op and we return the current row.
+      const updated = await pluginRepo.update(pluginId, { status: "active" });
+      const activated = updated ?? plugin;
+
+      await eventPublisher.publish({
+        eventType: "plugin.activated",
+        eventVersion: "1.0.0",
+        tenantId: "00000000-0000-0000-0000-000000000000",
+        actor: { type: "user", id: activatedBy },
+        data: {
+          pluginId: activated.manifest_id,
+          pluginName: activated.name,
+          version: activated.version,
+          activatedBy,
+        },
+      });
+
+      logger.info("Plugin activated", {
+        manifestId: activated.manifest_id,
+        version: activated.version,
+        activatedBy,
+      });
+
+      return activated;
     },
 
     async uninstallPlugin({ id, confirmOrphan, uninstalledBy, ontologyServiceUrl }) {

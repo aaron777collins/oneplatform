@@ -10,6 +10,8 @@ import {
   createLogger,
   createApp,
   loadMasterKey,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -271,6 +273,9 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     logger,
   });
 
+  const privateKeyPem = await loadServicePrivateKey("app-service", serviceKeysDir);
+  const serviceTokenSigner = await createServiceTokenSigner("app-service", privateKeyPem);
+
   const deployService = createDeployService({
     appRepo,
     buildRepo,
@@ -279,6 +284,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     authServiceUrl,
     baseUrl,
     logger,
+    serviceTokenSigner,
   });
 
   const permService = createPermissionService({ appRepo, permRepo, logger, masterKey });
@@ -389,6 +395,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     masterKey,
     redis,
     logger,
+    serviceTokenSigner,
   });
   honoApp.route("/bff", bffRoutes);
 
@@ -441,13 +448,12 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
           );
         }
 
-        // Call Auth Service to issue a guest session token (W3 — include service token)
-        const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+        const guestServiceToken = await serviceTokenSigner.sign();
         const guestResponse = await fetch(`${authServiceUrl}/internal/auth/guest-sessions`, {
           method:  "POST",
           headers: {
             "Content-Type":    "application/json",
-            "X-Service-Token": serviceToken,
+            "X-Service-Token": guestServiceToken,
           },
           body: JSON.stringify({
             appId:    tenantApp.id,

@@ -3,13 +3,14 @@
 // Tests AES-256-GCM encryption round-trips, credential accessor lazy caching,
 // storeCredentials, getDecryptedCredential, and deleteByConnectorId.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { encrypt } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import {
   createCredentialService,
   type CredentialRepository,
   type CredentialRow,
+  type RotationResult,
 } from "../services/credential-service.js";
 import {
   CredentialNotFoundError,
@@ -51,6 +52,8 @@ interface MockCredRepo {
   findByConnectorId: MockFn;
   findByConnectorIdAndField: MockFn;
   deleteByConnectorId: MockFn;
+  updateKeyVersion: MockFn;
+  findOutstandingForRotation: MockFn;
 }
 
 function makeRepo(): MockCredRepo {
@@ -59,6 +62,8 @@ function makeRepo(): MockCredRepo {
     findByConnectorId: vi.fn(),
     findByConnectorIdAndField: vi.fn(),
     deleteByConnectorId: vi.fn(),
+    updateKeyVersion: vi.fn(),
+    findOutstandingForRotation: vi.fn(),
   };
 }
 
@@ -395,5 +400,120 @@ describe("createCredentialAccessor", () => {
     const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
     const accessor = svc.createCredentialAccessor("conn-1", MASTER_KEY);
     await expect(accessor.get("nonexistent")).rejects.toBeInstanceOf(CredentialNotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rotateCredentials
+// ---------------------------------------------------------------------------
+
+describe("rotateCredentials", () => {
+  let repo: MockCredRepo;
+  let logger: Logger;
+
+  const V2_KEY = Buffer.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"); // 32 bytes
+  const V2_KEY_B64 = V2_KEY.toString("base64");
+
+  beforeEach(() => {
+    repo = makeRepo();
+    logger = makeLogger();
+    process.env["OP_CREDENTIAL_KEY_V2"] = V2_KEY_B64;
+  });
+
+  afterEach(() => {
+    delete process.env["OP_CREDENTIAL_KEY_V2"];
+  });
+
+  it("returns zero counts when no outstanding credentials exist", async () => {
+    repo.findOutstandingForRotation.mockResolvedValue([]);
+
+    const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
+    const result = await svc.rotateCredentials(MASTER_KEY, 2);
+    expect(result).toEqual({ rotated: 0, skipped: 0, failed: 0 });
+  });
+
+  it("re-encrypts outstanding credentials and updates key version", async () => {
+    const plaintext = "rotate-me";
+    const blob = await encrypt(plaintext, MASTER_KEY);
+    const row = makeCredRow({
+      id: "cred-1",
+      encrypted_blob: blob,
+      key_version: 1,
+    });
+    repo.findOutstandingForRotation.mockResolvedValue([row]);
+    repo.updateKeyVersion.mockResolvedValue(true);
+
+    const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
+    const result = await svc.rotateCredentials(MASTER_KEY, 2);
+
+    expect(result.rotated).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.failed).toBe(0);
+
+    const updateCalls = repo.updateKeyVersion.mock.calls;
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0]?.[2]).toBe(2); // newKeyVersion
+    expect(updateCalls[0]?.[3]).toBe(1); // oldKeyVersion
+  });
+
+  it("counts skipped rows when updateKeyVersion returns false (concurrent rotation)", async () => {
+    const blob = await encrypt("value", MASTER_KEY);
+    const row = makeCredRow({ id: "cred-2", encrypted_blob: blob, key_version: 1 });
+    repo.findOutstandingForRotation.mockResolvedValue([row]);
+    repo.updateKeyVersion.mockResolvedValue(false);
+
+    const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
+    const result = await svc.rotateCredentials(MASTER_KEY, 2);
+
+    expect(result.rotated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.failed).toBe(0);
+  });
+
+  it("counts failed rows when decryption fails and continues", async () => {
+    const row = makeCredRow({
+      id: "cred-bad",
+      encrypted_blob: "aW52YWxpZGJsb2I=", // corrupted
+      key_version: 1,
+    });
+    repo.findOutstandingForRotation.mockResolvedValue([row]);
+
+    const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
+    const result = await svc.rotateCredentials(MASTER_KEY, 2);
+
+    expect(result.rotated).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(result.failed).toBe(1);
+    expect((logger.error as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
+
+  it("handles a mix of rotated, skipped, and failed credentials", async () => {
+    const goodBlob = await encrypt("good-value", MASTER_KEY);
+    const rows = [
+      makeCredRow({ id: "cred-ok", encrypted_blob: goodBlob, key_version: 1 }),
+      makeCredRow({ id: "cred-race", encrypted_blob: goodBlob, key_version: 1 }),
+      makeCredRow({ id: "cred-bad", encrypted_blob: "aW52YWxpZA==", key_version: 1 }),
+    ];
+    repo.findOutstandingForRotation.mockResolvedValue(rows);
+    repo.updateKeyVersion
+      .mockResolvedValueOnce(true)   // cred-ok succeeds
+      .mockResolvedValueOnce(false); // cred-race lost the race
+
+    const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
+    const result = await svc.rotateCredentials(MASTER_KEY, 2);
+
+    expect(result.rotated).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.failed).toBe(1);
+  });
+
+  it("logs completion summary after rotation", async () => {
+    repo.findOutstandingForRotation.mockResolvedValue([]);
+
+    const svc = createCredentialService({ credentialRepo: asRepo(repo), logger });
+    await svc.rotateCredentials(MASTER_KEY, 2);
+
+    const infoCalls = (logger.info as ReturnType<typeof vi.fn>).mock.calls;
+    expect(infoCalls.length).toBeGreaterThan(0);
   });
 });

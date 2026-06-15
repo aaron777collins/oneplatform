@@ -39,7 +39,32 @@ export interface AuthMiddlewareConfig {
  */
 export function authMiddleware(config: AuthMiddlewareConfig) {
   const secretBytes = new TextEncoder().encode(config.jwtSecret);
-  const publicRouteSet = new Set(config.publicRoutes ?? []);
+  const exactPublicRoutes = new Set<string>();
+  const prefixPublicRoutes: string[] = [];
+
+  for (const route of config.publicRoutes ?? []) {
+    const normalized = route.endsWith("/") && route.length > 1
+      ? route.slice(0, -1)
+      : route;
+    if (normalized.includes(":")) {
+      // Strip the trailing `/:paramName` segment(s) to get the prefix.
+      const prefix = normalized.replace(/\/:[^/]+/g, "");
+      prefixPublicRoutes.push(prefix);
+    } else {
+      exactPublicRoutes.add(normalized);
+    }
+  }
+
+  function isPublicRoute(rawPath: string): boolean {
+    const path = rawPath.endsWith("/") && rawPath.length > 1
+      ? rawPath.slice(0, -1)
+      : rawPath;
+    if (exactPublicRoutes.has(path)) return true;
+    for (const prefix of prefixPublicRoutes) {
+      if (path === prefix || path.startsWith(prefix + "/")) return true;
+    }
+    return false;
+  }
 
   return createMiddleware(async (c, next) => {
     const path = new URL(c.req.url).pathname;
@@ -51,7 +76,7 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
     // /internal/* routes are protected by serviceAuthMiddleware (Ed25519 JWT) which
     // runs as the next middleware layer in createApp(). They still pass through here,
     // but serviceAuthMiddleware will enforce the service token before any handler runs.
-    if (publicRouteSet.has(path)) {
+    if (isPublicRoute(path)) {
       await next();
       return;
     }
@@ -84,8 +109,12 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       }
 
       // Check Redis revocation blocklist — every request, O(1) (spec §4 JWT Strategy)
-      const revoked = await config.redis.exists(`revocation:${claims.jti}`);
-      if (revoked) {
+      // Two blocklist levels: per-token (logout) and per-user (deactivation/password reset).
+      const [tokenRevoked, userRevoked] = await Promise.all([
+        config.redis.exists(`revocation:${claims.jti}`),
+        config.redis.exists(`revocation:user:${claims.sub}`),
+      ]);
+      if (tokenRevoked || userRevoked) {
         return c.json(
           { error: { code: "UNAUTHORIZED", message: "Token has been revoked.", requestId } },
           401
