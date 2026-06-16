@@ -57,17 +57,47 @@ export interface PipelineRun {
   readonly error: { message: string; code: string } | null;
 }
 
+export interface PipelineDefinition {
+  readonly version: 1;
+  readonly entryStepId: string;
+  readonly steps: readonly PipelineStep[];
+  readonly options?: {
+    readonly maxConcurrentRuns?: number;
+    readonly allowConcurrentRuns?: boolean;
+    readonly stepTimeout?: number;
+    readonly retainRunsCount?: number;
+  };
+}
+
+export interface PipelineStep {
+  readonly id: string;
+  readonly name: string;
+  readonly type: 'code' | 'connector' | 'transformer' | 'conditional' | 'parallel' | 'webhook';
+  readonly inputs?: Record<string, PipelineInputSource>;
+  readonly onError?: 'fail' | 'skip';
+  readonly condition?: string;
+  readonly timeout?: number;
+  readonly [key: string]: unknown;
+}
+
+export type PipelineInputSource =
+  | { readonly from: 'pipeline.input'; readonly path?: string }
+  | { readonly from: 'step'; readonly stepId: string; readonly path?: string }
+  | { readonly from: 'literal'; readonly value: unknown };
+
 export interface CreatePipelineRequest {
   readonly name: string;
+  readonly slug?: string;
   readonly description?: string;
-  readonly trigger: PipelineTrigger;
+  readonly definition: PipelineDefinition;
+  readonly isActive?: boolean;
 }
 
 export interface UpdatePipelineRequest {
   readonly name?: string;
   readonly description?: string;
-  readonly trigger?: PipelineTrigger;
-  readonly status?: Pipeline['status'];
+  readonly definition?: PipelineDefinition;
+  readonly isActive?: boolean;
 }
 
 // --- Connectors ---
@@ -188,22 +218,31 @@ export interface MigrationStatus {
 
 export interface App {
   readonly id: string;
+  readonly tenantId: string;
   readonly name: string;
+  readonly slug: string;
   readonly description: string | null;
-  readonly status: 'active' | 'inactive';
+  readonly accessMode: 'platform-user' | 'public';
+  readonly currentBuildId: string | null;
+  readonly allowedModules: string[];
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly createdBy: string;
 }
 
 export interface CreateAppRequest {
   readonly name: string;
+  readonly slug: string;
   readonly description?: string;
+  readonly accessMode?: 'platform-user' | 'public';
 }
 
 export interface UpdateAppRequest {
   readonly name?: string;
+  readonly slug?: string;
   readonly description?: string;
-  readonly status?: App['status'];
+  readonly accessMode?: 'platform-user' | 'public';
+  readonly allowedModules?: string[];
 }
 
 // --- Plugins ---

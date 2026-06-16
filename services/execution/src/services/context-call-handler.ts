@@ -405,7 +405,10 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     executionCtx: ExecutionContext,
   ): Promise<unknown> {
     const key = typeof args[0] === "string" ? args[0] : null;
-    if (key === null || executionCtx.pluginId === undefined) return null;
+    if (key === null) return null;
+    if (executionCtx.pluginId === undefined) {
+      throw new Error("cache.get() requires a pluginId in the execution context");
+    }
 
     const url = `${pluginServiceUrl}/internal/plugins/cache/${encodeURIComponent(executionCtx.tenantId)}/${encodeURIComponent(executionCtx.pluginId)}/${encodeURIComponent(key)}`;
     const response = await fetch(url, { headers: authHeaders });
@@ -420,7 +423,10 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     executionCtx: ExecutionContext,
   ): Promise<void> {
     const key = typeof args[0] === "string" ? args[0] : null;
-    if (key === null || executionCtx.pluginId === undefined) return;
+    if (key === null) return;
+    if (executionCtx.pluginId === undefined) {
+      throw new Error("cache.set() requires a pluginId in the execution context");
+    }
 
     const value = args[1];
     const ttlSeconds = typeof args[2] === "number" ? args[2] : undefined;
@@ -441,7 +447,10 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     executionCtx: ExecutionContext,
   ): Promise<void> {
     const key = typeof args[0] === "string" ? args[0] : null;
-    if (key === null || executionCtx.pluginId === undefined) return;
+    if (key === null) return;
+    if (executionCtx.pluginId === undefined) {
+      throw new Error("cache.delete() requires a pluginId in the execution context");
+    }
 
     const url = `${pluginServiceUrl}/internal/plugins/cache/${encodeURIComponent(executionCtx.tenantId)}/${encodeURIComponent(executionCtx.pluginId)}/${encodeURIComponent(key)}`;
     await fetch(url, { method: "DELETE", headers: authHeaders });

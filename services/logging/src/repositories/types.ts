@@ -3,6 +3,7 @@
 
 export interface LogEventRow {
   id: string;
+  tenant_id: string;
   trace_id: string;
   service: string;
   level: "debug" | "info" | "warn" | "error";
@@ -32,6 +33,7 @@ export interface AuditEventRow {
 // ---------------------------------------------------------------------------
 
 export interface CreateLogEventData {
+  tenantId: string;
   traceId: string;
   service: string;
   level: "debug" | "info" | "warn" | "error";

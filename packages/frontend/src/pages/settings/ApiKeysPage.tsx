@@ -108,6 +108,28 @@ const AVAILABLE_SCOPES = [
   "admin",
 ];
 
+const SCOPE_DESCRIPTIONS: Record<string, string> = {
+  "data:read": "Read data records, query datasets",
+  "data:write": "Create, update, and delete data records",
+  "ontology:read": "View object types, link types, and schemas",
+  "ontology:write": "Create and modify object types and schemas",
+  "pipelines:read": "View pipeline definitions and run history",
+  "pipelines:trigger": "Trigger pipeline executions",
+  "pipelines:manage": "Create, update, and delete pipelines",
+  "apps:read": "View application configurations",
+  "apps:deploy": "Deploy applications",
+  "apps:manage": "Create, update, and delete applications",
+  "plugins:read": "View installed plugins",
+  "plugins:manage": "Install, update, and remove plugins",
+  "users:read": "View user profiles and team members",
+  "users:manage": "Invite, update roles, and remove users",
+  "logs:read": "View audit logs and system events",
+  "webhooks:manage": "Create, update, and delete webhooks",
+  "execution:read": "View sandbox execution results and logs",
+  "execution:run": "Execute code in sandboxed environments",
+  "admin": "Full administrative access to all platform features",
+};
+
 // ---------------------------------------------------------------------------
 // ApiKeysPage component
 // ---------------------------------------------------------------------------
@@ -188,12 +210,12 @@ export function ApiKeysPage() {
 
   const rotateMutation = useMutation({
     mutationFn: (keyId: string) =>
-      client.post<{ id: string; key: string; keyPrefix: string; scopes: string[]; createdAt: string }>(
+      client.post<{ data: { id: string; key: string; keyPrefix: string; scopes: string[]; createdAt: string } }>(
         `/v1/api-keys/${keyId}/rotate`,
       ),
     onSuccess: (response) => {
       setRotateTarget(null);
-      setRotatedKey(response.key);
+      setRotatedKey(response.data.key);
       void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
     },
     onError: (error) => {
@@ -377,16 +399,23 @@ export function ApiKeysPage() {
 
                 <fieldset>
                   <legend className="mb-2 text-sm font-medium">Scopes</legend>
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                     {AVAILABLE_SCOPES.map((scope) => (
-                      <label key={scope} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <label key={scope} className="flex cursor-pointer items-start gap-2 text-sm">
                         <input
                           type="checkbox"
                           checked={selectedScopes.includes(scope)}
                           onChange={() => toggleScope(scope)}
-                          className="h-4 w-4 rounded border-[var(--color-input)] accent-[var(--color-primary)]"
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-[var(--color-input)] accent-[var(--color-primary)]"
                         />
-                        <code className="font-mono text-xs">{scope}</code>
+                        <div className="min-w-0">
+                          <code className="font-mono text-xs">{scope}</code>
+                          {SCOPE_DESCRIPTIONS[scope] !== undefined && (
+                            <p className="text-xs text-[var(--color-muted-foreground)] leading-tight">
+                              {SCOPE_DESCRIPTIONS[scope]}
+                            </p>
+                          )}
+                        </div>
                       </label>
                     ))}
                   </div>
@@ -476,7 +505,7 @@ export function ApiKeysPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 rounded-md bg-[var(--color-muted)] px-3 py-2">
                 <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                  {showRotatedKey ? rotatedKey : "op_" + "•".repeat(rotatedKey.length - 3)}
+                  {showRotatedKey ? rotatedKey : "op_" + "•".repeat(Math.max(0, rotatedKey.length - 3))}
                 </code>
                 <button
                   type="button"

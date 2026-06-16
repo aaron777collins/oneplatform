@@ -83,19 +83,22 @@ fi
 # approach. Using 'sleep 2' would be unreliable on large datasets.
 echo "[backup] Backing up Redis..."
 
-BEFORE_SAVE=$(docker compose exec -T redis redis-cli LASTSAVE 2>/dev/null | tr -d '[:space:]')
+REDIS_ADMIN_PW=$(docker compose exec -T redis cat /data/init/redis_password_admin.txt 2>/dev/null | tr -d '[:space:]')
+REDIS_AUTH=(--user op_admin -a "${REDIS_ADMIN_PW}")
+
+BEFORE_SAVE=$(docker compose exec -T redis redis-cli "${REDIS_AUTH[@]}" LASTSAVE 2>/dev/null | tr -d '[:space:]')
 if [ -z "${BEFORE_SAVE}" ]; then
   echo "[backup] ERROR: Could not read Redis LASTSAVE timestamp. Is Redis running?" >&2
   exit 1
 fi
 
-docker compose exec -T redis redis-cli BGSAVE > /dev/null
+docker compose exec -T redis redis-cli "${REDIS_AUTH[@]}" BGSAVE > /dev/null
 echo "[backup] Waiting for Redis BGSAVE to complete (polling LASTSAVE)..."
 
 SAVE_COMPLETE=0
 # Poll up to 60 seconds with 1-second intervals.
 for i in $(seq 1 60); do
-  AFTER_SAVE=$(docker compose exec -T redis redis-cli LASTSAVE 2>/dev/null | tr -d '[:space:]')
+  AFTER_SAVE=$(docker compose exec -T redis redis-cli "${REDIS_AUTH[@]}" LASTSAVE 2>/dev/null | tr -d '[:space:]')
   if [ "${AFTER_SAVE}" != "${BEFORE_SAVE}" ]; then
     echo "[backup] BGSAVE complete (LASTSAVE: ${BEFORE_SAVE} → ${AFTER_SAVE})"
     SAVE_COMPLETE=1

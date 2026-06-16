@@ -11,7 +11,7 @@ import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, NotFoundError } from "@oneplatform/core";
 import type { AuthService } from "../services/index.js";
 import type { TokenService } from "../services/token-service.js";
-import type { UserRepository } from "../repositories/index.js";
+import type { UserRepository, TenantRepository } from "../repositories/index.js";
 import {
   registerRequest,
   loginRequest,
@@ -25,11 +25,12 @@ export interface AuthRouteDeps {
   authService: AuthService;
   tokenService: TokenService;
   userRepository: UserRepository;
+  tenantRepository: TenantRepository;
 }
 
 export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { authService, tokenService, userRepository } = deps;
+  const { authService, tokenService, userRepository, tenantRepository } = deps;
 
   // POST /api/v1/auth/register — public
   routes.post("/api/v1/auth/register", async (c) => {
@@ -97,12 +98,13 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
     if (!found) {
       throw new NotFoundError("User not found.");
     }
+    const tenant = await tenantRepository.findById(found.tenant_id);
     return c.json({
       id: found.id,
       email: found.email,
       displayName: found.display_name ?? "",
       tenantId: found.tenant_id,
-      tenantName: found.tenant_id,
+      tenantName: tenant?.name ?? found.tenant_id,
       roles: found.roles,
     });
   });

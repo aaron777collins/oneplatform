@@ -510,7 +510,7 @@ describe("contextCallHandler — cache operations", () => {
     expect(response.result).toBeNull();
   });
 
-  it("cache.get returns null when no pluginId in context", async () => {
+  it("cache.get returns error when no pluginId in context", async () => {
     const handler = createContextCallHandler(makeDeps());
     const ctx = makeCtx({});
 
@@ -518,7 +518,8 @@ describe("contextCallHandler — cache operations", () => {
       makeRequest("cache.get", ["my-key"]),
       ctx,
     );
-    expect(response.result).toBeNull();
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain("pluginId");
   });
 
   it("cache.get fetches from plugin service when key and pluginId are present", async () => {

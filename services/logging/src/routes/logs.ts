@@ -12,6 +12,7 @@ const EXPORT_MAX_WINDOW_DAYS = (): number =>
 function mapRow(row: LogEventRow) {
   return {
     id: row.id,
+    tenantId: row.tenant_id,
     traceId: row.trace_id,
     service: row.service,
     level: row.level,

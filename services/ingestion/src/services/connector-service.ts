@@ -354,51 +354,10 @@ export function createConnectorService(
     tenantId: string,
     query: ListConnectorsOptions,
   ): Promise<ConnectorListResult> {
-    // Apply plugin filter at the DB level when specified.
-    let connectorRows: ConnectorRow[];
-
-    if (query.filterPluginId !== undefined) {
-      // The repo has findByPluginId — filter to this tenant's connectors.
-      const byPlugin = await connectorRepo.findByPluginId(query.filterPluginId);
-      connectorRows = tenantId === "*"
-        ? byPlugin
-        : byPlugin.filter((c) => c.tenant_id === tenantId);
-    } else {
-      connectorRows = await connectorRepo.findByTenantId(tenantId, {
-        ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
-        limit: query.limit,
-      });
-    }
-
-    // Apply status filter in-process (the repo doesn't have a filterStatus param).
-    if (query.filterStatus !== undefined) {
-      const wantEnabled = query.filterStatus === "enabled";
-      connectorRows = connectorRows.filter((c) => c.is_enabled === wantEnabled);
-    }
-
-    // Batch-fetch sync state for all connectors in a single query.
-    const connectorIds = connectorRows.map((c) => c.id);
-    const syncStateMap = await syncStateRepo.findByConnectorIds(connectorIds);
-
-    const items: ConnectorWithSyncState[] = [];
-    for (const connector of connectorRows) {
-      let syncState = syncStateMap.get(connector.id);
-      if (syncState === undefined) {
-        logger.warn("sync_state missing for connector — synthesising default", {
-          connectorId: connector.id,
-        });
-        syncState = await syncStateRepo.upsert({ connector_id: connector.id, sync_mode: connector.sync_mode });
-      }
-      items.push({ connector, syncState });
-    }
-
-    const total = await connectorRepo.countByTenantId(tenantId);
-    const nextCursor =
-      connectorRows.length === query.limit
-        ? (connectorRows[connectorRows.length - 1]?.id ?? null)
-        : null;
-
-    return { items, data: items, nextCursor, total };
+    // Use the repo's list() method for all code paths so that pluginId
+    // filtering, status filtering, and pagination all happen at the SQL level.
+    // The repo JOIN already includes sync_state, so no separate fetch is needed.
+    return connectorRepo.list(tenantId, query);
   }
 
   // -------------------------------------------------------------------------

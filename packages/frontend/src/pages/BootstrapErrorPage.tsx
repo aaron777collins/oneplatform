@@ -76,7 +76,7 @@ export function BootstrapErrorPage() {
             <span>
               <strong className="text-[var(--color-foreground)]">Check the gateway port.</strong>{" "}
               The API gateway should be reachable at port 3000 by default.
-              Try <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">curl http://localhost:3000/health</code>.
+              Try <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">curl http://localhost:3000/healthz</code>.
             </span>
           </li>
           <li className="flex gap-2">
@@ -91,7 +91,7 @@ export function BootstrapErrorPage() {
             <span className="shrink-0 font-mono text-xs font-semibold text-[var(--color-foreground)]">4.</span>
             <span>
               <strong className="text-[var(--color-foreground)]">Check your .env file.</strong>{" "}
-              Ensure <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">OP_GATEWAY_PORT</code>{" "}
+              Ensure the API gateway is running on port 3000
               and database connection strings are set correctly.
             </span>
           </li>

@@ -90,7 +90,7 @@ export function ProfilePage() {
 
   const updateProfileMutation = useMutation({
     mutationFn: (values: ProfileValues) =>
-      client.patch(`/v1/auth/users/${userId}`, values),
+      client.put(`/v1/users/${userId}`, { displayName: values.displayName }),
     onSuccess: () => {
       toast({ title: "Profile updated" });
     },
@@ -147,8 +147,11 @@ export function ProfilePage() {
                   <FormItem>
                     <FormLabel>Email address</FormLabel>
                     <FormControl>
-                      <Input type="email" autoComplete="email" {...field} />
+                      <Input type="email" autoComplete="email" {...field} disabled />
                     </FormControl>
+                    <p className="text-xs text-[var(--color-muted-foreground)]">
+                      Email address cannot be changed.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

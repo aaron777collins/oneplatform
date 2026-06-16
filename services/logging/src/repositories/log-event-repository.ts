@@ -53,6 +53,7 @@ export class LogEventRepository {
   async insertBatch(events: CreateLogEventData[]): Promise<void> {
     if (events.length === 0) return;
 
+    const tenantIds = events.map((e) => e.tenantId);
     const traceIds = events.map((e) => e.traceId);
     const services = events.map((e) => e.service);
     const levels = events.map((e) => e.level);
@@ -62,15 +63,16 @@ export class LogEventRepository {
 
     await this.db.query(
       `INSERT INTO logging.events
-         (trace_id, service, level, message, metadata, created_at)
+         (tenant_id, trace_id, service, level, message, metadata, created_at)
        SELECT
-         unnest($1::text[])        AS trace_id,
-         unnest($2::text[])        AS service,
-         unnest($3::text[])        AS level,
-         unnest($4::text[])        AS message,
-         unnest($5::jsonb[])       AS metadata,
-         unnest($6::timestamptz[]) AS created_at`,
-      [traceIds, services, levels, messages, metadatas, createdAts]
+         unnest($1::text[])        AS tenant_id,
+         unnest($2::text[])        AS trace_id,
+         unnest($3::text[])        AS service,
+         unnest($4::text[])        AS level,
+         unnest($5::text[])        AS message,
+         unnest($6::jsonb[])       AS metadata,
+         unnest($7::timestamptz[]) AS created_at`,
+      [tenantIds, traceIds, services, levels, messages, metadatas, createdAts]
     );
   }
 
@@ -135,7 +137,7 @@ export class LogEventRepository {
       conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const sql = `
-      SELECT id, trace_id, service, level, message, metadata, created_at
+      SELECT id, tenant_id, trace_id, service, level, message, metadata, created_at
       FROM logging.events
       ${whereClause} ${cursorClause}
       ORDER BY created_at DESC, id DESC
@@ -230,7 +232,7 @@ export class LogEventRepository {
     const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
     const sql = `
-      SELECT id, trace_id, service, level, message, metadata, created_at
+      SELECT id, tenant_id, trace_id, service, level, message, metadata, created_at
       FROM logging.events
       ${whereClause} ${keysetClause}
       ORDER BY created_at ASC, id ASC

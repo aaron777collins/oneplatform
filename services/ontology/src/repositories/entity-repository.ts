@@ -121,16 +121,21 @@ export function createEntityRepository(db: pg.Pool): EntityRepository {
     async findDeletedOlderThan(tenantId, days) {
       const result = await db.query<EntityRow>(
         `SELECT * FROM ontology.entities
-         WHERE tenant_id = $1 AND deleted_at IS NOT NULL AND deleted_at < now() - ($2 || ' days')::interval
+         WHERE tenant_id = $1 AND deleted_at IS NOT NULL AND deleted_at < now() - ($2::int * interval '1 day')
          ORDER BY deleted_at`,
-        [tenantId, String(days)],
+        [tenantId, days],
       );
       return result.rows;
     },
 
     async countDataRows(schemaName, entitySlug) {
+      // Escape embedded double quotes to prevent SQL injection via identifier
+      // interpolation. PostgreSQL's quoted-identifier syntax requires doubling
+      // any literal double-quote character inside the delimiters.
+      const safeSchema = schemaName.replace(/"/g, '""');
+      const safeSlug = entitySlug.replace(/"/g, '""');
       const result = await db.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM "${schemaName}"."${entitySlug}"`,
+        `SELECT COUNT(*)::text AS count FROM "${safeSchema}"."${safeSlug}"`,
       );
       return parseInt(result.rows[0]!["count"], 10);
     },

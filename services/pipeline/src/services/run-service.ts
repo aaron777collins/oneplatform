@@ -54,7 +54,7 @@ export interface RunRepository {
   create(data: RunCreateInput): Promise<RunRow>;
   findById(id: string): Promise<RunRow | null>;
   findByTenantAndId(tenantId: string, id: string): Promise<RunRow | null>;
-  findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number; filterStatus?: RunRow["status"] }): Promise<RunRow[]>;
+  findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number; filterStatus?: RunRow["status"]; pipelineId?: string }): Promise<RunRow[]>;
   updateStatus(id: string, data: RunUpdateInput): Promise<RunRow | null>;
   countActiveByPipelineId(pipelineId: string): Promise<number>;
 }
@@ -273,6 +273,7 @@ export function createRunService(deps: RunServiceDeps): RunService {
       ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
       limit: query.limit,
       ...(query.filterStatus !== undefined ? { filterStatus: query.filterStatus } : {}),
+      ...(query.pipelineId !== undefined ? { pipelineId: query.pipelineId } : {}),
     });
 
     const nextCursor = rows.length === query.limit

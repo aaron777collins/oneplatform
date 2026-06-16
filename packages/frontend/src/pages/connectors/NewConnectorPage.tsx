@@ -21,6 +21,14 @@ import type { ConnectorConfigSchema } from "@/components/connectors/ConnectorFor
 
 type Step = "choose-type" | "configure" | "test" | "done";
 
+interface PluginEntry {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  configSchema?: ConnectorConfigSchema | null;
+}
+
 interface ConnectorTypeOption {
   id: string;
   name: string;
@@ -99,19 +107,30 @@ export function NewConnectorPage() {
   const [testError, setTestError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  // Fetch available connector types from the plugin registry
+  // Fetch available connector plugins from the plugin registry
   const { data: typesData, isLoading: typesLoading } = useQuery({
-    queryKey: ["connector-types"],
-    queryFn: () => client.get<{ data: ConnectorTypeOption[] }>("/v1/connectors/types"),
+    queryKey: ["connector-plugins"],
+    queryFn: async () => {
+      const result = await client.get<{ data: PluginEntry[] }>("/v1/plugins", { type: "connector" });
+      // Map plugin entries to ConnectorTypeOption shape
+      const options: ConnectorTypeOption[] = (result.data ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        configSchema: p.configSchema ?? { type: "object" as const, properties: {} },
+      }));
+      return { data: options };
+    },
   });
 
   const createConnector = useMutation({
-    mutationFn: (body: { typeId: string; config: ConnectorFormValues }) =>
+    mutationFn: (body: { pluginId: string; name: string; config: ConnectorFormValues; credentials?: Record<string, unknown> }) =>
       client.post<ApiResponse<CreatedConnector>>("/v1/connectors", body),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ["connectors"] });
       setCreatedId(result.data.id);
-      setCurrentStep("done");
+      // After creation, test the connection
+      void testAfterCreate(result.data.id);
     },
     onError: (err) => {
       const message = err instanceof ApiError ? err.message : "Failed to create connector";
@@ -127,31 +146,48 @@ export function NewConnectorPage() {
   }
 
   async function handleConfigureSubmit(values: ConnectorFormValues) {
+    if (selectedType === null) return;
     setFormValues(values);
     setCurrentStep("test");
-    await runTest(values);
+    setTestStatus("testing");
+    setTestError(null);
+    // Create the connector first, then test it
+    const connectorName = typeof values["name"] === "string" ? values["name"] : selectedType.name;
+    createConnector.mutate({
+      pluginId: selectedType.id,
+      name: connectorName,
+      config: values,
+    });
   }
 
-  async function runTest(values: ConnectorFormValues) {
-    if (selectedType === null) return;
+  async function testAfterCreate(connectorId: string) {
     setTestStatus("testing");
     setTestError(null);
     try {
-      await client.post(`/v1/connectors/test`, {
-        typeId: selectedType.id,
-        config: values,
-      });
+      await client.post(`/v1/connectors/${connectorId}/test`);
+      setTestStatus("success");
+      setCurrentStep("done");
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Connection test failed";
+      setTestStatus("failed");
+      setTestError(message);
+      // Still go to done since the connector was created
+      setCurrentStep("done");
+    }
+  }
+
+  async function retryTest() {
+    if (createdId === null) return;
+    setTestStatus("testing");
+    setTestError(null);
+    try {
+      await client.post(`/v1/connectors/${createdId}/test`);
       setTestStatus("success");
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Connection test failed";
       setTestStatus("failed");
       setTestError(message);
     }
-  }
-
-  function handleSave() {
-    if (selectedType === null || formValues === null) return;
-    createConnector.mutate({ typeId: selectedType.id, config: formValues });
   }
 
   const connectorTypes = typesData?.data ?? [];
@@ -247,19 +283,21 @@ export function NewConnectorPage() {
           </div>
         )}
 
-        {/* Step 3: Test connection */}
+        {/* Step 3: Creating & testing connection */}
         {currentStep === "test" && (
           <div className="max-w-md space-y-4">
-            <h2 className="text-base font-semibold">Test connection</h2>
+            <h2 className="text-base font-semibold">Creating and testing connection</h2>
 
             <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] p-4">
-              {testStatus === "testing" && (
+              {(testStatus === "testing" || createConnector.isPending) && (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" aria-hidden />
-                  <p className="text-sm">Testing connection…</p>
+                  <p className="text-sm">
+                    {createConnector.isPending ? "Creating connector…" : "Testing connection…"}
+                  </p>
                 </>
               )}
-              {testStatus === "success" && (
+              {testStatus === "success" && !createConnector.isPending && (
                 <>
                   <CheckCircle2 className="h-5 w-5 text-[var(--color-status-success)]" aria-hidden />
                   <p className="text-sm font-medium text-[var(--color-status-success)]">
@@ -267,45 +305,24 @@ export function NewConnectorPage() {
                   </p>
                 </>
               )}
-              {testStatus === "failed" && (
+              {testStatus === "failed" && !createConnector.isPending && (
                 <>
                   <XCircle className="h-5 w-5 text-[var(--color-destructive)]" aria-hidden />
                   <div>
                     <p className="text-sm font-medium text-[var(--color-destructive)]">
-                      Connection failed
+                      Connection test failed
                     </p>
                     {testError !== null && (
                       <p className="mt-0.5 text-xs text-[var(--color-muted-foreground)]">
                         {testError}
                       </p>
                     )}
+                    <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+                      The connector was created but the connection test did not pass. You can retry the test or check the connector settings.
+                    </p>
                   </div>
                 </>
               )}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setCurrentStep("configure")}
-              >
-                Back
-              </Button>
-              {testStatus === "failed" && formValues !== null && (
-                <Button
-                  variant="outline"
-                  onClick={() => void runTest(formValues)}
-                >
-                  Retry test
-                </Button>
-              )}
-              <Button
-                onClick={handleSave}
-                disabled={testStatus === "testing" || createConnector.isPending}
-                aria-busy={createConnector.isPending}
-              >
-                {createConnector.isPending ? "Saving…" : "Save connector"}
-              </Button>
             </div>
           </div>
         )}
@@ -313,13 +330,36 @@ export function NewConnectorPage() {
         {/* Step 4: Done */}
         {currentStep === "done" && (
           <div className="max-w-md space-y-4">
-            <div className="flex items-center gap-3 rounded-md border border-[var(--color-status-success)]/30 bg-[var(--color-status-success)]/10 p-4">
-              <CheckCircle2 className="h-5 w-5 text-[var(--color-status-success)]" aria-hidden />
+            <div className={`flex items-center gap-3 rounded-md border p-4 ${
+              testStatus === "success"
+                ? "border-[var(--color-status-success)]/30 bg-[var(--color-status-success)]/10"
+                : "border-[var(--color-border)]"
+            }`}>
+              {testStatus === "success" ? (
+                <CheckCircle2 className="h-5 w-5 text-[var(--color-status-success)]" aria-hidden />
+              ) : testStatus === "testing" ? (
+                <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" aria-hidden />
+              ) : (
+                <XCircle className="h-5 w-5 text-[var(--color-destructive)]" aria-hidden />
+              )}
               <div>
                 <p className="text-sm font-medium">Connector created</p>
-                <p className="text-xs text-[var(--color-muted-foreground)]">
-                  Your connector is ready to use.
-                </p>
+                {testStatus === "success" && (
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    Your connector is ready to use. Connection test passed.
+                  </p>
+                )}
+                {testStatus === "testing" && (
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    Testing connection…
+                  </p>
+                )}
+                {testStatus === "failed" && (
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    Connector was created but the connection test failed.
+                    {testError !== null && ` ${testError}`}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2">
@@ -329,6 +369,22 @@ export function NewConnectorPage() {
                 >
                   View connector
                 </Button>
+              )}
+              {testStatus === "failed" && createdId !== null && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => void retryTest()}
+                  >
+                    Retry test
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void navigate({ to: "/connectors/$id", params: { id: createdId } })}
+                  >
+                    Edit settings
+                  </Button>
+                </>
               )}
               <Button
                 variant="outline"

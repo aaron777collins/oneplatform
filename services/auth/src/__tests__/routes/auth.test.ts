@@ -7,7 +7,7 @@ import type { AppVariables, UserContext } from "@oneplatform/core";
 import { errorHandlerMiddleware, ConflictError, UnauthorizedError } from "@oneplatform/core";
 import type { AuthService } from "../../services/index.js";
 import type { TokenService } from "../../services/token-service.js";
-import type { UserRepository } from "../../repositories/index.js";
+import type { UserRepository, TenantRepository } from "../../repositories/index.js";
 import { createAuthRoutes } from "../../routes/auth.js";
 import {
   AccountLockedError,
@@ -70,10 +70,17 @@ function buildApp(
     });
   }
 
+  const mockTenantRepository = {
+    findById: vi.fn().mockResolvedValue({ id: "tenant-1", name: "Test Tenant" }),
+    findBySlug: vi.fn().mockResolvedValue(null),
+    create: vi.fn(),
+  } as unknown as TenantRepository;
+
   const routes = createAuthRoutes({
     authService,
     tokenService,
     userRepository: userRepository ?? makeUserRepository(),
+    tenantRepository: mockTenantRepository,
   });
   app.route("/", routes);
   return app;

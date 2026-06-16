@@ -323,6 +323,12 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
       // Stream the file from MinIO line-by-line rather than buffering the
       // entire file in memory — this keeps peak heap usage proportional to a
       // single chunk rather than the file size (design spec §9.3, W10).
+      // Callback for parse errors — increments rowsFailed so the failure rate
+      // check at the end of processUploadJob accounts for malformed rows.
+      function onParseError(): void {
+        rowsFailed += 1;
+      }
+
       if (normaliseContentType === "application/json") {
         // JSON arrays must be parsed as a whole so we collect chunks into a
         // Node.js Buffer; the MaxUploadBytes guard above ensures this is bounded.
@@ -339,10 +345,10 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
         normaliseContentType === "text/csv" ||
         normaliseContentType === "application/octet-stream"
       ) {
-        await processCsvStream(objectStream, onRecord);
+        await processCsvStream(objectStream, onRecord, onParseError);
       } else {
         // NDJSON / JSON Lines / text/tab-separated-values
-        await processNdjsonStream(objectStream, onRecord);
+        await processNdjsonStream(objectStream, onRecord, onParseError);
       }
 
       // Flush any remaining records.
@@ -520,6 +526,7 @@ function inferCsvValue(value: string | null): unknown {
 async function processNdjsonStream(
   stream: ReadableStream<Uint8Array>,
   onRecord: (index: number, data: Record<string, unknown>) => Promise<void>,
+  onParseError?: () => void,
 ): Promise<void> {
   const decoder = new TextDecoder("utf-8");
   const reader = stream.getReader();
@@ -550,7 +557,8 @@ async function processNdjsonStream(
             await onRecord(index, item as Record<string, unknown>);
           }
         } catch {
-          // Malformed line — counted as parse failure by the caller via rowsFailed.
+          // Malformed line — notify the caller so it can increment rowsFailed.
+          onParseError?.();
         }
         index += 1;
       }
@@ -567,7 +575,8 @@ async function processNdjsonStream(
           await onRecord(index, item as Record<string, unknown>);
         }
       } catch {
-        // Trailing malformed line — counted as parse failure by the caller.
+        // Trailing malformed line — notify the caller so it can increment rowsFailed.
+        onParseError?.();
       }
     }
   } finally {
@@ -578,7 +587,10 @@ async function processNdjsonStream(
 async function processCsvStream(
   stream: ReadableStream<Uint8Array>,
   onRecord: (index: number, data: Record<string, unknown>) => Promise<void>,
+  onParseError?: () => void,
 ): Promise<void> {
+  // onParseError is available for CSV parse errors if needed in the future.
+  void onParseError;
   const decoder = new TextDecoder("utf-8");
   const reader = stream.getReader();
   let remainder = "";

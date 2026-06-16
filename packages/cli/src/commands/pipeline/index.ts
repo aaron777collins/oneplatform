@@ -57,7 +57,7 @@ async function updateAction(id: string, opts: { file: string }, ctx: CommandCont
   const { load } = await import("js-yaml");
   const content = readFileSync(opts.file, "utf8");
   const definition = load(content) as unknown;
-  await ctx.http.put(`/api/v1/pipelines/${encodeURIComponent(id)}`, definition);
+  await ctx.http.patch(`/api/v1/pipelines/${encodeURIComponent(id)}`, definition);
   ctx.renderer.success(`Pipeline ${id} updated.`);
 }
 

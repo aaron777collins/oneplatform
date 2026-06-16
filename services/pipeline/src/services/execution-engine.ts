@@ -801,16 +801,20 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       let failedStepId: string | null = null;
       let failureError: Error | null = null;
 
+      // Pre-fetch all run_step rows once and build a lookup map to avoid N+1
+      // queries inside the step traversal loop.
+      const allRunStepRows = await runStepRepo.findByRunId(runId);
+      const runStepMap = new Map(allRunStepRows.map((r) => [r.step_id, r]));
+
       stepTraversal:
       while (currentStepId !== null) {
         // Cancellation check between steps
         if (await ctx.isCancelled()) {
-          // Mark all remaining pending steps as cancelled
-          const stepRows = await runStepRepo.findByRunId(runId);
+          // Mark all remaining pending steps as cancelled — use the pre-fetched
+          // map instead of re-querying.
+          const pendingRows = allRunStepRows.filter((r) => r.status === "pending");
           await Promise.all(
-            stepRows
-              .filter((r) => r.status === "pending")
-              .map((r) => runStepRepo.updateStatus(runId, r.step_id, { status: "cancelled" })),
+            pendingRows.map((r) => runStepRepo.updateStatus(runId, r.step_id, { status: "cancelled" })),
           );
 
           await runRepo.updateStatus(runId, { status: "cancelled", completed_at: new Date() });
@@ -832,9 +836,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           break;
         }
 
-        // Find the run_step row for this step
-        const stepRows = await runStepRepo.findByRunId(runId);
-        const runStepRow = stepRows.find((r) => r.step_id === currentStepId);
+        // Find the run_step row for this step from the pre-fetched map
+        const runStepRow = runStepMap.get(currentStepId);
         if (runStepRow === undefined) break;
 
         // Evaluate skip condition (JSONata, 100ms timeout)

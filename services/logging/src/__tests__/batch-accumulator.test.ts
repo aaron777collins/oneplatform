@@ -37,6 +37,7 @@ function makeRepo(insertBatch: InsertBatchFn = async () => {}) {
 
 const EVENT = {
   timestamp: "2026-01-15T10:00:00.000Z",
+  tenantId: "tenant-test",
   traceId: "trace-abc",
   service: "test-service",
   level: "info" as const,
@@ -172,6 +173,7 @@ describe("BatchAccumulator", () => {
       const specificEvent = {
         timestamp: "2026-03-01T09:00:00.000Z",
         traceId: "trace-xyz",
+        tenantId: "tenant-1",
         service: "payments",
         level: "error" as const,
         message: "Payment failed",

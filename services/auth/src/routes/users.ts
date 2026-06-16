@@ -40,10 +40,23 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
     const limitParam = c.req.query("limit");
     const limit = limitParam !== undefined ? parseInt(limitParam, 10) : undefined;
 
+    // Optional search/filter query parameters
+    const emailFilter = c.req.query("email");
+    const roleFilter = c.req.query("role");
+    const isActiveParam = c.req.query("isActive");
+    const isActiveFilter = isActiveParam !== undefined
+      ? isActiveParam === "true"
+      : undefined;
+
     const { users, nextCursor } = await userRepository.listByTenant(
       user.tenantId,
       cursor,
       limit,
+      {
+        ...(emailFilter !== undefined && { email: emailFilter }),
+        ...(roleFilter !== undefined && { role: roleFilter }),
+        ...(isActiveFilter !== undefined && { isActive: isActiveFilter }),
+      },
     );
 
     const data = users.map((u) => ({
@@ -145,9 +158,29 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       ...(parsed.data.roles !== undefined ? { roles: parsed.data.roles } : {}),
     });
 
-    // isActive changes go through a separate deactivate path in the repository
-    // since it's a distinct column update.
-    if (parsed.data.isActive === false) {
+    // isActive changes go through separate activate/deactivate paths in the
+    // repository since they are distinct column updates with side effects.
+    if (parsed.data.isActive === true) {
+      await userRepository.activate(id);
+    } else if (parsed.data.isActive === false) {
+      // Guard: prevent deactivating the last platform admin. If the target user
+      // holds the platform-admin role, verify at least one other active admin
+      // exists before proceeding.
+      if (existing.roles.includes("platform-admin")) {
+        const otherAdminsResult = await db.query<{ count: string }>(
+          `SELECT count(*) AS count FROM auth.users
+           WHERE tenant_id = $1
+             AND 'platform-admin' = ANY(roles)
+             AND is_active = true
+             AND id != $2`,
+          [user.tenantId, id],
+        );
+        const otherAdminCount = parseInt(otherAdminsResult.rows[0]?.count ?? "0", 10);
+        if (otherAdminCount === 0) {
+          throw new ForbiddenError("Cannot deactivate the last platform admin.");
+        }
+      }
+
       await userRepository.deactivate(id);
 
       // Revoke all active sessions immediately so the deactivated user cannot
@@ -197,7 +230,7 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       displayName: updated.display_name,
       roles: updated.roles,
       emailVerified: updated.email_verified,
-      isActive: parsed.data.isActive === false ? false : updated.is_active,
+      isActive: parsed.data.isActive !== undefined ? parsed.data.isActive : updated.is_active,
       lastLoginAt: updated.last_login_at?.toISOString() ?? null,
       createdAt: updated.created_at.toISOString(),
     });

@@ -59,7 +59,7 @@ export const authConfigSchema = baseConfigSchema.extend({
   OP_SMTP_PORT: z.coerce.number().int().optional(),
   OP_SMTP_USER: z.string().optional(),
   OP_SMTP_PASS: z.string().optional(),
-  OP_SMTP_FROM: z.string().email().optional(),
+  OP_SMTP_FROM: z.string().min(1).optional(),
   OP_SMTP_SECURE: z.string().transform((v) => v === "true").default("true"),
   OP_MINIO_USER: z.string().default("minioadmin"),
   OP_MINIO_PASSWORD: minioPasswordSchema,

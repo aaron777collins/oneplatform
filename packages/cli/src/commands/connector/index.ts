@@ -37,7 +37,7 @@ interface UpdateOpts {
   description?: string;
   scheduleCron?: string;
 }
-interface TriggerOpts { wait?: boolean }
+interface TriggerOpts { wait?: boolean; mode?: "full" | "incremental"; force?: boolean }
 
 // Validates that a cron expression has exactly 5 space-separated fields.
 // Full semantic validation is performed server-side; this catches obvious typos
@@ -56,8 +56,8 @@ function validateCronFieldCount(expr: string): void {
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
-  if (opts.plugin) query["pluginId"] = opts.plugin;
-  if (opts.status) query["status"] = opts.status;
+  if (opts.plugin) query["filter[pluginId][eq]"] = opts.plugin;
+  if (opts.status) query["filter[status][eq]"] = opts.status;
   const connectors = await ctx.http.get<unknown[]>("/api/v1/connectors", query);
   ctx.renderer.render(connectors, CONNECTOR_COLUMNS);
 }
@@ -151,8 +151,12 @@ async function testAction(id: string, _opts: Record<string, never>, ctx: Command
 }
 
 async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (opts.mode) body["syncMode"] = opts.mode;
+  if (opts.force) body["force"] = true;
   const resp = await ctx.http.post<{ syncJobId: string }>(
     `/api/v1/connectors/${encodeURIComponent(id)}/trigger`,
+    body,
   );
   ctx.renderer.info(`Connector triggered. Sync Job ID: ${resp.syncJobId}`);
 
@@ -183,7 +187,7 @@ export function registerConnector(program: Command): void {
   connector.command("list")
     .description("List all connectors")
     .option("--plugin <plugin-id>", "Filter by plugin ID")
-    .option("--status <status>", "Filter by status: active|paused|error")
+    .option("--status <status>", "Filter by status: enabled|disabled")
     .action(withContext<[ListOpts]>(listAction));
 
   connector.command("create")
@@ -237,5 +241,7 @@ export function registerConnector(program: Command): void {
     .description("Manually trigger a connector run")
     .argument("<id>", "Connector ID")
     .option("--wait", "Poll until run completes")
+    .option("--mode <mode>", "Sync mode override: full | incremental")
+    .option("--force", "Force sync even if one is already running")
     .action(withContext<[string, TriggerOpts]>(triggerAction));
 }

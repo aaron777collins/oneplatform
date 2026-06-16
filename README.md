@@ -38,10 +38,11 @@ OnePlatform is a free, open-source alternative to Fivetran + n8n + Retool — co
 ```bash
 git clone https://github.com/aaron777collins/oneplatform.git
 cd oneplatform
-docker compose up
+cp .env.example .env
+docker compose -f docker/docker-compose.yml up -d
 ```
 
-The platform will be available at `http://localhost:3000`.
+The UI will be available at `http://localhost:8080`. The API gateway is at `http://localhost:3000`.
 
 ## Tech Stack
 

@@ -1,5 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import type { Logger } from "@oneplatform/core";
+import { decrypt } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type pg from "pg";
 import type { AppRepository } from "../repositories/app-repository.js";
@@ -232,7 +233,7 @@ const BUILD_INTERRUPTED_GRACE_MS = 5 * 60 * 1_000;
 export function createBuildService(deps: BuildServiceDeps): BuildService {
   const {
     pool, appRepo, fileRepo, buildRepo, permRepo,
-    redis, executionServiceUrl, logger,
+    redis, executionServiceUrl, masterKey, logger,
   } = deps;
 
   // MinIO credentials — read once at service creation, not on every call (W10)
@@ -399,13 +400,25 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         fileSnapshot[f.path] = f.content_hash;
       }
 
-      // Fetch non-secret env vars for esbuild define
+      // Fetch non-secret env vars for esbuild define.
+      // Values are stored encrypted at rest — decrypt before passing to the build.
       const envVarRows = await permRepo.listEnvVarsByApp(appId);
       const envVars: Record<string, string> = {};
-      for (const ev of envVarRows) {
-        if (!ev.is_secret) {
-          envVars[ev.key] = ev.value;
-        }
+      const decryptFailures: string[] = [];
+      await Promise.all(
+        envVarRows
+          .filter((ev) => !ev.is_secret)
+          .map(async (ev) => {
+            try {
+              envVars[ev.key] = await decrypt(ev.value, masterKey);
+            } catch {
+              logger.warn("Failed to decrypt env var for build", { appId, key: ev.key, buildId: build.id });
+              decryptFailures.push(ev.key);
+            }
+          })
+      );
+      if (decryptFailures.length > 0) {
+        throw new Error(`Build aborted: failed to decrypt env vars: ${decryptFailures.join(", ")}`);
       }
 
       // Refresh app to get allowed_modules

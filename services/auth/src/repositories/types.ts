@@ -184,6 +184,7 @@ export interface CreateRoleData {
 }
 
 export interface UpdateRoleData {
+  name?: string;
   description?: string;
   permissions?: string[];
 }

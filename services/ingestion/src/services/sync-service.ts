@@ -586,7 +586,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
           totalRecords += records.length;
           batchSeqNum += 1;
           progress.totalRecords = totalRecords;
-          progress.completedBatches = batchSeqNum;
+          progress.totalBatches = batchSeqNum;
           progress.lastBatchAt = new Date().toISOString();
           await writeProgress(progress);
 

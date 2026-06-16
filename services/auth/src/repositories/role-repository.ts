@@ -61,6 +61,10 @@ export class RoleRepository {
     const values: unknown[] = [];
     let idx = 1;
 
+    if (data.name !== undefined) {
+      sets.push(`name = $${idx++}`);
+      values.push(data.name);
+    }
     if (data.description !== undefined) {
       sets.push(`description = $${idx++}`);
       values.push(data.description);

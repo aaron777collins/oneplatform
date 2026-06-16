@@ -35,7 +35,7 @@ export interface Deployment {
 export interface AppBuild {
   readonly id: string;
   readonly appId: string;
-  readonly status: 'queued' | 'building' | 'success' | 'failed';
+  readonly status: 'pending' | 'building' | 'success' | 'failed';
   readonly version: string | null;
   readonly createdAt: string;
   readonly completedAt: string | null;
@@ -109,7 +109,7 @@ export interface AppNamespace {
    * Set the current (deployed) build. The build must be in 'success' status.
    * Equivalent to a deployment/promotion step.
    */
-  deploy(id: string, buildId: string): Promise<App>;
+  deploy(id: string, buildId: string): Promise<Deployment>;
 
   /**
    * Upload a pre-built bundle and trigger an immediate deployment.
@@ -151,16 +151,20 @@ export function createAppNamespace(transport: Transport): AppNamespace {
     list(options?: ListOptions): PaginatedIterable<App> {
       const pageSize = options?.limit ?? 50;
       return new Paginator<App>(async (cursor, limit) => {
-        const result = await transport.request<{
-          items: App[];
-          nextCursor: string | null;
-          total: number | null;
-        }>({
+        // The server returns { data: App[], pagination: { nextCursor, total } }.
+        // Transport unwraps the { data } envelope, so we receive App[] directly.
+        // Pagination metadata is lost in the unwrap. We infer hasMore from
+        // whether the returned page is full (length === limit).
+        const items = await transport.request<App[]>({
           method: 'GET',
           path: BASE,
           query: { limit, ...(cursor !== null ? { cursor } : {}) },
         });
-        return { ...result, hasMore: result.nextCursor !== null };
+        // When the server returns exactly `limit` items, there are likely more pages.
+        // Use the last item's id as the cursor for the next page.
+        const hasMore = items.length === limit;
+        const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.id : null;
+        return { items, nextCursor, total: null, hasMore };
       }, pageSize);
     },
 
@@ -204,25 +208,25 @@ export function createAppNamespace(transport: Transport): AppNamespace {
     listBuilds(id: string, options?: ListOptions): PaginatedIterable<AppBuild> {
       const pageSize = options?.limit ?? 20;
       return new Paginator<AppBuild>(async (cursor, limit) => {
-        const result = await transport.request<{
-          items: AppBuild[];
-          nextCursor: string | null;
-          total: number | null;
-        }>({
+        // Same pattern as list(): Transport unwraps { data } envelope,
+        // so we receive AppBuild[] directly and infer pagination from array length.
+        const items = await transport.request<AppBuild[]>({
           method: 'GET',
           path: `${BASE}/${encodeURIComponent(id)}/builds`,
           query: { limit, ...(cursor !== null ? { cursor } : {}) },
         });
-        return { ...result, hasMore: result.nextCursor !== null };
+        const hasMore = items.length === limit;
+        const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.id : null;
+        return { items, nextCursor, total: null, hasMore };
       }, pageSize);
     },
 
-    async deploy(id: string, buildId: string): Promise<App> {
-      // PATCH the app's currentBuildId to promote a successful build to production.
-      return transport.request<App>({
-        method: 'PATCH',
-        path: `${BASE}/${encodeURIComponent(id)}`,
-        body: { currentBuildId: buildId },
+    async deploy(id: string, buildId: string): Promise<Deployment> {
+      // POST to the deploy endpoint to promote a successful build to production.
+      return transport.request<Deployment>({
+        method: 'POST',
+        path: `${BASE}/${encodeURIComponent(id)}/deploy`,
+        body: { buildId },
       });
     },
 
@@ -257,11 +261,11 @@ export function createAppNamespace(transport: Transport): AppNamespace {
     // ── Virtual file system ──────────────────────────────────────────────────
 
     async listFiles(id: string): Promise<AppFileSummary[]> {
-      const result = await transport.request<{ data: AppFileSummary[] }>({
+      // Transport unwraps the { data } envelope, so we receive AppFileSummary[] directly.
+      return transport.request<AppFileSummary[]>({
         method: 'GET',
         path: `${BASE}/${encodeURIComponent(id)}/files`,
       });
-      return result.data;
     },
 
     async getFile(id: string, filePath: string): Promise<AppFileDetail> {

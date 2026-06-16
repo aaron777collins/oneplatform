@@ -30,16 +30,16 @@ import { cn } from "@/lib/utils.js";
 
 export interface AuditEvent {
   id: string;
-  timestamp: string;
-  /** User or service that performed the action */
-  actor: string;
-  /** Event type, e.g. "connector.created", "user.login" */
+  traceId: string;
+  actorId: string;
+  actorType: string;
+  tenantId: string;
   action: string;
-  /** Resource being acted on, e.g. "connector:abc123" */
-  resource: string;
-  /** Outcome: "success" | "failure" */
-  outcome: "success" | "failure";
-  traceId?: string;
+  resourceType: string;
+  resourceId: string;
+  result: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
 }
 
 export interface AuditLogTableProps {
@@ -61,12 +61,11 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
     queryKey: ["audit-logs", { from, to }],
     queryFn: ({ pageParam, signal }) =>
       client.get<PaginatedResponse<AuditEvent>>(
-        "/v1/audit",
+        "/v1/audit-events",
         {
           limit: "50",
-          sort: "-timestamp",
-          ...(from !== undefined ? { "filter[timestamp][gte]": from } : {}),
-          ...(to !== undefined ? { "filter[timestamp][lte]": to } : {}),
+          ...(from !== undefined ? { from } : {}),
+          ...(to !== undefined ? { to } : {}),
           ...(pageParam !== undefined ? { cursor: pageParam } : {}),
         },
         { signal },
@@ -85,9 +84,10 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
     const lower = search.toLowerCase();
     return allEvents.filter(
       (e) =>
-        e.actor.toLowerCase().includes(lower) ||
+        e.actorId.toLowerCase().includes(lower) ||
         e.action.toLowerCase().includes(lower) ||
-        e.resource.toLowerCase().includes(lower),
+        e.resourceType.toLowerCase().includes(lower) ||
+        e.resourceId.toLowerCase().includes(lower),
     );
   }, [allEvents, search]);
 
@@ -100,7 +100,7 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
           aria-hidden="true"
         />
         <Input
-          placeholder="Search actor, action, resource…"
+          placeholder="Search actor, action, resource type…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-8"
@@ -115,7 +115,7 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
             <TableHead>Actor</TableHead>
             <TableHead>Action</TableHead>
             <TableHead>Resource</TableHead>
-            <TableHead>Outcome</TableHead>
+            <TableHead>Result</TableHead>
             <TableHead>Trace</TableHead>
           </TableRow>
         </TableHeader>
@@ -138,30 +138,32 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
             filteredEvents.map((event) => (
               <TableRow key={event.id}>
                 <TableCell className="text-sm tabular-nums">
-                  <RelativeTime value={event.timestamp} />
+                  <RelativeTime value={event.createdAt} />
                 </TableCell>
                 <TableCell className="max-w-[120px] truncate font-mono text-xs">
-                  {event.actor}
+                  <span title={`${event.actorType}:${event.actorId}`}>
+                    {event.actorId}
+                  </span>
                 </TableCell>
                 <TableCell className="text-sm">{event.action}</TableCell>
                 <TableCell className="max-w-[180px] truncate font-mono text-xs text-[var(--color-muted-foreground)]">
-                  {event.resource}
+                  {event.resourceType}:{event.resourceId}
                 </TableCell>
                 <TableCell>
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-xs font-semibold",
-                      event.outcome === "success"
+                      event.result === "success"
                         ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
                         : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
                     )}
                     role="status"
                   >
-                    {event.outcome}
+                    {event.result}
                   </span>
                 </TableCell>
                 <TableCell>
-                  {event.traceId !== undefined ? (
+                  {event.traceId ? (
                     <TraceIdLink traceId={event.traceId} />
                   ) : (
                     <span className="text-[var(--color-muted-foreground)]">—</span>

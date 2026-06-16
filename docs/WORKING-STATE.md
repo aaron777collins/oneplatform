@@ -136,6 +136,19 @@ This document tracks the current state of development. Read this FIRST when resu
   - V3-L-07: CLI machine-ID macOS UUID + OP_MACHINE_ID override + weak fallback warning
   - V3-L-08: Frontend API key search/filter
 
+#### Phase 11: V4 Analysis & Fixes
+- [x] User story analysis v4 — 148 net-new findings from 10 personas across 60+ files
+- [x] 10-persona parallel analysis using workflow with 197 agents + adversarial verification
+- [x] 38 false positives refuted during verification
+- [x] Infrastructure fixes: Redis ACL (execution user, bull: prefixes), Redis URL username, README quick start, backup.sh auth, MinIO password guard, gateway fallback ports, OP_SMTP_FROM relaxed, BootstrapErrorPage healthz fix
+- [x] Auth/Logging fixes: user listing with pagination/filtering, per-user token revocation check, role rename cascades to user arrays, logging tenant_id column, role deletion guard, safe SQL interval casting
+- [x] SDK/App fixes: tenant-scoped BFF cache key, build-service decryption fail-fast, platform-types resource, apps pagination, service token JWT auth
+- [x] Frontend fixes: AuditLogTable overhaul, ServiceHealthGrid enhancements, NewConnectorPage wizard with recovery path, AdminPage/TeamsPage placeholders, ApiKeysPage rotation fix, scope descriptions
+- [x] Plugin/Execution fixes: scaffold auth-provider signature fix, cache operations fail-fast on missing pluginId, HookStage/HookPayloadDataMap key alignment, mock context factories
+- [x] Data engineer fixes: CLI connector/pipeline/schedule improvements, mapping-rules tenant isolation, mapping-service batch upsert, execution-engine N+1 fix, upload service enhancements
+- [x] 6 parallel code reviews — all blockers resolved
+- [x] All type checks pass, all ~6,800 tests pass
+
 ### Pending
 1. Docker Compose — add all 9 application service containers
 2. TLS configuration and security hardening
@@ -166,6 +179,7 @@ This document tracks the current state of development. Read this FIRST when resu
 | `docs/designs/*.md` | L2 service designs |
 | `docs/USER-STORIES-ANALYSIS-V2.md` | Friction point analysis v2 (85 findings) |
 | `docs/USER-STORIES-ANALYSIS-V3.md` | Friction point analysis v3 (53 net-new findings) |
+| `docs/USER-STORIES-ANALYSIS-V4.md` | Friction point analysis v4 (148 net-new findings) |
 | `docs/GAP-ANALYSIS.md` | Gap analysis (127 gaps across 9 categories) |
 | `docs/ARCH-REVIEW-REMAINING-ISSUES.md` | Architecture review of remaining issues |
 | `DEVELOPMENT-PROCESS.md` | Development pipeline and quality gates |

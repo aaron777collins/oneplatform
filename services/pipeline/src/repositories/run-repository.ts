@@ -93,19 +93,26 @@ export class RunRepository {
     return result.rows;
   }
 
-  // Cursor-based paginated list scoped to a tenant (across all pipelines).
+  // Cursor-based paginated list scoped to a tenant (across all pipelines,
+  // or filtered to a single pipeline when pipelineId is provided).
   async findByTenantId(
     tenantId: string,
     options?: {
       cursor?: string;
       limit?: number;
       filterStatus?: RunRow["status"];
+      pipelineId?: string;
     }
   ): Promise<RunRow[]> {
     const limit = options?.limit ?? 50;
     const conditions: string[] = ["tenant_id = $1"];
     const values: unknown[] = [tenantId];
     let idx = 2;
+
+    if (options?.pipelineId !== undefined) {
+      conditions.push(`pipeline_id = $${idx++}`);
+      values.push(options.pipelineId);
+    }
 
     if (options?.filterStatus !== undefined) {
       conditions.push(`status = $${idx++}`);

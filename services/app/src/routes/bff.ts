@@ -74,14 +74,20 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     const userRoleNames = new Set(user.roles);
     const roles = allAppRoles.filter((r) => userRoleNames.has(r.name));
 
+    // Map userId → id and provide email/displayName placeholders so the
+    // response matches the app-sdk UserContext interface (id, email, displayName).
+    // The core UserContext only carries userId; email/displayName require a
+    // lookup against the Auth Service user profile — a future enhancement.
     return c.json({
       data: {
-        userId:   user.userId,
-        tenantId: user.tenantId,
+        id:          user.userId,
+        email:       null,
+        displayName: user.userId,
+        tenantId:    user.tenantId,
         appId,
         // User's roles within the app — the SDK uses this for permission checks
-        roles:    roles.map((r) => r.name),
-        isGuest:  user.isGuest,
+        roles:       roles.map((r) => r.name),
+        isGuest:     user.isGuest,
       },
     });
   });
@@ -569,7 +575,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     // Check Redis cache before hitting the DB. The cache is written below on
     // every miss with a 60 s TTL, so back-to-back SDK init calls share one DB
     // round-trip per minute per app rather than one per request.
-    const cacheKey = `bff:runtime-config:${appId}`;
+    const cacheKey = `bff:runtime-config:${user.tenantId}:${appId}`;
     const cached = await redis.get(cacheKey).catch(() => null);
     if (cached !== null) {
       try {

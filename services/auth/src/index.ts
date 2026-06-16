@@ -33,6 +33,7 @@ import {
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
+  TenantRepository,
   UserRepository,
   RoleRepository,
   OAuthClientRepository,
@@ -171,6 +172,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
   const events = createEventPublisher({ redis });
 
   // Step 4: Instantiate repositories.
+  const tenantRepository = new TenantRepository(db);
   const userRepository = new UserRepository(db);
   const roleRepository = new RoleRepository(db);
   const oauthClientRepository = new OAuthClientRepository(db);
@@ -264,6 +266,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
     oauthService,
     guestSessionService,
     // Repositories (used directly by routes that don't need a full service)
+    tenantRepository,
     roleRepository,
     userRepository,
     oauthClientRepository,

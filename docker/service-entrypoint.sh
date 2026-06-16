@@ -74,7 +74,7 @@ export OP_DATABASE_URL="postgres://${SERVICE_SHORT}_service_role:${DB_PASSWORD}@
 
 # ── Per-service Redis connection URL ──────────────────────────────────────────
 REDIS_PASSWORD=$(read_secret "$INIT_DIR/redis_password_${SERVICE_SHORT}.txt")
-export OP_REDIS_URL="redis://:${REDIS_PASSWORD}@redis:6379"
+export OP_REDIS_URL="redis://op_${SERVICE_SHORT}:${REDIS_PASSWORD}@redis:6379"
 
 # ── Ed25519 private key path ─────────────────────────────────────────────────
 # Services that need to make outbound service-to-service calls sign tokens with
@@ -95,7 +95,7 @@ fi
 # placeholder string from .env.example are rejected. This is defense-in-depth —
 # the Zod config schema in packages/core/src/config.ts adds a second check for
 # non-Compose deployment topologies (Kubernetes, bare Node.js).
-if [ -z "${OP_MINIO_PASSWORD:-}" ] || [ "${OP_MINIO_PASSWORD:-}" = "CHANGE_ME_minio" ]; then
+if [ -z "${OP_MINIO_PASSWORD:-}" ] || [ "${OP_MINIO_PASSWORD:-}" = "CHANGE_ME_minio" ] || [ "${OP_MINIO_PASSWORD:-}" = "dev_minio_password_change_me" ]; then
   echo "[service-entrypoint] FATAL: OP_MINIO_PASSWORD is unset or still set to the placeholder value." >&2
   echo "[service-entrypoint] Set a strong password in .env before running docker compose up." >&2
   exit 1

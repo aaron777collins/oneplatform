@@ -170,8 +170,8 @@ export interface HookPayloadDataMap {
   "after:ingestion.validate":  IngestionValidateData;
   "before:ontology.map":       OntologyMapData;
   "after:ontology.map":        OntologyMapData;
-  "before:pipeline.execute":   PipelineExecuteData;
-  "after:pipeline.execute":    PipelineExecuteData;
+  "before:pipeline.step":      PipelineExecuteData;
+  "after:pipeline.step":       PipelineExecuteData;
   "before:auth.login":         AuthLoginData;
   "after:auth.login":          AuthLoginData;
 }

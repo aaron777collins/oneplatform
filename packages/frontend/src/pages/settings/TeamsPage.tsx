@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { UserPlus, Trash2 } from "lucide-react";
+import { UserPlus, Trash2, Info } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import {
   Form,
@@ -69,10 +69,11 @@ export function TeamsPage() {
   const queryClient = useQueryClient();
   const [removeTarget, setRemoveTarget] = React.useState<Member | null>(null);
 
+  // Use /v1/users for member list since /v1/teams/* endpoints are not implemented
   const membersQuery = useQuery({
-    queryKey: ["teams", "members"],
+    queryKey: ["users", "members"],
     queryFn: ({ signal }) =>
-      client.get<PaginatedResponse<Member>>("/v1/teams/members", undefined, { signal }),
+      client.get<PaginatedResponse<Member>>("/v1/users", undefined, { signal }),
   });
 
   const members = membersQuery.data?.data ?? [];
@@ -82,26 +83,21 @@ export function TeamsPage() {
     defaultValues: { email: "", role: "viewer" },
   });
 
+  // Invite functionality is not yet available on the backend
   const inviteMutation = useMutation({
-    mutationFn: (values: InviteValues) =>
-      client.post("/v1/teams/invites", values),
-    onSuccess: () => {
-      toast({ title: "Invitation sent" });
-      form.reset();
-      void queryClient.invalidateQueries({ queryKey: ["teams"] });
-    },
-    onError: (error) => {
-      const message = error instanceof ApiError ? error.message : "Invite failed.";
-      toast({ title: "Invite failed", description: message, variant: "destructive" });
+    mutationFn: (_values: InviteValues) =>
+      Promise.reject(new Error("Invite API is not yet available")),
+    onError: () => {
+      toast({ title: "Not available", description: "Team invitations are coming soon.", variant: "destructive" });
     },
   });
 
   const updateRoleMutation = useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
-      client.patch(`/v1/teams/members/${memberId}`, { role }),
+      client.patch(`/v1/users/${memberId}`, { role }),
     onSuccess: () => {
       toast({ title: "Role updated" });
-      void queryClient.invalidateQueries({ queryKey: ["teams"] });
+      void queryClient.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (error) => {
       const message = error instanceof ApiError ? error.message : "Role update failed.";
@@ -111,11 +107,11 @@ export function TeamsPage() {
 
   const removeMutation = useMutation({
     mutationFn: (memberId: string) =>
-      client.delete(`/v1/teams/members/${memberId}`),
+      client.delete(`/v1/users/${memberId}`),
     onSuccess: () => {
       toast({ title: "Member removed" });
       setRemoveTarget(null);
-      void queryClient.invalidateQueries({ queryKey: ["teams"] });
+      void queryClient.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (error) => {
       const message = error instanceof ApiError ? error.message : "Remove failed.";
@@ -127,13 +123,19 @@ export function TeamsPage() {
     <div>
       <PageHeader title="Teams" description="Manage members and their access roles." />
 
-      {/* Invite form */}
+      {/* Invite form — Coming Soon */}
       <div className="mb-8 mt-6 max-w-lg rounded-lg border border-[var(--color-border)] p-4">
+        <div className="mb-4 flex items-start gap-3 rounded-md border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
+          <p className="text-xs text-[var(--color-muted-foreground)]">
+            Team invitations are coming soon. You can view existing members below.
+          </p>
+        </div>
         <h2 className="mb-4 text-sm font-semibold">Invite member</h2>
         <Form {...form}>
           <form
-            onSubmit={(e) => void form.handleSubmit((v) => inviteMutation.mutate(v))(e)}
-            className="flex items-end gap-3"
+            onSubmit={(e) => { e.preventDefault(); }}
+            className="flex items-end gap-3 opacity-60"
           >
             <FormField
               control={form.control}
@@ -142,7 +144,7 @@ export function TeamsPage() {
                 <FormItem className="flex-1">
                   <FormLabel>Email address</FormLabel>
                   <FormControl>
-                    <Input type="email" placeholder="colleague@example.com" {...field} />
+                    <Input type="email" placeholder="colleague@example.com" {...field} disabled />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -154,7 +156,7 @@ export function TeamsPage() {
               render={({ field }) => (
                 <FormItem className="w-32">
                   <FormLabel>Role</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value} disabled>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue />
@@ -172,12 +174,12 @@ export function TeamsPage() {
             />
             <Button
               type="submit"
-              disabled={inviteMutation.isPending}
-              aria-busy={inviteMutation.isPending}
+              disabled
+              aria-disabled="true"
               className="mb-0"
             >
               <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
-              {inviteMutation.isPending ? "Inviting…" : "Invite"}
+              Invite
             </Button>
           </form>
         </Form>

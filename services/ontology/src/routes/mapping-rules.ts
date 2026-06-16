@@ -88,6 +88,13 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    // Tenant isolation: verify the rule belongs to this tenant before updating.
+    const existingRule = await mappingRuleRepo.findById(c.req.param("ruleId"));
+    if (!existingRule) throw new NotFoundError("Mapping rule not found.");
+    if (existingRule.tenant_id !== user.tenantId) {
+      throw new ForbiddenError("You do not have access to this mapping rule.");
+    }
+
     const body = await c.req.json();
     const parsed = updateMappingRuleRequest.safeParse(body);
     if (!parsed.success) {
@@ -119,6 +126,13 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
     const user = c.var.user;
     if (!user.scopes.includes(REQUIRED_WRITE_SCOPE) && !user.scopes.includes("admin")) {
       throw new ForbiddenError("ontology:write scope is required.");
+    }
+
+    // Tenant isolation: verify the rule belongs to this tenant before deleting.
+    const ruleToDelete = await mappingRuleRepo.findById(c.req.param("ruleId"));
+    if (!ruleToDelete) throw new NotFoundError("Mapping rule not found.");
+    if (ruleToDelete.tenant_id !== user.tenantId) {
+      throw new ForbiddenError("You do not have access to this mapping rule.");
     }
 
     const deleted = await mappingRuleRepo.delete(c.req.param("ruleId"));

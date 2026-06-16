@@ -10,6 +10,7 @@ import type { CreateLogEventData } from "../repositories/types.js";
 
 const LogEventSchema = z.object({
   timestamp: z.string().datetime(),
+  tenantId: z.string().default(""),
   traceId: z.string().default(""),
   service: z.string().min(1).max(64),
   level: z.enum(["debug", "info", "warn", "error"]),
@@ -87,6 +88,7 @@ export class BatchAccumulator extends EventEmitter {
 
   private async writeBatch(events: ParsedLogEvent[]): Promise<void> {
     const rows: CreateLogEventData[] = events.map((e) => ({
+      tenantId: e.tenantId,
       traceId: e.traceId,
       service: e.service,
       level: e.level,

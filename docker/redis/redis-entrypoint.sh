@@ -26,7 +26,7 @@ echo "[redis-entrypoint] Rendering users.acl from template..."
 
 cp "$TEMPLATE" "$RENDERED"
 
-for USER in admin auth pipeline logging gateway ingestion ontology app plugin; do
+for USER in admin auth pipeline logging gateway ingestion ontology app plugin execution; do
   PW_FILE="$INIT_DIR/redis_password_${USER}.txt"
   if [ ! -f "$PW_FILE" ]; then
     echo "[redis-entrypoint] FATAL: Redis password file missing: $PW_FILE" >&2

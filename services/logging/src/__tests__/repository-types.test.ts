@@ -34,6 +34,7 @@ function hasKeys(obj: object, keys: string[]): boolean {
 describe("LogEventRow", () => {
   const validRow: LogEventRow = {
     id: "550e8400-e29b-41d4-a716-446655440000",
+    tenant_id: "tenant-abc",
     trace_id: "trace-abc",
     service: "gateway",
     level: "error",
@@ -56,6 +57,7 @@ describe("LogEventRow", () => {
     expect(
       hasKeys(validRow, [
         "id",
+        "tenant_id",
         "trace_id",
         "service",
         "level",
@@ -190,6 +192,7 @@ describe("AuditEventRow", () => {
 
 describe("CreateLogEventData", () => {
   const validData: CreateLogEventData = {
+    tenantId: "tenant-abc",
     traceId: "trace-xyz",
     service: "payments",
     level: "warn",
@@ -206,7 +209,7 @@ describe("CreateLogEventData", () => {
   });
 
   it("uses camelCase keys (write input, not DB columns)", () => {
-    expect(hasKeys(validData, ["traceId", "service", "level", "message", "metadata", "createdAt"])).toBe(true);
+    expect(hasKeys(validData, ["tenantId", "traceId", "service", "level", "message", "metadata", "createdAt"])).toBe(true);
     expect("trace_id" in validData).toBe(false);
     expect("created_at" in validData).toBe(false);
   });

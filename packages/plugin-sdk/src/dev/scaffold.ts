@@ -346,10 +346,10 @@ export const ${entrypoint}: AuthProvider = {
     };
   },
 
-  getAuthorizationUrl(state: string, options: AuthOptions, config: Record<string, unknown>): string {
-    const clientId = config["clientId"];
+  getAuthorizationUrl(state: string, options: AuthOptions): string {
+    const clientId = options.additionalParams?.["clientId"];
     if (typeof clientId !== "string" || !clientId) {
-      throw new PluginAuthError("Missing required config: clientId");
+      throw new PluginAuthError("Missing required config: clientId — pass it via additionalParams");
     }
     const params = new URLSearchParams({
       response_type: "code",

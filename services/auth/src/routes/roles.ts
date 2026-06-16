@@ -11,7 +11,9 @@ import {
   ValidationError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
 } from "@oneplatform/core";
+import type pg from "pg";
 import type { RoleRepository } from "../repositories/index.js";
 import type { EntityPermissionRepository } from "../repositories/entity-permission-repository.js";
 import { PredefinedRoleImmutableError } from "../services/errors.js";
@@ -24,6 +26,7 @@ import {
 export interface RoleRouteDeps {
   roleRepository: RoleRepository;
   entityPermissionRepository: EntityPermissionRepository;
+  db: pg.Pool;
 }
 
 // Scope required to mutate roles (create, update, delete, set permissions).
@@ -31,7 +34,7 @@ const ROLE_MANAGE_SCOPE = "users:manage";
 
 export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { roleRepository, entityPermissionRepository } = deps;
+  const { roleRepository, entityPermissionRepository, db } = deps;
 
   // POST /api/v1/roles — create a new tenant-scoped role
   routes.post("/api/v1/roles", async (c) => {
@@ -136,10 +139,24 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
       );
     }
 
+    const isRename = parsed.data.name !== undefined && parsed.data.name !== existing.name;
+
     const updated = await roleRepository.update(id, {
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
       ...(parsed.data.permissions !== undefined ? { permissions: parsed.data.permissions } : {}),
     });
+
+    if (isRename) {
+      await db.query(
+        `UPDATE auth.users
+            SET roles = array_replace(roles, $1, $2),
+                updated_at = now()
+          WHERE tenant_id = $3
+            AND $1 = ANY(roles)`,
+        [existing.name, parsed.data.name, user.tenantId],
+      );
+    }
 
     return c.json({
       id: updated.id,
@@ -169,6 +186,19 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
     if (existing.is_predefined) {
       throw new PredefinedRoleImmutableError(
         `Role "${existing.name}" is a predefined role and cannot be deleted.`,
+      );
+    }
+
+    // Prevent deletion of roles that are currently assigned to users.
+    // The caller must first remove the role from all users before deleting it.
+    const assignedResult = await db.query<{ count: string }>(
+      `SELECT count(*) AS count FROM auth.users WHERE tenant_id = $1 AND $2 = ANY(roles)`,
+      [user.tenantId, existing.name],
+    );
+    const assignedCount = parseInt(assignedResult.rows[0]?.count ?? "0", 10);
+    if (assignedCount > 0) {
+      throw new ConflictError(
+        "Cannot delete role that is assigned to users. Remove role from all users first.",
       );
     }
 

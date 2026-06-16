@@ -29,7 +29,7 @@ function validateCron(expr: string): void {
 }
 
 interface ListOpts { pipeline?: string; status?: string }
-interface CreateOpts { pipeline: string; cron: string; name?: string; timezone?: string }
+interface CreateOpts { pipeline: string; cron: string; name?: string; timezone?: string; inputTemplate?: string; disabled?: boolean }
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -48,18 +48,26 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
   };
   if (opts.name) body["name"] = opts.name;
   body["timezone"] = opts.timezone ?? "UTC";
+  if (opts.inputTemplate) {
+    try {
+      body["inputTemplate"] = JSON.parse(opts.inputTemplate) as unknown;
+    } catch {
+      throw new CliError("--input-template must be valid JSON.", EXIT.GENERAL);
+    }
+  }
+  if (opts.disabled) body["enabled"] = false;
 
   const resp = await ctx.http.post<{ id: string; name: string }>("/api/v1/schedules", body);
   ctx.renderer.success(`Schedule '${resp.name}' created (ID: ${resp.id}).`);
 }
 
 async function pauseAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  await ctx.http.post(`/api/v1/schedules/${encodeURIComponent(id)}/pause`);
+  await ctx.http.patch(`/api/v1/schedules/${encodeURIComponent(id)}`, { enabled: false });
   ctx.renderer.success(`Schedule ${id} paused.`);
 }
 
 async function resumeAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  await ctx.http.post(`/api/v1/schedules/${encodeURIComponent(id)}/resume`);
+  await ctx.http.patch(`/api/v1/schedules/${encodeURIComponent(id)}`, { enabled: true });
   ctx.renderer.success(`Schedule ${id} resumed.`);
 }
 
@@ -82,6 +90,8 @@ export function registerSchedule(program: Command): void {
     .requiredOption("--cron <expr>", 'Standard 5-field cron expression (minute hour day month weekday). Examples: "0 */6 * * *" (every 6 hours), "30 9 * * 1-5" (weekdays at 09:30)')
     .option("--name <name>", "Display name")
     .option("--timezone <tz>", "IANA timezone string (default: UTC)")
+    .option("--input-template <json>", "JSON string of input template parameters passed to each triggered run")
+    .option("--disabled", "Create the schedule in a disabled state")
     .action(withContext<[CreateOpts]>(createAction));
 
   schedule.command("pause").description("Pause a schedule")

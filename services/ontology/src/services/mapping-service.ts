@@ -59,11 +59,24 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
       let failed = 0;
       const errors: MapResult["errors"] = [];
 
+      // Simple Map caches for entity and field lookups to avoid redundant DB
+      // round-trips when multiple rule groups reference the same entity.
+      const entityCache = new Map<string, Awaited<ReturnType<typeof entityRepo.findById>>>();
+      const fieldCache = new Map<string, FieldRow[]>();
+
       for (const [entityId, entityRules] of rulesByEntity) {
-        const entity = await entityRepo.findById(tenantId, entityId);
+        let entity = entityCache.get(entityId);
+        if (entity === undefined) {
+          entity = await entityRepo.findById(tenantId, entityId);
+          entityCache.set(entityId, entity);
+        }
         if (!entity) continue;
 
-        const fields = await fieldRepo.findByEntityId(entityId);
+        let fields = fieldCache.get(entityId);
+        if (fields === undefined) {
+          fields = await fieldRepo.findByEntityId(entityId);
+          fieldCache.set(entityId, fields);
+        }
         const zodSchema = buildEntityZodSchema(fields).omit({
           _id: true,
           _createdAt: true,
@@ -78,6 +91,10 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
 
         for (const record of records) {
           const mappedRecord: Record<string, unknown> = {};
+
+          // Track already-mapped field slugs so higher-priority rules (sorted
+          // first) win and later rules targeting the same slug are skipped.
+          const claimedSlugs = new Set<string>();
 
           for (const rule of entityRules) {
             const sourceValue = getNestedValue(record.data, rule.source_field_path);
@@ -157,10 +174,12 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
               }
             }
 
-            // Find target field slug
+            // Find target field slug — skip if already claimed by a higher-priority rule
             const targetField = fields.find((f) => f.id === rule.target_field_id);
             if (targetField) {
+              if (claimedSlugs.has(targetField.slug)) continue;
               mappedRecord[targetField.slug] = transformedValue;
+              claimedSlugs.add(targetField.slug);
             }
           }
 
@@ -179,27 +198,53 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
           }
         }
 
-        // Upsert valid records
+        // Upsert valid records — batch by column set to use multi-row INSERT
         if (validRecords.length > 0) {
           const table = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(entity.slug)}`;
           const userFieldSlugs = fields.filter((f) => !f.system_generated).map((f) => f.slug);
+
+          // Group records by their column set so each group can be inserted
+          // with a single multi-row INSERT statement instead of one per record.
+          const groupsByColKey = new Map<string, {
+            cols: string[];
+            records: Array<{ sourceId: string; data: Record<string, unknown> }>;
+          }>();
+
+          for (const rec of validRecords) {
+            const cols = ["_source_id", ...userFieldSlugs.filter((s) => rec.data[s] !== undefined)];
+            const colKey = cols.join(",");
+            let group = groupsByColKey.get(colKey);
+            if (!group) {
+              group = { cols, records: [] };
+              groupsByColKey.set(colKey, group);
+            }
+            group.records.push(rec);
+          }
 
           const client = await db.connect();
           try {
             await client.query("BEGIN");
 
-            for (const rec of validRecords) {
-              const cols = ["_source_id", ...userFieldSlugs.filter((s) => rec.data[s] !== undefined)];
-              const vals = [rec.sourceId, ...userFieldSlugs.filter((s) => rec.data[s] !== undefined).map((s) => rec.data[s])];
-              const placeholders = vals.map((_, i) => `$${i + 1}`);
+            for (const { cols, records: groupRecords } of groupsByColKey.values()) {
               const colNames = cols.map((c) => quotePgIdentifier(c));
               const updateSets = cols.slice(1).map((c) => `${quotePgIdentifier(c)} = EXCLUDED.${quotePgIdentifier(c)}`);
 
+              // Build multi-row VALUES clause
+              const allVals: unknown[] = [];
+              const rowPlaceholders: string[] = [];
+              for (const rec of groupRecords) {
+                const vals = [rec.sourceId, ...userFieldSlugs.filter((s) => rec.data[s] !== undefined).map((s) => rec.data[s])];
+                const offset = allVals.length;
+                const ph = vals.map((_, i) => `$${offset + i + 1}`);
+                rowPlaceholders.push(`(${ph.join(", ")})`);
+                allVals.push(...vals);
+              }
+
               await client.query(
                 `INSERT INTO ${table} (${colNames.join(", ")})
-                 VALUES (${placeholders.join(", ")})
+                 VALUES ${rowPlaceholders.join(", ")}
                  ON CONFLICT ("_source_id") DO UPDATE SET ${updateSets.join(", ")}, "_updated_at" = now(), "_version" = ${table}."_version" + 1`,
-                vals,
+                allVals,
               );
             }
 

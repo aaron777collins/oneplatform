@@ -8,11 +8,11 @@
  * the permission check inline to provide a clear message if reached incorrectly.
  */
 import * as React from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Shield, RotateCcw } from "lucide-react";
+import { Shield, RotateCcw, Info } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import {
   Form,
@@ -24,10 +24,9 @@ import {
 } from "@/components/ui/form.js";
 import { Input } from "@/components/ui/input.js";
 import { Button } from "@/components/ui/button.js";
-import { Skeleton } from "@/components/ui/skeleton.js";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog.js";
 import { usePermission } from "@/hooks/use-auth.js";
-import { useApiClient, ApiError } from "@/lib/api-client.js";
+// useApiClient not needed until admin config endpoints are implemented
 import { toast } from "@/hooks/use-toast.js";
 
 // ---------------------------------------------------------------------------
@@ -51,45 +50,34 @@ type TenantValues = z.infer<typeof tenantSchema>;
 
 export function AdminPage() {
   const isAdmin = usePermission("tenant-admin");
-  const client = useApiClient();
 
   const [rotateKeyOpen, setRotateKeyOpen] = React.useState(false);
 
-  const configQuery = useQuery({
-    queryKey: ["admin", "tenant-config"],
-    queryFn: ({ signal }) =>
-      client.get<{ data: TenantConfig }>("/v1/admin/config", undefined, { signal }),
-    enabled: isAdmin,
-  });
+  // Admin config endpoints are not yet implemented on the backend.
+  // The UI is kept as a preview with disabled controls.
+  const configQuery = {
+    isLoading: false,
+    data: undefined as { data: TenantConfig } | undefined,
+  };
 
   const form = useForm<TenantValues>({
     resolver: zodResolver(tenantSchema),
-    values: configQuery.data !== undefined
-      ? { tenantName: configQuery.data.data.tenantName }
-      : { tenantName: "" },
+    values: { tenantName: "" },
   });
 
   const updateConfigMutation = useMutation({
-    mutationFn: (values: TenantValues) =>
-      client.patch("/v1/admin/config", values),
-    onSuccess: () => {
-      toast({ title: "Configuration saved" });
-    },
-    onError: (error) => {
-      const message = error instanceof ApiError ? error.message : "Save failed.";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+    mutationFn: (_values: TenantValues) =>
+      Promise.reject(new Error("Admin config API is not yet available")),
+    onError: () => {
+      toast({ title: "Not available", description: "Admin configuration is coming soon.", variant: "destructive" });
     },
   });
 
   const rotateMasterKeyMutation = useMutation({
-    mutationFn: () => client.post("/v1/admin/rotate-master-key"),
-    onSuccess: () => {
-      toast({ title: "Master key rotation initiated" });
-      setRotateKeyOpen(false);
-    },
-    onError: (error) => {
-      const message = error instanceof ApiError ? error.message : "Rotation failed.";
-      toast({ title: "Rotation failed", description: message, variant: "destructive" });
+    mutationFn: () =>
+      Promise.reject(new Error("Master key rotation API is not yet available")),
+    onError: () => {
+      toast({ title: "Not available", description: "Master key rotation is coming soon.", variant: "destructive" });
       setRotateKeyOpen(false);
     },
   });
@@ -116,57 +104,51 @@ export function AdminPage() {
       />
 
       <div className="mt-6 max-w-lg space-y-6">
+        {/* Coming Soon banner */}
+        <div className="flex items-start gap-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-semibold">Coming Soon</p>
+            <p className="mt-0.5 text-sm text-[var(--color-muted-foreground)]">
+              Admin configuration and master key rotation are under active development.
+              These features will be available in a future release. The layout below is a preview.
+            </p>
+          </div>
+        </div>
+
         {/* Tenant config */}
-        <div className="rounded-lg border border-[var(--color-border)] p-4">
+        <div className="rounded-lg border border-[var(--color-border)] p-4 opacity-60">
           <h2 className="mb-4 text-sm font-semibold">Tenant settings</h2>
-          {configQuery.isLoading ? (
-            <Skeleton className="h-20 w-full" />
-          ) : (
-            <Form {...form}>
-              <form
-                onSubmit={(e) => void form.handleSubmit((v) => updateConfigMutation.mutate(v))(e)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={form.control}
-                  name="tenantName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Organization name</FormLabel>
-                      <FormControl><Input {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* Read-only limits */}
-                {configQuery.data !== undefined && (
-                  <dl className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <dt className="text-[var(--color-muted-foreground)]">Max apps</dt>
-                      <dd className="font-medium">{configQuery.data.data.maxApps}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[var(--color-muted-foreground)]">Max connectors</dt>
-                      <dd className="font-medium">{configQuery.data.data.maxConnectors}</dd>
-                    </div>
-                  </dl>
+          <Form {...form}>
+            <form
+              onSubmit={(e) => { e.preventDefault(); }}
+              className="space-y-4"
+            >
+              <FormField
+                control={form.control}
+                name="tenantName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Organization name</FormLabel>
+                    <FormControl><Input {...field} disabled /></FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )}
+              />
 
-                <Button
-                  type="submit"
-                  disabled={updateConfigMutation.isPending}
-                  aria-busy={updateConfigMutation.isPending}
-                >
-                  {updateConfigMutation.isPending ? "Saving…" : "Save settings"}
-                </Button>
-              </form>
-            </Form>
-          )}
+              <Button
+                type="submit"
+                disabled
+                aria-disabled="true"
+              >
+                Save settings
+              </Button>
+            </form>
+          </Form>
         </div>
 
         {/* Danger zone */}
-        <div className="rounded-lg border border-[var(--color-destructive)]/30 p-4 space-y-4">
+        <div className="rounded-lg border border-[var(--color-destructive)]/30 p-4 space-y-4 opacity-60">
           <h2 className="text-sm font-semibold text-[var(--color-destructive)]">Danger zone</h2>
 
           <div>
@@ -177,7 +159,8 @@ export function AdminPage() {
             <Button
               variant="destructive"
               size="sm"
-              onClick={() => setRotateKeyOpen(true)}
+              disabled
+              aria-disabled="true"
             >
               <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
               Rotate master key

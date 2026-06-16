@@ -625,8 +625,6 @@ services:
       dockerfile: docker/Dockerfile.frontend
     container_name: frontend
     environment:
-      # VITE_API_URL is baked into the SPA at build time (not a runtime env var).
-      # See Dockerfile.frontend where it is passed as a build arg.
       NGINX_GATEWAY_URL: http://gateway-service:3000
     depends_on:
       gateway-service:

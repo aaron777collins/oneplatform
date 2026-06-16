@@ -28,6 +28,7 @@ ALTER SCHEMA logging OWNER TO logging_service_role;
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS logging.events (
   id          UUID        NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id   TEXT        NOT NULL DEFAULT '',
   trace_id    TEXT        NOT NULL DEFAULT '',
   service     TEXT        NOT NULL,
   level       TEXT        NOT NULL CHECK (level IN ('debug','info','warn','error')),
@@ -55,6 +56,11 @@ CREATE INDEX IF NOT EXISTS events_search_vec_gin_idx
 
 CREATE INDEX IF NOT EXISTS events_created_at_idx
   ON logging.events (created_at DESC);
+
+-- Tenant-scoped log queries — most API callers filter by tenant_id
+CREATE INDEX IF NOT EXISTS events_tenant_id_created_idx
+  ON logging.events (tenant_id, created_at DESC)
+  WHERE tenant_id <> '';
 
 -- ---------------------------------------------------------------------------
 -- logging.audit_events — non-partitioned append-only table

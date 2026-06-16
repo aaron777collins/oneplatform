@@ -157,7 +157,7 @@ fi
 # The redis/users.acl file is rendered at postgres/redis startup by a separate
 # entrypoint that reads these files and substitutes the placeholders.
 # Ref spec §3 "Redis: ACL Users".
-for REDIS_USER in admin auth pipeline logging gateway ingestion ontology app plugin; do
+for REDIS_USER in admin auth pipeline logging gateway ingestion ontology app plugin execution; do
   PW_FILE="$INIT_DIR/redis_password_${REDIS_USER}.txt"
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating Redis password for op_${REDIS_USER}"

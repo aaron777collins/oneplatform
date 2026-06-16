@@ -197,14 +197,16 @@ export function AppProvider({
       try {
         const [meResult] = await withRetry(() =>
           Promise.all([
-            bffClient.request<UserContext>("/bff/me"),
+            bffClient.request<{ data: UserContext } | UserContext>("/bff/me"),
             permissionCache.seed(bffClient),
           ]),
         );
 
         if (cancelled) return;
 
-        setUser(meResult);
+        // BFF returns { data: UserContext } envelope; unwrap if present.
+        const meData = (meResult as { data?: UserContext }).data ?? (meResult as UserContext);
+        setUser(meData);
 
         // Step 4: open the WebSocket connection
         wsManager.connect(config.appId);

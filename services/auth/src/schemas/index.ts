@@ -42,7 +42,10 @@ export const ApiKeyScope = z.enum([
   "users:read",
   "users:manage",
   "logs:read",
+  "logs:export",
+  "audit:read",
   "webhooks:manage",
+  "execution:read",
   "execution:run",
   "admin",
 ]);

@@ -1,10 +1,11 @@
 user default off nopass ~* &* -@all
 user op_admin on >REDIS_PASSWORD_admin ~* &* +@all
-user op_auth on >REDIS_PASSWORD_auth ~auth:* ~revocation:* ~reset:* &auth:* &revocation:* +@read +@write +@string +@hash +@set +@sortedset +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
-user op_pipeline on >REDIS_PASSWORD_pipeline ~queue:pipeline:* ~queue:execution:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
-user op_logging on >REDIS_PASSWORD_logging ~log:* ~audit:* &logs:* &audit:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_auth on >REDIS_PASSWORD_auth ~auth:* ~revocation:* ~reset:* ~bull:auth:* &auth:* &revocation:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_pipeline on >REDIS_PASSWORD_pipeline ~queue:pipeline:* ~queue:execution:* ~bull:queue:pipeline:* ~bull:queue:execution:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_logging on >REDIS_PASSWORD_logging ~log:* ~audit:* ~bull:audit:* ~bull:log:* &logs:* &audit:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
 user op_gateway on >REDIS_PASSWORD_gateway ~ratelimit:* ~gateway:* ~webhook:* &events:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
-user op_ingestion on >REDIS_PASSWORD_ingestion ~queue:ingestion:* ~ingestion:sync:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_ingestion on >REDIS_PASSWORD_ingestion ~queue:ingestion:* ~ingestion:sync:* ~bull:ingestion:* ~bull:queue:ingestion:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
 user op_ontology on >REDIS_PASSWORD_ontology ~ontology:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
-user op_app on >REDIS_PASSWORD_app ~guest-session:* &events:* +@read +@write +@string +@hash +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
-user op_plugin on >REDIS_PASSWORD_plugin ~plugin:* &events:* +@read +@write +@string +@hash +@set +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_app on >REDIS_PASSWORD_app ~guest-session:* ~rate:guest-session:* ~app:* ~bff:* ~bull:app:* ~bull:queue:app:* &events:* &app:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_plugin on >REDIS_PASSWORD_plugin ~plugin:* ~bull:plugin:* &events:* +@read +@write +@string +@hash +@set +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_execution on >REDIS_PASSWORD_execution ~execution:* &execution:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug

@@ -11,6 +11,7 @@ import type { BatchAccumulator } from "../services/ingestion-service.js";
 function mapRow(row: LogEventRow) {
   return {
     id: row.id,
+    tenantId: row.tenant_id,
     traceId: row.trace_id,
     service: row.service,
     level: row.level,
@@ -144,6 +145,7 @@ export function createInternalRoutes(
         );
       }
       events.push({
+        tenantId: parsed.data.tenantId,
         traceId: parsed.data.traceId,
         service: parsed.data.service,
         level: parsed.data.level,
@@ -158,6 +160,7 @@ export function createInternalRoutes(
     for (const event of events) {
       batchAccumulator.push({
         timestamp: event.createdAt.toISOString(),
+        tenantId: event.tenantId,
         traceId: event.traceId,
         service: event.service,
         level: event.level,

@@ -69,6 +69,7 @@ export type InternalLogQueryInput = z.infer<typeof internalLogQuerySchema>;
 
 export const ingestEventSchema = z.object({
   timestamp: z.string().datetime(),
+  tenantId: z.string().default(""),
   traceId: z.string().default(""),
   service: z.string().min(1).max(64),
   level: z.enum(["debug", "info", "warn", "error"]),

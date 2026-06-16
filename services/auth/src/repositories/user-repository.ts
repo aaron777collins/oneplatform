@@ -161,12 +161,23 @@ export class UserRepository {
     );
   }
 
+  async activate(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE auth.users
+            SET is_active  = true,
+                updated_at = now()
+          WHERE id = $1`,
+      [id]
+    );
+  }
+
   // Keyset pagination keyed on (created_at, id) to guarantee a stable,
   // index-friendly sort even for rows inserted within the same millisecond.
   async listByTenant(
     tenantId: string,
     cursor?: string,
-    limit?: number
+    limit?: number,
+    filters?: { email?: string; role?: string; isActive?: boolean },
   ): Promise<{ users: User[]; nextCursor: string | null }> {
     const pageSize = Math.min(limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
@@ -189,6 +200,28 @@ export class UserRepository {
       afterId = decoded.id;
     }
 
+    // Build dynamic filter conditions beyond the base tenant_id + cursor clause.
+    const extraConditions: string[] = [];
+    const extraValues: unknown[] = [];
+    let paramIdx = 5; // $1=tenantId, $2=afterCreatedAt, $3=afterId, $4=limit+1
+
+    if (filters?.email !== undefined) {
+      extraConditions.push(`email ILIKE $${paramIdx++}`);
+      extraValues.push(`%${filters.email}%`);
+    }
+    if (filters?.role !== undefined) {
+      extraConditions.push(`$${paramIdx++} = ANY(roles)`);
+      extraValues.push(filters.role);
+    }
+    if (filters?.isActive !== undefined) {
+      extraConditions.push(`is_active = $${paramIdx++}`);
+      extraValues.push(filters.isActive);
+    }
+
+    const extraWhere = extraConditions.length > 0
+      ? "AND " + extraConditions.join(" AND ")
+      : "";
+
     const result = await this.pool.query<User>(
       `SELECT ${USER_COLUMNS}
          FROM auth.users
@@ -197,9 +230,10 @@ export class UserRepository {
             $2::timestamptz IS NULL
             OR (created_at, id) > ($2::timestamptz, $3::uuid)
           )
+          ${extraWhere}
         ORDER BY created_at ASC, id ASC
         LIMIT $4`,
-      [tenantId, afterCreatedAt, afterId, pageSize + 1]
+      [tenantId, afterCreatedAt, afterId, pageSize + 1, ...extraValues]
     );
 
     // Fetching one extra row lets us detect whether another page exists

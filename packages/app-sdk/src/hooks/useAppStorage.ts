@@ -90,10 +90,12 @@ export function useAppStorage<T>(
     let cancelled = false;
 
     bffClient
-      .request<BffStorageGetResponse>(`/bff/storage/${encodeURIComponent(key)}`)
+      .request<{ data: BffStorageGetResponse } | BffStorageGetResponse>(`/bff/storage/${encodeURIComponent(key)}`)
       .then((res) => {
         if (!cancelled) {
-          setValueState(res.value !== null ? (res.value as T) : defaultValue);
+          // BFF returns { data: { key, value, updatedAt } } envelope; unwrap if present.
+          const storageData = (res as { data?: BffStorageGetResponse }).data ?? (res as BffStorageGetResponse);
+          setValueState(storageData.value !== null ? (storageData.value as T) : defaultValue);
           setIsLoaded(true);
         }
       })

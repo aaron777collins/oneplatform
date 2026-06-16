@@ -486,11 +486,14 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
     // HTML shell for index request (design spec §7.2)
     if (rawPath === "" || rawPath === "/") {
-      const configJson = JSON.stringify({
+      const configJsonRaw = JSON.stringify({
         appId:     tenantApp.id,
         tenantId:  tenantApp.tenant_id,
         bffOrigin: "",
       });
+      // Defense-in-depth: escape "</script>" sequences in the JSON blob to prevent
+      // XSS injection when the config is interpolated inside a <script> tag.
+      const configJson = configJsonRaw.replace(/</g, '\\u003c');
 
       // W11: escape the app name to prevent XSS via injected HTML in the title tag
       const html = [
@@ -544,9 +547,26 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
       );
     }
 
-    const contentType = rawPath.endsWith(".json")
-      ? "application/json"
-      : "application/javascript";
+    // Map file extensions to proper MIME types so browsers handle CSS, fonts,
+    // images, etc. correctly instead of treating everything as JS or JSON.
+    const MIME_TYPES: Record<string, string> = {
+      '.js':    'application/javascript',
+      '.mjs':   'application/javascript',
+      '.json':  'application/json',
+      '.css':   'text/css',
+      '.html':  'text/html',
+      '.svg':   'image/svg+xml',
+      '.png':   'image/png',
+      '.jpg':   'image/jpeg',
+      '.jpeg':  'image/jpeg',
+      '.gif':   'image/gif',
+      '.woff':  'font/woff',
+      '.woff2': 'font/woff2',
+      '.ttf':   'font/ttf',
+      '.map':   'application/json',
+    };
+    const ext = rawPath.substring(rawPath.lastIndexOf('.'));
+    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
 
     return new Response(minioResp.body, {
       status: 200,

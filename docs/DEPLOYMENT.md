@@ -33,8 +33,10 @@ $EDITOR .env
 docker compose -f docker/docker-compose.yml up -d
 
 # 4. Follow the first-run wizard in your browser
-open http://localhost:3000
+open http://localhost:8080
 ```
+
+> **Note:** The UI is served on port 8080. The API gateway listens on port 3000.
 
 The setup wizard (bootstrap) runs automatically on first launch. It guides
 you through creating the first admin user and generates the master encryption
@@ -51,9 +53,8 @@ to `.env` and customise the values below.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OP_BASE_URL` | `http://localhost:3000` | Public-facing URL including protocol and port. Must match the address users type in their browser. Used in redirect URIs, email links, and CORS. |
-| `OP_ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated list of allowed CORS origins. In production set this to your exact frontend URL. |
-| `OP_GATEWAY_PORT` | `3000` | Port the API gateway listens on. |
+| `OP_BASE_URL` | `http://localhost:8080` | Public-facing URL including protocol and port. Must match the address users type in their browser. Used in redirect URIs, email links, and CORS. |
+| `OP_ALLOWED_ORIGINS` | `http://localhost:8080` | Comma-separated list of allowed CORS origins. In production set this to your exact frontend URL. |
 
 ### Database
 
@@ -217,7 +218,7 @@ The browser cannot reach the API gateway.
 
 1. Check that Docker is running: `docker ps`
 2. Check all containers are up: `docker compose -f docker/docker-compose.yml ps`
-3. Check the gateway port: `curl http://localhost:3000/health`
+3. Check the gateway port: `curl http://localhost:3000/healthz`
 4. Check gateway logs: `docker compose -f docker/docker-compose.yml logs gateway`
 
 ### Services fail to start
@@ -225,7 +226,7 @@ The browser cannot reach the API gateway.
 Common causes:
 
 - **Missing `.env` file**: `cp .env.example .env` and fill in required values.
-- **Port conflict**: Another service is using port 3000. Set `OP_GATEWAY_PORT` to a free port.
+- **Port conflict**: Another service is using port 3000 (API gateway) or 8080 (UI). Free the conflicting port or adjust docker-compose port mappings.
 - **Database connection error**: Check `POSTGRES_PASSWORD` matches in all services.
 - **Insufficient memory**: Increase Docker's memory limit to at least 4 GB.
 

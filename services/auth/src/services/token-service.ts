@@ -42,6 +42,8 @@ const ALL_SCOPES: readonly string[] = [
   "users:read",
   "users:manage",
   "logs:read",
+  "logs:export",
+  "audit:read",
   "webhooks:manage",
   "execution:read",
   "execution:run",
@@ -57,16 +59,17 @@ const PREDEFINED_ROLE_SCOPES: Readonly<Record<string, readonly string[]>> = {
     "data:read", "data:write", "ontology:read", "ontology:write",
     "pipelines:manage", "apps:manage", "apps:deploy", "apps:read",
     "execution:read", "execution:run", "plugins:read", "plugins:manage",
-    "users:read", "users:manage", "logs:read", "webhooks:manage",
+    "users:read", "users:manage", "logs:read", "logs:export",
+    "audit:read", "webhooks:manage",
   ],
   developer: [
     "data:read", "data:write", "ontology:read", "pipelines:manage",
     "apps:manage", "apps:deploy", "apps:read", "execution:read", "execution:run",
-    "plugins:read", "logs:read",
+    "plugins:read", "logs:read", "audit:read",
   ],
   editor: [
     "data:read", "data:write", "ontology:read", "pipelines:manage",
-    "apps:manage", "apps:read", "execution:read", "logs:read",
+    "apps:manage", "apps:read", "execution:read", "logs:read", "audit:read",
   ],
   viewer: [
     "data:read", "ontology:read", "pipelines:read", "apps:read", "logs:read",
@@ -236,9 +239,12 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
 
       const claims = payload as JWTPayload & Partial<JwtClaims>;
 
-      // Check revocation blocklist
-      const revoked = await redis.get(`revocation:${claims["jti"]}`);
-      if (revoked !== null) return null;
+      // Check per-JTI and per-user revocation blocklists
+      const [jtiRevoked, userRevoked] = await Promise.all([
+        redis.get(`revocation:${claims["jti"]}`),
+        typeof claims["sub"] === "string" ? redis.get(`revocation:user:${claims["sub"]}`) : null,
+      ]);
+      if (jtiRevoked !== null || userRevoked !== null) return null;
 
       // Validate required custom claims are present and well-typed
       if (
