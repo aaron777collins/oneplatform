@@ -94,3 +94,13 @@ pnpm lint       # Lint all packages
 Business Source License (BSL) — source-available, free to self-host and modify. Converts to Apache 2.0 after 4 years.
 
 See [LICENSE](./LICENSE) for details.
+
+License Summary:
+
+oneplatform is licensed under the Business Source License 1.1.
+
+Non-production use is permitted under the terms of the LICENSE file.
+
+Production use, including internal business use, hosted use, or commercial deployment, requires separate written permission or a commercial license from Aaron Collins.
+
+On 2030-06-17, the Licensed Work converts to the MIT License.
