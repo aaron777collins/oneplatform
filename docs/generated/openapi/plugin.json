@@ -1,0 +1,3113 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Plugin Service",
+    "description": "Manages the OnePlatform plugin registry. Plugins extend the platform with custom connectors, transformers, destinations, auth providers, and widgets. Includes installation, instance management per tenant, versioned upgrades with drain-based rollouts, and hook chain resolution.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local (via Gateway)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Plugins",
+      "description": "Plugin registry management. Installation and uninstallation require the platform-admin role."
+    },
+    {
+      "name": "Plugin Instances",
+      "description": "Per-tenant plugin instances. Creating an instance enables the plugin for a specific tenant with custom configuration."
+    },
+    {
+      "name": "Plugin Upgrades",
+      "description": "Versioned upgrade and rollback for installed plugins. Requires platform-admin role."
+    },
+    {
+      "name": "Plugin Hooks",
+      "description": "Hook chain query for a plugin at a specific lifecycle stage."
+    }
+  ],
+  "paths": {
+    "/api/v1/plugins": {
+      "get": {
+        "summary": "List plugins",
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "getApiV1Plugins",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Lists all plugins in the registry. Supports filtering by type, status, and full-text search (q). No authentication required.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "connector",
+                "transformer",
+                "destination",
+                "auth-provider",
+                "widget"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "installed",
+                "active",
+                "disabled",
+                "uninstalled"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Install plugin",
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "postApiV1Plugins",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "HTTP 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallApprovalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Installs a plugin from a signed .oppkg bundle. The request must be multipart/form-data with a 'bundle' file field. If the manifest declares external URLs and approveUrls is false, the installation is paused and returns 202 with a list of URLs requiring approval. Resubmit with approveUrls=true to proceed. Requires platform-admin role.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallPluginRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plugins/{id}": {
+      "get": {
+        "summary": "Get plugin",
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "getApiV1PluginsById",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Returns full plugin details including the manifest, approved URLs, and current instances. No authentication required.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "PluginId"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Uninstall plugin",
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "deleteApiV1PluginsById",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUninstallResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Uninstalls a plugin. If active instances exist, pass confirmOrphan=true to acknowledge that those instances will be orphaned. Requires platform-admin role.",
+        "parameters": [
+          {
+            "name": "confirmOrphan",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "UninstallPluginId"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{id}/instances": {
+      "get": {
+        "summary": "List plugin instances",
+        "tags": [
+          "Plugin Instances"
+        ],
+        "operationId": "getApiV1PluginsByIdInstances",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstanceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Lists instances of a plugin. Non-admin callers see only their own tenant's instances. Platform-admin callers see all tenants.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "InstanceListPluginId"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create plugin instance",
+        "tags": [
+          "Plugin Instances"
+        ],
+        "operationId": "postApiV1PluginsByIdInstances",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstanceCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Enables a plugin for the caller's tenant with the provided configuration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePluginInstanceRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "CreateInstancePluginId"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{id}/instances/{instanceId}": {
+      "patch": {
+        "summary": "Update plugin instance",
+        "tags": [
+          "Plugin Instances"
+        ],
+        "operationId": "patchApiV1PluginsByIdInstancesByInstanceId",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstanceUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Partially updates a plugin instance's display name, config, or enabled state.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchPluginInstanceRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "PatchInstancePluginId"
+            }
+          },
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "PluginInstanceId"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{manifestId}/upgrade": {
+      "post": {
+        "summary": "Upgrade plugin",
+        "tags": [
+          "Plugin Upgrades"
+        ],
+        "operationId": "postApiV1PluginsByManifestIdUpgrade",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUpgradeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Initiates a version upgrade for an installed plugin using a drain-based rollout. The new bundle is staged and existing executions are drained before the switch. Requires platform-admin role.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginUpgradeRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "manifestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "UpgradePluginManifestId"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{manifestId}/rollback": {
+      "post": {
+        "summary": "Rollback plugin",
+        "tags": [
+          "Plugin Upgrades"
+        ],
+        "operationId": "postApiV1PluginsByManifestIdRollback",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginRollbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Rolls back a plugin to its previously active version. Requires platform-admin role.",
+        "parameters": [
+          {
+            "name": "manifestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "RollbackPluginManifestId"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{id}/hooks": {
+      "get": {
+        "summary": "Get hook chain for plugin",
+        "tags": [
+          "Plugin Hooks"
+        ],
+        "operationId": "getApiV1PluginsByIdHooks",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginHookChainResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — invalid input or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "VALIDATION_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "UNAUTHORIZED"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — authenticated but insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "FORBIDDEN"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "NOT_FOUND"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "RATE_LIMITED"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryAfter": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "example": "INTERNAL_ERROR"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Returns the ordered hook chain registered by this plugin for a specific lifecycle stage (e.g. 'before:ingestion:batch'). The stage query parameter is required.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "HooksPluginId"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PluginListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "manifestId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "connector",
+                    "transformer",
+                    "destination",
+                    "auth-provider",
+                    "widget"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "installed",
+                    "active",
+                    "disabled",
+                    "uninstalled"
+                  ]
+                },
+                "description": {
+                  "type": "string"
+                },
+                "author": {
+                  "type": "string"
+                },
+                "installedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "instanceCount": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "manifestId",
+                "name",
+                "version",
+                "type",
+                "status",
+                "description",
+                "author",
+                "installedAt",
+                "instanceCount"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false,
+        "description": "PluginListResponse"
+      },
+      "InstallPluginRequest": {
+        "type": "object",
+        "properties": {
+          "bundle": {
+            "description": "Plugin .oppkg bundle file"
+          },
+          "approveUrls": {
+            "type": "boolean",
+            "default": false
+          },
+          "platformWide": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "InstallPluginRequest"
+      },
+      "PluginInstallResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "manifestId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "connector",
+              "transformer",
+              "destination",
+              "auth-provider",
+              "widget"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "active"
+            ]
+          },
+          "requiredApprovals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "urlPattern": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "urlPattern",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "manifestId",
+          "name",
+          "version",
+          "type",
+          "status"
+        ],
+        "additionalProperties": false,
+        "description": "PluginInstallResponse"
+      },
+      "PluginInstallApprovalResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "approval_required"
+            ]
+          },
+          "manifestId": {
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "urlPattern": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "urlPattern",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "manifestId",
+          "requiredApprovals",
+          "message"
+        ],
+        "additionalProperties": false,
+        "description": "PluginInstallApprovalResponse"
+      },
+      "PluginDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "manifestId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "connector",
+              "transformer",
+              "destination",
+              "auth-provider",
+              "widget"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "active",
+              "staged",
+              "draining",
+              "disabled",
+              "uninstalled"
+            ]
+          },
+          "manifest": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "bundleSizeBytes": {
+            "type": "integer"
+          },
+          "installedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "installedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "gpgFingerprint": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvedUrls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "instances": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "id",
+          "manifestId",
+          "name",
+          "version",
+          "type",
+          "status",
+          "manifest",
+          "bundleSizeBytes",
+          "installedAt",
+          "installedBy",
+          "gpgFingerprint",
+          "approvedUrls",
+          "instances"
+        ],
+        "additionalProperties": false,
+        "description": "PluginDetailResponse"
+      },
+      "PluginUninstallResponse": {
+        "type": "object",
+        "properties": {
+          "uninstalled": {
+            "type": "boolean"
+          },
+          "pluginId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "manifestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uninstalled",
+          "pluginId",
+          "manifestId"
+        ],
+        "additionalProperties": false,
+        "description": "PluginUninstallResponse"
+      },
+      "PluginInstanceListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "instanceId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "pluginManifestId": {
+                  "type": "string"
+                },
+                "pluginId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "tenantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "instanceId",
+                "pluginManifestId",
+                "pluginId",
+                "tenantId",
+                "displayName",
+                "config",
+                "enabled",
+                "createdAt",
+                "updatedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "PluginInstanceListResponse"
+      },
+      "CreatePluginInstanceRequest": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          }
+        },
+        "required": [
+          "displayName"
+        ],
+        "additionalProperties": false,
+        "description": "CreatePluginInstanceRequest"
+      },
+      "PluginInstanceCreateResponse": {
+        "type": "object",
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pluginManifestId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "instanceId",
+          "pluginManifestId",
+          "tenantId",
+          "displayName",
+          "enabled",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "description": "PluginInstanceCreateResponse"
+      },
+      "PatchPluginInstanceRequest": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "description": "PatchPluginInstanceRequest"
+      },
+      "PluginInstanceUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pluginManifestId": {
+            "type": "string"
+          },
+          "pluginId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "instanceId",
+          "pluginManifestId",
+          "pluginId",
+          "tenantId",
+          "displayName",
+          "config",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "description": "PluginInstanceUpdateResponse"
+      },
+      "PluginUpgradeRequest": {
+        "type": "object",
+        "properties": {
+          "toVersion": {
+            "type": "string"
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "toVersion"
+        ],
+        "additionalProperties": false,
+        "description": "PluginUpgradeRequest"
+      },
+      "PluginUpgradeResponse": {
+        "type": "object",
+        "properties": {
+          "manifestId": {
+            "type": "string"
+          },
+          "fromVersion": {
+            "type": "string"
+          },
+          "toVersion": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "staged",
+              "active"
+            ]
+          },
+          "upgradedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "manifestId",
+          "fromVersion",
+          "toVersion",
+          "status",
+          "upgradedAt"
+        ],
+        "additionalProperties": false,
+        "description": "PluginUpgradeResponse"
+      },
+      "PluginRollbackResponse": {
+        "type": "object",
+        "properties": {
+          "manifestId": {
+            "type": "string"
+          },
+          "rolledBackTo": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          "rolledBackAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "manifestId",
+          "rolledBackTo",
+          "status",
+          "rolledBackAt"
+        ],
+        "additionalProperties": false,
+        "description": "PluginRollbackResponse"
+      },
+      "PluginHookChainResponse": {
+        "type": "object",
+        "properties": {
+          "hooks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pluginManifestId": {
+                  "type": "string"
+                },
+                "stage": {
+                  "type": "string"
+                },
+                "criticality": {
+                  "type": "string",
+                  "enum": [
+                    "critical",
+                    "advisory"
+                  ]
+                },
+                "priority": {
+                  "type": "integer"
+                },
+                "entrypoint": {
+                  "type": "string"
+                },
+                "timeout": {
+                  "type": "integer",
+                  "nullable": true
+                }
+              },
+              "required": [
+                "pluginManifestId",
+                "stage",
+                "criticality",
+                "priority",
+                "entrypoint",
+                "timeout"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "hooks"
+        ],
+        "additionalProperties": false,
+        "description": "PluginHookChainResponse"
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT access token. Obtain via POST /api/v1/auth/login."
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "API key with 'ApiKey ' prefix, e.g. 'ApiKey op_key_abc123...'. Obtain via POST /api/v1/api-keys."
+      }
+    }
+  }
+}

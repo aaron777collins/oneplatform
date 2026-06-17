@@ -1,0 +1,21 @@
+FROM caddy:2-alpine
+
+RUN apk add --no-cache gettext
+
+RUN addgroup -g 1001 oneplatform && adduser -u 1001 -G oneplatform -s /bin/sh -D oneplatform
+
+COPY docker/caddy/Caddyfile.dev            /etc/caddy/Caddyfile.dev
+COPY docker/caddy/Caddyfile.prod.template  /etc/caddy/Caddyfile.prod.template
+COPY docker/caddy/Caddyfile.nossl          /etc/caddy/Caddyfile.nossl
+COPY docker/caddy/caddy-entrypoint.sh      /usr/local/bin/caddy-entrypoint.sh
+RUN chmod +x /usr/local/bin/caddy-entrypoint.sh
+
+RUN mkdir -p /data/caddy /config/caddy && \
+    chown -R oneplatform:oneplatform /data/caddy /config/caddy && \
+    chown oneplatform:oneplatform /etc/caddy
+
+USER oneplatform
+
+EXPOSE 80 443
+
+CMD ["/usr/local/bin/caddy-entrypoint.sh"]

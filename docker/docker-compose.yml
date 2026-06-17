@@ -245,8 +245,8 @@ services:
       LOGGING_SERVICE_URL: http://logging-service:3000
       PLUGIN_SERVICE_URL: http://plugin-service:3000
       # OP_* values injected by service-entrypoint.sh from init-data volume
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_GLOBAL_RATE_LIMIT: ${OP_GLOBAL_RATE_LIMIT:-10000}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
@@ -255,8 +255,6 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
-    ports:
-      - "3000:3000"
     networks:
       - oneplatform-internal
       - oneplatform-public
@@ -285,8 +283,8 @@ services:
       SERVICE_NAME: auth-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_REQUIRE_EMAIL_VERIFICATION: ${OP_REQUIRE_EMAIL_VERIFICATION:-false}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
@@ -330,8 +328,8 @@ services:
       SERVICE_NAME: ingestion-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_INGESTION_BATCH_SIZE: ${OP_INGESTION_BATCH_SIZE:-1000}
       OP_LARGE_SYNC_CONCURRENCY: ${OP_LARGE_SYNC_CONCURRENCY:-3}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
@@ -368,8 +366,8 @@ services:
       SERVICE_NAME: ontology-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MIGRATION_TIMEOUT: ${OP_MIGRATION_TIMEOUT:-3600}
       OP_ONTOLOGY_POLL_INTERVAL: ${OP_ONTOLOGY_POLL_INTERVAL:-15}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
@@ -406,8 +404,8 @@ services:
       SERVICE_NAME: pipeline-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
     volumes:
@@ -442,8 +440,8 @@ services:
       SERVICE_NAME: execution-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_SANDBOX_POOL_SIZE: ${OP_SANDBOX_POOL_SIZE:-5}
       OP_CONNECTOR_TIMEOUT_SECONDS: ${OP_CONNECTOR_TIMEOUT_SECONDS:-300}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
@@ -496,8 +494,8 @@ services:
       SERVICE_NAME: app-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_WILDCARD_DOMAIN: ${OP_WILDCARD_DOMAIN:-}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
@@ -534,8 +532,8 @@ services:
       SERVICE_NAME: logging-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
     volumes:
@@ -570,8 +568,8 @@ services:
       SERVICE_NAME: plugin-service
       NODE_ENV: production
       PORT: "3000"
-      OP_BASE_URL: ${OP_BASE_URL:-http://localhost:3000}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-http://localhost:3000}
+      OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
     volumes:
@@ -624,16 +622,12 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.frontend
     container_name: frontend
-    environment:
-      NGINX_GATEWAY_URL: http://gateway-service:3000
     depends_on:
       gateway-service:
         condition: service_healthy
     networks:
       - oneplatform-internal
       - oneplatform-public
-    ports:
-      - "8080:80"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
@@ -641,6 +635,57 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # ─── Layer 5: TLS Reverse Proxy ──────────────────────────────────────────
+  caddy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.caddy
+    container_name: caddy
+    environment:
+      OP_TLS_MODE:  ${OP_TLS_MODE:-internal}
+      OP_DOMAIN:    ${OP_DOMAIN:-localhost}
+      OP_TLS_EMAIL: ${OP_TLS_EMAIL:-}
+    volumes:
+      - caddy-data:/data/caddy
+      - caddy-config:/config/caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - oneplatform-public
+    depends_on:
+      gateway-service:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:size=50M
+      - /etc/caddy:size=1M
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "caddy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
 
 volumes:
   # Data store persistence
@@ -657,6 +702,9 @@ volumes:
   sandbox-socket:
   # Aggregated structured logs written by Vector from all service containers
   log-data:
+  # TLS certificate storage and Caddy runtime config
+  caddy-data:
+  caddy-config:
 
 networks:
   oneplatform-public:

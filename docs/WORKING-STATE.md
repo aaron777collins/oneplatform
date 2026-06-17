@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 9 — Critical Fixes & Hardening
+## Current Phase: Phase 12 — Docker Compose, Docs & TLS (COMPLETE)
 
 ### Completed Phases
 
@@ -149,13 +149,32 @@ This document tracks the current state of development. Read this FIRST when resu
 - [x] 6 parallel code reviews — all blockers resolved
 - [x] All type checks pass, all ~6,800 tests pass
 
+#### Phase 12: Docker Compose, Docs & TLS
+- [x] Docker Compose — all 9 service containers already complete (gateway, auth, ingestion, ontology, pipeline, execution, app, logging, plugin)
+- [x] API docs pipeline — OpenAPI specs for all 9 services, TypeDoc for 4 SDK packages, CLI reference (23 pages)
+- [x] docs:merge — merged specs into docs/generated/ (10 OpenAPI JSON, 257 TypeDoc pages, 23 CLI pages)
+- [x] Starlight docs site build — 25 pages compiled, search indexed (1146 words)
+- [x] OPERATIONS.md — day-to-day platform operations guide
+- [x] MONITORING.md — observability and alerting setup guide
+- [x] TROUBLESHOOTING.md — common issues and debug procedures
+- [x] UPGRADE.md — version upgrade and migration procedures
+- [x] BACKUP.md — backup and disaster recovery procedures
+- [x] TLS configuration — Caddy reverse proxy with 3 modes (internal/auto/off)
+  - Caddyfile.dev: self-signed via Caddy internal CA
+  - Caddyfile.prod.template: Let's Encrypt with HTTP-01 ACME
+  - Caddyfile.nossl: plain HTTP fallback for dev behind proxies
+  - caddy-entrypoint.sh: mode selector with domain validation
+  - Dockerfile.caddy: caddy:2-alpine, UID 1001, read-only filesystem
+  - Docker Compose: caddy service, ports 80/443, security hardening (cap_drop ALL, read_only, tmpfs)
+  - Frontend: simplified to static nginx.conf (Caddy handles API routing + security headers)
+  - All services updated: OP_BASE_URL/OP_ALLOWED_ORIGINS → https://localhost
+  - CSP headers on all 3 Caddyfile variants
+  - Dead nginx-frontend-start.sh removed
+- [x] Code review — 3 parallel reviews (TLS, API docs, ops docs), all blockers fixed
+- [x] Final E2E verification — 17/17 build, 20/20 test suites, 19/19 docs, 25-page Starlight site, Docker Compose valid
+
 ### Pending
-1. Docker Compose — add all 9 application service containers
-2. TLS configuration and security hardening
-3. Operational documentation (deployment, operations, upgrade guides)
-4. Auto-generated API docs pipeline
-5. BSL license file
-6. Final end-to-end verification
+1. BSL license file (explicitly deferred by user)
 
 ## Test Totals
 
@@ -182,5 +201,10 @@ This document tracks the current state of development. Read this FIRST when resu
 | `docs/USER-STORIES-ANALYSIS-V4.md` | Friction point analysis v4 (148 net-new findings) |
 | `docs/GAP-ANALYSIS.md` | Gap analysis (127 gaps across 9 categories) |
 | `docs/ARCH-REVIEW-REMAINING-ISSUES.md` | Architecture review of remaining issues |
+| `docs/OPERATIONS.md` | Day-to-day platform operations |
+| `docs/MONITORING.md` | Observability and alerting setup |
+| `docs/TROUBLESHOOTING.md` | Common issues and debug procedures |
+| `docs/UPGRADE.md` | Version upgrade and migration procedures |
+| `docs/BACKUP.md` | Backup and disaster recovery |
 | `DEVELOPMENT-PROCESS.md` | Development pipeline and quality gates |
 | `.claude/handoff.md` | Session continuity handoff |

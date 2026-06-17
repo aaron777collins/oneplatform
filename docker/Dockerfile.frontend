@@ -3,10 +3,8 @@
 # Multi-stage build for the OnePlatform React SPA.
 #
 # Stage 1 (builder): installs deps and runs Vite build.
-# Stage 2 (runner):  nginx:alpine serving the built SPA with the nginx.conf
-#                    from the frontend package. The gateway upstream hostname
-#                    is substituted at container start via envsubst so a single
-#                    image works in any environment (dev, staging, prod).
+# Stage 2 (runner):  nginx:alpine serving the built SPA.
+#                    API routing and TLS are handled by Caddy at the edge.
 
 ARG NODE_VERSION=22
 
@@ -47,20 +45,13 @@ RUN pnpm --filter @oneplatform/frontend build
 # ─── Stage 2: nginx runtime ──────────────────────────────────────────────────
 FROM nginx:1.27-alpine AS runner
 
-# Install gettext for envsubst (Alpine nginx image does not include it).
-RUN apk add --no-cache gettext
-
 # Copy the built SPA assets from the builder stage.
 COPY --from=builder /build/packages/frontend/dist /usr/share/nginx/html
 
-# Copy the nginx config as a template. envsubst will substitute
-# $NGINX_GATEWAY_URL before nginx starts (default: http://gateway-service:3000).
-COPY --from=builder /build/packages/frontend/nginx.conf /etc/nginx/nginx.conf.template
-
-# The startup script substitutes the gateway URL and launches nginx.
-COPY docker/nginx-frontend-start.sh /usr/local/bin/nginx-frontend-start.sh
-RUN chmod +x /usr/local/bin/nginx-frontend-start.sh
+# Copy the static nginx config (no template substitution needed — Caddy handles
+# API routing and TLS at the edge).
+COPY --from=builder /build/packages/frontend/nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
 
-CMD ["/usr/local/bin/nginx-frontend-start.sh"]
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,41 @@
+# Production TLS configuration using Let's Encrypt (HTTP-01 ACME challenge).
+#
+# Required env vars (rendered by caddy-entrypoint.sh):
+#   OP_DOMAIN     — public hostname, e.g. platform.example.com
+#   OP_TLS_EMAIL  — Let's Encrypt account email
+
+{
+	admin off
+	email ${OP_TLS_EMAIL}
+	log {
+		output stdout
+		format json
+	}
+}
+
+${OP_DOMAIN} {
+	header {
+		Strict-Transport-Security  "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options     "nosniff"
+		X-Frame-Options            "DENY"
+		Referrer-Policy            "strict-origin-when-cross-origin"
+		Permissions-Policy         "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://${OP_DOMAIN}; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:80 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+}

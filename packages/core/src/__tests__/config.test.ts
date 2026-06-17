@@ -51,8 +51,7 @@ describe("loadConfig", () => {
     setMinimalEnv();
     const { loadConfig, baseConfigSchema } = await import("../config.js");
     const config = loadConfig(baseConfigSchema);
-    // OP_ALLOWED_ORIGINS defaults to http://localhost:3000 (as array after transform)
-    expect(config.OP_ALLOWED_ORIGINS).toEqual(["http://localhost:3000"]);
+    expect(config.OP_ALLOWED_ORIGINS).toEqual(["https://localhost"]);
   });
 
   it("parses OP_ALLOWED_ORIGINS as an array", async () => {

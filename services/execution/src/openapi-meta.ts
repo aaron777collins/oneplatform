@@ -102,7 +102,7 @@ export const meta: ServiceOpenApiMeta = {
         contentType: "application/json",
       },
       response: {
-        202: RunResponseSchema.describe("RunResponse"),
+        202: RunResponseSchema.describe("ExecutionRunResponse"),
       },
     },
     {

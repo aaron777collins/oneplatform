@@ -1,0 +1,43 @@
+# Development TLS configuration using Caddy's internal CA.
+# Caddy generates and signs its own certificates — no external ACME calls.
+#
+# To suppress browser warnings, import the Caddy root CA:
+#   docker compose -f docker/docker-compose.yml cp caddy:/data/caddy/pki/authorities/local/root.crt /tmp/caddy-root.crt
+#   # macOS:  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/caddy-root.crt
+#   # Ubuntu: sudo cp /tmp/caddy-root.crt /usr/local/share/ca-certificates/caddy-root.crt && sudo update-ca-certificates
+
+{
+	admin off
+	log {
+		output stdout
+		format json
+	}
+}
+
+https://localhost {
+	tls internal
+
+	header {
+		X-Content-Type-Options     "nosniff"
+		X-Frame-Options            "DENY"
+		Referrer-Policy            "strict-origin-when-cross-origin"
+		Permissions-Policy         "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://localhost; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:80 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+}

@@ -35,7 +35,7 @@ export const baseConfigSchema = z.object({
   OP_JWT_SECRET: z.string().min(32),
   OP_CURSOR_SECRET: z.string().min(32),
   OP_BASE_URL: z.string().url(),
-  OP_ALLOWED_ORIGINS: originsSchema.optional().default("http://localhost:3000"),
+  OP_ALLOWED_ORIGINS: originsSchema.optional().default("https://localhost"),
   OP_DATABASE_URL: z.string().url(),
   OP_REDIS_URL: z.string().url(),
 });

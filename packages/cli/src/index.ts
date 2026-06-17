@@ -122,6 +122,9 @@ export function buildProgram(): Command {
   return program;
 }
 
-// Parse argv when invoked as the CLI binary
-const program = buildProgram();
-program.parse(process.argv);
+import { fileURLToPath } from "node:url";
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const program = buildProgram();
+  program.parse(process.argv);
+}

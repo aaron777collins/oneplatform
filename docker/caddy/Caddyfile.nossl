@@ -1,0 +1,36 @@
+# Plain HTTP mode — for local development behind another proxy (ngrok, etc.).
+# WARNING: never use in production.
+
+{
+	admin off
+	log {
+		output stdout
+		format json
+	}
+}
+
+:80 {
+	header {
+		X-Content-Type-Options     "nosniff"
+		X-Frame-Options            "DENY"
+		Referrer-Policy            "strict-origin-when-cross-origin"
+		Permissions-Policy         "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:80 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+}

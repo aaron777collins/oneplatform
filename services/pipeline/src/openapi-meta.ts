@@ -194,7 +194,7 @@ const runResponse = z
       createdAt: z.string().datetime(),
     }),
   })
-  .describe("RunResponse");
+  .describe("PipelineRunResponse");
 
 const runListResponse = z
   .object({

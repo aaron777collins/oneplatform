@@ -15,6 +15,8 @@
 #   OP_BASE_URL         — Public base URL (e.g. https://platform.example.com)
 #   OP_JWT_SECRET       — JWT signing secret (min 32 chars)
 #   OP_MASTER_KEY       — Master encryption key
+#   OP_DOMAIN           — Public domain name (e.g. platform.example.com)
+#   OP_TLS_EMAIL        — Let's Encrypt account email
 #
 # ── Scaling note ────────────────────────────────────────────────────────────
 # This file does NOT set deploy.replicas. In standalone Docker Compose,
@@ -170,4 +172,21 @@ services:
       resources:
         limits:
           memory: 512m
+          cpus: "0.5"
+
+  # ── Caddy TLS: require production domain and email ────────────────────────
+  caddy:
+    environment:
+      OP_TLS_MODE:  "auto"
+      OP_DOMAIN:    "${OP_DOMAIN:?Must set OP_DOMAIN for production (e.g. platform.example.com)}"
+      OP_TLS_EMAIL: "${OP_TLS_EMAIL:?Must set OP_TLS_EMAIL for production (Let's Encrypt account email)}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 256m
           cpus: "0.5"

@@ -42,7 +42,7 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-The UI will be available at `http://localhost:8080`. The API gateway is at `http://localhost:3000`.
+The platform will be available at `https://localhost` (Caddy provides TLS with a self-signed cert for development).
 
 ## Tech Stack
 

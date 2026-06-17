@@ -226,7 +226,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
       throw new ValidationError("Invalid diff request body", parsed.error.issues);
     }
 
-    const input = stripUndefined({
+    const input: PatchEntityInput = stripUndefined({
       name: parsed.data.name,
       description: parsed.data.description,
       isPublic: parsed.data.isPublic,
@@ -234,7 +234,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
       removeFieldSlugs: parsed.data.removeFieldSlugs,
       renameFields: parsed.data.renameFields,
       updateFields: parsed.data.updateFields,
-    });
+    }) as PatchEntityInput;
 
     const result = await entityService.diffEntity(user.tenantId, entityType, input);
     return c.json({
