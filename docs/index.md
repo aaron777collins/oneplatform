@@ -66,7 +66,7 @@ The platform will be available at `https://localhost` (Caddy provides TLS with a
 
 ## Development
 
-See [DEVELOPMENT-PROCESS.md](./DEVELOPMENT-PROCESS.md) for the full development workflow.
+See [Development Process](./development-process.md) for the full development workflow.
 
 ### Prerequisites
 
@@ -85,15 +85,15 @@ pnpm lint       # Lint all packages
 
 ## Documentation
 
-- [Architecture Decisions](./docs/decisions/001-architecture-decisions.md) — All 23 architecture decisions
-- [Design Spec](./docs/superpowers/specs/) — Detailed design specifications
-- [Development Process](./DEVELOPMENT-PROCESS.md) — How we build and review code
+- [Architecture Decisions](./decisions/001-architecture-decisions.md) — All 36 architecture decisions
+- [Getting Started](./getting-started/) — Quickstart guides by role
+- [Development Process](./development-process.md) — How we build and review code
 
 ## License
 
 Business Source License (BSL) — source-available, free to self-host and modify. Converts to MIT License after 4 years.
 
-See [LICENSE](./LICENSE) for details.
+See [LICENSE](https://github.com/aaron777collins/oneplatform/blob/main/LICENSE) for details.
 
 License Summary:
 

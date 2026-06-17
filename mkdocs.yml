@@ -1,0 +1,271 @@
+site_name: OnePlatform
+site_description: Open-source data integration, transformation, and app platform
+site_url: https://aaron777collins.github.io/oneplatform/
+repo_url: https://github.com/aaron777collins/oneplatform
+repo_name: aaron777collins/oneplatform
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search:
+      separator: '[\s\-\.]+'
+      lang: en
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/aaron777collins/oneplatform
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - getting-started/index.md
+    - Data Engineer: quickstart/data-engineer.md
+    - App Developer: quickstart/app-developer.md
+    - Plugin Developer: quickstart/plugin-developer.md
+    - Platform Admin: quickstart/platform-admin.md
+
+  - Architecture:
+    - architecture/index.md
+    - Decisions:
+      - Architecture Decisions: decisions/001-architecture-decisions.md
+      - Expanded Decisions: decisions/002-expanded-architecture-decisions.md
+    - Service Designs:
+      - Gateway: designs/gateway-service.md
+      - Auth: designs/auth-service.md
+      - Ingestion: designs/ingestion-service.md
+      - Ontology: designs/ontology-service.md
+      - Pipeline: designs/pipeline-service.md
+      - Execution: designs/execution-service.md
+      - App: designs/app-service.md
+      - Logging: designs/logging-service.md
+      - Plugin: designs/plugin-service.md
+    - Package Designs:
+      - SDK: designs/sdk-package.md
+      - App SDK: designs/app-sdk-package.md
+      - Plugin SDK: designs/plugin-sdk-package.md
+      - CLI: designs/cli-package.md
+      - Frontend: designs/frontend-package.md
+    - Cross-Cutting:
+      - Auto-Generated Docs: designs/auto-generated-docs.md
+      - Friction Fixes: designs/friction-fixes.md
+      - Integration Tests: designs/integration-test-architecture.md
+
+  - Operations:
+    - operations/index.md
+    - Deployment: DEPLOYMENT.md
+    - Day-to-Day Operations: OPERATIONS.md
+    - Monitoring: MONITORING.md
+    - Backup & Recovery: BACKUP.md
+    - Upgrades: UPGRADE.md
+    - Troubleshooting: TROUBLESHOOTING.md
+
+  - Reference:
+    - reference/index.md
+    - CLI:
+      - Overview: generated/cli/index.md
+      - app: generated/cli/app.md
+      - auth: generated/cli/auth.md
+      - completion: generated/cli/completion.md
+      - config: generated/cli/config.md
+      - connector: generated/cli/connector.md
+      - data: generated/cli/data.md
+      - dlq: generated/cli/dlq.md
+      - exec: generated/cli/exec.md
+      - logs: generated/cli/logs.md
+      - mapping: generated/cli/mapping.md
+      - ontology: generated/cli/ontology.md
+      - pipeline: generated/cli/pipeline.md
+      - plugin: generated/cli/plugin.md
+      - profile: generated/cli/profile.md
+      - role: generated/cli/role.md
+      - schedule: generated/cli/schedule.md
+      - sdk: generated/cli/sdk.md
+      - service: generated/cli/service.md
+      - status: generated/cli/status.md
+      - user: generated/cli/user.md
+      - version: generated/cli/version.md
+      - webhook-out: generated/cli/webhook-out.md
+    - SDK (@oneplatform/sdk):
+      - Overview: generated/typedoc/sdk/README.md
+      - Functions:
+        - createClient: generated/typedoc/sdk/functions/createClient.md
+        - filter: generated/typedoc/sdk/functions/filter.md
+      - Interfaces:
+        - OnePlatformClient: generated/typedoc/sdk/interfaces/OnePlatformClient.md
+        - ClientOptions: generated/typedoc/sdk/interfaces/ClientOptions.md
+        - Pipeline: generated/typedoc/sdk/interfaces/Pipeline.md
+        - PipelineRun: generated/typedoc/sdk/interfaces/PipelineRun.md
+        - ConnectorInstance: generated/typedoc/sdk/interfaces/ConnectorInstance.md
+        - Plugin: generated/typedoc/sdk/interfaces/Plugin.md
+        - App: generated/typedoc/sdk/interfaces/App.md
+        - User: generated/typedoc/sdk/interfaces/User.md
+        - ApiKey: generated/typedoc/sdk/interfaces/ApiKey.md
+        - Page: generated/typedoc/sdk/interfaces/Page.md
+        - PaginatedIterable: generated/typedoc/sdk/interfaces/PaginatedIterable.md
+        - ListOptions: generated/typedoc/sdk/interfaces/ListOptions.md
+        - FilterBuilder: generated/typedoc/sdk/interfaces/FilterBuilder.md
+        - Subscription: generated/typedoc/sdk/interfaces/Subscription.md
+        - RetryPolicy: generated/typedoc/sdk/interfaces/RetryPolicy.md
+      - Error Classes:
+        - OnePlatformError: generated/typedoc/sdk/classes/OnePlatformError.md
+        - AuthError: generated/typedoc/sdk/classes/AuthError.md
+        - ValidationError: generated/typedoc/sdk/classes/ValidationError.md
+        - NotFoundError: generated/typedoc/sdk/classes/NotFoundError.md
+        - RateLimitError: generated/typedoc/sdk/classes/RateLimitError.md
+    - App SDK (@oneplatform/app-sdk):
+      - Overview: generated/typedoc/app-sdk/README.md
+      - Functions:
+        - AppProvider: generated/typedoc/app-sdk/functions/AppProvider.md
+        - useQuery: generated/typedoc/app-sdk/functions/useQuery.md
+        - useMutation: generated/typedoc/app-sdk/functions/useMutation.md
+        - useSubscription: generated/typedoc/app-sdk/functions/useSubscription.md
+        - useUser: generated/typedoc/app-sdk/functions/useUser.md
+        - usePermission: generated/typedoc/app-sdk/functions/usePermission.md
+        - useAppStorage: generated/typedoc/app-sdk/functions/useAppStorage.md
+      - Interfaces:
+        - QueryResult: generated/typedoc/app-sdk/interfaces/QueryResult.md
+        - MutationResult: generated/typedoc/app-sdk/interfaces/MutationResult.md
+        - SubscriptionResult: generated/typedoc/app-sdk/interfaces/SubscriptionResult.md
+        - UserContext: generated/typedoc/app-sdk/interfaces/UserContext.md
+        - EntityEvent: generated/typedoc/app-sdk/interfaces/EntityEvent.md
+    - Plugin SDK (@oneplatform/plugin-sdk):
+      - Overview: generated/typedoc/plugin-sdk/README.md
+      - Interfaces:
+        - Connector: generated/typedoc/plugin-sdk/interfaces/Connector.md
+        - ConnectorMetadata: generated/typedoc/plugin-sdk/interfaces/ConnectorMetadata.md
+        - Destination: generated/typedoc/plugin-sdk/interfaces/Destination.md
+        - Transformer: generated/typedoc/plugin-sdk/interfaces/Transformer.md
+        - Widget: generated/typedoc/plugin-sdk/interfaces/Widget.md
+        - AuthProvider: generated/typedoc/plugin-sdk/interfaces/AuthProvider.md
+        - PluginContext: generated/typedoc/plugin-sdk/interfaces/PluginContext.md
+        - HookDeclaration: generated/typedoc/plugin-sdk/interfaces/HookDeclaration.md
+        - CacheAccessor: generated/typedoc/plugin-sdk/interfaces/CacheAccessor.md
+        - CredentialAccessor: generated/typedoc/plugin-sdk/interfaces/CredentialAccessor.md
+      - Error Classes:
+        - PluginError: generated/typedoc/plugin-sdk/classes/PluginError.md
+        - PluginAuthError: generated/typedoc/plugin-sdk/classes/PluginAuthError.md
+        - PluginConfigError: generated/typedoc/plugin-sdk/classes/PluginConfigError.md
+        - PluginDataError: generated/typedoc/plugin-sdk/classes/PluginDataError.md
+    - Core Library (@oneplatform/core):
+      - Overview: generated/typedoc/core/README.md
+      - Functions:
+        - createApp: generated/typedoc/core/functions/createApp.md
+        - createLogger: generated/typedoc/core/functions/createLogger.md
+        - createDbClient: generated/typedoc/core/functions/createDbClient.md
+        - createRedisClient: generated/typedoc/core/functions/createRedisClient.md
+        - createQueue: generated/typedoc/core/functions/createQueue.md
+        - createWorker: generated/typedoc/core/functions/createWorker.md
+        - createEventPublisher: generated/typedoc/core/functions/createEventPublisher.md
+        - createServiceTokenSigner: generated/typedoc/core/functions/createServiceTokenSigner.md
+        - authMiddleware: generated/typedoc/core/functions/authMiddleware.md
+        - serviceAuthMiddleware: generated/typedoc/core/functions/serviceAuthMiddleware.md
+        - corsMiddleware: generated/typedoc/core/functions/corsMiddleware.md
+        - errorHandlerMiddleware: generated/typedoc/core/functions/errorHandlerMiddleware.md
+        - healthz: generated/typedoc/core/functions/healthz.md
+        - loadConfig: generated/typedoc/core/functions/loadConfig.md
+        - encrypt: generated/typedoc/core/functions/encrypt.md
+        - decrypt: generated/typedoc/core/functions/decrypt.md
+      - Interfaces:
+        - Logger: generated/typedoc/core/interfaces/Logger.md
+        - EventPublisher: generated/typedoc/core/interfaces/EventPublisher.md
+        - ApiResponse: generated/typedoc/core/interfaces/ApiResponse.md
+        - PaginatedResponse: generated/typedoc/core/interfaces/PaginatedResponse.md
+        - UserContext: generated/typedoc/core/interfaces/UserContext.md
+        - ServiceTokenSigner: generated/typedoc/core/interfaces/ServiceTokenSigner.md
+        - CreateAppConfig: generated/typedoc/core/interfaces/CreateAppConfig.md
+      - Error Classes:
+        - AppError: generated/typedoc/core/classes/AppError.md
+        - ValidationError: generated/typedoc/core/classes/ValidationError.md
+        - NotFoundError: generated/typedoc/core/classes/NotFoundError.md
+        - ForbiddenError: generated/typedoc/core/classes/ForbiddenError.md
+        - UnauthorizedError: generated/typedoc/core/classes/UnauthorizedError.md
+        - RateLimitError: generated/typedoc/core/classes/RateLimitError.md
+
+  - Development:
+    - development/index.md
+    - Development Process: development-process.md
+    - Working State: WORKING-STATE.md
+    - Analysis:
+      - Gap Analysis: GAP-ANALYSIS.md
+      - User Stories v4: USER-STORIES-ANALYSIS-V4.md
+      - User Stories v3: USER-STORIES-ANALYSIS-V3.md
+      - User Stories v2: USER-STORIES-ANALYSIS-V2.md

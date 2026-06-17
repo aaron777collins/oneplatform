@@ -12,3 +12,5 @@ coverage/
 *.tgz
 tmp/
 .turbo/
+site/
+docs/development-process.md
