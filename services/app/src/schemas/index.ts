@@ -146,6 +146,23 @@ export const StoragePutSchema = z.object({
 export type StoragePutInput = z.infer<typeof StoragePutSchema>;
 
 // ---------------------------------------------------------------------------
+// App-from-template schema — G-075
+// ---------------------------------------------------------------------------
+
+export const CreateAppFromTemplateSchema = z.object({
+  templateId:  z.string().min(1),
+  name:        z.string().min(1).max(128),
+  slug:        z.string().min(1).max(64).regex(
+                 /^[a-z0-9-]+$/,
+                 "slug must be lowercase alphanumeric with hyphens"
+               ),
+  description: z.string().max(512).optional(),
+  accessMode:  z.enum(["platform-user", "public"]).default("platform-user"),
+});
+
+export type CreateAppFromTemplateInput = z.infer<typeof CreateAppFromTemplateSchema>;
+
+// ---------------------------------------------------------------------------
 // Shared pagination query schema
 // ---------------------------------------------------------------------------
 

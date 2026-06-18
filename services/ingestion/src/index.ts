@@ -30,6 +30,8 @@ import {
   createRetentionService,
   createWebhookDeliveryService,
   createWebhookDeliveryLogger,
+  createSyncAnalyticsService,
+  createConnectorHealthService,
 } from "./services/index.js";
 import type { SyncJobPayload, BatchJobPayload } from "./services/index.js";
 import type { FileParseJobPayload } from "./services/upload-service.js";
@@ -40,6 +42,8 @@ import {
   createWebhookRoutes,
   createUploadRoutes,
   createInternalRoutes,
+  createAnalyticsRoutes,
+  createConnectorHealthRoutes,
 } from "./routes/index.js";
 
 export interface ServiceApp {
@@ -188,6 +192,18 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     logger,
   });
 
+  const syncAnalyticsService = createSyncAnalyticsService({
+    syncService,
+    connectorRepo,
+  });
+
+  const connectorHealthService = createConnectorHealthService({
+    syncService,
+    connectorRepo,
+    syncStateRepo,
+    logger,
+  });
+
   const webhookManagementService = createWebhookManagementService({
     receiverRepo: webhookReceiverRepo,
     connectorRepo,
@@ -306,6 +322,13 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
 
   const connectorRoutes = createConnectorRoutes({ connectorService, syncService, masterKey: config.masterKey });
   app.route("/api/v1/connectors", connectorRoutes);
+
+  const connectorHealthRoutes = createConnectorHealthRoutes({ connectorHealthService });
+  app.route("/api/v1/connectors", connectorHealthRoutes);
+
+  const analyticsRoutes = createAnalyticsRoutes({ analyticsService: syncAnalyticsService, connectorService });
+  app.route("/api/v1/connectors", analyticsRoutes);
+  app.route("/api/v1/analytics", analyticsRoutes);
 
   const webhookRoutes = createWebhookRoutes({
     webhookManagementService,

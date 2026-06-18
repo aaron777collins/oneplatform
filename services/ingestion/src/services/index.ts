@@ -98,6 +98,21 @@ export {
   type ChangedField,
 } from "./schema-drift-service.js";
 
+export {
+  createConnectorHealthService,
+  type ConnectorHealthService,
+  type ConnectorHealthServiceDeps,
+  type HealthStatus,
+  type ConnectorHealthSummaryItem,
+  type HealthSummary,
+  type DailyTrendPoint,
+  type ConnectorHealthDetail,
+  computeHealthStatus,
+  computeSuccessRate,
+  computeAvgLatencyMs,
+  buildDailyTrend,
+} from "./connector-health-service.js";
+
 // Re-export error classes so routes only need to import from services/index.js
 export {
   ConnectorNotFoundError,

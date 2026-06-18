@@ -12,3 +12,9 @@ export type { UploadRouteDeps } from "./uploads.js";
 
 export { createInternalRoutes } from "./internal.js";
 export type { InternalRouteDeps } from "./internal.js";
+
+export { createAnalyticsRoutes } from "./analytics.js";
+export type { AnalyticsRouteDeps } from "./analytics.js";
+
+export { createConnectorHealthRoutes } from "./connector-health.js";
+export type { ConnectorHealthRouteDeps } from "./connector-health.js";

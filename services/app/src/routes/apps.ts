@@ -16,7 +16,9 @@ import {
   EnvVarSchema,
   PatchOAuthSchema,
   PaginationSchema,
+  CreateAppFromTemplateSchema,
 } from "../schemas/index.js";
+import { ALL_TEMPLATES, findTemplateById } from "../templates/index.js";
 import {
   AppFileVersionConflictError,
   AppFileTooLargeError,
@@ -487,6 +489,57 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     await appService.getApp(user.tenantId, c.req.param("id"));
     // Forward to Auth Service to remove dev redirect URIs
     return new Response(null, { status: 204 });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Templates — G-075
+  // ---------------------------------------------------------------------------
+
+  // GET /templates — list all available templates
+  routes.get("/templates", async (c) => {
+    return c.json({
+      data: ALL_TEMPLATES.map((t) => t.meta),
+    });
+  });
+
+  // POST /from-template — create an app from a pre-built template
+  routes.post("/from-template", async (c) => {
+    const user = c.var.user;
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = CreateAppFromTemplateSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
+    }
+
+    const template = findTemplateById(parsed.data.templateId);
+    if (!template) {
+      throw new ValidationError(`Unknown template "${parsed.data.templateId}".`, []);
+    }
+
+    // Create the app first
+    const app = await appService.createApp(user.tenantId, user.userId, {
+      name:       parsed.data.name,
+      slug:       parsed.data.slug,
+      accessMode: parsed.data.accessMode,
+      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+    });
+
+    // Render the template files and write them to VFS
+    const files = template.render(parsed.data.name, parsed.data.slug);
+    for (const [filePath, content] of Object.entries(files)) {
+      const contentHash = sha256hex(content);
+      await fileRepo.create({
+        app_id:       app.id,
+        path:         filePath,
+        content,
+        content_hash: contentHash,
+        updated_by:   user.userId,
+      });
+    }
+
+    return c.json({ data: formatAppDetail(app) }, 201);
   });
 
   // ---------------------------------------------------------------------------

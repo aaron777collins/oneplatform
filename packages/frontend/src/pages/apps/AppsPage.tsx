@@ -3,14 +3,11 @@
  *
  * Route: /apps
  *
- * Provides a "New App" button that opens a name/slug creation dialog.
+ * Provides a "New App" button that opens a TemplatePickerDialog (G-075).
  */
 import * as React from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Plus, Search, LayoutGrid } from "lucide-react";
 
 // Cast Lucide icons to avoid exactOptionalPropertyTypes conflict on className
@@ -18,52 +15,13 @@ type IconComponent = React.ComponentType<{ className?: string }>;
 const LayoutGridIcon = LayoutGrid as IconComponent;
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog.js";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { EmptyState } from "@/components/shared/EmptyState.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { AppCard, type AppCardData, type AppAccessMode } from "@/components/apps/AppCard.js";
-import { useApiClient, ApiError } from "@/lib/api-client.js";
-import { toast } from "@/hooks/use-toast.js";
+import { TemplatePickerDialog } from "@/components/apps/TemplatePickerDialog.js";
+import { useApiClient } from "@/lib/api-client.js";
 import type { PaginatedResponse } from "@/lib/api-client.js";
-
-// ---------------------------------------------------------------------------
-// New app form schema
-// ---------------------------------------------------------------------------
-
-const newAppSchema = z.object({
-  name: z.string().min(1, "Name is required").max(64),
-  slug: z
-    .string()
-    .min(1, "Slug is required")
-    .max(48)
-    .regex(/^[a-z0-9-]+$/, "Slug may only contain lowercase letters, numbers, and hyphens"),
-  accessMode: z.enum(["public", "platform-user"]),
-});
-
-type NewAppValues = z.infer<typeof newAppSchema>;
 
 // ---------------------------------------------------------------------------
 // AppsPage component
@@ -94,37 +52,6 @@ export function AppsPage() {
       return true;
     });
   }, [apps, search, accessFilter]);
-
-  const form = useForm<NewAppValues>({
-    resolver: zodResolver(newAppSchema),
-    defaultValues: { name: "", slug: "", accessMode: "platform-user" },
-  });
-
-  // Auto-generate slug from name
-  const nameValue = form.watch("name");
-  React.useEffect(() => {
-    const slug = nameValue
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    form.setValue("slug", slug, { shouldValidate: false });
-  }, [nameValue, form]);
-
-  const createMutation = useMutation({
-    mutationFn: (values: NewAppValues) =>
-      client.post<{ data: AppCardData }>("/v1/apps", values),
-    onSuccess: (response) => {
-      toast({ title: "App created" });
-      void queryClient.invalidateQueries({ queryKey: ["apps"] });
-      setDialogOpen(false);
-      form.reset();
-      void navigate({ to: "/apps/$id", params: { id: response.data.id } });
-    },
-    onError: (error) => {
-      const message = error instanceof ApiError ? error.message : "Failed to create app.";
-      toast({ title: "Create failed", description: message, variant: "destructive" });
-    },
-  });
 
   return (
     <div className="flex-1 p-6">
@@ -204,79 +131,15 @@ export function AppsPage() {
         </div>
       )}
 
-      {/* New app dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>New App</DialogTitle>
-            <DialogDescription>
-              Create a new Monaco-powered app. You can edit the code immediately after creation.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form
-              onSubmit={(e) => void form.handleSubmit((v) => createMutation.mutate(v))(e)}
-              className="space-y-4"
-            >
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>App name <span className="text-[var(--color-destructive)]" aria-hidden>*</span></FormLabel>
-                    <FormControl>
-                      <Input placeholder="My Internal Tool" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="slug"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>URL slug <span className="text-[var(--color-destructive)]" aria-hidden>*</span></FormLabel>
-                    <FormControl>
-                      <Input placeholder="my-internal-tool" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="accessMode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Access mode</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="platform-user">Platform users only</SelectItem>
-                        <SelectItem value="public">Public (no auth required)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <DialogFooter>
-                <Button variant="outline" type="button" onClick={() => setDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createMutation.isPending} aria-busy={createMutation.isPending}>
-                  {createMutation.isPending ? "Creating…" : "Create app"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+      {/* Template picker dialog — G-075 */}
+      <TemplatePickerDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onCreated={(app) => {
+          void queryClient.invalidateQueries({ queryKey: ["apps"] });
+          void navigate({ to: "/apps/$id", params: { id: app.id } });
+        }}
+      />
     </div>
   );
 }
