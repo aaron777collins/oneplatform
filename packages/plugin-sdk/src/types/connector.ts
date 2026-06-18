@@ -131,3 +131,79 @@ export interface Connector {
    */
   disconnect(handle: ConnectorHandle, context: PluginContext): Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// CDC (Change Data Capture) extension
+//
+// CdcConnector is an extension of Connector for built-in connectors that
+// support PostgreSQL WAL logical replication. Plugin SDK connectors that run
+// in isolated-vm cannot implement this interface because they cannot hold a
+// native pg.Client replication connection. Built-in connectors (e.g.,
+// PostgresCdcConnector) implement this interface directly inside the
+// ingestion service.
+// ---------------------------------------------------------------------------
+
+/** A single change event streamed from a CDC source. */
+export interface CdcEvent {
+  /** The type of DML operation. */
+  type: "insert" | "update" | "delete";
+  /** Fully-qualified table name (schema.table). */
+  table: string;
+  /** ISO 8601 timestamp when the event occurred (derived from WAL commit time). */
+  timestamp: string;
+  /** WAL LSN for this event (PostgreSQL: "XXXXXXXX/YYYYYYYY"). */
+  lsn?: string;
+  /** Generic position string for non-LSN sources. */
+  position?: string;
+  /** Row state before the change (populated for UPDATE and DELETE). */
+  before?: Record<string, unknown>;
+  /** Row state after the change (populated for INSERT and UPDATE). */
+  after?: Record<string, unknown>;
+}
+
+/** Options passed to CdcConnector.startCdcStream(). */
+export interface CdcOptions {
+  /** Tables to capture. Fully-qualified names (schema.table). Empty = all tables in publication. */
+  tables: string[];
+  /** Resume from this position (LSN for PostgreSQL). Omit to start from the tip. */
+  startPosition?: string;
+  /** Number of events to accumulate before flushing a batch. Default: 500. */
+  batchSize?: number;
+  /** Maximum time in ms to wait before flushing a partial batch. Default: 1000. */
+  batchTimeoutMs?: number;
+}
+
+/** Metadata about a PostgreSQL logical replication slot. */
+export interface ReplicationSlotInfo {
+  /** Replication slot name on the source database. */
+  slotName: string;
+  /** The LSN the slot has confirmed flushing up to. */
+  confirmedFlushLsn: string;
+  /** Approximate WAL accumulation behind this slot in bytes. */
+  lagBytes: number;
+  /** Whether the slot is currently active (i.e., a client is streaming from it). */
+  active: boolean;
+}
+
+/**
+ * Extension of Connector for sources that support real-time Change Data Capture.
+ *
+ * Implementors must set supportsRealtime = true and provide an async generator
+ * via startCdcStream() that yields CdcEvent objects until stopCdcStream() is
+ * called or the upstream connection drops.
+ */
+export interface CdcConnector extends Connector {
+  readonly supportsRealtime: true;
+  /**
+   * Opens a CDC stream and returns an AsyncIterable of CdcEvent objects.
+   * The iterable must stop yielding when stopCdcStream() is called.
+   */
+  startCdcStream(context: PluginContext, options: CdcOptions): AsyncIterable<CdcEvent>;
+  /** Signals the CDC stream to stop. Must resolve after the stream has closed. */
+  stopCdcStream(): Promise<void>;
+  /**
+   * Returns metadata about the replication slot (optional — only for connectors
+   * that use PostgreSQL logical replication slots).
+   */
+  getReplicationSlotInfo?(): Promise<ReplicationSlotInfo>;
+}

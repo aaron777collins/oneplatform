@@ -27,3 +27,6 @@ export type { ConnectorRegistryRouteDeps } from "./connector-registry.js";
 
 export { createCdcRoutes } from "./cdc.js";
 export type { CdcRouteDeps } from "./cdc.js";
+
+export { createStreamingRoutes } from "./streaming.js";
+export type { StreamingRouteDeps } from "./streaming.js";

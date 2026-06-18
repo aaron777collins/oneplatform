@@ -90,13 +90,17 @@ export type {
   HookDataFor,
 } from "./types/hooks.js";
 
-// Connector interface
+// Connector interface and CDC extension types
 export type {
   ConnectorHandle,
   BatchResult,
   EventCallback,
   Subscription,
   Connector,
+  CdcEvent,
+  CdcOptions,
+  ReplicationSlotInfo,
+  CdcConnector,
 } from "./types/connector.js";
 
 // Transformer interface

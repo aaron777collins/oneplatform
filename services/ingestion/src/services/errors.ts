@@ -79,3 +79,18 @@ export class WebhookReceiverNotFoundError extends AppError {
   readonly code = "INGESTION_WEBHOOK_NOT_FOUND" as const;
   readonly statusCode = 200;
 }
+
+export class CdcAlreadyRunningError extends AppError {
+  readonly code = "INGESTION_CDC_ALREADY_RUNNING" as const;
+  readonly statusCode = 409;
+}
+
+export class CdcNotRunningError extends AppError {
+  readonly code = "INGESTION_CDC_NOT_RUNNING" as const;
+  readonly statusCode = 404;
+}
+
+export class CdcConnectorConfigError extends AppError {
+  readonly code = "INGESTION_CDC_CONFIG_ERROR" as const;
+  readonly statusCode = 400;
+}

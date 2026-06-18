@@ -252,6 +252,54 @@ export class RawTableRepository {
     return row !== undefined ? parseInt(row["count"], 10) : 0;
   }
 
+  // Returns all _source_id values for non-deleted rows.  Used by the
+  // reconciliation service to build the platform-side ID set for comparison
+  // against the source system (reconciliation-service.ts § ID set comparison).
+  async listSourceIds(connectorId: string): Promise<string[]> {
+    const qtName = qualifiedTableName(connectorId);
+    const result = await this.pool.query<{ _source_id: string }>(
+      `SELECT _source_id FROM ${qtName} WHERE deleted_at IS NULL ORDER BY _source_id`,
+    );
+    return result.rows.map((r) => r["_source_id"]);
+  }
+
+  // Returns a deterministic sample of at most `limit` records for the
+  // reconciliation service's field-value comparison pass.  When sourceIds is
+  // provided only those IDs are returned, keeping the result bounded even when
+  // the table is large.
+  async sampleRecords(
+    connectorId: string,
+    limit: number,
+    sourceIds?: string[],
+  ): Promise<Array<{ sourceId: string; data: Record<string, unknown> }>> {
+    const qtName = qualifiedTableName(connectorId);
+
+    let result: pg.QueryResult<{ _source_id: string; data: unknown }>;
+    if (sourceIds !== undefined && sourceIds.length > 0) {
+      result = await this.pool.query<{ _source_id: string; data: unknown }>(
+        `SELECT _source_id, data FROM ${qtName}
+          WHERE deleted_at IS NULL
+            AND _source_id = ANY($1::text[])
+          ORDER BY _source_id
+          LIMIT $2`,
+        [sourceIds, limit],
+      );
+    } else {
+      result = await this.pool.query<{ _source_id: string; data: unknown }>(
+        `SELECT _source_id, data FROM ${qtName}
+          WHERE deleted_at IS NULL
+          ORDER BY _source_id
+          LIMIT $1`,
+        [limit],
+      );
+    }
+
+    return result.rows.map((r) => ({
+      sourceId: r["_source_id"],
+      data: r.data as Record<string, unknown>,
+    }));
+  }
+
   // ensureTable — alias for createRawTable that matches the service interface name.
   // Idempotent: the underlying DDL uses IF NOT EXISTS so repeated calls are safe.
   async ensureTable(connectorId: string): Promise<void> {

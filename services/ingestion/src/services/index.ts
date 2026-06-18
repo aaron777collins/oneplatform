@@ -123,6 +123,15 @@ export {
 } from "./cdc-ingestion-service.js";
 
 export {
+  createStreamingIngestionService,
+  type StreamingIngestionService,
+  type StreamingIngestionServiceDeps,
+  type StreamConsumerStatus,
+  type StreamStatus,
+  type StartStreamOptions,
+} from "./streaming-ingestion-service.js";
+
+export {
   createReconciliationService,
   executeReconcileJob,
   computeMatchRate,
