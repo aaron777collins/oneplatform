@@ -12,6 +12,15 @@ your upgrade type before executing any command.
 2. [Upgrade Types](#2-upgrade-types)
 3. [Standard Upgrade Procedure](#3-standard-upgrade-procedure)
 4. [Database Migrations](#4-database-migrations)
+   - 4.1 How migrations work
+   - 4.2 Monitoring migration progress
+   - 4.3 Diagnosing migration failures
+   - 4.4 Manual migration execution
+   - 4.5 Schema rollback
+   - 4.6 Ontology service migration timeout
+   - 4.7 Migration file naming convention
+   - 4.8 Writing reversible migrations
+   - 4.9 Testing migrations against a production data copy
 5. [Secret Rotation](#5-secret-rotation)
 6. [Configuration Changes](#6-configuration-changes)
 7. [Rollback Procedures](#7-rollback-procedures)
@@ -19,6 +28,7 @@ your upgrade type before executing any command.
 9. [Version Compatibility Matrix](#9-version-compatibility-matrix)
 10. [Post-Upgrade Verification](#10-post-upgrade-verification)
 11. [Migration Checklist Template](#11-migration-checklist-template)
+12. [Pre-Upgrade Validation Script](#12-pre-upgrade-validation-script)
 
 ---
 
@@ -67,6 +77,16 @@ grep -v 'PASSWORD\|SECRET\|KEY\|TOKEN' .env
 Save this output to a file. You will need it if you need to match the old state.
 
 ### 1.3 Verify the current stack is healthy
+
+Run the pre-upgrade validation script — it checks all services, data store connectivity,
+database sizes, and disk space in one pass (see section 12 for full output reference):
+
+```bash
+# Run from the repo root — exits 1 if anything is wrong
+./scripts/upgrade-check.sh
+```
+
+For manual spot-checks:
 
 ```bash
 # All services should show healthy or running — no restarting containers
@@ -488,6 +508,165 @@ OP_MIGRATION_TIMEOUT=7200  # 2 hours
 
 # Monitor progress
 docker compose logs -f ontology-service
+```
+
+### 4.7 Migration file naming convention
+
+Each service owns its migrations in `services/<service>/src/db/migrations/`. Files must
+follow this exact naming scheme:
+
+```
+NNN_short_description.sql
+```
+
+Where:
+
+| Part | Rule |
+|---|---|
+| `NNN` | Zero-padded three-digit sequence number, starting at `001` |
+| `_short_description` | Snake-case summary of what the migration does (no spaces, lowercase) |
+| `.sql` | Plain SQL file — no template syntax, no Node.js |
+
+**Examples:**
+```
+001_initial_schema.sql
+002_add_tenant_soft_delete.sql
+003_backfill_missing_cursor_ids.sql
+004_drop_legacy_events_table.sql    ← Phase 2 of a two-phase destructive change
+```
+
+The migration runner (`services/<service>/src/db/migrate.ts`) sorts files lexicographically
+and applies them in order. The version key stored in `<schema>.schema_migrations` is the
+filename without the `.sql` suffix (e.g. `002_add_tenant_soft_delete`). Once a version key
+is recorded, that file is never applied again even if its content changes — this is why
+you must never edit a migration that has been applied to any environment.
+
+### 4.8 Writing reversible migrations
+
+The migration system is forward-only at the application level (no automatic down runner).
+"Reversible" means the operation can be undone by restoring from backup plus deploying the
+previous service version. For destructive schema changes where you want a recovery path
+shorter than a full restore, use a two-phase approach:
+
+**Phase 1 — additive (backward-compatible, safe to deploy immediately):**
+
+```sql
+-- 005_rename_source_to_connector_phase1.sql
+--
+-- WHY two phases: renaming a column breaks the running service immediately.
+-- Phase 1 adds the new name while the old name stays. Both service versions
+-- can run simultaneously during the maintenance window.
+
+ALTER TABLE ingestion.jobs
+  ADD COLUMN IF NOT EXISTS connector_id UUID
+    REFERENCES ingestion.connectors(id) ON DELETE CASCADE;
+
+-- Backfill: copy existing source_id values into connector_id
+UPDATE ingestion.jobs
+  SET connector_id = source_id
+  WHERE connector_id IS NULL AND source_id IS NOT NULL;
+```
+
+**Phase 2 — destructive (deploy only after all replicas run Phase 1):**
+
+```sql
+-- 006_rename_source_to_connector_phase2.sql
+--
+-- WHY separate file and separate deploy: Phase 2 runs after the new service
+-- version (which only reads connector_id) has been live for at least one
+-- maintenance window. At that point source_id is dead weight — no code reads it.
+
+ALTER TABLE ingestion.jobs
+  DROP COLUMN IF EXISTS source_id;
+```
+
+The minimum gap between Phase 1 and Phase 2 deploys is documented in
+`DEVELOPMENT-PROCESS.md §17.1` and must be at least 3 months for externally-visible
+schema changes (to give downstream consumers time to adapt).
+
+**What makes a migration safe to apply to a running service:**
+- `ADD COLUMN ... DEFAULT <value>` — safe; old code ignores the new column
+- `CREATE TABLE IF NOT EXISTS` — safe
+- `CREATE INDEX CONCURRENTLY` — safe (does not lock the table)
+- `ALTER TABLE ... ADD CONSTRAINT ... NOT VALID` — safe; validates on next write only
+- `DROP COLUMN` — **unsafe** without Phase 1 first
+- `RENAME COLUMN` — **unsafe** without Phase 1 first
+- `ALTER COLUMN ... TYPE` — **unsafe** without Phase 1 first
+- `DROP TABLE` — **unsafe** without Phase 1 first
+
+### 4.9 Testing migrations against a production data copy
+
+Running migrations against an empty CI database is necessary but not sufficient. Schema
+migrations on large tables with real data distributions can take minutes or fail due to
+lock contention, constraint violations on real data, or `VACUUM`/`AUTOVACUUM` interference.
+Test against a production data copy before deploying to production.
+
+**Step 1 — Restore the latest backup into a test database on a non-production host:**
+
+```bash
+# On the test host (or on production, using a separate database name)
+./docker/scripts/backup.sh ./backups
+BACKUP_TS=$(ls -t ./backups | head -1)
+
+# Restore into a separate test database — does not affect the live oneplatform database
+docker compose exec postgres createdb -U postgres oneplatform_migration_test
+
+docker compose cp ./backups/${BACKUP_TS}/postgres.dump postgres:/tmp/migration_test.dump
+docker compose exec postgres pg_restore \
+  -U postgres \
+  -d oneplatform_migration_test \
+  --no-owner \
+  --no-privileges \
+  /tmp/migration_test.dump
+
+docker compose exec -T postgres rm -f /tmp/migration_test.dump
+```
+
+**Step 2 — Point a temporary service instance at the test database and run migrations:**
+
+```bash
+# Override the DATABASE_URL for a one-off migration run against the test DB
+# Replace 'auth' with the service you are testing.
+docker compose run --rm \
+  -e DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/oneplatform_migration_test" \
+  auth-service \
+  node -e "
+    import('./dist/db/migrate.js').then(({ runMigrations }) => {
+      const { Pool } = require('pg');
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      return runMigrations(pool)
+        .then(r => { console.log('Applied:', r.applied); console.log('Skipped:', r.skipped); pool.end(); })
+        .catch(e => { console.error(e); pool.end(); process.exit(1); });
+    });
+  "
+```
+
+**Step 3 — Verify expected row counts and index usage:**
+
+```bash
+# Check that the migration did not inadvertently alter row counts
+docker compose exec postgres psql -U postgres -d oneplatform_migration_test \
+  -c "SELECT schemaname, relname, n_live_tup FROM pg_stat_user_tables ORDER BY relname;"
+
+# Confirm the new index is present and used by EXPLAIN
+docker compose exec postgres psql -U postgres -d oneplatform_migration_test \
+  -c "EXPLAIN SELECT * FROM auth.users WHERE deleted_at IS NULL LIMIT 10;"
+```
+
+**Step 4 — Measure migration duration on realistic data:**
+
+```bash
+# Time the full migration run to estimate production maintenance window length
+time docker compose run --rm \
+  -e DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/oneplatform_migration_test" \
+  auth-service \
+  node -e "/* migration runner as above */"
+```
+
+**Step 5 — Clean up the test database:**
+
+```bash
+docker compose exec postgres dropdb -U postgres oneplatform_migration_test
 ```
 
 ---
@@ -1172,6 +1351,7 @@ Upgrade type:         [ ] Patch  [ ] Minor  [ ] Major
 Maintenance window:   _______________  to  _______________
 
 PRE-UPGRADE
+[ ] Pre-upgrade script passed: ./scripts/upgrade-check.sh
 [ ] Backup created at: ./backups/_______________
     - postgres.dump:   [ ] present  size: _______
     - redis.rdb:       [ ] present  size: _______
@@ -1218,6 +1398,76 @@ NOTES
 _______________
 ________________________________________________________________________________
 ```
+
+---
+
+## 12. Pre-Upgrade Validation Script
+
+`scripts/upgrade-check.sh` is a pre-flight script that validates the stack is ready to
+upgrade. Run it as the first step of any upgrade, before taking the backup.
+
+```bash
+# Run from the repo root
+./scripts/upgrade-check.sh
+```
+
+The script checks:
+- All application services are running and passing their health checks
+- All data stores (PostgreSQL, Redis, MinIO, PgBouncer) are healthy
+- PostgreSQL is reachable and accepting connections via PgBouncer
+- Redis is reachable and responding to PING
+- Disk space on the Docker data root is sufficient (warns at < 5 GB free)
+- Current deployed versions (Docker image tags and git commit)
+- Current database size per schema (to estimate backup and migration duration)
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | All checks passed — safe to proceed |
+| 1 | One or more checks failed — resolve before upgrading |
+
+Example output when the stack is healthy:
+```
+[upgrade-check] OnePlatform pre-upgrade validation
+[upgrade-check] Git commit: b570dc9 (main)
+[upgrade-check] ---
+[upgrade-check] PASS  op-init is complete (/data/init/ready exists)
+[upgrade-check] PASS  postgres is healthy
+[upgrade-check] PASS  redis is healthy
+[upgrade-check] PASS  minio is healthy
+[upgrade-check] PASS  pgbouncer is healthy
+[upgrade-check] PASS  gateway-service is healthy
+[upgrade-check] PASS  auth-service is healthy
+[upgrade-check] PASS  ingestion-service is healthy
+[upgrade-check] PASS  ontology-service is healthy
+[upgrade-check] PASS  pipeline-service is healthy
+[upgrade-check] PASS  execution-service is healthy
+[upgrade-check] PASS  app-service is healthy
+[upgrade-check] PASS  logging-service is healthy
+[upgrade-check] PASS  plugin-service is healthy
+[upgrade-check] PASS  PostgreSQL reachable via PgBouncer (port 5433)
+[upgrade-check] PASS  Redis reachable (PONG received)
+[upgrade-check] PASS  Disk free: 47G (>= 5G threshold)
+[upgrade-check] ---
+[upgrade-check] Database size by schema:
+[upgrade-check]   auth:       12 MB
+[upgrade-check]   ingestion:   8 MB
+[upgrade-check]   ontology:   45 MB
+[upgrade-check]   pipeline:    6 MB
+[upgrade-check]   execution:   3 MB
+[upgrade-check]   app:         2 MB
+[upgrade-check]   logging:    18 MB
+[upgrade-check]   plugin:      1 MB
+[upgrade-check]   gateway:     1 MB
+[upgrade-check] ---
+[upgrade-check] All checks PASSED. Stack is ready to upgrade.
+```
+
+If any check fails, the script exits 1 and prints a remediation hint. Do not proceed
+with the upgrade until all checks pass.
+
+See the script source at `scripts/upgrade-check.sh` for full implementation details.
 
 ---
 

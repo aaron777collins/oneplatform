@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Trash2, TestTube } from "lucide-react";
+import { Plus, Trash2, TestTube, Search } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import {
   Dialog,
@@ -43,6 +43,7 @@ import { RelativeTime } from "@/components/shared/RelativeTime.js";
 import { useApiClient, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { PaginatedResponse } from "@/lib/api-client.js";
+import { WebhookInspectorPanel } from "./WebhookInspectorPanel.js";
 
 // ---------------------------------------------------------------------------
 // Types & schema
@@ -83,6 +84,9 @@ export function WebhooksPage() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<Webhook | null>(null);
   const [selectedEvents, setSelectedEvents] = React.useState<string[]>([]);
+
+  // Inspector panel state — null means closed.
+  const [inspectorTarget, setInspectorTarget] = React.useState<Webhook | null>(null);
 
   const webhooksQuery = useQuery({
     queryKey: ["webhooks"],
@@ -220,6 +224,16 @@ export function WebhooksPage() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
+                        onClick={() => setInspectorTarget(webhook)}
+                        aria-label="Inspect webhook deliveries"
+                        title="Inspect deliveries"
+                      >
+                        <Search className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
                         onClick={() => testMutation.mutate(webhook.id)}
                         disabled={testMutation.isPending}
                         aria-label="Test webhook delivery"
@@ -340,6 +354,15 @@ export function WebhooksPage() {
         }}
         isLoading={deleteMutation.isPending}
       />
+
+      {inspectorTarget !== null && (
+        <WebhookInspectorPanel
+          webhookId={inspectorTarget.id}
+          webhookName={inspectorTarget.url}
+          open={inspectorTarget !== null}
+          onOpenChange={(open) => { if (!open) setInspectorTarget(null); }}
+        />
+      )}
     </div>
   );
 }

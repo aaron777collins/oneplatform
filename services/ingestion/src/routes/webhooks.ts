@@ -3,22 +3,26 @@ import type { AppVariables } from "@oneplatform/core";
 import { UnauthorizedError } from "@oneplatform/core";
 import type { WebhookReceiveService } from "../services/index.js";
 import type { WebhookManagementService } from "../services/webhook-management-service.js";
+import type { WebhookDeliveryService } from "../services/webhook-delivery-service.js";
+import { WebhookReceiverNotFoundError } from "../services/errors.js";
 import {
   createWebhookReceiverRequest,
   patchWebhookReceiverRequest,
   rotateWebhookSecretRequest,
   listWebhookReceiversQuery,
+  listWebhookDeliveriesQuery,
 } from "../schemas/index.js";
 
 export interface WebhookRouteDeps {
   webhookManagementService: WebhookManagementService;
   webhookReceiveService: WebhookReceiveService;
+  webhookDeliveryService: WebhookDeliveryService;
   masterKey: Buffer;
 }
 
 export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { webhookManagementService, webhookReceiveService, masterKey } = deps;
+  const { webhookManagementService, webhookReceiveService, webhookDeliveryService, masterKey } = deps;
 
   // --- Public receive endpoint (no auth — HMAC verified by service) ---
   // Registered BEFORE parameterized management routes to avoid route shadowing.
@@ -35,7 +39,22 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
         ?? c.req.header("x-hub-signature-256")
         ?? c.req.header("x-signature");
 
-      await webhookReceiveService.receiveEvent(receiverId, rawBody, signatureHeader);
+      // Collect a safe subset of headers for the delivery log.
+      // Authorization / Cookie values are stripped to avoid storing secrets.
+      const BLOCKED_HEADERS = new Set([
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+      ]);
+      const incomingHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(c.req.header())) {
+        if (!BLOCKED_HEADERS.has(key.toLowerCase())) {
+          incomingHeaders[key] = value;
+        }
+      }
+
+      await webhookReceiveService.receiveEvent(receiverId, rawBody, signatureHeader, incomingHeaders);
     } catch {
       // Intentionally swallowed — errors are logged inside the service.
       // The caller receives { ok: true } regardless so receiver IDs cannot
@@ -179,6 +198,64 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     );
 
     return c.json({ data: result });
+  });
+
+  // --- Delivery log routes (authenticated) ---
+
+  routes.get("/inbound/:id/deliveries", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+
+    const raw = c.req.query();
+    const parsed = listWebhookDeliveriesQuery.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({
+        error: { code: "VALIDATION_ERROR", message: "Invalid query parameters.", details: parsed.error.flatten() },
+      }, 400);
+    }
+
+    const q = parsed.data;
+
+    try {
+      const result = await webhookDeliveryService.listDeliveries(
+        user.tenantId,
+        c.req.param("id"),
+        { ...(q.cursor ? { cursor: q.cursor } : {}), limit: q.limit },
+      );
+      return c.json(result);
+    } catch (err: unknown) {
+      if (err instanceof WebhookReceiverNotFoundError) {
+        return c.json({
+          error: { code: "WEBHOOK_RECEIVER_NOT_FOUND", message: err.message },
+        }, 404);
+      }
+      throw err;
+    }
+  });
+
+  routes.get("/inbound/:id/deliveries/:deliveryId", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+
+    try {
+      const delivery = await webhookDeliveryService.getDelivery(
+        user.tenantId,
+        c.req.param("id"),
+        c.req.param("deliveryId"),
+      );
+      return c.json({ data: delivery });
+    } catch (err: unknown) {
+      if (err instanceof WebhookReceiverNotFoundError) {
+        return c.json({
+          error: { code: "WEBHOOK_RECEIVER_NOT_FOUND", message: err.message },
+        }, 404);
+      }
+      throw err;
+    }
   });
 
   return routes;

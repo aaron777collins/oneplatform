@@ -148,6 +148,10 @@ export interface WebhookReceiveService {
     receiverId: string,
     rawBody: Buffer,
     signatureHeader: string | undefined,
+    // Optional headers forwarded to delivery logging middleware.  The core
+    // HMAC path never reads this — it is only consumed by the delivery logger
+    // wrapper so the hot path stays free of audit-log concerns.
+    incomingHeaders?: Record<string, string>,
   ): Promise<ReceiveEventResult>;
   invalidateCache(receiverId: string): void;
 }
