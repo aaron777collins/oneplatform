@@ -12,6 +12,10 @@
     "dev": "turbo dev",
     "test": "turbo run test",
     "test:e2e": "vitest run --config tests/vitest.e2e.config.ts",
+    "test:bench": "vitest run --config tests/vitest.bench.config.ts",
+    "bench": "vitest run --config tests/vitest.bench.config.ts run-all",
+    "bench:save": "BENCH_SAVE_BASELINE=1 vitest run --config tests/vitest.bench.config.ts run-all",
+    "bench:ci": "BENCH_COMPARE=1 vitest run --config tests/vitest.bench.config.ts run-all",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
@@ -24,7 +28,9 @@
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "prettier": "^3.3.0",
+    "tsx": "*",
     "turbo": "^2.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "*"
   }
 }
