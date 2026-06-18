@@ -1,0 +1,87 @@
+{{/*
+Plugin Service — plugin registry, isolated-vm instances per plugin set.
+Bottleneck: memory (VM instances per loaded plugin).  Memory scales with
+distinct plugin count, not request volume.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-plugin" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "plugin" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.plugin.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "plugin" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "plugin" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: plugin
+          image: {{ include "oneplatform.image" (dict "svc" .Values.plugin "root" .) | quote }}
+          imagePullPolicy: {{ .Values.plugin.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "plugin-service"
+            {{- range $k, $v := .Values.plugin.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.plugin.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.plugin.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.plugin.persistence.enabled }}
+            - name: plugin-data
+              mountPath: /data/plugin
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+        {{- if .Values.plugin.persistence.enabled }}
+        - name: plugin-data
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-plugin-data" (include "oneplatform.fullname" .) }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-plugin" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "plugin" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "plugin" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.plugin.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "plugin" "cfg" .Values.plugin "root" .) }}

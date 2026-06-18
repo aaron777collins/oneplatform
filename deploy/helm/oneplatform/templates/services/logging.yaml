@@ -1,0 +1,78 @@
+{{/*
+Logging Service — high-throughput audit and event log write path via BullMQ.
+Bottleneck: I/O (PostgreSQL write throughput).  Scale horizontally for queue
+depth issues; monitor bull:audit:wait and bull:log:wait queue depths.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-logging" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "logging" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.logging.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "logging" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "logging" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: logging
+          image: {{ include "oneplatform.image" (dict "svc" .Values.logging "root" .) | quote }}
+          imagePullPolicy: {{ .Values.logging.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "logging-service"
+            {{- range $k, $v := .Values.logging.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.logging.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.logging.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-logging" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "logging" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "logging" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.logging.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "logging" "cfg" .Values.logging "root" .) }}

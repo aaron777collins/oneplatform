@@ -1,0 +1,77 @@
+{{/*
+Ingestion Service — connector syncs, batch record ingest via BullMQ.
+Bottleneck: memory (batch buffers).  BullMQ distributes jobs across replicas.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-ingestion" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "ingestion" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.ingestion.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "ingestion" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "ingestion" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ingestion
+          image: {{ include "oneplatform.image" (dict "svc" .Values.ingestion "root" .) | quote }}
+          imagePullPolicy: {{ .Values.ingestion.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "ingestion-service"
+            - name: OP_INGESTION_BATCH_SIZE
+              value: {{ .Values.ingestion.env.OP_INGESTION_BATCH_SIZE | default "1000" | quote }}
+            - name: OP_LARGE_SYNC_CONCURRENCY
+              value: {{ .Values.ingestion.env.OP_LARGE_SYNC_CONCURRENCY | default "3" | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ingestion.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.ingestion.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-ingestion" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "ingestion" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "ingestion" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.ingestion.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "ingestion" "cfg" .Values.ingestion "root" .) }}

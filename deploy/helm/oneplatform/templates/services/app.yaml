@@ -1,0 +1,85 @@
+{{/*
+App Service — app asset serving, app API calls.
+Bottleneck: low-medium.  App assets stored in MinIO for large deployments.
+The app-data PVC is mounted when app.persistence.enabled=true.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-app" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "app" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "app" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "app" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ include "oneplatform.image" (dict "svc" .Values.app "root" .) | quote }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "app-service"
+            - name: OP_WILDCARD_DOMAIN
+              value: {{ .Values.app.env.OP_WILDCARD_DOMAIN | default "" | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.app.persistence.enabled }}
+            - name: app-data
+              mountPath: /data/app
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+        {{- if .Values.app.persistence.enabled }}
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-app-data" (include "oneplatform.fullname" .) }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-app" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "app" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "app" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "app" "cfg" .Values.app "root" .) }}

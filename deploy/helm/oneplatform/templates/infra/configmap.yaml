@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oneplatform.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.labels" . | nindent 4 }}
+data:
+  # Non-sensitive shared configuration consumed by all application services.
+  # Sensitive values (passwords, keys) live in the Secret, not here.
+  NODE_ENV: "production"
+  OP_BASE_URL: {{ .Values.baseUrl | quote }}
+  OP_ALLOWED_ORIGINS: {{ .Values.allowedOrigins | quote }}
+
+  # Service-to-service URLs — internal DNS names resolved via kube-dns.
+  GATEWAY_SERVICE_URL:   {{ include "oneplatform.serviceURL" (dict "service" "gateway"   "root" .) | quote }}
+  AUTH_SERVICE_URL:      {{ include "oneplatform.serviceURL" (dict "service" "auth"      "root" .) | quote }}
+  INGESTION_SERVICE_URL: {{ include "oneplatform.serviceURL" (dict "service" "ingestion" "root" .) | quote }}
+  ONTOLOGY_SERVICE_URL:  {{ include "oneplatform.serviceURL" (dict "service" "ontology"  "root" .) | quote }}
+  PIPELINE_SERVICE_URL:  {{ include "oneplatform.serviceURL" (dict "service" "pipeline"  "root" .) | quote }}
+  EXECUTION_SERVICE_URL: {{ include "oneplatform.serviceURL" (dict "service" "execution" "root" .) | quote }}
+  APP_SERVICE_URL:       {{ include "oneplatform.serviceURL" (dict "service" "app"       "root" .) | quote }}
+  LOGGING_SERVICE_URL:   {{ include "oneplatform.serviceURL" (dict "service" "logging"   "root" .) | quote }}
+  PLUGIN_SERVICE_URL:    {{ include "oneplatform.serviceURL" (dict "service" "plugin"    "root" .) | quote }}
+
+  # Observability
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ coalesce .Values.otelExporterOtlpEndpoint (printf "http://%s-jaeger:4318" (include "oneplatform.fullname" .)) | quote }}
+
+  # Data store coordinates (passwords come from the Secret)
+  DATABASE_HOST: {{ include "oneplatform.postgresqlHost" . | quote }}
+  DATABASE_PORT: {{ include "oneplatform.postgresqlPort" . | quote }}
+  DATABASE_NAME: {{ coalesce .Values.postgresql.auth.database .Values.externalPostgresql.database | quote }}
+  REDIS_HOST:    {{ include "oneplatform.redisHost" . | quote }}
+  REDIS_PORT:    {{ include "oneplatform.redisPort" . | quote }}
+  MINIO_ENDPOINT: {{ include "oneplatform.minioEndpoint" . | quote }}

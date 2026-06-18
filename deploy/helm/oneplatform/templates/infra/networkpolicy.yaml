@@ -1,0 +1,99 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicies mirror the Docker Compose network isolation model:
+#
+#  oneplatform-internal (internal: true) — all app services + data stores
+#  oneplatform-public                    — gateway + frontend only
+#  oneplatform-sandbox                   — execution + sandbox only
+#
+# The default-deny ingress policy below is applied first; then explicit
+# allow rules are created per service.  Egress is unrestricted because
+# services need to reach external webhook targets.
+
+# Default-deny all ingress within the namespace.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-default-deny-ingress" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+# Allow the ingress controller to reach gateway and frontend.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-allow-ingress-controller" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [gateway, frontend]
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from any namespace — the ingress controller typically runs in
+    # ingress-nginx namespace.  Restrict further by adding a namespaceSelector
+    # matching your specific ingress controller namespace if required.
+    - {}
+
+# Internal service mesh: allow all app services to talk to each other and
+# to infrastructure (postgres, redis, minio, jaeger).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-allow-internal" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: oneplatform
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow traffic only from other OnePlatform pods within the same namespace.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: oneplatform
+
+# Sandbox isolation: only the execution service may communicate with the
+# sandbox VM pod.  The sandbox has no network path to data stores.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-sandbox-isolation" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: sandbox
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only execution may reach the sandbox.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: execution
+  egress:
+    # Sandbox has no egress — all communication is via the Unix socket
+    # emulated in Kubernetes via a shared emptyDir volume in the same Pod.
+    []
+{{- end }}

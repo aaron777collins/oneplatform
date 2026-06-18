@@ -1,0 +1,106 @@
+{{/*
+Auth Service — JWT issuance, session management, SMTP email queue.
+Bottleneck: low.  SMTP delivery is async via BullMQ, not in the request path.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-auth" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "auth" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.auth.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "auth" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "auth" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: auth
+          image: {{ include "oneplatform.image" (dict "svc" .Values.auth "root" .) | quote }}
+          imagePullPolicy: {{ .Values.auth.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "auth-service"
+            - name: OP_REQUIRE_EMAIL_VERIFICATION
+              value: {{ .Values.auth.env.OP_REQUIRE_EMAIL_VERIFICATION | default "false" | quote }}
+            # SMTP credentials from the shared Secret
+            - name: OP_SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: smtpHost
+            - name: OP_SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: smtpPort
+            - name: OP_SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: smtpUser
+            - name: OP_SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: smtpPassword
+            - name: OP_SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: smtpFrom
+            - name: OP_SMTP_SECURE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: smtpSecure
+          ports:
+            - name: http
+              containerPort: {{ .Values.auth.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.auth.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-auth" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "auth" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "auth" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.auth.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "auth" "cfg" .Values.auth "root" .) }}

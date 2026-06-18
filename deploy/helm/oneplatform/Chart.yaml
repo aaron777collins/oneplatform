@@ -1,0 +1,32 @@
+apiVersion: v2
+name: oneplatform
+description: OnePlatform — multi-tenant data integration and automation platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+# Optional subcharts. Set postgresql.enabled=false or redis.enabled=false
+# to use externally-managed instances (recommended for Medium/Large tiers).
+# See values.yaml for external host/port/password configuration.
+dependencies:
+  - name: postgresql
+    version: "15.5.38"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "19.6.4"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: minio
+    version: "14.7.15"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: minio.enabled
+
+maintainers:
+  - name: OnePlatform Team
+    url: https://github.com/oneplatform/oneplatform
+
+keywords:
+  - data-integration
+  - automation
+  - microservices

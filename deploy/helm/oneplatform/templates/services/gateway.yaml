@@ -1,0 +1,120 @@
+{{/*
+Gateway Service — HTTP router, JWT validation, rate limiting.
+Bottleneck: CPU.  Horizontal scaling is safe; state is in Redis.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-gateway" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "gateway" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "gateway" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "gateway" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          image: {{ include "oneplatform.image" (dict "svc" .Values.gateway "root" .) | quote }}
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "gateway-service"
+            # Service-to-service routing map (gateway is the only service that
+            # needs all sibling URLs; others only call their direct dependencies)
+            - name: ONTOLOGY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: ONTOLOGY_SERVICE_URL
+            - name: INGESTION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: INGESTION_SERVICE_URL
+            - name: AUTH_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: AUTH_SERVICE_URL
+            - name: PIPELINE_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: PIPELINE_SERVICE_URL
+            - name: EXECUTION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: EXECUTION_SERVICE_URL
+            - name: APP_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: APP_SERVICE_URL
+            - name: LOGGING_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: LOGGING_SERVICE_URL
+            - name: PLUGIN_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "oneplatform.configMapName" . }}
+                  key: PLUGIN_SERVICE_URL
+            {{- range $k, $v := .Values.gateway.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # tmpfs for /tmp — container root fs is read-only (mirrors docker-compose)
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-gateway" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "gateway" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "gateway" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.gateway.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "gateway" "cfg" .Values.gateway "root" .) }}

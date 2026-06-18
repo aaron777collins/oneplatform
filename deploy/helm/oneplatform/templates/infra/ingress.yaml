@@ -1,0 +1,49 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "oneplatform.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.ingress.tls.certManagerIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.certManagerIssuer | quote }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.hostname | quote }}
+      {{- if .Values.ingress.tls.secretName }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.hostname | quote }}
+      http:
+        paths:
+          # All /api/* traffic routes to the gateway service.
+          # The gateway performs JWT validation, rate limiting, and service routing.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-gateway" (include "oneplatform.fullname" .) }}
+                port:
+                  number: {{ .Values.gateway.service.port }}
+          # All other paths serve the React SPA from the frontend service.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-frontend" (include "oneplatform.fullname" .) }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}

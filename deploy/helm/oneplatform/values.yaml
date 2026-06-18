@@ -1,0 +1,585 @@
+# OnePlatform Helm Chart — Default Values
+#
+# Resource defaults match docker/docker-compose.yml deploy.resources.limits.
+# See docs/CAPACITY-PLANNING.md for tier-based tuning recommendations.
+#
+# Override in a separate values file per environment:
+#   helm upgrade oneplatform ./deploy/helm/oneplatform -f values-prod.yaml
+
+# ---------------------------------------------------------------------------
+# Global
+# ---------------------------------------------------------------------------
+global:
+  # Docker image registry prefix applied to all service images.
+  # Override to pull from a private registry, e.g. "ghcr.io/myorg".
+  imageRegistry: ""
+
+  # Pull secret names available in the target namespace.
+  imagePullSecrets: []
+  # - name: regcred
+
+  # Override the namespace used for all resources.
+  # Helm's --namespace flag is the preferred mechanism; this exists for
+  # use in umbrella charts that need an explicit namespace field.
+  namespace: ""
+
+  # Image tag applied to all OnePlatform service images unless overridden
+  # per service. Defaults to the chart's appVersion.
+  imageTag: ""
+
+# ---------------------------------------------------------------------------
+# Shared / cross-cutting
+# ---------------------------------------------------------------------------
+
+# Base URL that users hit in their browser, including scheme.
+# Used by services that construct absolute URLs (gateway, auth, app).
+baseUrl: "https://oneplatform.example.com"
+
+# Comma-separated CORS allowed origins.
+allowedOrigins: "https://oneplatform.example.com"
+
+# OTLP / OpenTelemetry endpoint.  Defaults to bundled Jaeger.
+otelExporterOtlpEndpoint: ""
+
+# ---------------------------------------------------------------------------
+# Service account
+# ---------------------------------------------------------------------------
+serviceAccount:
+  # Create a dedicated ServiceAccount for all OnePlatform pods.
+  # Set to false to use an existing account and provide its name below.
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Pod security (applied to all service Deployments)
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# ---------------------------------------------------------------------------
+# Secrets — credentials managed outside Helm by default
+# ---------------------------------------------------------------------------
+# existingSecret: name of a pre-created Secret that contains ALL of the keys
+# listed under secrets.keys below.  When set, the chart uses that Secret
+# instead of creating one.  Leave empty to have the chart create a Secret
+# with the literal values below (acceptable for development only).
+existingSecret: ""
+
+secrets:
+  # JWT signing key for Ed25519 (base64-encoded PEM).  Generate with:
+  #   openssl genpkey -algorithm ed25519 | base64 -w0
+  jwtPrivateKey: ""
+  jwtPublicKey: ""
+
+  # PostgreSQL superuser password (only used when postgresql.enabled=true)
+  postgresPassword: "change_me_postgres"
+  # Application-level database password used by all services
+  appDbPassword: "change_me_app"
+
+  # Redis application password (only used when redis.enabled=true)
+  redisPassword: "change_me_redis"
+
+  # MinIO root credentials (only used when minio.enabled=true)
+  minioRootUser: "minioadmin"
+  minioRootPassword: "change_me_minio"
+
+  # SMTP credentials (optional — leave empty to disable email delivery)
+  smtpHost: ""
+  smtpPort: "587"
+  smtpUser: ""
+  smtpPassword: ""
+  smtpFrom: ""
+  smtpSecure: "true"
+
+# ---------------------------------------------------------------------------
+# Ingress (Caddy acts as reverse proxy inside the cluster)
+# ---------------------------------------------------------------------------
+ingress:
+  # When enabled, create a standard Kubernetes Ingress resource for TLS
+  # termination by an external ingress controller (nginx, Traefik, etc.).
+  # When disabled, deploy the Caddy sidecar instead (see caddy section).
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+  hostname: "oneplatform.example.com"
+  tls:
+    enabled: true
+    # Provide a pre-existing TLS secret or leave empty to use cert-manager.
+    secretName: "oneplatform-tls"
+    # cert-manager ClusterIssuer — set when you want cert-manager to provision.
+    certManagerIssuer: ""
+
+# Caddy deployment — used as an in-cluster TLS proxy when ingress.enabled=false.
+# Mirrors the Docker Compose caddy service.
+caddy:
+  # Deploy caddy as a LoadBalancer Service instead of using the Ingress resource.
+  enabled: false
+  image:
+    repository: caddy
+    tag: "2.8-alpine"
+    pullPolicy: IfNotPresent
+  tlsMode: "internal"   # "internal" (self-signed) | "acme" (Let's Encrypt)
+  domain: "localhost"
+  tlsEmail: ""
+  resources:
+    limits:
+      cpu: "250m"
+      memory: "128Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+
+# ---------------------------------------------------------------------------
+# Infrastructure components
+# ---------------------------------------------------------------------------
+
+# Bundled PostgreSQL subchart (bitnami/postgresql).
+# Set enabled=false and provide externalPostgresql when using RDS / Cloud SQL.
+postgresql:
+  enabled: true
+  auth:
+    database: oneplatform
+    # References secrets.postgresPassword via the chart's existingSecret
+    # mechanism — override with an existing secret for production.
+    password: ""
+    username: postgres
+  primary:
+    resources:
+      limits:
+        cpu: "2"
+        memory: "2Gi"
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+    persistence:
+      enabled: true
+      size: 50Gi
+    extendedConfiguration: |
+      max_connections = 200
+
+# External PostgreSQL (used when postgresql.enabled=false)
+externalPostgresql:
+  host: ""
+  port: 5432
+  database: oneplatform
+  username: postgres
+  # Key in existingSecret that holds the password
+  passwordSecretKey: "postgresPassword"
+
+# Bundled Redis subchart (bitnami/redis).
+# Set enabled=false and provide externalRedis when using ElastiCache / Redis Cloud.
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: ""
+  master:
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    persistence:
+      enabled: true
+      size: 8Gi
+  replica:
+    replicaCount: 0
+
+# External Redis (used when redis.enabled=false)
+externalRedis:
+  host: ""
+  port: 6379
+  passwordSecretKey: "redisPassword"
+
+# Bundled MinIO subchart (bitnami/minio).
+# Set enabled=false and set externalMinio for S3 or managed object storage.
+minio:
+  enabled: true
+  auth:
+    rootUser: ""
+    rootPassword: ""
+  persistence:
+    enabled: true
+    size: 100Gi
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+
+# External S3-compatible object storage (used when minio.enabled=false)
+externalMinio:
+  endpoint: ""
+  # Key in existingSecret that holds rootUser / rootPassword
+  userSecretKey: "minioRootUser"
+  passwordSecretKey: "minioRootPassword"
+
+# ---------------------------------------------------------------------------
+# Observability
+# ---------------------------------------------------------------------------
+jaeger:
+  enabled: true
+  image:
+    repository: jaegertracing/all-in-one
+    tag: "1.62"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    otlpPort: 4318
+    queryPort: 16686
+
+grafana:
+  enabled: true
+  image:
+    repository: grafana/grafana-oss
+    tag: "11.0.0"
+    pullPolicy: IfNotPresent
+  adminPassword: "admin"
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  persistence:
+    enabled: true
+    size: 5Gi
+  service:
+    port: 3000
+
+# ---------------------------------------------------------------------------
+# Application services
+# Each service block follows the same schema:
+#   image        — repository + tag (tag defaults to global.imageTag / appVersion)
+#   replicas     — initial pod count
+#   resources    — limits/requests matching capacity planning guide
+#   env          — additional environment variables injected into the container
+#   hpa          — HorizontalPodAutoscaler settings (stateless services only)
+# ---------------------------------------------------------------------------
+
+image:
+  # Common repository prefix.  Full image = registry/repository:tag
+  repository: ghcr.io/oneplatform
+  pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# Gateway service
+# Bottleneck: CPU.  Scale horizontally; stateless.
+# ---------------------------------------------------------------------------
+gateway:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/gateway
+    tag: ""
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    port: 3000
+  env:
+    OP_GLOBAL_RATE_LIMIT: "10000"
+    OP_WEBHOOK_ALLOW_HTTP: "false"
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# Auth service
+# Bottleneck: low.  One replica is usually sufficient.
+# ---------------------------------------------------------------------------
+auth:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/auth
+    tag: ""
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    port: 3000
+  env:
+    OP_REQUIRE_EMAIL_VERIFICATION: "false"
+    OP_SMTP_HOST: ""
+    OP_SMTP_PORT: ""
+    OP_SMTP_FROM: ""
+    OP_SMTP_SECURE: "true"
+  hpa:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+
+# ---------------------------------------------------------------------------
+# Ingestion service
+# Bottleneck: memory (batch buffers).  Scale horizontally for throughput.
+# ---------------------------------------------------------------------------
+ingestion:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/ingestion
+    tag: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+  service:
+    port: 3000
+  env:
+    OP_INGESTION_BATCH_SIZE: "1000"
+    OP_LARGE_SYNC_CONCURRENCY: "3"
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetMemoryUtilizationPercentage: 75
+
+# ---------------------------------------------------------------------------
+# Ontology service
+# Bottleneck: low.  Do NOT scale during active migrations (advisory locks).
+# ---------------------------------------------------------------------------
+ontology:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/ontology
+    tag: ""
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    port: 3000
+  env:
+    OP_MIGRATION_TIMEOUT: "3600"
+    OP_ONTOLOGY_POLL_INTERVAL: "15"
+  # HPA intentionally disabled: advisory locks make simultaneous migration
+  # runs from multiple replicas unsafe.  Scale manually once migrations complete.
+  hpa:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 2
+    targetCPUUtilizationPercentage: 80
+
+# ---------------------------------------------------------------------------
+# Pipeline service
+# Bottleneck: CPU (DAG traversal).  Scale horizontally.
+# ---------------------------------------------------------------------------
+pipeline:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/pipeline
+    tag: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+  service:
+    port: 3000
+  env: {}
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# Execution service
+# Bottleneck: memory (sandbox VM pool).  Each replica maintains its own pool.
+# ---------------------------------------------------------------------------
+execution:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/execution
+    tag: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+  service:
+    port: 3000
+  env:
+    OP_SANDBOX_POOL_SIZE: "5"
+    OP_CONNECTOR_TIMEOUT_SECONDS: "300"
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetMemoryUtilizationPercentage: 75
+
+# ---------------------------------------------------------------------------
+# Sandbox VM (isolated-vm JS/TS runner)
+# Co-deployed with the execution service as a sidecar in the same Pod.
+# No external network access; communicates via Unix socket in shared emptyDir.
+# ---------------------------------------------------------------------------
+sandbox:
+  image:
+    repository: ghcr.io/oneplatform/sandbox
+    tag: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+# ---------------------------------------------------------------------------
+# App service
+# Bottleneck: low-medium.  Stateless for routing; app assets in MinIO.
+# ---------------------------------------------------------------------------
+app:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/app
+    tag: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+  service:
+    port: 3000
+  env:
+    OP_WILDCARD_DOMAIN: ""
+  persistence:
+    # app-data volume from Docker Compose; used for local app assets
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# Logging service
+# Bottleneck: I/O (high-throughput write path via BullMQ).
+# ---------------------------------------------------------------------------
+logging:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/logging
+    tag: ""
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    port: 3000
+  env: {}
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# Plugin service
+# Bottleneck: memory (isolated-vm instances per loaded plugin set).
+# ---------------------------------------------------------------------------
+plugin:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/plugin
+    tag: ""
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    port: 3000
+  env: {}
+  persistence:
+    # plugin-data volume from Docker Compose; used for plugin binaries/state
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetMemoryUtilizationPercentage: 75
+
+# ---------------------------------------------------------------------------
+# Frontend (React SPA served by nginx)
+# ---------------------------------------------------------------------------
+frontend:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/oneplatform/frontend
+    tag: ""
+  resources:
+    limits:
+      cpu: "250m"
+      memory: "128Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+  service:
+    port: 80
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy
+# ---------------------------------------------------------------------------
+networkPolicy:
+  # When enabled, enforce Kubernetes NetworkPolicies that mirror the Docker
+  # Compose internal/public network isolation model.
+  enabled: true

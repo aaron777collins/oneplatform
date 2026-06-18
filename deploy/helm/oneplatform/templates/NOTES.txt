@@ -1,0 +1,92 @@
+OnePlatform {{ .Chart.AppVersion }} has been deployed.
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. VERIFY ALL PODS ARE RUNNING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+All pods should reach Running/Ready (1/1 for single-container pods,
+2/2 for the execution pod which includes the sandbox sidecar).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. ACCESS THE APPLICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.ingress.enabled }}
+  URL: https://{{ .Values.ingress.hostname }}
+{{- else if .Values.caddy.enabled }}
+  Get the LoadBalancer IP:
+    kubectl get svc -n {{ .Release.Namespace }} {{ include "oneplatform.fullname" . }}-caddy
+{{- else }}
+  No Ingress or Caddy is enabled.  Port-forward the gateway to test locally:
+    kubectl port-forward -n {{ .Release.Namespace }} \
+      svc/{{ include "oneplatform.fullname" . }}-gateway 3000:3000
+  Then visit: http://localhost:3000
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. OBSERVABILITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.grafana.enabled }}
+  Grafana dashboard (port-forward to access):
+    kubectl port-forward -n {{ .Release.Namespace }} \
+      svc/{{ include "oneplatform.fullname" . }}-grafana 3100:3000
+  URL: http://localhost:3100
+  Username: admin
+  Password: (set in .Values.grafana.adminPassword or the grafana secret)
+{{- end }}
+
+{{- if .Values.jaeger.enabled }}
+  Jaeger trace UI (port-forward to access):
+    kubectl port-forward -n {{ .Release.Namespace }} \
+      svc/{{ include "oneplatform.fullname" . }}-jaeger 16686:16686
+  URL: http://localhost:16686
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. IMPORTANT: CHANGE DEFAULT CREDENTIALS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you installed without a pre-existing secret (existingSecret=""), the
+chart created a Secret with the placeholder passwords from values.yaml.
+Rotate ALL credentials before exposing this deployment externally:
+
+  - secrets.postgresPassword
+  - secrets.appDbPassword
+  - secrets.redisPassword
+  - secrets.minioRootPassword
+  - secrets.jwtPrivateKey / jwtPublicKey
+  - grafana.adminPassword
+
+For production, pre-create a Kubernetes Secret containing all keys and
+set existingSecret=<name> to prevent the chart from managing credentials.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. SCALING GUIDANCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+See docs/CAPACITY-PLANNING.md for tier-based recommendations.
+
+Quick horizontal scale of a stateless service:
+  kubectl scale deployment {{ include "oneplatform.fullname" . }}-gateway \
+    -n {{ .Release.Namespace }} --replicas=3
+
+Do NOT scale the ontology service while schema migrations are running.
+Advisory locks serialize migration runs; two replicas racing a migration
+will block until one completes.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. UPGRADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  helm upgrade {{ .Release.Name }} ./deploy/helm/oneplatform \
+    -n {{ .Release.Namespace }} \
+    -f your-values.yaml \
+    --atomic --timeout 10m
+
+See deploy/helm/README.md for the full upgrade procedure.

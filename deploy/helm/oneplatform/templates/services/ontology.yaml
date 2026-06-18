@@ -1,0 +1,80 @@
+{{/*
+Ontology Service — schema registry, advisory-lock migrations, PG LISTEN/NOTIFY.
+Bottleneck: low.  Do NOT scale during active migrations — advisory locks
+serialize migration runs.  HPA is disabled by default for this reason.
+Requires session-pool mode in PgBouncer (not transaction mode) because
+PostgreSQL LISTEN/NOTIFY requires a persistent server connection.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-ontology" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "ontology" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.ontology.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "ontology" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "ontology" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ontology
+          image: {{ include "oneplatform.image" (dict "svc" .Values.ontology "root" .) | quote }}
+          imagePullPolicy: {{ .Values.ontology.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "ontology-service"
+            - name: OP_MIGRATION_TIMEOUT
+              value: {{ .Values.ontology.env.OP_MIGRATION_TIMEOUT | default "3600" | quote }}
+            - name: OP_ONTOLOGY_POLL_INTERVAL
+              value: {{ .Values.ontology.env.OP_ONTOLOGY_POLL_INTERVAL | default "15" | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ontology.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.ontology.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-ontology" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "ontology" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "ontology" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.ontology.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "ontology" "cfg" .Values.ontology "root" .) }}

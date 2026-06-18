@@ -1,0 +1,141 @@
+{{/*
+Execution Service + Sandbox VM sidecar.
+Bottleneck: memory (isolated-vm sandbox pool).
+
+In Docker Compose the sandbox runs as a separate container communicating via
+a Unix socket on a shared named volume.  In Kubernetes the sandbox runs as
+a sidecar container in the same Pod sharing an emptyDir volume for the socket.
+This preserves the isolation boundary (separate process/filesystem) while
+working within Kubernetes' networking model where Pod containers share a
+network namespace but can use filesystem-based IPC.
+
+Security: sandbox container has no capabilities, read-only root fs,
+and an empty egress NetworkPolicy — it can only be reached by the
+execution container in the same Pod.
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-execution" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "execution" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.execution.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" "execution" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oneplatform.serviceLabels" (dict "service" "execution" "root" .) | nindent 8 }}
+        # Label used by the sandbox NetworkPolicy to identify the execution container
+        app.kubernetes.io/component: execution
+    spec:
+      serviceAccountName: {{ include "oneplatform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Sandbox init: the sandbox sidecar must be ready before the execution
+      # service starts accepting requests.  Use initContainers or rely on the
+      # readiness probe — the execution service's /healthz checks the socket.
+      containers:
+        # ── Sandbox VM sidecar ──────────────────────────────────────────────
+        - name: sandbox
+          image: {{ include "oneplatform.image" (dict "svc" .Values.sandbox "root" .) | quote }}
+          imagePullPolicy: {{ .Values.sandbox.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            - name: NODE_ENV
+              value: "production"
+            # V8 hardening flags — mirror Dockerfile.sandbox NODE_OPTIONS.
+            # --jitless disables JIT compilation to reduce attack surface.
+            # --disallow-code-generation-from-strings blocks eval() / new Function().
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=512 --disallow-code-generation-from-strings --jitless"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            # Run as a non-root user that differs from the execution service
+            # user to prevent accidental privilege sharing.
+            runAsNonRoot: true
+            runAsUser: 1002
+          resources:
+            {{- toYaml .Values.sandbox.resources | nindent 12 }}
+          volumeMounts:
+            - name: sandbox-socket
+              mountPath: /run/sandbox
+            - name: tmp-sandbox
+              mountPath: /tmp
+
+        # ── Execution service ────────────────────────────────────────────────
+        - name: execution
+          image: {{ include "oneplatform.image" (dict "svc" .Values.execution "root" .) | quote }}
+          imagePullPolicy: {{ .Values.execution.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            {{- include "oneplatform.commonEnv" . | nindent 12 }}
+            - name: SERVICE_NAME
+              value: "execution-service"
+            - name: OP_SANDBOX_POOL_SIZE
+              value: {{ .Values.execution.env.OP_SANDBOX_POOL_SIZE | default "5" | quote }}
+            - name: OP_CONNECTOR_TIMEOUT_SECONDS
+              value: {{ .Values.execution.env.OP_CONNECTOR_TIMEOUT_SECONDS | default "300" | quote }}
+            # Execution service reaches the sandbox via the shared Unix socket,
+            # not via TCP.  SANDBOX_SOCKET_PATH replaces DOCKER_HOST used in
+            # the Docker Compose deployment.
+            - name: SANDBOX_SOCKET_PATH
+              value: "/var/run/sandbox/op.sock"
+          ports:
+            - name: http
+              containerPort: {{ .Values.execution.service.port }}
+              protocol: TCP
+          {{- include "oneplatform.livenessProbe" . | nindent 10 }}
+          {{- include "oneplatform.readinessProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.execution.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: sandbox-socket
+              mountPath: /var/run/sandbox
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Shared emptyDir for the Unix socket between execution and sandbox.
+        # Memory medium prevents socket data from hitting node disk.
+        - name: sandbox-socket
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Mi
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+        - name: tmp-sandbox
+          emptyDir:
+            medium: Memory
+            sizeLimit: 50Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-execution" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "execution" "root" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oneplatform.serviceSelectorLabels" (dict "service" "execution" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.execution.service.port }}
+      targetPort: http
+---
+{{ include "oneplatform.hpa" (dict "service" "execution" "cfg" .Values.execution "root" .) }}

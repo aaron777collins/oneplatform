@@ -1,0 +1,66 @@
+{{/*
+PersistentVolumeClaims for stateful service data.
+
+MinIO PVC: managed by the bitnami/minio subchart when minio.enabled=true.
+The PVCs below cover OnePlatform application-level data volumes that
+exist in Docker Compose as named volumes (app-data, plugin-data).
+*/}}
+
+{{- if .Values.app.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-app-data" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "app" "root" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.app.persistence.size | quote }}
+  {{- if .Values.app.persistence.storageClass }}
+  storageClassName: {{ .Values.app.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}
+
+{{- if .Values.plugin.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-plugin-data" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "plugin" "root" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.plugin.persistence.size | quote }}
+  {{- if .Values.plugin.persistence.storageClass }}
+  storageClassName: {{ .Values.plugin.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}
+
+{{- if .Values.grafana.enabled }}
+{{- if .Values.grafana.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-grafana-data" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "grafana" "root" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.grafana.persistence.size | quote }}
+{{- end }}
+{{- end }}
