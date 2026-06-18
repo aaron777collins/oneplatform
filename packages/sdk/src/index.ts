@@ -87,6 +87,18 @@ export type {
   AuditQueryOptions,
 } from './types/resources.js';
 
+// App deployment and rollback result types
+export type {
+  Deployment,
+  RollbackResult,
+  RollbackOptions,
+  AppBuild,
+  TriggerBuildRequest,
+  AppFileSummary,
+  AppFileDetail,
+  WriteFileRequest,
+} from './resources/apps.js';
+
 // Platform resource types — stable shapes for server-returned data
 export type {
   WhoAmIResponse,

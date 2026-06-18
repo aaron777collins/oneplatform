@@ -28,6 +28,31 @@ export interface Deployment {
   readonly previousBuildId: string | null;
 }
 
+/**
+ * Result returned by rollback().
+ * Shape mirrors the RollbackResult type from the app service's deploy-service.ts.
+ */
+export interface RollbackResult {
+  readonly appId: string;
+  /** The build that was active before the rollback. */
+  readonly fromBuildId: string;
+  /** The build that is now active after the rollback. */
+  readonly toBuildId: string;
+  readonly rolledBackAt: string;
+}
+
+/**
+ * Options accepted by rollback().
+ * buildId is required — rollback always targets a specific previously-successful build.
+ */
+export interface RollbackOptions {
+  /**
+   * The ID of the build to roll back to. Must be a UUID of a build that
+   * previously reached 'success' status and still has retained artifacts.
+   */
+  readonly buildId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Build types
 // ---------------------------------------------------------------------------
@@ -130,6 +155,18 @@ export interface AppNamespace {
     opts?: { env?: string },
   ): Promise<Deployment>;
 
+  /**
+   * Roll back an app to a specific previously-successful build.
+   *
+   * The target build must have status 'success' and its artifacts must still be
+   * within the platform's retention window. Use `listBuilds()` to find candidate
+   * build IDs before calling this method.
+   *
+   * @param appId   App ID or slug
+   * @param options Options containing the `buildId` to roll back to
+   */
+  rollback(appId: string, options: RollbackOptions): Promise<RollbackResult>;
+
   // Virtual file system
   listFiles(id: string): Promise<AppFileSummary[]>;
   getFile(id: string, filePath: string): Promise<AppFileDetail>;
@@ -227,6 +264,16 @@ export function createAppNamespace(transport: Transport): AppNamespace {
         method: 'POST',
         path: `${BASE}/${encodeURIComponent(id)}/deploy`,
         body: { buildId },
+      });
+    },
+
+    async rollback(appId: string, options: RollbackOptions): Promise<RollbackResult> {
+      // POST /api/v1/apps/:appId/rollback — the buildId is required by the server's
+      // RollbackSchema, so we send it unconditionally rather than filtering undefined.
+      return transport.request<RollbackResult>({
+        method: 'POST',
+        path: `${BASE}/${encodeURIComponent(appId)}/rollback`,
+        body: { buildId: options.buildId },
       });
     },
 

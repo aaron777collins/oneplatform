@@ -1,0 +1,21 @@
+{
+  "name": "@oneplatform/example-custom-connector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example: a custom REST API connector plugin implementing @oneplatform/plugin-sdk",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "validate": "op plugin validate manifest.json"
+  },
+  "dependencies": {
+    "@oneplatform/plugin-sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@oneplatform/cli": "^0.1.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

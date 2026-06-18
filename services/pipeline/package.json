@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "dev": "tsc --project tsconfig.json --watch",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
     "test": "vitest run --passWithNoTests",
     "test:integration:level1": "vitest run --config vitest.integration.ts",
     "test:integration:level2": "vitest run --config vitest.integration-l2.ts",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@types/node": "*",
     "@types/pg": "*",
+    "tsx": "*",
     "typescript": "*",
     "vitest": "*"
   }

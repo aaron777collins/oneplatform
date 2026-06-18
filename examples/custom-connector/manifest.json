@@ -1,0 +1,61 @@
+{
+  "manifestVersion": "1",
+
+  "id": "com.example.connectors.shopify-products",
+  "name": "Shopify Products (Example)",
+  "version": "1.0.0",
+  "type": "connector",
+  "description": "Ingests product catalog data from a Shopify store into OnePlatform via the Shopify Admin REST API.",
+  "author": "Example Author",
+
+  "supportUrl": "https://github.com/example/oneplatform-shopify-connector/issues",
+  "homepageUrl": "https://github.com/example/oneplatform-shopify-connector",
+
+  "minPlatformVersion": "0.1.0",
+
+  "entrypoint": "connector",
+
+  "configSchema": {
+    "type": "object",
+    "required": ["shopDomain", "apiVersion"],
+    "properties": {
+      "shopDomain": {
+        "type": "string",
+        "description": "Your Shopify store domain, e.g. my-store.myshopify.com"
+      },
+      "apiVersion": {
+        "type": "string",
+        "description": "Shopify Admin API version, e.g. 2024-04",
+        "default": "2024-04"
+      },
+      "pageSize": {
+        "type": "integer",
+        "description": "Number of products to fetch per request (max 250)",
+        "default": 100,
+        "minimum": 1,
+        "maximum": 250
+      }
+    }
+  },
+
+  "requiredExternalUrls": [
+    "https://*.myshopify.com"
+  ],
+
+  "requiredApis": ["credentials", "fetch", "cache", "tracing"],
+
+  "requiredCredentials": [
+    {
+      "name": "shopify_access_token",
+      "description": "Shopify Admin API access token. Generate one under Apps → develop apps in the Shopify admin.",
+      "type": "token",
+      "required": true
+    }
+  ],
+
+  "hooks": [],
+  "tags": ["ecommerce", "shopify", "products"],
+  "license": "MIT",
+
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}

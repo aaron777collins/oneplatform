@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --parallel",
+    "dev": "turbo dev",
     "test": "turbo run test",
     "test:e2e": "vitest run --config tests/vitest.e2e.config.ts",
     "lint": "turbo run lint",

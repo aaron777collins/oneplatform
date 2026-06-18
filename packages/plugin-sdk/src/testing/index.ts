@@ -19,6 +19,31 @@ export type {
   MockSpanAttributeCall,
 } from "./mock-context.js";
 
+export {
+  createConnectorMockContext,
+  createAuthProviderMockContext,
+  createDestinationMockContext,
+  createTransformerMockContext,
+  CONNECTOR_SAMPLE_RECORDS,
+  AUTH_SAMPLE_TOKEN_RESPONSE,
+  AUTH_SAMPLE_USERINFO,
+  TRANSFORMER_SAMPLE_INPUT_RECORDS,
+} from "./mock-factories.js";
+export type {
+  MockConnectorContext,
+  MockConnectorContextOptions,
+  ConnectorFetchResponse,
+  MockAuthProviderContext,
+  MockAuthProviderContextOptions,
+  TokenResponse,
+  UserinfoResponse,
+  MockDestinationContext,
+  MockDestinationContextOptions,
+  MockDestinationWriteCall,
+  MockTransformerFactoryContext,
+  MockTransformerContextOptions,
+} from "./mock-factories.js";
+
 export { assertValidPlugin, assertValidMetadata } from "./assertions.js";
 
 export { simulateHook } from "./simulate-hook.js";
