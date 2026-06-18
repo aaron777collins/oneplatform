@@ -116,6 +116,7 @@ function makePipelineRow(overrides?: Partial<PipelineRow>): PipelineRow {
     created_at: new Date("2026-01-01T00:00:00Z"),
     updated_at: new Date("2026-01-01T00:00:00Z"),
     created_by: "user-001",
+    current_version: 0,
     ...overrides,
   };
 }

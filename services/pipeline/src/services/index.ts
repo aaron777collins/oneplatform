@@ -22,10 +22,22 @@ export {
   type ConditionalStep,
   type ParallelStep,
   type WebhookStep,
+  type WaitStep,
+  type ApprovalStep,
+  type SubWorkflowStep,
   type ParallelBranch,
   type InputSource,
   type ValidationResult,
 } from "./pipeline-service.js";
+
+export {
+  createApprovalService,
+  type ApprovalService,
+  type ApprovalRecord,
+  type ApprovalDecision,
+  type ApprovalStatus,
+  type PendingApprovalView,
+} from "./approval-service.js";
 
 export {
   createRunService,

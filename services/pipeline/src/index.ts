@@ -22,6 +22,7 @@ import {
   createTriggerService,
   createExecutionEngine,
   createExecutionTracker,
+  createApprovalService,
 } from "./services/index.js";
 import type {
   PipelineRunJobPayload,

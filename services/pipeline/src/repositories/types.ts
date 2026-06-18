@@ -21,6 +21,24 @@ export interface PipelineRow {
   created_at: Date;
   updated_at: Date;
   created_by: string;
+  // Monotonically increasing counter; 0 until the first update is applied.
+  current_version: number;
+}
+
+// ---------------------------------------------------------------------------
+// pipeline.pipeline_versions
+// ---------------------------------------------------------------------------
+
+export interface PipelineVersionRow {
+  id: string;
+  pipeline_id: string;
+  tenant_id: string;
+  version_number: number;
+  definition_snapshot: Record<string, unknown>;
+  name_at_version: string;
+  description_at_version: string | null;
+  created_at: Date;
+  created_by: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,4 +251,14 @@ export interface CreateRunLogData {
   message: string;
   step_id?: string;
   details?: Record<string, unknown>;
+}
+
+export interface CreatePipelineVersionData {
+  pipeline_id: string;
+  tenant_id: string;
+  version_number: number;
+  definition_snapshot: Record<string, unknown>;
+  name_at_version: string;
+  description_at_version?: string | null;
+  created_by: string;
 }

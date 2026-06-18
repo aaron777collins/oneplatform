@@ -10,6 +10,7 @@ import {
   type PipelineRow,
   type PipelineDefinition,
   type PipelineRepository,
+  type PipelineVersionRepository,
   type RunRepository,
   type ScheduleRepoForPipeline,
   type PipelineListResult,
@@ -39,6 +40,7 @@ function makePipelineRow(overrides?: Partial<PipelineRow>): PipelineRow {
     created_at: new Date("2026-01-01T00:00:00Z"),
     updated_at: new Date("2026-01-01T00:00:00Z"),
     created_by: "user-001",
+    current_version: 0,
     ...overrides,
   };
 }
@@ -62,6 +64,11 @@ type MockPipelineRepo = {
   delete: ReturnType<typeof vi.fn>;
 };
 
+type MockVersionRepo = {
+  listByPipelineId: ReturnType<typeof vi.fn>;
+  findByPipelineIdAndVersionNumber: ReturnType<typeof vi.fn>;
+};
+
 type MockScheduleRepo = {
   disableByPipelineId: ReturnType<typeof vi.fn>;
 };
@@ -82,6 +89,13 @@ function makePipelineRepo(): MockPipelineRepo {
   };
 }
 
+function makeVersionRepo(): MockVersionRepo {
+  return {
+    listByPipelineId: vi.fn(),
+    findByPipelineIdAndVersionNumber: vi.fn(),
+  };
+}
+
 function makeScheduleRepo(): MockScheduleRepo {
   return {
     disableByPipelineId: vi.fn(),
@@ -97,6 +111,7 @@ function makeRunRepo(): MockRunRepo {
 function makeDeps(
   overrides?: Partial<{
     pipelineRepo: MockPipelineRepo;
+    versionRepo: MockVersionRepo;
     scheduleRepo: MockScheduleRepo;
     runRepo: MockRunRepo;
     logger: Logger;
@@ -104,6 +119,7 @@ function makeDeps(
 ): PipelineServiceDeps {
   return {
     pipelineRepo: (overrides?.pipelineRepo ?? makePipelineRepo()) as unknown as PipelineRepository,
+    versionRepo: (overrides?.versionRepo ?? makeVersionRepo()) as unknown as PipelineVersionRepository,
     scheduleRepo: (overrides?.scheduleRepo ?? makeScheduleRepo()) as unknown as ScheduleRepoForPipeline,
     runRepo: (overrides?.runRepo ?? makeRunRepo()) as unknown as RunRepository,
     logger: overrides?.logger ?? makeLogger(),
@@ -169,9 +185,9 @@ describe("validateDefinition — valid definitions", () => {
           id: "cond",
           name: "Cond",
           type: "conditional",
-          expression: "input.flag = true",
-          trueBranchStepId: "step-yes",
-          falseBranchStepId: "step-no",
+          condition: { field: "flag", operator: "eq" as const, value: true },
+          thenStepId: "step-yes",
+          elseStepId: "step-no",
           onError: "fail",
         },
         { id: "step-yes", name: "Yes", type: "code", language: "javascript", code: "x", onError: "fail" },
@@ -252,7 +268,7 @@ describe("validateDefinition — invalid definitions", () => {
     expect(firstError).toContain("does-not-exist");
   });
 
-  it("returns valid=false when conditional trueBranchStepId references missing step", () => {
+  it("returns valid=false when conditional thenStepId references missing step", () => {
     const definition: PipelineDefinition = {
       version: 1,
       entryStepId: "cond",
@@ -261,9 +277,9 @@ describe("validateDefinition — invalid definitions", () => {
           id: "cond",
           name: "Cond",
           type: "conditional",
-          expression: "x",
-          trueBranchStepId: "missing-true",
-          falseBranchStepId: "step-no",
+          condition: { field: "flag", operator: "exists" as const },
+          thenStepId: "missing-true",
+          elseStepId: "step-no",
           onError: "fail",
         },
         { id: "step-no", name: "No", type: "code", language: "javascript", code: "x", onError: "fail" },
@@ -274,7 +290,7 @@ describe("validateDefinition — invalid definitions", () => {
     expect(result.errors.some((e) => e.includes("missing-true"))).toBe(true);
   });
 
-  it("returns valid=false when conditional falseBranchStepId references missing step", () => {
+  it("returns valid=false when conditional elseStepId references missing step", () => {
     const definition: PipelineDefinition = {
       version: 1,
       entryStepId: "cond",
@@ -283,9 +299,9 @@ describe("validateDefinition — invalid definitions", () => {
           id: "cond",
           name: "Cond",
           type: "conditional",
-          expression: "x",
-          trueBranchStepId: "step-yes",
-          falseBranchStepId: "missing-false",
+          condition: { field: "flag", operator: "exists" as const },
+          thenStepId: "step-yes",
+          elseStepId: "missing-false",
           onError: "fail",
         },
         { id: "step-yes", name: "Yes", type: "code", language: "javascript", code: "x", onError: "fail" },
@@ -413,15 +429,16 @@ describe("validateDefinition — invalid definitions", () => {
           id: "cond",
           name: "Cond",
           type: "conditional",
-          expression: "x",
-          trueBranchStepId: "missing-true",
-          falseBranchStepId: "missing-false",
+          condition: { field: "x", operator: "exists" as const },
+          thenStepId: "missing-true",
+          elseStepId: "missing-false",
           onError: "fail",
         },
       ],
     };
     const result = service.validateDefinition(definition);
     expect(result.valid).toBe(false);
+    // entryStepId + thenStepId + elseStepId are all missing => at least 3 errors
     expect(result.errors.length).toBeGreaterThanOrEqual(3);
   });
 });

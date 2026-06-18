@@ -5,9 +5,11 @@ import type {
   UpdatePipelineData,
 } from "./types.js";
 
+// current_version is included so callers can display the version counter without
+// needing a second query against pipeline_versions.
 const PIPELINE_COLUMNS = `
   id, tenant_id, name, slug, description, definition,
-  is_active, created_at, updated_at, created_by
+  is_active, created_at, updated_at, created_by, current_version
 `;
 
 export class PipelineRepository {
@@ -116,9 +118,13 @@ export class PipelineRepository {
     return result.rows;
   }
 
+  // update() wraps the snapshot + UPDATE in a single transaction so the version
+  // record and the new pipeline state are always consistent — no partial writes.
+  // The caller provides `updatedBy` so the version record knows who made the change.
   async update(
     id: string,
-    data: UpdatePipelineData
+    data: UpdatePipelineData,
+    updatedBy?: string
   ): Promise<PipelineRow | null> {
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -147,17 +153,67 @@ export class PipelineRepository {
       );
     }
 
+    // Increment the version counter on every update so current_version on the
+    // pipeline row always reflects how many snapshots have been taken.
+    sets.push("current_version = current_version + 1");
     sets.push("updated_at = now()");
     values.push(id);
 
-    const result = await this.pool.query<PipelineRow>(
-      `UPDATE pipeline.pipelines
-            SET ${sets.join(", ")}
-          WHERE id = $${idx}
-      RETURNING ${PIPELINE_COLUMNS}`,
-      values
-    );
-    return result.rows[0] ?? null;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Snapshot the current state before applying the update. We use SELECT …
+      // FOR UPDATE to lock the row for the duration of the transaction, preventing
+      // a concurrent update from racing between the snapshot read and the write.
+      const snapshotResult = await client.query<PipelineRow>(
+        `SELECT ${PIPELINE_COLUMNS}
+           FROM pipeline.pipelines
+          WHERE id = $1
+          FOR UPDATE`,
+        [id]
+      );
+
+      const existing = snapshotResult.rows[0];
+
+      if (existing !== undefined && updatedBy !== undefined) {
+        // The new version_number is current_version + 1 (the value after the
+        // UPDATE below increments it). We compute it here before the UPDATE runs.
+        const nextVersion = existing.current_version + 1;
+
+        await client.query(
+          `INSERT INTO pipeline.pipeline_versions
+             (pipeline_id, tenant_id, version_number, definition_snapshot,
+              name_at_version, description_at_version, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            id,
+            existing.tenant_id,
+            nextVersion,
+            JSON.stringify(existing.definition),
+            existing.name,
+            existing.description ?? null,
+            updatedBy,
+          ]
+        );
+      }
+
+      const result = await client.query<PipelineRow>(
+        `UPDATE pipeline.pipelines
+              SET ${sets.join(", ")}
+            WHERE id = $${idx}
+        RETURNING ${PIPELINE_COLUMNS}`,
+        values
+      );
+
+      await client.query("COMMIT");
+      return result.rows[0] ?? null;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // Hard-delete a pipeline. Callers must verify no active runs exist before

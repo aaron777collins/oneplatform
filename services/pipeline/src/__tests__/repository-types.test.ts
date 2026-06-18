@@ -49,6 +49,7 @@ describe("PipelineRow", () => {
     created_at: new Date("2026-01-01T00:00:00Z"),
     updated_at: new Date("2026-01-01T00:00:00Z"),
     created_by: "user-001",
+    current_version: 0,
   };
 
   it("has all required snake_case columns", () => {
@@ -56,6 +57,7 @@ describe("PipelineRow", () => {
       hasKeys(validRow, [
         "id", "tenant_id", "name", "slug", "description",
         "definition", "is_active", "created_at", "updated_at", "created_by",
+        "current_version",
       ]),
     ).toBe(true);
   });

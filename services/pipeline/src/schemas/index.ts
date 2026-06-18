@@ -49,13 +49,21 @@ const StepBaseSchema = z.object({
     "code",
     "connector",
     "transformer",
+    "transform",
     "conditional",
     "parallel",
     "webhook",
+    "wait",
+    "approval",
+    "sub_workflow",
   ]),
   inputs: z.record(InputSourceSchema).optional(),
   onError: z.enum(["fail", "skip"]).default("fail"),
-  condition: z.string().max(5000).optional(),
+  // skipIf is a JSONata expression evaluated before running this step.
+  // When the expression evaluates to a truthy value the step is skipped.
+  // Named skipIf (not condition) to avoid a name collision with the
+  // structured condition object on the conditional step type.
+  skipIf: z.string().max(5000).optional(),
   // timeout override per step (ms). Max 1 hour.
   timeout: z.number().int().min(1000).max(3_600_000).optional(),
   // Per-step retry with exponential backoff. Applied before onError semantics.
@@ -63,6 +71,120 @@ const StepBaseSchema = z.object({
   // If the step fails after all retries, execute this step id instead of
   // applying onError. The fallback step must exist in the same pipeline definition.
   fallbackStepId: z.string().min(1).max(64).optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Transform step schema — pre-built declarative data transformations (G-051).
+//
+// Each operation variant is a discriminated union member on the `operation`
+// field.  The engine resolves the correct handler at runtime without a
+// secondary dispatch table.
+// ---------------------------------------------------------------------------
+
+export const TransformOperationSchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("dedup"),
+    keyFields: z.array(z.string().min(1)).min(1),
+    strategy: z.enum(["first", "last"]),
+  }),
+  z.object({
+    operation: z.literal("filter"),
+    // expression evaluated by the safe expression evaluator (no eval)
+    condition: z.string().min(1).max(2000),
+  }),
+  z.object({
+    operation: z.literal("map"),
+    // outputField → expression mapping
+    mappings: z.record(z.string().min(1)),
+  }),
+  z.object({
+    operation: z.literal("aggregate"),
+    groupBy: z.array(z.string().min(1)),
+    aggregations: z
+      .array(
+        z.object({
+          field: z.string().min(1),
+          function: z.enum(["sum", "avg", "min", "max", "count"]),
+          alias: z.string().min(1),
+        }),
+      )
+      .min(1),
+  }),
+  z.object({
+    operation: z.literal("pivot"),
+    groupField: z.string().min(1),
+    pivotField: z.string().min(1),
+    valueField: z.string().min(1),
+    aggregation: z.enum(["sum", "avg", "min", "max", "count"]),
+  }),
+  z.object({
+    operation: z.literal("unpivot"),
+    keyField: z.string().min(1),
+    valueFields: z.array(z.string().min(1)).min(1),
+    nameColumn: z.string().min(1),
+    valueColumn: z.string().min(1),
+  }),
+  z.object({
+    operation: z.literal("join"),
+    // rightDataSource references a prior step id whose output is used as the
+    // right-hand record set.  Resolved by the execution engine at runtime.
+    rightDataSource: z.string().min(1),
+    joinType: z.enum(["inner", "left", "right", "full"]),
+    leftKey: z.string().min(1),
+    rightKey: z.string().min(1),
+  }),
+  z.object({
+    operation: z.literal("sort"),
+    fields: z
+      .array(
+        z.object({
+          field: z.string().min(1),
+          direction: z.enum(["asc", "desc"]),
+        }),
+      )
+      .min(1),
+  }),
+  z.object({
+    operation: z.literal("limit"),
+    count: z.number().int().positive(),
+  }),
+  z.object({
+    operation: z.literal("rename"),
+    fieldMap: z.record(z.string().min(1)),
+  }),
+]);
+
+export const TransformStepSchema = StepBaseSchema.extend({
+  type: z.literal("transform"),
+  // dataSource is the step id whose output provides the input records.
+  // When absent the step's resolved inputs are used directly.
+  dataSource: z.string().min(1).optional(),
+  transform: TransformOperationSchema,
+});
+
+// ---------------------------------------------------------------------------
+// Sub-workflow step schema — exported so callers can reference it directly.
+//
+// inputMapping maps child pipeline input field names to dot-notation path
+// strings resolved against the parent's { input, steps } context at runtime.
+// This is intentionally simpler than InputSourceSchema: sub-workflow inputs
+// are always derived from parent context, never from literals (which can be
+// hardcoded in the child pipeline's definition instead).
+// ---------------------------------------------------------------------------
+
+export const SubWorkflowStepSchema = StepBaseSchema.extend({
+  type: z.literal("sub_workflow"),
+  pipelineId: z.string().uuid(),
+  // Each key is a child input field name; each value is a dot-path resolved
+  // against the parent's accumulated { input, steps } context.
+  inputMapping: z.record(z.string()).optional(),
+  // When true the parent step blocks until the child run reaches a terminal
+  // state and merges the child's output. When false the child is dispatched
+  // asynchronously and only the child runId is returned as output.
+  waitForCompletion: z.boolean().default(true),
+  // Wall-clock timeout for waiting on the child (ms). Distinct from the base
+  // step timeout; both caps apply and the tighter one wins.
+  timeoutMs: z.number().positive().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -84,6 +206,22 @@ export const StepSchema: z.ZodType<any> = z.discriminatedUnion("type", [
     entrypoint: z.string().optional(),
   }),
 
+  // wait — pauses execution for a fixed duration (max 24 hours).
+  StepBaseSchema.extend({
+    type: z.literal("wait"),
+    durationMs: z.number().positive().max(86_400_000),
+  }),
+
+  // approval — pauses execution until a listed approver accepts or rejects.
+  // timeoutMs defaults to 24 hours; when the deadline passes the step is
+  // marked failed so the pipeline does not block indefinitely.
+  StepBaseSchema.extend({
+    type: z.literal("approval"),
+    approvers: z.array(z.string().min(1)).min(1),
+    message: z.string().max(2000).optional(),
+    timeoutMs: z.number().positive().max(86_400_000).default(86_400_000),
+  }),
+
   // connector — triggers an Ingestion Service connector sync.
   StepBaseSchema.extend({
     type: z.literal("connector"),
@@ -100,12 +238,31 @@ export const StepSchema: z.ZodType<any> = z.discriminatedUnion("type", [
     entityType: z.string().optional(),
   }),
 
-  // conditional — JSONata branch; evaluated inside the Pipeline Service (no sandbox).
+  // conditional — structured field/operator/value branch evaluated synchronously
+  // inside the Pipeline Service (no sandbox, no JSONata).  elseStepId is
+  // optional; when omitted and the condition is false the pipeline continues
+  // to the next sequential step.
   StepBaseSchema.extend({
     type: z.literal("conditional"),
-    expression: z.string().max(5000),
-    trueBranchStepId: z.string(),
-    falseBranchStepId: z.string(),
+    condition: z.object({
+      field: z.string().min(1),
+      operator: z.enum([
+        "eq",
+        "neq",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "contains",
+        "not_contains",
+        "exists",
+        "not_exists",
+        "matches",
+      ]),
+      value: z.unknown().optional(),
+    }),
+    thenStepId: z.string().min(1),
+    elseStepId: z.string().min(1).optional(),
   }),
 
   // parallel — concurrent branches; z.lazy() allows branches to contain steps.
@@ -125,6 +282,9 @@ export const StepSchema: z.ZodType<any> = z.discriminatedUnion("type", [
     waitMode: z.enum(["all", "any"]),
   }),
 
+  // transform — pre-built declarative data transformations (G-051).
+  TransformStepSchema,
+
   // webhook — outbound HTTP call; URL validated for SSRF before save and at execution.
   StepBaseSchema.extend({
     type: z.literal("webhook"),
@@ -136,6 +296,11 @@ export const StepSchema: z.ZodType<any> = z.discriminatedUnion("type", [
     // webhook step has its own tighter timeout cap (max 2 minutes).
     timeout: z.number().int().min(1000).max(120_000).optional(),
   }),
+
+  // sub_workflow — invoke another pipeline as a child execution.
+  // The SubWorkflowStepSchema constant above captures the same shape but
+  // is defined before the union so it can be exported independently.
+  SubWorkflowStepSchema,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -271,3 +436,5 @@ export type ListSchedulesQueryInput = z.infer<typeof ListSchedulesQuery>;
 export type RetryConfig = z.infer<typeof RetryConfigSchema>;
 export type ListVersionsQueryInput = z.infer<typeof ListVersionsQuery>;
 export type RollbackPipelineInput = z.infer<typeof RollbackPipelineSchema>;
+export type TransformOperation = z.infer<typeof TransformOperationSchema>;
+export type TransformStepInput = z.infer<typeof TransformStepSchema>;

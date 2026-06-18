@@ -36,9 +36,13 @@ export type StepType =
   | "code"
   | "connector"
   | "transformer"
+  | "transform"
   | "conditional"
   | "parallel"
-  | "webhook";
+  | "webhook"
+  | "wait"
+  | "approval"
+  | "sub_workflow";
 
 export type InputSource =
   | { from: "pipeline.input"; path?: string }
@@ -57,7 +61,10 @@ export interface StepBase {
   type: StepType;
   inputs?: Record<string, InputSource>;
   onError?: "fail" | "skip";
-  condition?: string;
+  // skipIf is a JSONata expression evaluated before executing this step.
+  // When truthy the step is skipped. Named skipIf to avoid a name collision
+  // with the structured condition object on ConditionalStep.
+  skipIf?: string;
   timeout?: number;
   // Per-step retry with exponential backoff. Defaults to no retries when absent.
   retryConfig?: RetryConfig;
@@ -87,11 +94,82 @@ export interface TransformerStep extends StepBase {
   entityType?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Transform step — pre-built declarative data transformations (G-051).
+// Each operation is a discriminated union keyed on the `operation` field.
+// The shapes here mirror TransformOperationSchema in schemas/index.ts.
+// ---------------------------------------------------------------------------
+
+export type TransformOperation =
+  | { operation: "dedup"; keyFields: string[]; strategy: "first" | "last" }
+  | { operation: "filter"; condition: string }
+  | { operation: "map"; mappings: Record<string, string> }
+  | {
+      operation: "aggregate";
+      groupBy: string[];
+      aggregations: Array<{
+        field: string;
+        function: "sum" | "avg" | "min" | "max" | "count";
+        alias: string;
+      }>;
+    }
+  | {
+      operation: "pivot";
+      groupField: string;
+      pivotField: string;
+      valueField: string;
+      aggregation: "sum" | "avg" | "min" | "max" | "count";
+    }
+  | {
+      operation: "unpivot";
+      keyField: string;
+      valueFields: string[];
+      nameColumn: string;
+      valueColumn: string;
+    }
+  | {
+      operation: "join";
+      rightDataSource: string;
+      joinType: "inner" | "left" | "right" | "full";
+      leftKey: string;
+      rightKey: string;
+    }
+  | { operation: "sort"; fields: Array<{ field: string; direction: "asc" | "desc" }> }
+  | { operation: "limit"; count: number }
+  | { operation: "rename"; fieldMap: Record<string, string> };
+
+export interface TransformStep extends StepBase {
+  type: "transform";
+  // When set, the records come from the named prior step's output rather than
+  // from the step's standard input mapping.  Allows chaining transforms without
+  // explicit input declarations.
+  dataSource?: string;
+  transform: TransformOperation;
+}
+
 export interface ConditionalStep extends StepBase {
   type: "conditional";
-  expression: string;
-  trueBranchStepId: string;
-  falseBranchStepId: string;
+  condition: {
+    field: string;
+    operator:
+      | "eq"
+      | "neq"
+      | "gt"
+      | "gte"
+      | "lt"
+      | "lte"
+      | "contains"
+      | "not_contains"
+      | "exists"
+      | "not_exists"
+      | "matches";
+    value?: unknown;
+  };
+  // thenStepId is the branch taken when the condition is true.
+  // elseStepId is optional; when absent a false condition falls through to the
+  // next sequential step in the pipeline's steps array.
+  thenStepId: string;
+  elseStepId?: string;
 }
 
 export interface ParallelBranch {
@@ -116,13 +194,49 @@ export interface WebhookStep extends StepBase {
   timeout?: number;
 }
 
+// wait — suspends the pipeline worker for a fixed duration then resumes.
+// Maximum duration is 24 hours (86_400_000 ms) to prevent indefinite blocking.
+export interface WaitStep extends StepBase {
+  type: "wait";
+  durationMs: number;
+}
+
+// approval — suspends execution until one of the listed approvers submits a
+// decision via the approval API. If no decision arrives before timeoutMs the
+// step is automatically failed so the pipeline does not hang.
+export interface ApprovalStep extends StepBase {
+  type: "approval";
+  approvers: string[]; // user IDs that are permitted to submit a decision
+  message?: string;    // optional context shown to the approver in the UI
+  timeoutMs: number;   // default 24h; validated ≤ 86_400_000 by Zod schema
+}
+
+// sub_workflow — executes another pipeline as a child run.
+//
+// inputMapping maps child input field names to dot-path strings that the engine
+// resolves against the parent's accumulated { input, steps } context.
+// waitForCompletion=true blocks the parent until the child reaches a terminal
+// state; false fires the child asynchronously and returns only the child runId.
+// timeoutMs is the wall-clock limit for waiting on the child (ms).
+export interface SubWorkflowStep extends StepBase {
+  type: "sub_workflow";
+  pipelineId: string;
+  inputMapping?: Record<string, string>;
+  waitForCompletion: boolean;
+  timeoutMs?: number;
+}
+
 export type Step =
   | CodeStep
   | ConnectorStep
   | TransformerStep
+  | TransformStep
   | ConditionalStep
   | ParallelStep
-  | WebhookStep;
+  | WebhookStep
+  | WaitStep
+  | ApprovalStep
+  | SubWorkflowStep;
 
 export interface PipelineOptions {
   maxConcurrentRuns?: number;
@@ -335,7 +449,10 @@ function buildAdjacencyMap(steps: Step[]): Map<string, string[]> {
     const neighbors: string[] = [];
 
     if (step.type === "conditional") {
-      neighbors.push(step.trueBranchStepId, step.falseBranchStepId);
+      neighbors.push(step.thenStepId);
+      if (step.elseStepId !== undefined) {
+        neighbors.push(step.elseStepId);
+      }
     } else if (step.type === "parallel") {
       for (const branch of step.branches) {
         neighbors.push(branch.entryStepId);
@@ -399,11 +516,11 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     for (const step of definition.steps) {
       // Validate conditional branch targets
       if (step.type === "conditional") {
-        if (!allStepIds.has(step.trueBranchStepId)) {
-          errors.push(`Step "${step.id}": trueBranchStepId "${step.trueBranchStepId}" not found.`);
+        if (!allStepIds.has(step.thenStepId)) {
+          errors.push(`Step "${step.id}": thenStepId "${step.thenStepId}" not found.`);
         }
-        if (!allStepIds.has(step.falseBranchStepId)) {
-          errors.push(`Step "${step.id}": falseBranchStepId "${step.falseBranchStepId}" not found.`);
+        if (step.elseStepId !== undefined && !allStepIds.has(step.elseStepId)) {
+          errors.push(`Step "${step.id}": elseStepId "${step.elseStepId}" not found.`);
         }
       }
 

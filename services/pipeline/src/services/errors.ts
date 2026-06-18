@@ -9,6 +9,11 @@ export class PipelineNotFoundError extends AppError {
   readonly statusCode = 404;
 }
 
+export class PipelineVersionNotFoundError extends AppError {
+  readonly code = "PIPELINE_VERSION_NOT_FOUND" as const;
+  readonly statusCode = 404;
+}
+
 export class PipelineInactiveError extends AppError {
   readonly code = "PIPELINE_INACTIVE" as const;
   readonly statusCode = 409;
@@ -95,4 +100,62 @@ export class HookRecursionError extends AppError {
 export class TriggerSignatureInvalidError extends AppError {
   readonly code = "TRIGGER_SIGNATURE_INVALID" as const;
   readonly statusCode = 401;
+}
+
+// Approval API errors — used in approval routes when re-raising errors from ApprovalService.
+
+export class ApprovalNotFoundError extends AppError {
+  readonly code = "APPROVAL_NOT_FOUND" as const;
+  readonly statusCode = 404;
+}
+
+export class ApprovalUnauthorizedError extends AppError {
+  readonly code = "APPROVAL_UNAUTHORIZED" as const;
+  readonly statusCode = 403;
+}
+
+export class ApprovalAlreadyDecidedError extends AppError {
+  readonly code = "APPROVAL_ALREADY_DECIDED" as const;
+  readonly statusCode = 409;
+}
+
+// Wait step exceeded the 24-hour maximum or timeout cap.
+export class WaitStepDurationError extends AppError {
+  readonly code = "WAIT_STEP_DURATION_INVALID" as const;
+  readonly statusCode = 422;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-workflow errors
+// ---------------------------------------------------------------------------
+
+// A sub-workflow step would exceed the maximum nesting depth of 5.
+// Prevents runaway recursive pipeline invocations.
+export class SubWorkflowDepthExceededError extends AppError {
+  readonly code = "SUB_WORKFLOW_DEPTH_EXCEEDED" as const;
+  readonly statusCode = 422;
+}
+
+// A sub-workflow step would create a circular call chain (A → … → A).
+export class SubWorkflowCircularDependencyError extends AppError {
+  readonly code = "SUB_WORKFLOW_CIRCULAR_DEPENDENCY" as const;
+  readonly statusCode = 422;
+}
+
+// A sub-workflow step's referenced pipeline was not found or is inactive.
+export class SubWorkflowPipelineNotFoundError extends AppError {
+  readonly code = "SUB_WORKFLOW_PIPELINE_NOT_FOUND" as const;
+  readonly statusCode = 404;
+}
+
+// A sub-workflow step waited beyond its timeout without the child completing.
+export class SubWorkflowTimeoutError extends AppError {
+  readonly code = "SUB_WORKFLOW_TIMEOUT" as const;
+  readonly statusCode = 500;
+}
+
+// A sub-workflow child pipeline run completed in a failed or cancelled state.
+export class SubWorkflowChildFailedError extends AppError {
+  readonly code = "SUB_WORKFLOW_CHILD_FAILED" as const;
+  readonly statusCode = 500;
 }
