@@ -1,0 +1,114 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.auth-provider-ldap",
+  "name": "LDAP / Active Directory Auth Provider",
+  "version": "1.0.0",
+  "type": "auth-provider",
+  "description": "LDAP and Active Directory authentication. Authenticates users via LDAP bind, searches for user attributes and group memberships, and maps LDAP groups to OnePlatform RBAC roles.",
+  "author": "OnePlatform",
+  "license": "BSL-1.1",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "authProvider",
+  "tags": ["ldap", "active-directory", "ad", "sso", "enterprise", "directory"],
+  "configSchema": {
+    "type": "object",
+    "required": ["url", "baseDN", "bindDN", "bindCredentialKey", "userSearchBase"],
+    "properties": {
+      "url": {
+        "type": "string",
+        "format": "uri",
+        "description": "LDAP server URL. Use ldap:// for plain or ldaps:// for TLS. Example: ldap://ldap.example.com:389 or ldaps://ldap.example.com:636."
+      },
+      "baseDN": {
+        "type": "string",
+        "description": "Base distinguished name for the directory. Example: dc=example,dc=com."
+      },
+      "bindDN": {
+        "type": "string",
+        "description": "Distinguished name of the service account used to bind and perform searches. Example: cn=admin,dc=example,dc=com."
+      },
+      "bindCredentialKey": {
+        "type": "string",
+        "description": "Name of the platform credential holding the bind password. The credential value is fetched at initialize() time and never stored in config.",
+        "default": "ldap_bind_password"
+      },
+      "userSearchBase": {
+        "type": "string",
+        "description": "OU under baseDN where user objects live. Appended to baseDN at search time. Example: ou=users."
+      },
+      "userSearchFilter": {
+        "type": "string",
+        "description": "LDAP filter template for user lookup. {{username}} is substituted with the login username. Example: (uid={{username}}). Defaults to (uid={{username}}).",
+        "default": "(uid={{username}})"
+      },
+      "userAttributes": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "LDAP attributes to return from user search. Defaults to [\"dn\", \"uid\", \"cn\", \"mail\", \"givenName\", \"sn\", \"memberOf\"].",
+        "default": ["dn", "uid", "cn", "mail", "givenName", "sn", "memberOf"]
+      },
+      "groupSearchBase": {
+        "type": "string",
+        "description": "OU under baseDN where group objects live. Omit to disable group search (use memberOf on user objects instead). Example: ou=groups."
+      },
+      "groupSearchFilter": {
+        "type": "string",
+        "description": "LDAP filter template for group membership lookup. {{dn}} is substituted with the user's DN. Example: (member={{dn}}). Used only when groupSearchBase is set.",
+        "default": "(member={{dn}})"
+      },
+      "groupNameAttribute": {
+        "type": "string",
+        "description": "LDAP attribute that holds the group's name. Defaults to cn.",
+        "default": "cn"
+      },
+      "groupMapping": {
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "description": "Map of LDAP group name → OnePlatform role name. Groups absent from this map are dropped. Example: { \"Domain Admins\": \"platform-admin\" }."
+      },
+      "useTLS": {
+        "type": "boolean",
+        "description": "Upgrade to TLS after connect using STARTTLS (for ldap:// connections). Ignored when url begins with ldaps://. Default: true.",
+        "default": true
+      },
+      "tlsOptions": {
+        "type": "object",
+        "description": "TLS options forwarded to the platform LDAP proxy. rejectUnauthorized should be true in production.",
+        "properties": {
+          "rejectUnauthorized": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "searchSizeLimit": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 1000,
+        "description": "Maximum number of entries to return from a single LDAP search. Default: 200.",
+        "default": 200
+      },
+      "connectionTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 30000,
+        "description": "LDAP connection timeout in milliseconds. Default: 5000.",
+        "default": 5000
+      }
+    },
+    "additionalProperties": false
+  },
+  "requiredCredentials": [
+    {
+      "name": "ldap_bind_password",
+      "description": "Password for the LDAP service account (bindDN). Used for bind and all subsequent searches. Override the credential key name via the bindCredentialKey config field.",
+      "type": "secret",
+      "required": true
+    }
+  ],
+  "requiredExternalUrls": [],
+  "requiredApis": ["credentials", "fetch", "cache", "tracing"],
+  "hooks": [],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}

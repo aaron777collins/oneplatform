@@ -46,6 +46,10 @@ export interface ExecutionStatus {
   completedAt?: string;
   steps: StepStatus[];
   progress: ExecutionProgress;
+  /** The pipeline-level input captured at the moment this run was enqueued. */
+  inputSnapshot?: Record<string, unknown>;
+  /** Set when this execution was created by replaying another execution. */
+  replayOf?: string;
 }
 
 // Step definition used when initializing a tracking record.
@@ -96,6 +100,7 @@ export interface ExecutionTracker {
     executionId: string,
     pipelineId: string,
     steps: StepDefinition[],
+    opts?: { inputSnapshot?: Record<string, unknown>; replayOf?: string },
   ): void;
 
   /** Update an individual step's status and emit the corresponding SSE event. */
@@ -231,10 +236,16 @@ export function createExecutionTracker(): ExecutionTracker {
   // startExecution
   // -------------------------------------------------------------------------
 
+  // Maximum byte size for a captured input snapshot. Snapshots larger than this
+  // are dropped entirely rather than silently truncated, so callers always get
+  // the full picture or nothing at all.
+  const INPUT_SNAPSHOT_MAX_BYTES = 1_048_576; // 1 MiB
+
   function startExecution(
     executionId: string,
     pipelineId: string,
     steps: StepDefinition[],
+    opts?: { inputSnapshot?: Record<string, unknown>; replayOf?: string },
   ): void {
     if (executionId.length === 0) {
       throw new Error("executionId must not be empty.");
@@ -257,6 +268,19 @@ export function createExecutionTracker(): ExecutionTracker {
 
     const now = new Date().toISOString();
 
+    // Guard the snapshot size before storing. JSON.stringify is the simplest
+    // way to measure the byte footprint of the input object; it overestimates
+    // slightly for multi-byte characters but is accurate enough for the cap.
+    let inputSnapshot: Record<string, unknown> | undefined;
+    if (opts?.inputSnapshot !== undefined) {
+      const serialised = JSON.stringify(opts.inputSnapshot);
+      if (serialised.length <= INPUT_SNAPSHOT_MAX_BYTES) {
+        inputSnapshot = opts.inputSnapshot;
+      }
+      // Silently drop oversized snapshots — the engine has already logged a
+      // warning before calling startExecution in this case.
+    }
+
     const executionStatus: ExecutionStatus = {
       executionId,
       pipelineId,
@@ -264,6 +288,8 @@ export function createExecutionTracker(): ExecutionTracker {
       startedAt: now,
       steps: stepStatuses,
       progress: computeProgress(stepStatuses),
+      ...(inputSnapshot !== undefined ? { inputSnapshot } : {}),
+      ...(opts?.replayOf !== undefined ? { replayOf: opts.replayOf } : {}),
     };
 
     activeExecutions.set(executionId, {

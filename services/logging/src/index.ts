@@ -40,12 +40,14 @@ import { runMigrations } from "./db/migrate.js";
 import {
   LogEventRepository,
   AuditEventRepository,
+  FieldAuditRepository,
 } from "./repositories/index.js";
 import {
   BatchAccumulator,
   IngestionService,
   AuditService,
   RetentionService,
+  FieldAuditService,
 } from "./services/index.js";
 import { registerRoutes } from "./routes/index.js";
 
@@ -153,6 +155,8 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
   // Step 5: Instantiate repositories.
   const logEventRepository = new LogEventRepository(db);
   const auditEventRepository = new AuditEventRepository(db);
+  const fieldAuditRepository = new FieldAuditRepository(db);
+  const fieldAuditService = new FieldAuditService(fieldAuditRepository);
 
   // Step 6: Start pub/sub listener — PSUBSCRIBE logs:* on the dedicated
   // subscriber connection so the main Redis connection remains usable.
@@ -201,6 +205,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
     version,
     logEventRepository,
     auditEventRepository,
+    fieldAuditService,
     batchAccumulator: accumulator,
     servicePublicKeys,
   });

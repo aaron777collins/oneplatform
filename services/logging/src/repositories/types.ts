@@ -1,6 +1,83 @@
 // Row shapes returned from Postgres queries — these mirror the DB columns
 // exactly (snake_case) so callers can map to camelCase at the API boundary.
 
+// ---------------------------------------------------------------------------
+// Field audit domain types (G-125)
+// ---------------------------------------------------------------------------
+
+export interface FieldChangeEntry {
+  tenantId: string;
+  userId: string;
+  entityType: string;
+  entityId: string;
+  fieldName: string;
+  /** undefined means the field is being created (action='create') */
+  oldValue?: unknown;
+  /** undefined means the field is being deleted (action='delete') */
+  newValue?: unknown;
+  action: "create" | "update" | "delete";
+  /** Where the mutation originated */
+  source: "api" | "ui" | "system";
+  timestamp: string;
+}
+
+export interface FieldAccessEntry {
+  tenantId: string;
+  userId: string;
+  entityType: string;
+  entityId: string;
+  fieldsAccessed: string[];
+  timestamp: string;
+  /** Declared purpose — used by GDPR audit queries */
+  purpose: "view" | "export" | "api";
+}
+
+export interface FieldChangeRow {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  entity_type: string;
+  entity_id: string;
+  field_name: string;
+  old_value: unknown;
+  new_value: unknown;
+  action: "create" | "update" | "delete";
+  source: "api" | "ui" | "system";
+  changed_at: Date;
+}
+
+export interface FieldAccessRow {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  entity_type: string;
+  entity_id: string;
+  fields_accessed: string[];
+  purpose: "view" | "export" | "api";
+  accessed_at: Date;
+}
+
+export interface FieldHistoryQueryParams {
+  entityType: string;
+  entityId: string;
+  fieldName?: string;
+  userId?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit: number;
+}
+
+export interface FieldAccessQueryParams {
+  entityType: string;
+  entityId: string;
+  userId?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit: number;
+}
+
 export interface LogEventRow {
   id: string;
   tenant_id: string;

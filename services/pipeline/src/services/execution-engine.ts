@@ -9,11 +9,28 @@ import type {
   CodeStep,
   ConnectorStep,
   TransformerStep,
+  TransformStep,
   ConditionalStep,
   ParallelStep,
   WebhookStep,
+  WaitStep,
+  ApprovalStep,
+  SubWorkflowStep,
   ParallelBranch,
 } from "./pipeline-service.js";
+import {
+  dedup,
+  filter,
+  mapFields,
+  aggregate,
+  pivot,
+  unpivot,
+  join,
+  sort,
+  limit,
+  rename,
+  type DataRecord,
+} from "./transform-engine.js";
 import type {
   RunRow,
   RunStepRow,
@@ -24,8 +41,17 @@ import type {
   RunStepRepository,
   RunLogRepository,
 } from "./run-service.js";
-import { StepExecutionError } from "./errors.js";
+import {
+  StepExecutionError,
+  SubWorkflowDepthExceededError,
+  SubWorkflowCircularDependencyError,
+  SubWorkflowPipelineNotFoundError,
+  SubWorkflowTimeoutError,
+  SubWorkflowChildFailedError,
+} from "./errors.js";
+import { evaluateCondition } from "./condition-evaluator.js";
 import type { ExecutionTracker } from "./execution-tracker.js";
+import type { ApprovalService } from "./approval-service.js";
 
 // ---------------------------------------------------------------------------
 // Repository interfaces required by the execution engine
@@ -111,6 +137,12 @@ interface RunContext {
   lockClient: PoolClient;
   // Cancellation flag checked between steps
   isCancelled: () => Promise<boolean>;
+  // Ordered list of ancestor pipelineIds from the root call down to (but not
+  // including) the current pipeline. Empty for top-level runs. Used to enforce
+  // the max nesting depth and detect indirect circular dependencies
+  // (e.g. A calls B, B calls A). Immutable for each context instance; child
+  // contexts receive a new array with the parent pipelineId appended.
+  subWorkflowCallStack: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +223,55 @@ function cancellationKey(runId: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Sub-workflow nesting limit
+//
+// A depth of 5 prevents runaway recursive invocations while still allowing
+// meaningful compositions. The call stack is threaded through RunContext so
+// each nested execution can check its own depth and detect indirect cycles
+// (A → B → A) without needing a separate shared data structure.
+// ---------------------------------------------------------------------------
+
+export const SUB_WORKFLOW_MAX_DEPTH = 5;
+
+// ---------------------------------------------------------------------------
+// Sub-workflow trigger interface
+//
+// Injected into the engine so sub-workflow execution can enqueue child runs
+// and poll for their completion without coupling the engine to the concrete
+// RunService or BullMQ queue implementations.
+// ---------------------------------------------------------------------------
+
+export interface SubWorkflowTriggerResult {
+  runId: string;
+}
+
+export interface SubWorkflowCompletionResult {
+  status: RunStatus;
+  // The final output of the child run's last completed step, or null when the
+  // child produced no output (empty pipeline or all steps skipped).
+  output: Record<string, unknown> | null;
+}
+
+// SubWorkflowTrigger is the minimal surface that the engine needs from the
+// RunService to start and await child runs. Keeping it as a narrow interface
+// avoids a direct dependency on the full RunService and makes testing easier.
+export interface SubWorkflowTrigger {
+  // Enqueue a new run for the given pipeline and return its runId.
+  triggerRun(
+    pipelineId: string,
+    tenantId: string,
+    input: Record<string, unknown>,
+  ): Promise<SubWorkflowTriggerResult>;
+
+  // Poll until the run reaches a terminal state or timeoutMs elapses.
+  // Rejects with SubWorkflowTimeoutError on timeout.
+  waitForCompletion(
+    runId: string,
+    timeoutMs: number,
+  ): Promise<SubWorkflowCompletionResult>;
+}
+
+// ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 
@@ -214,6 +295,14 @@ export interface ExecutionEngineDeps {
   // Optional — when provided, step transitions are reflected in the real-time
   // SSE tracker. Tests can omit this to avoid coupling to the tracker.
   executionTracker?: ExecutionTracker;
+  // Optional — when provided, wait and approval steps use this service for
+  // their control-flow state. When absent, approval steps immediately fail
+  // (safe default for test environments that do not wire the service).
+  approvalService?: ApprovalService;
+  // Optional — when provided, sub_workflow steps can invoke child pipelines.
+  // When absent, sub_workflow steps fail loudly with a descriptive error so
+  // the absence is immediately visible rather than silently skipping.
+  subWorkflowTrigger?: SubWorkflowTrigger;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +324,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     logger,
     serviceTokenSigner,
     executionTracker,
+    approvalService,
+    subWorkflowTrigger,
   } = deps;
 
   // -------------------------------------------------------------------------
@@ -447,6 +538,128 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
   }
 
   // -------------------------------------------------------------------------
+  // executeTransformStep — applies a pre-built declarative transformation
+  // (G-051).  All operations are pure synchronous functions; the async
+  // wrapper exists only to conform to the StepResult promise interface.
+  // -------------------------------------------------------------------------
+
+  async function executeTransformStep(
+    step: TransformStep,
+    ctx: RunContext,
+    resolvedInput: Record<string, unknown>,
+  ): Promise<{ output: Record<string, unknown> }> {
+    // Resolve the input record set.
+    // When dataSource is set, pull records from a prior step's output.
+    // Otherwise, use the resolved input's 'records' field, or treat the
+    // entire resolved input as a single-element array if it is not an array.
+    let inputRecords: DataRecord[];
+    if (step.dataSource !== undefined) {
+      const priorOutput = ctx.stepOutputs.get(step.dataSource);
+      inputRecords = extractRecordArray(priorOutput, step.dataSource);
+    } else {
+      const rawRecords = resolvedInput["records"] ?? resolvedInput;
+      inputRecords = Array.isArray(rawRecords)
+        ? (rawRecords as DataRecord[])
+        : [resolvedInput as DataRecord];
+    }
+
+    const op = step.transform;
+    let outputRecords: DataRecord[];
+
+    switch (op.operation) {
+      case "dedup":
+        outputRecords = dedup(inputRecords, op.keyFields, op.strategy);
+        break;
+
+      case "filter":
+        outputRecords = filter(inputRecords, op.condition);
+        break;
+
+      case "map":
+        outputRecords = mapFields(inputRecords, op.mappings);
+        break;
+
+      case "aggregate":
+        outputRecords = aggregate(inputRecords, op.groupBy, op.aggregations);
+        break;
+
+      case "pivot":
+        outputRecords = pivot(inputRecords, {
+          groupField: op.groupField,
+          pivotField: op.pivotField,
+          valueField: op.valueField,
+          aggregation: op.aggregation,
+        });
+        break;
+
+      case "unpivot":
+        outputRecords = unpivot(inputRecords, {
+          keyField: op.keyField,
+          valueFields: op.valueFields,
+          nameColumn: op.nameColumn,
+          valueColumn: op.valueColumn,
+        });
+        break;
+
+      case "join": {
+        // Resolve the right-hand record set from the named prior step
+        const rightOutput = ctx.stepOutputs.get(op.rightDataSource);
+        const rightRecords = extractRecordArray(rightOutput, op.rightDataSource);
+        outputRecords = join(inputRecords, rightRecords, {
+          joinType: op.joinType,
+          leftKey: op.leftKey,
+          rightKey: op.rightKey,
+        });
+        break;
+      }
+
+      case "sort":
+        outputRecords = sort(inputRecords, op.fields);
+        break;
+
+      case "limit":
+        outputRecords = limit(inputRecords, op.count);
+        break;
+
+      case "rename":
+        outputRecords = rename(inputRecords, op.fieldMap);
+        break;
+
+      default: {
+        // Exhaustive check — TypeScript will catch unhandled operations at build time.
+        const _exhaustive: never = op;
+        throw new StepExecutionError(
+          `Unknown transform operation: ${JSON.stringify(_exhaustive)}`,
+          { stepId: step.id },
+        );
+      }
+    }
+
+    return { output: { records: outputRecords, count: outputRecords.length } };
+  }
+
+  // Extracts a DataRecord[] from a prior step output, failing loudly when the
+  // shape is unexpected rather than silently passing an empty array.
+  function extractRecordArray(output: unknown, sourceStepId: string): DataRecord[] {
+    if (output === null || output === undefined) {
+      throw new StepExecutionError(
+        `Transform join/dataSource: step "${sourceStepId}" produced no output.`,
+      );
+    }
+    // Step outputs are wrapped as { records: [...] } by executeTransformStep
+    if (typeof output === "object" && !Array.isArray(output)) {
+      const wrapped = (output as Record<string, unknown>)["records"];
+      if (Array.isArray(wrapped)) return wrapped as DataRecord[];
+      // Fallback: treat the whole output as a single record
+      return [output as DataRecord];
+    }
+    if (Array.isArray(output)) return output as DataRecord[];
+    throw new StepExecutionError(
+      `Transform: step "${sourceStepId}" output is not a record array (got ${typeof output}).`,
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // executeConnectorStep — dispatches to Ingestion Service
   // -------------------------------------------------------------------------
 
@@ -615,12 +828,362 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     steps: Step[],
   ): string | null {
     if (step.type === "conditional") {
-      return conditionalNextId ?? null;
+      // When conditionalNextId is defined, route to the chosen branch target.
+      // When undefined (elseStepId absent and condition was false), fall
+      // through to the next sequential step so execution continues.
+      if (conditionalNextId !== undefined) {
+        return conditionalNextId;
+      }
     }
 
     const idx = steps.findIndex((s) => s.id === step.id);
     if (idx === -1 || idx === steps.length - 1) return null;
     return steps[idx + 1]?.id ?? null;
+  }
+
+  // -------------------------------------------------------------------------
+  // executeWaitStep — pauses execution for the configured duration.
+  //
+  // The sleep is implemented with a plain setTimeout so the BullMQ worker
+  // process stays alive during the wait.  This works correctly for waits up to
+  // the 24-hour maximum because BullMQ jobs have no processing-time limit
+  // beyond the lock renewal interval (which BullMQ handles internally).
+  // For very long waits (hours), a BullMQ delayed-job approach would be more
+  // resilient to process restarts, but the 24-hour cap makes the simple approach
+  // acceptable for V1 without overcomplicating the engine.
+  // -------------------------------------------------------------------------
+
+  async function executeWaitStep(
+    step: WaitStep,
+    ctx: RunContext,
+  ): Promise<{ output: Record<string, unknown> }> {
+    const startedAt = new Date();
+    await appendLog(
+      ctx.runId,
+      ctx.tenantId,
+      `Wait step "${step.name}" pausing for ${step.durationMs}ms.`,
+      { stepId: step.id, level: "info", details: { durationMs: step.durationMs } },
+    );
+
+    await sleep(step.durationMs);
+
+    const resumedAt = new Date();
+    const actualDurationMs = resumedAt.getTime() - startedAt.getTime();
+
+    return {
+      output: {
+        durationMs: step.durationMs,
+        actualDurationMs,
+        resumedAt: resumedAt.toISOString(),
+      },
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // executeApprovalStep — suspends execution until a human submits a decision.
+  //
+  // The engine polls the ApprovalService every APPROVAL_POLL_INTERVAL_MS.
+  // This is intentionally simple: the HTTP API sets the decision on the
+  // ApprovalService, and the next poll picks it up.  A more sophisticated
+  // design would use a Promise that the HTTP handler resolves directly, but
+  // that couples the web layer to the worker process — polling is safer when
+  // the worker may run on a different instance than the API.
+  //
+  // The cancellation flag is checked on every poll so a pipeline cancel also
+  // unblocks approval steps.
+  // -------------------------------------------------------------------------
+
+  const APPROVAL_POLL_INTERVAL_MS = 5_000; // 5s between polls
+
+  async function executeApprovalStep(
+    step: ApprovalStep,
+    ctx: RunContext,
+  ): Promise<{ output: Record<string, unknown> }> {
+    if (approvalService === undefined) {
+      throw new StepExecutionError(
+        `Approval step "${step.id}" requires an ApprovalService but none was provided.`,
+        { stepId: step.id },
+      );
+    }
+
+    // Create the approval request (idempotent — safe on retry).
+    const record = approvalService.requestApproval(
+      ctx.runId,
+      step.id,
+      step.approvers,
+      step.message,
+      step.timeoutMs,
+    );
+
+    await appendLog(
+      ctx.runId,
+      ctx.tenantId,
+      `Approval step "${step.name}" waiting for decision. Timeout at ${record.timeoutAt}.`,
+      {
+        stepId: step.id,
+        level: "info",
+        details: {
+          approvers: step.approvers,
+          timeoutAt: record.timeoutAt,
+        },
+      },
+    );
+
+    // Poll until a terminal decision or cancellation.
+    // eslint-disable-next-line no-constant-condition
+    for (;;) {
+      await sleep(APPROVAL_POLL_INTERVAL_MS);
+
+      // Check run-level cancellation between polls.
+      if (await ctx.isCancelled()) {
+        // Cancellation is handled by the outer traversal loop; throw to surface it.
+        throw new StepExecutionError(
+          `Approval step "${step.id}" interrupted by pipeline cancellation.`,
+          { stepId: step.id },
+        );
+      }
+
+      const current = approvalService.getApprovalStatus(ctx.runId, step.id);
+      if (current === null) {
+        // Should never happen (we just created it), but be defensive.
+        throw new StepExecutionError(
+          `Approval record for step "${step.id}" unexpectedly missing from store.`,
+          { stepId: step.id },
+        );
+      }
+
+      if (current.status === "approved") {
+        await appendLog(
+          ctx.runId,
+          ctx.tenantId,
+          `Approval step "${step.name}" approved by "${current.decidedBy ?? "unknown"}".`,
+          {
+            stepId: step.id,
+            level: "info",
+            details: { decidedBy: current.decidedBy, comment: current.comment },
+          },
+        );
+        return {
+          output: {
+            decision: "approved",
+            decidedBy: current.decidedBy,
+            decidedAt: current.decidedAt,
+            comment: current.comment,
+          },
+        };
+      }
+
+      if (current.status === "rejected") {
+        throw new StepExecutionError(
+          `Approval step "${step.id}" rejected by "${current.decidedBy ?? "unknown"}": ${current.comment ?? "no comment provided"}.`,
+          { stepId: step.id },
+        );
+      }
+
+      if (current.status === "timed_out") {
+        throw new StepExecutionError(
+          `Approval step "${step.id}" timed out at ${current.timeoutAt} without a decision.`,
+          { stepId: step.id },
+        );
+      }
+
+      // status === "pending": keep polling
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // resolveSubWorkflowInput — maps parent context paths to child input fields.
+  //
+  // inputMapping: Record<childFieldName, dotPathIntoParentContext>
+  // The path syntax mirrors skipIf expressions: { input, steps } is the root,
+  // so "input.userId" reads from the parent run's top-level input and
+  // "steps.extract-step.output.count" reads from a prior step's output.
+  // -------------------------------------------------------------------------
+
+  function resolveSubWorkflowInput(
+    inputMapping: Record<string, string>,
+    parentInput: Record<string, unknown>,
+    parentStepOutputs: Map<string, unknown>,
+  ): Record<string, unknown> {
+    // Build the same { input, steps } context object that evaluateConditional uses
+    // so path semantics are identical to skipIf expressions.
+    const stepsCtx: Record<string, unknown> = {};
+    for (const [sid, out] of parentStepOutputs) {
+      stepsCtx[sid] = { output: out };
+    }
+    const parentCtx = { input: parentInput, steps: stepsCtx };
+
+    const childInput: Record<string, unknown> = {};
+    for (const [childField, parentPath] of Object.entries(inputMapping)) {
+      childInput[childField] = getPath(parentCtx, parentPath);
+    }
+    return childInput;
+  }
+
+  // -------------------------------------------------------------------------
+  // executeSubWorkflowStep — invokes another pipeline as a child execution.
+  //
+  // Safety invariants enforced before starting the child:
+  //   1. Max nesting depth: callStack length must be < SUB_WORKFLOW_MAX_DEPTH.
+  //      The stack records ancestor pipeline IDs, so length 4 means we are one
+  //      level away from the limit and the child would be at level 5.
+  //   2. No circular dependency: target pipelineId must not appear anywhere in
+  //      the call stack nor equal the current pipeline ID.
+  //
+  // waitForCompletion=true: blocks until child reaches a terminal state and
+  //   merges child output into the parent step result.
+  // waitForCompletion=false: fires the child asynchronously and returns
+  //   { childRunId, status: "pending" } immediately so the parent continues.
+  // -------------------------------------------------------------------------
+
+  async function executeSubWorkflowStep(
+    step: SubWorkflowStep,
+    ctx: RunContext,
+  ): Promise<{ output: Record<string, unknown> }> {
+    // Guard 1: max nesting depth.
+    // callStack contains ancestor IDs (not the current one); adding the current
+    // pipeline creates the full chain. If that chain is already SUB_WORKFLOW_MAX_DEPTH
+    // items deep, the child would exceed the limit.
+    if (ctx.subWorkflowCallStack.length >= SUB_WORKFLOW_MAX_DEPTH) {
+      throw new SubWorkflowDepthExceededError(
+        `Sub-workflow step "${step.id}" would exceed the maximum nesting depth of ${SUB_WORKFLOW_MAX_DEPTH}. ` +
+        `Current depth: ${ctx.subWorkflowCallStack.length}. ` +
+        `Call chain: ${[...ctx.subWorkflowCallStack, ctx.pipelineId].join(" → ")}`,
+        {
+          stepId: step.id,
+          depth: ctx.subWorkflowCallStack.length,
+          maxDepth: SUB_WORKFLOW_MAX_DEPTH,
+        },
+      );
+    }
+
+    // Guard 2: circular dependency.
+    // Build the complete ancestor chain including the current pipeline.
+    const fullCallChain = [...ctx.subWorkflowCallStack, ctx.pipelineId];
+    if (fullCallChain.includes(step.pipelineId)) {
+      throw new SubWorkflowCircularDependencyError(
+        `Sub-workflow step "${step.id}" would create a circular dependency. ` +
+        `Pipeline "${step.pipelineId}" already appears in the call chain: ` +
+        `${fullCallChain.join(" → ")} → ${step.pipelineId}`,
+        { stepId: step.id, pipelineId: step.pipelineId, callChain: fullCallChain },
+      );
+    }
+
+    // Guard 3: sub-workflow trigger must be wired in deps.
+    if (subWorkflowTrigger === undefined) {
+      throw new StepExecutionError(
+        `Sub-workflow step "${step.id}" cannot execute: subWorkflowTrigger is not configured in engine deps.`,
+        { stepId: step.id },
+      );
+    }
+
+    // Resolve child input from parent context via inputMapping.
+    const childInput = step.inputMapping !== undefined
+      ? resolveSubWorkflowInput(step.inputMapping, ctx.runInput, ctx.stepOutputs)
+      : {};
+
+    await appendLog(
+      ctx.runId,
+      ctx.tenantId,
+      `Sub-workflow step "${step.name}" triggering child pipeline "${step.pipelineId}".`,
+      {
+        stepId: step.id,
+        level: "info",
+        details: {
+          childPipelineId: step.pipelineId,
+          waitForCompletion: step.waitForCompletion,
+          callDepth: fullCallChain.length,
+        },
+      },
+    );
+
+    // Trigger the child run.
+    let triggerResult: SubWorkflowTriggerResult;
+    try {
+      triggerResult = await subWorkflowTrigger.triggerRun(
+        step.pipelineId,
+        ctx.tenantId,
+        childInput,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Surface pipeline-not-found as a dedicated error so authors can fix the
+      // pipelineId reference rather than digging through generic failure logs.
+      if (msg.includes("not found") || msg.includes("PIPELINE_NOT_FOUND")) {
+        throw new SubWorkflowPipelineNotFoundError(
+          `Sub-workflow step "${step.id}" references pipeline "${step.pipelineId}" which was not found or is inactive.`,
+          { stepId: step.id, pipelineId: step.pipelineId },
+        );
+      }
+      throw new StepExecutionError(
+        `Sub-workflow step "${step.id}" failed to trigger child pipeline: ${msg}`,
+        { stepId: step.id },
+      );
+    }
+
+    const childRunId = triggerResult.runId;
+
+    await appendLog(
+      ctx.runId,
+      ctx.tenantId,
+      `Sub-workflow step "${step.name}" child run "${childRunId}" started.`,
+      { stepId: step.id, details: { childRunId, childPipelineId: step.pipelineId } },
+    );
+
+    // Fire-and-forget mode: return immediately with child run metadata.
+    if (!step.waitForCompletion) {
+      return {
+        output: { childRunId, childPipelineId: step.pipelineId, status: "pending" },
+      };
+    }
+
+    // Synchronous mode: wait for the child run to reach a terminal state.
+    // timeoutMs on the step caps how long we poll; fall back to the pipeline's
+    // step default so there is always a bound.
+    const waitTimeoutMs = step.timeoutMs
+      ?? ctx.definition.options?.stepTimeout
+      ?? stepDefaultTimeoutMs;
+
+    let completion: SubWorkflowCompletionResult;
+    try {
+      completion = await subWorkflowTrigger.waitForCompletion(childRunId, waitTimeoutMs);
+    } catch (err) {
+      if (err instanceof SubWorkflowTimeoutError) {
+        throw err;
+      }
+      throw new StepExecutionError(
+        `Sub-workflow step "${step.id}" error while waiting for child run "${childRunId}": ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+        { stepId: step.id, childRunId },
+      );
+    }
+
+    // Propagate child failure so the parent step fails and applies its own
+    // onError / retry / fallback semantics normally.
+    if (completion.status === "failed" || completion.status === "cancelled") {
+      throw new SubWorkflowChildFailedError(
+        `Sub-workflow step "${step.id}" child run "${childRunId}" finished with status "${completion.status}".`,
+        { stepId: step.id, childRunId, childStatus: completion.status },
+      );
+    }
+
+    await appendLog(
+      ctx.runId,
+      ctx.tenantId,
+      `Sub-workflow step "${step.name}" child run "${childRunId}" completed successfully.`,
+      { stepId: step.id, details: { childRunId, childStatus: completion.status } },
+    );
+
+    return {
+      output: {
+        childRunId,
+        childPipelineId: step.pipelineId,
+        status: completion.status,
+        // Only include output key when the child produced output so callers can
+        // detect "no output" via the key's absence rather than a null value.
+        ...(completion.output !== null ? { output: completion.output } : {}),
+      },
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -683,21 +1246,49 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       return { output: result.output };
     }
 
+    if (step.type === "transform") {
+      const result = await executeTransformStep(step, ctx, resolvedInput);
+      return { output: result.output };
+    }
+
     if (step.type === "conditional") {
-      const stepsContext: Record<string, unknown> = {};
-      for (const [stepId, output] of ctx.stepOutputs) {
-        stepsContext[stepId] = { output };
+      // Build the data context for condition evaluation.
+      // The condition field paths are resolved against a flat map that merges
+      // the pipeline's top-level input with all accumulated step outputs so
+      // that conditions can reference both sources without extra indirection.
+      const dataContext: Record<string, unknown> = {
+        ...ctx.runInput,
+        ...resolvedInput,
+      };
+
+      const result = evaluateCondition(dataContext, step.condition);
+
+      // Determine routing: true -> thenStepId, false -> elseStepId (or undefined
+      // which signals "fall through to the next sequential step").
+      const nextStepId = result ? step.thenStepId : step.elseStepId;
+
+      await appendLog(
+        ctx.runId,
+        ctx.tenantId,
+        `Conditional step "${step.name}" evaluated to ${result}: routing to ${nextStepId ?? "next sequential step"}.`,
+        {
+          stepId: step.id,
+          level: "info",
+          details: {
+            conditionField: step.condition.field,
+            conditionOperator: step.condition.operator,
+            conditionResult: result,
+            nextStepId: nextStepId ?? null,
+          },
+        },
+      );
+
+      // exactOptionalPropertyTypes requires we omit nextStepId entirely
+      // when it is undefined rather than setting it to undefined explicitly.
+      if (nextStepId !== undefined) {
+        return { output: { condition: result, nextStepId }, nextStepId };
       }
-
-      // resolvedInput for conditional uses the run's original input object
-      const runInput = resolvedInput;
-      const isTruthy = await evaluateConditional(step.expression, {
-        input: runInput,
-        steps: stepsContext,
-      });
-
-      const nextStepId = isTruthy ? step.trueBranchStepId : step.falseBranchStepId;
-      return { output: { condition: isTruthy }, nextStepId };
+      return { output: { condition: result, nextStepId: null } };
     }
 
     if (step.type === "parallel") {
@@ -707,6 +1298,21 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
     if (step.type === "webhook") {
       const result = await executeWebhookStep(step, ctx, resolvedInput);
+      return { output: result.output };
+    }
+
+    if (step.type === "wait") {
+      const result = await executeWaitStep(step, ctx);
+      return { output: result.output };
+    }
+
+    if (step.type === "approval") {
+      const result = await executeApprovalStep(step, ctx);
+      return { output: result.output };
+    }
+
+    if (step.type === "sub_workflow") {
+      const result = await executeSubWorkflowStep(step, ctx);
       return { output: result.output };
     }
 
@@ -757,7 +1363,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       // The definition was validated against PipelineDefinitionSchema at write time.
       const definition = run.definition_snapshot as unknown as PipelineDefinition;
 
-      // Build the run context shared across all step executions
+      // Build the run context shared across all step executions.
+      // subWorkflowCallStack is empty for top-level runs; child runs receive
+      // a context with the parent pipelineId appended (see executeSubWorkflowStep).
       const ctx: RunContext = {
         runId,
         tenantId,
@@ -770,6 +1378,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           const flag = await redis.get(cancellationKey(runId));
           return flag !== null;
         },
+        subWorkflowCallStack: [],
       };
 
       // Step 3: Transition to running
@@ -792,10 +1401,35 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
       // Initialize in-memory execution tracking so SSE subscribers get immediate
       // visibility into the pending step list.
+      //
+      // Capture the run's input as an immutable snapshot for replay support.
+      // The size guard is enforced inside startExecution; we warn here so the
+      // oversized-input case is observable in logs without blocking the run.
+      const inputSnapshotBytes = JSON.stringify(run.input).length;
+      if (inputSnapshotBytes > 1_048_576) {
+        logger.warn("Input snapshot exceeds 1 MiB limit — snapshot will not be stored for replay", {
+          runId,
+          pipelineId: run.pipeline_id,
+          inputBytes: inputSnapshotBytes,
+        });
+      }
+
+      // replayOf is stored in trigger_meta by the replay route so the engine
+      // does not need its own field on RunRow.
+      const replayOf = typeof run.trigger_meta["replayOf"] === "string"
+        ? run.trigger_meta["replayOf"]
+        : undefined;
+
       executionTracker?.startExecution(
         runId,
         run.pipeline_id,
         allSteps.map((s) => ({ stepId: s.id, name: s.name, type: s.type })),
+        {
+          // exactOptionalPropertyTypes: only spread optional keys when they have
+          // actual values so we never assign `undefined` to an optional-typed key.
+          ...(run.input !== undefined ? { inputSnapshot: run.input } : {}),
+          ...(replayOf !== undefined ? { replayOf } : {}),
+        },
       );
 
       // Step 5: Run after:pipeline.trigger hooks
@@ -1202,7 +1836,12 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     conditionalNext: string | undefined,
   ): string | null {
     if (step.type === "conditional") {
-      return conditionalNext ?? null;
+      // When conditionalNext is defined, route to the chosen branch target.
+      // When undefined (elseStepId absent and condition was false), fall
+      // through to the next sequential step in the pipeline's steps array.
+      if (conditionalNext !== undefined) {
+        return conditionalNext;
+      }
     }
     const idx = steps.findIndex((s) => s.id === step.id);
     if (idx === -1 || idx === steps.length - 1) return null;

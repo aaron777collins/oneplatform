@@ -124,6 +124,13 @@ export interface TriggerRunResult {
   status: "pending";
 }
 
+export interface ReplayRunResult {
+  runId: string;
+  status: "pending";
+  /** The execution ID that was replayed to produce this run. */
+  replayOf: string;
+}
+
 export interface RunService {
   triggerRun(
     pipelineId: string,
@@ -137,6 +144,16 @@ export interface RunService {
   listRuns(tenantId: string, query: RunListQuery): Promise<RunListResult>;
   cancelRun(tenantId: string, runId: string): Promise<void>;
   getRunLogs(runId: string, lastSeenId?: number): Promise<RunLogEntry[]>;
+  /**
+   * Replay an existing execution using the same input that was captured when it
+   * originally ran. The new run is linked to the original via trigger_meta.replayOf.
+   */
+  replayRun(
+    pipelineId: string,
+    tenantId: string,
+    executionId: string,
+    triggerActorId?: string,
+  ): Promise<ReplayRunResult>;
 }
 
 export interface RunServiceDeps {
@@ -326,11 +343,65 @@ export function createRunService(deps: RunServiceDeps): RunService {
     return runLogRepo.findByRunId(runId, lastSeenId !== undefined ? { afterId: lastSeenId } : undefined);
   }
 
+  // -------------------------------------------------------------------------
+  // replayRun — triggers a new run using the persisted input of an existing run.
+  //
+  // The authoritative input source is RunRow.input (stored in the DB at trigger
+  // time), not the in-memory execution tracker. This ensures replay works even
+  // after a service restart that cleared the tracker's in-memory history.
+  // -------------------------------------------------------------------------
+
+  async function replayRun(
+    pipelineId: string,
+    tenantId: string,
+    executionId: string,
+    triggerActorId?: string,
+  ): Promise<ReplayRunResult> {
+    // Verify the original run exists and belongs to this tenant + pipeline.
+    const originalRun = await runRepo.findByTenantAndId(tenantId, executionId);
+    if (originalRun === null) {
+      throw new PipelineRunNotFoundError(
+        `Pipeline run "${executionId}" not found.`,
+        { runId: executionId, tenantId },
+      );
+    }
+    if (originalRun.pipeline_id !== pipelineId) {
+      // Treat pipeline mismatch as not-found to avoid leaking run IDs across pipelines.
+      throw new PipelineRunNotFoundError(
+        `Pipeline run "${executionId}" does not belong to pipeline "${pipelineId}".`,
+        { runId: executionId, pipelineId, tenantId },
+      );
+    }
+
+    // Carry the original input forward verbatim — the point of replay is
+    // deterministic re-execution with identical inputs.
+    const result = await triggerRun(
+      pipelineId,
+      tenantId,
+      "manual",
+      originalRun.input,
+      // replayOf is threaded through trigger_meta so the execution engine can
+      // surface it on the tracker's ExecutionStatus without a schema migration.
+      { replayOf: executionId },
+      triggerActorId,
+    );
+
+    logger.info("Pipeline run replay triggered", {
+      tenantId,
+      pipelineId,
+      newRunId: result.runId,
+      replayOf: executionId,
+    });
+
+    return { runId: result.runId, status: "pending", replayOf: executionId };
+  }
+
   return {
     triggerRun,
     getRun,
     listRuns,
     cancelRun,
     getRunLogs,
+    replayRun,
   };
 }

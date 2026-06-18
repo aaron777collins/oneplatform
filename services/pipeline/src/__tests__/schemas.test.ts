@@ -132,8 +132,8 @@ describe("StepSchema — code step — valid", () => {
     expect(r.success).toBe(true);
   });
 
-  it("accepts a condition string", () => {
-    const r = StepSchema.safeParse({ ...minimalCodeStep, condition: "input.enabled = true" });
+  it("accepts a skipIf string (pre-execution guard expression)", () => {
+    const r = StepSchema.safeParse({ ...minimalCodeStep, skipIf: "input.enabled = true" });
     expect(r.success).toBe(true);
   });
 
@@ -297,36 +297,73 @@ const conditionalStep = {
   id: "cond-1",
   name: "Conditional Step",
   type: "conditional" as const,
-  expression: "input.count > 0",
-  trueBranchStepId: "step-true",
-  falseBranchStepId: "step-false",
+  condition: {
+    field: "user.status",
+    operator: "eq" as const,
+    value: "active",
+  },
+  thenStepId: "step-true",
+  elseStepId: "step-false",
 };
 
 describe("StepSchema — conditional step — valid", () => {
-  it("accepts valid conditional step", () => {
+  it("accepts valid conditional step with all operators and both branch targets", () => {
     const r = StepSchema.safeParse(conditionalStep);
     expect(r.success).toBe(true);
   });
 
-  it("accepts expression up to 5000 chars", () => {
-    const r = StepSchema.safeParse({ ...conditionalStep, expression: "x".repeat(5000) });
+  it("accepts conditional step without elseStepId (falls through to next sequential step)", () => {
+    const { elseStepId: _e, ...withoutElse } = conditionalStep;
+    const r = StepSchema.safeParse(withoutElse);
     expect(r.success).toBe(true);
+  });
+
+  it("accepts exists operator without a value", () => {
+    const r = StepSchema.safeParse({
+      ...conditionalStep,
+      condition: { field: "user.email", operator: "exists" },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts every supported operator", () => {
+    const operators = [
+      "eq", "neq", "gt", "gte", "lt", "lte",
+      "contains", "not_contains", "exists", "not_exists", "matches",
+    ] as const;
+    for (const operator of operators) {
+      const r = StepSchema.safeParse({
+        ...conditionalStep,
+        condition: { field: "score", operator, value: 10 },
+      });
+      expect(r.success).toBe(true);
+    }
   });
 });
 
 describe("StepSchema — conditional step — invalid", () => {
-  it("rejects expression exceeding 5000 chars", () => {
-    fails(StepSchema, { ...conditionalStep, expression: "x".repeat(5001) });
-  });
-
-  it("rejects missing trueBranchStepId", () => {
-    const { trueBranchStepId: _t, ...rest } = conditionalStep;
+  it("rejects missing condition object", () => {
+    const { condition: _c, ...rest } = conditionalStep;
     fails(StepSchema, rest);
   });
 
-  it("rejects missing falseBranchStepId", () => {
-    const { falseBranchStepId: _f, ...rest } = conditionalStep;
+  it("rejects missing thenStepId", () => {
+    const { thenStepId: _t, ...rest } = conditionalStep;
     fails(StepSchema, rest);
+  });
+
+  it("rejects unknown operator", () => {
+    fails(StepSchema, {
+      ...conditionalStep,
+      condition: { ...conditionalStep.condition, operator: "fuzzy" },
+    });
+  });
+
+  it("rejects empty condition field string", () => {
+    fails(StepSchema, {
+      ...conditionalStep,
+      condition: { ...conditionalStep.condition, field: "" },
+    });
   });
 });
 

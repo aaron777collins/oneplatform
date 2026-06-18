@@ -6,14 +6,17 @@ import type { Redis } from "ioredis";
 import { createLogRoutes } from "./logs.js";
 import { createAuditRoutes } from "./audit.js";
 import { createInternalRoutes } from "./internal.js";
+import { createFieldAuditRoutes } from "./field-audit.js";
 import type { LogRouteDeps } from "./logs.js";
 import type { AuditRouteDeps } from "./audit.js";
 import type { InternalRouteDeps } from "./internal.js";
+import type { FieldAuditRouteDeps } from "./field-audit.js";
 
 export interface RegisterRoutesConfig
   extends LogRouteDeps,
     AuditRouteDeps,
-    InternalRouteDeps {
+    InternalRouteDeps,
+    FieldAuditRouteDeps {
   db: pg.Pool;
   redis: Redis;
   serviceName: string;
@@ -41,6 +44,7 @@ export function registerRoutes(
   app.route("/", createLogRoutes(config));
   app.route("/", createAuditRoutes(config));
   app.route("/", createInternalRoutes(config));
+  app.route("/", createFieldAuditRoutes(config));
 }
 
 export { createLogRoutes } from "./logs.js";
@@ -51,3 +55,6 @@ export type { AuditRouteDeps } from "./audit.js";
 
 export { createInternalRoutes } from "./internal.js";
 export type { InternalRouteDeps } from "./internal.js";
+
+export { createFieldAuditRoutes } from "./field-audit.js";
+export type { FieldAuditRouteDeps } from "./field-audit.js";

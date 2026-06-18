@@ -64,6 +64,31 @@ export const internalLogQuerySchema = logQuerySchema.extend({
 export type InternalLogQueryInput = z.infer<typeof internalLogQuerySchema>;
 
 // ---------------------------------------------------------------------------
+// Field audit query schemas (G-125)
+// ---------------------------------------------------------------------------
+
+export const fieldHistoryQuerySchema = z.object({
+  fieldName: z.string().min(1).max(255).optional(),
+  userId: z.string().max(255).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  cursor: z.string().max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
+export type FieldHistoryQueryInput = z.infer<typeof fieldHistoryQuerySchema>;
+
+export const entityAccessQuerySchema = z.object({
+  userId: z.string().max(255).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  cursor: z.string().max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
+export type EntityAccessQueryInput = z.infer<typeof entityAccessQuerySchema>;
+
+// ---------------------------------------------------------------------------
 // Direct ingest schema — for POST /internal/logging/ingest
 // ---------------------------------------------------------------------------
 
