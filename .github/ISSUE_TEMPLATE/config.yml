@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Discussions — Q&A and Ideas
+    url: https://github.com/aaron777collins/oneplatform/discussions
+    about: >
+      Not sure if something is a bug? Have a general question or early-stage idea?
+      Start a Discussion instead of opening an issue.
+  - name: Security Vulnerability
+    url: https://github.com/aaron777collins/oneplatform/security/advisories/new
+    about: >
+      Please report security vulnerabilities privately via GitHub's security advisory
+      workflow, not as a public issue.
