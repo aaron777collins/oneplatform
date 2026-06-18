@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#3b82f6" />
+    <title>OnePlatform — Offline</title>
+    <style>
+      :root {
+        --color-background: oklch(0.99 0.005 250);
+        --color-foreground: oklch(0.1 0.01 250);
+        --color-primary: oklch(0.55 0.2 250);
+        --color-muted-foreground: oklch(0.45 0.01 250);
+        --color-border: oklch(0.87 0.01 250);
+        --color-card: oklch(1 0 0);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --color-background: oklch(0.1 0.01 250);
+          --color-foreground: oklch(0.95 0.005 250);
+          --color-primary: oklch(0.65 0.2 250);
+          --color-muted-foreground: oklch(0.65 0.01 250);
+          --color-border: oklch(0.25 0.01 250);
+          --color-card: oklch(0.14 0.01 250);
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background-color: var(--color-background);
+        color: var(--color-foreground);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.5;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+
+      .card {
+        background-color: var(--color-card);
+        border: 1px solid var(--color-border);
+        border-radius: 0.5rem;
+        padding: 2.5rem 2rem;
+        max-width: 28rem;
+        width: 100%;
+        text-align: center;
+      }
+
+      .icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 4rem;
+        height: 4rem;
+        border-radius: 50%;
+        background-color: oklch(0.92 0.02 250);
+        margin-bottom: 1.5rem;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+
+      p {
+        color: var(--color-muted-foreground);
+        margin: 0 0 1.5rem;
+      }
+
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        background-color: var(--color-primary);
+        color: #fff;
+        border: none;
+        border-radius: 0.375rem;
+        padding: 0.625rem 1.25rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 2.75rem;
+        /* 44px minimum tap target */
+        min-width: 2.75rem;
+      }
+
+      button:hover {
+        opacity: 0.9;
+      }
+
+      button:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card" role="main">
+      <div class="icon" aria-hidden="true">
+        <svg
+          width="32"
+          height="32"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <line x1="1" y1="1" x2="23" y2="23"></line>
+          <path
+            d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"
+          ></path>
+        </svg>
+      </div>
+      <h1>You are offline</h1>
+      <p>
+        OnePlatform could not connect to the network. Check your connection and
+        try again.
+      </p>
+      <button type="button" onclick="window.location.reload()">
+        Try again
+      </button>
+    </div>
+  </body>
+</html>
