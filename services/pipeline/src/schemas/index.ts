@@ -33,6 +33,15 @@ const InputSourceSchema = z.discriminatedUnion("from", [
 // Step base — fields common to every step type.
 // ---------------------------------------------------------------------------
 
+// RetryConfig controls per-step automatic retry with exponential backoff.
+// Delay before attempt N = backoffMs * (backoffMultiplier ^ (N - 1)).
+// Example: backoffMs=1000, multiplier=2 → 1s, 2s, 4s, 8s, …
+export const RetryConfigSchema = z.object({
+  maxRetries: z.number().int().min(0).max(10).default(0),
+  backoffMs: z.number().int().min(100).max(60_000).default(1000),
+  backoffMultiplier: z.number().min(1).max(5).default(2),
+});
+
 const StepBaseSchema = z.object({
   id: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9\-]*[a-z0-9]$/),
   name: z.string().min(1).max(255),
@@ -49,6 +58,11 @@ const StepBaseSchema = z.object({
   condition: z.string().max(5000).optional(),
   // timeout override per step (ms). Max 1 hour.
   timeout: z.number().int().min(1000).max(3_600_000).optional(),
+  // Per-step retry with exponential backoff. Applied before onError semantics.
+  retryConfig: RetryConfigSchema.optional(),
+  // If the step fails after all retries, execute this step id instead of
+  // applying onError. The fallback step must exist in the same pipeline definition.
+  fallbackStepId: z.string().min(1).max(64).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -217,6 +231,20 @@ export const ListSchedulesQuery = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Versioning schemas
+// ---------------------------------------------------------------------------
+
+export const ListVersionsQuery = z.object({
+  // Cursor is the version_number of the last item returned (descending order).
+  cursor: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export const RollbackPipelineSchema = z.object({
+  version: z.number().int().positive(),
+});
+
+// ---------------------------------------------------------------------------
 // Internal trigger request — used by Ingestion Service / App Service.
 // ---------------------------------------------------------------------------
 
@@ -240,3 +268,6 @@ export type PipelineDefinition = z.infer<typeof PipelineDefinitionSchema>;
 export type ListPipelinesQueryInput = z.infer<typeof ListPipelinesQuery>;
 export type ListRunsQueryInput = z.infer<typeof ListRunsQuery>;
 export type ListSchedulesQueryInput = z.infer<typeof ListSchedulesQuery>;
+export type RetryConfig = z.infer<typeof RetryConfigSchema>;
+export type ListVersionsQueryInput = z.infer<typeof ListVersionsQuery>;
+export type RollbackPipelineInput = z.infer<typeof RollbackPipelineSchema>;

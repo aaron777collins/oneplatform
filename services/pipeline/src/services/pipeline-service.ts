@@ -2,6 +2,7 @@ import type { Logger } from "@oneplatform/core";
 import type { Pool } from "pg";
 import type {
   PipelineRow as RepoPipelineRow,
+  PipelineVersionRow as RepoPipelineVersionRow,
   CreatePipelineData,
   UpdatePipelineData,
 } from "../repositories/types.js";
@@ -10,6 +11,7 @@ import {
   PipelineRunsActiveError,
   PipelineValidationError,
   PipelineInvalidWebhookUrlError,
+  PipelineVersionNotFoundError,
 } from "./errors.js";
 
 // ---------------------------------------------------------------------------
@@ -22,6 +24,9 @@ import {
 // returned as Record<string,unknown>; callers inside the service cast it to
 // PipelineDefinition after fetching (validated at write time).
 export type PipelineRow = RepoPipelineRow;
+
+// PipelineVersionRow mirrors the DB row for pipeline_versions.
+export type PipelineVersionRow = RepoPipelineVersionRow;
 
 // ---------------------------------------------------------------------------
 // Step types (design spec §4.2)
@@ -40,6 +45,12 @@ export type InputSource =
   | { from: "step"; stepId: string; path?: string }
   | { from: "literal"; value: unknown };
 
+export interface RetryConfig {
+  maxRetries: number;
+  backoffMs: number;
+  backoffMultiplier: number;
+}
+
 export interface StepBase {
   id: string;
   name: string;
@@ -48,6 +59,11 @@ export interface StepBase {
   onError?: "fail" | "skip";
   condition?: string;
   timeout?: number;
+  // Per-step retry with exponential backoff. Defaults to no retries when absent.
+  retryConfig?: RetryConfig;
+  // Execute this step id when the step fails after exhausting all retries.
+  // Takes precedence over onError when set.
+  fallbackStepId?: string;
 }
 
 export interface CodeStep extends StepBase {
@@ -154,8 +170,22 @@ export interface PipelineRepository {
   findByTenantAndId(tenantId: string, id: string): Promise<PipelineRow | null>;
   findByTenantAndSlug(tenantId: string, slug: string): Promise<PipelineRow | null>;
   findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number; filterIsActive?: boolean }): Promise<PipelineRow[]>;
-  update(id: string, data: RepoUpdateInput): Promise<PipelineRow | null>;
+  // updatedBy is forwarded to the version snapshot so the audit trail records who
+  // initiated each change. Omitting it (legacy callers or non-definition-changing
+  // updates) skips snapshot creation.
+  update(id: string, data: RepoUpdateInput, updatedBy?: string): Promise<PipelineRow | null>;
   delete(id: string): Promise<boolean>;
+}
+
+export interface PipelineVersionRepository {
+  listByPipelineId(
+    pipelineId: string,
+    options?: { cursor?: number; limit?: number }
+  ): Promise<PipelineVersionRow[]>;
+  findByPipelineIdAndVersionNumber(
+    pipelineId: string,
+    versionNumber: number
+  ): Promise<PipelineVersionRow | null>;
 }
 
 export interface ScheduleRepoForPipeline {
@@ -195,13 +225,21 @@ export interface UpdatePipelineInput {
 // PipelineService — public interface
 // ---------------------------------------------------------------------------
 
+export interface PipelineVersionListResult {
+  data: PipelineVersionRow[];
+  pagination: { nextCursor: number | null };
+}
+
 export interface PipelineService {
   createPipeline(tenantId: string, userId: string, input: CreatePipelineInput): Promise<PipelineRow>;
   getPipeline(tenantId: string, id: string): Promise<PipelineRow>;
   listPipelines(tenantId: string, query: PipelineListQuery): Promise<PipelineListResult>;
-  updatePipeline(tenantId: string, id: string, input: UpdatePipelineInput): Promise<PipelineRow>;
+  updatePipeline(tenantId: string, id: string, input: UpdatePipelineInput, updatedBy?: string): Promise<PipelineRow>;
   deletePipeline(tenantId: string, id: string): Promise<void>;
   validateDefinition(definition: PipelineDefinition): ValidationResult;
+  listVersions(tenantId: string, pipelineId: string, options?: { cursor?: number; limit?: number }): Promise<PipelineVersionListResult>;
+  getVersion(tenantId: string, pipelineId: string, versionNumber: number): Promise<PipelineVersionRow>;
+  rollbackToVersion(tenantId: string, pipelineId: string, versionNumber: number, userId: string): Promise<PipelineRow>;
 }
 
 export interface ValidationResult {
@@ -211,6 +249,7 @@ export interface ValidationResult {
 
 export interface PipelineServiceDeps {
   pipelineRepo: PipelineRepository;
+  versionRepo: PipelineVersionRepository;
   scheduleRepo: ScheduleRepoForPipeline;
   runRepo: RunRepository;
   logger: Logger;
@@ -342,7 +381,7 @@ function hasCycle(adj: Map<string, string[]>, startId: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function createPipelineService(deps: PipelineServiceDeps): PipelineService {
-  const { pipelineRepo, scheduleRepo, runRepo, logger } = deps;
+  const { pipelineRepo, versionRepo, scheduleRepo, runRepo, logger } = deps;
 
   // -------------------------------------------------------------------------
   // validateDefinition — pure graph validation, no I/O
@@ -498,6 +537,7 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     tenantId: string,
     id: string,
     input: UpdatePipelineInput,
+    updatedBy?: string,
   ): Promise<PipelineRow> {
     // Verify ownership before update
     await getPipeline(tenantId, id);
@@ -539,7 +579,9 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     if (input.definition !== undefined) repoData.definition = input.definition;
     if (input.isActive !== undefined) repoData.is_active = input.isActive;
 
-    const updated = await pipelineRepo.update(id, repoData);
+    // Pass updatedBy through to the repository so that the version snapshot
+    // (taken atomically inside the transaction) records who triggered this change.
+    const updated = await pipelineRepo.update(id, repoData, updatedBy);
     if (updated === null) {
       // The row was removed between our ownership check and this UPDATE — treat as not found.
       throw new PipelineNotFoundError(
@@ -548,7 +590,7 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
       );
     }
 
-    logger.info("Pipeline updated", { tenantId, pipelineId: id });
+    logger.info("Pipeline updated", { tenantId, pipelineId: id, version: updated.current_version });
 
     return updated;
   }
@@ -575,6 +617,96 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     logger.info("Pipeline deleted", { tenantId, pipelineId: id });
   }
 
+  // -------------------------------------------------------------------------
+  // listVersions
+  // -------------------------------------------------------------------------
+
+  async function listVersions(
+    tenantId: string,
+    pipelineId: string,
+    options?: { cursor?: number; limit?: number },
+  ): Promise<PipelineVersionListResult> {
+    // Ownership check — prevents tenant A from listing versions of tenant B's pipeline.
+    await getPipeline(tenantId, pipelineId);
+
+    const limit = options?.limit ?? 50;
+    const rows = await versionRepo.listByPipelineId(pipelineId, {
+      ...(options?.cursor !== undefined ? { cursor: options.cursor } : {}),
+      limit,
+    });
+
+    // nextCursor is the version_number of the last item; the next page asks for
+    // items with version_number < that value (desc order).
+    const nextCursor =
+      rows.length === limit ? (rows[rows.length - 1]?.version_number ?? null) : null;
+
+    return { data: rows, pagination: { nextCursor } };
+  }
+
+  // -------------------------------------------------------------------------
+  // getVersion
+  // -------------------------------------------------------------------------
+
+  async function getVersion(
+    tenantId: string,
+    pipelineId: string,
+    versionNumber: number,
+  ): Promise<PipelineVersionRow> {
+    // Ownership check first.
+    await getPipeline(tenantId, pipelineId);
+
+    const version = await versionRepo.findByPipelineIdAndVersionNumber(pipelineId, versionNumber);
+    if (version === null) {
+      throw new PipelineVersionNotFoundError(
+        `Version ${versionNumber} of pipeline "${pipelineId}" not found.`,
+        { pipelineId, versionNumber },
+      );
+    }
+    return version;
+  }
+
+  // -------------------------------------------------------------------------
+  // rollbackToVersion
+  // -------------------------------------------------------------------------
+
+  async function rollbackToVersion(
+    tenantId: string,
+    pipelineId: string,
+    versionNumber: number,
+    userId: string,
+  ): Promise<PipelineRow> {
+    // getVersion performs the ownership check and throws PipelineVersionNotFoundError
+    // when the requested version does not exist.
+    const version = await getVersion(tenantId, pipelineId, versionNumber);
+
+    // The snapshot is already validated — it was a valid definition when originally
+    // saved. We still re-validate to catch any schema changes since that snapshot.
+    const restoredDef = version.definition_snapshot as unknown as PipelineDefinition;
+    const validation = validateDefinition(restoredDef);
+    if (!validation.valid) {
+      throw new PipelineValidationError(
+        `Version ${versionNumber} definition is no longer valid: ${validation.errors.join("; ")}`,
+        { errors: validation.errors },
+      );
+    }
+
+    // Rollback is treated as a new update — it creates its own version snapshot of
+    // the current state before restoring the old one. This preserves the full history
+    // (the "undo" itself is versioned), and the pipeline's current_version increments.
+    return updatePipeline(
+      tenantId,
+      pipelineId,
+      {
+        definition: version.definition_snapshot,
+        name: version.name_at_version,
+        ...(version.description_at_version !== null
+          ? { description: version.description_at_version }
+          : {}),
+      },
+      userId,
+    );
+  }
+
   return {
     createPipeline,
     getPipeline,
@@ -582,5 +714,8 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
     updatePipeline,
     deletePipeline,
     validateDefinition,
+    listVersions,
+    getVersion,
+    rollbackToVersion,
   };
 }

@@ -50,8 +50,45 @@ export type {
   AnyPluginMetadata,
 } from "./types/metadata.js";
 
-// Hook types
-export type { HookStage, HookDeclaration, HookPayload, HookResult } from "./types/hooks.js";
+// Hook types — core
+export type {
+  HookStage,
+  HookDeclaration,
+  HookContext,
+  HookPayload,
+  HookResult,
+  HookFn,
+  HookPayloadDataMap,
+} from "./types/hooks.js";
+
+// Hook types — per-stage data interfaces (ISP: each stage gets exactly what it needs)
+export type {
+  IngestionReceiveData,
+  IngestionValidateData,
+  IngestionEnrichData,
+  IngestionStageData,
+  OntologyMapData,
+  OntologyNormalizeData,
+  PipelineTriggerData,
+  PipelineStepData,
+  PipelineExecuteData, // @deprecated: use PipelineStepData
+  PipelineCompleteData,
+  ExecutionSetupData,
+  ExecutionTeardownData,
+  AuthLoginData,
+  AuthLogoutData,
+  AuthTokenIssueData,
+  AppRequestData,
+  AppBuildData,
+} from "./types/hooks.js";
+
+// Hook types — discriminated union for runtime stage narrowing
+export type {
+  DiscriminatedHookPayload,
+  UnknownStageHookPayload,
+  AnyHookPayload,
+  HookDataFor,
+} from "./types/hooks.js";
 
 // Connector interface
 export type {

@@ -16,6 +16,7 @@ import {
   StepSchema,
   PipelineDefinitionSchema,
   InternalTriggerRequestSchema,
+  RetryConfigSchema,
 } from "../schemas/index.js";
 
 // ---------------------------------------------------------------------------
@@ -506,6 +507,191 @@ describe("StepSchema — webhook step — invalid", () => {
   it("rejects missing method", () => {
     const { method: _m, ...rest } = webhookStep;
     fails(StepSchema, rest);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RetryConfigSchema
+// ---------------------------------------------------------------------------
+
+describe("RetryConfigSchema — valid", () => {
+  it("accepts a fully specified retry config", () => {
+    const r = RetryConfigSchema.safeParse({
+      maxRetries: 3,
+      backoffMs: 2000,
+      backoffMultiplier: 2,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("defaults maxRetries to 0 when omitted", () => {
+    const r = RetryConfigSchema.safeParse({});
+    expect(r.success && r.data.maxRetries).toBe(0);
+  });
+
+  it("defaults backoffMs to 1000 when omitted", () => {
+    const r = RetryConfigSchema.safeParse({});
+    expect(r.success && r.data.backoffMs).toBe(1000);
+  });
+
+  it("defaults backoffMultiplier to 2 when omitted", () => {
+    const r = RetryConfigSchema.safeParse({});
+    expect(r.success && r.data.backoffMultiplier).toBe(2);
+  });
+
+  it("accepts maxRetries=0 (no retries)", () => {
+    const r = RetryConfigSchema.safeParse({ maxRetries: 0 });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts maxRetries=10 (maximum)", () => {
+    const r = RetryConfigSchema.safeParse({ maxRetries: 10 });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts backoffMs=100 (minimum)", () => {
+    const r = RetryConfigSchema.safeParse({ backoffMs: 100 });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts backoffMs=60000 (maximum)", () => {
+    const r = RetryConfigSchema.safeParse({ backoffMs: 60_000 });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts backoffMultiplier=1 (no growth)", () => {
+    const r = RetryConfigSchema.safeParse({ backoffMultiplier: 1 });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts backoffMultiplier=5 (maximum)", () => {
+    const r = RetryConfigSchema.safeParse({ backoffMultiplier: 5 });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("RetryConfigSchema — invalid", () => {
+  it("rejects maxRetries=-1 (below minimum)", () => {
+    fails(RetryConfigSchema, { maxRetries: -1 });
+  });
+
+  it("rejects maxRetries=11 (above maximum)", () => {
+    fails(RetryConfigSchema, { maxRetries: 11 });
+  });
+
+  it("rejects fractional maxRetries", () => {
+    fails(RetryConfigSchema, { maxRetries: 1.5 });
+  });
+
+  it("rejects backoffMs=99 (below minimum)", () => {
+    fails(RetryConfigSchema, { backoffMs: 99 });
+  });
+
+  it("rejects backoffMs=60001 (above maximum)", () => {
+    fails(RetryConfigSchema, { backoffMs: 60_001 });
+  });
+
+  it("rejects fractional backoffMs", () => {
+    fails(RetryConfigSchema, { backoffMs: 500.5 });
+  });
+
+  it("rejects backoffMultiplier=0.9 (below minimum of 1)", () => {
+    fails(RetryConfigSchema, { backoffMultiplier: 0.9 });
+  });
+
+  it("rejects backoffMultiplier=5.1 (above maximum)", () => {
+    fails(RetryConfigSchema, { backoffMultiplier: 5.1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StepBaseSchema — retryConfig and fallbackStepId fields
+// ---------------------------------------------------------------------------
+
+describe("StepSchema — retryConfig field", () => {
+  it("accepts a code step with a valid retryConfig", () => {
+    const r = StepSchema.safeParse({
+      ...minimalCodeStep,
+      retryConfig: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("retryConfig is optional — absent by default", () => {
+    const r = StepSchema.safeParse(minimalCodeStep);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.retryConfig).toBeUndefined();
+    }
+  });
+
+  it("accepts retryConfig with only defaults applied", () => {
+    const r = StepSchema.safeParse({
+      ...minimalCodeStep,
+      retryConfig: {},
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.retryConfig?.maxRetries).toBe(0);
+      expect(r.data.retryConfig?.backoffMs).toBe(1000);
+      expect(r.data.retryConfig?.backoffMultiplier).toBe(2);
+    }
+  });
+
+  it("rejects retryConfig with maxRetries > 10", () => {
+    fails(StepSchema, {
+      ...minimalCodeStep,
+      retryConfig: { maxRetries: 11, backoffMs: 1000, backoffMultiplier: 2 },
+    });
+  });
+
+  it("rejects retryConfig with backoffMs < 100", () => {
+    fails(StepSchema, {
+      ...minimalCodeStep,
+      retryConfig: { maxRetries: 1, backoffMs: 50, backoffMultiplier: 2 },
+    });
+  });
+
+  it("rejects retryConfig with backoffMultiplier > 5", () => {
+    fails(StepSchema, {
+      ...minimalCodeStep,
+      retryConfig: { maxRetries: 1, backoffMs: 1000, backoffMultiplier: 6 },
+    });
+  });
+});
+
+describe("StepSchema — fallbackStepId field", () => {
+  it("accepts a code step with a valid fallbackStepId", () => {
+    const r = StepSchema.safeParse({
+      ...minimalCodeStep,
+      fallbackStepId: "step-fallback",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("fallbackStepId is optional — absent by default", () => {
+    const r = StepSchema.safeParse(minimalCodeStep);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.fallbackStepId).toBeUndefined();
+    }
+  });
+
+  it("rejects empty string fallbackStepId", () => {
+    fails(StepSchema, { ...minimalCodeStep, fallbackStepId: "" });
+  });
+
+  it("rejects fallbackStepId longer than 64 chars", () => {
+    fails(StepSchema, { ...minimalCodeStep, fallbackStepId: "a".repeat(65) });
+  });
+
+  it("accepts both retryConfig and fallbackStepId together", () => {
+    const r = StepSchema.safeParse({
+      ...minimalCodeStep,
+      retryConfig: { maxRetries: 2, backoffMs: 500, backoffMultiplier: 1.5 },
+      fallbackStepId: "step-fallback",
+    });
+    expect(r.success).toBe(true);
   });
 });
 

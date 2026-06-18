@@ -619,6 +619,25 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
   }
 
   // -------------------------------------------------------------------------
+  // scheduleRetryDelay — resolves after the computed exponential backoff window.
+  // Separated from executeStepWithRetry so tests can spy on it without needing
+  // real timers. The delay grows as: backoffMs * (backoffMultiplier ^ attempt),
+  // where attempt is 0-indexed (first retry = attempt 0, so delay = backoffMs).
+  // -------------------------------------------------------------------------
+
+  function computeBackoffMs(
+    backoffMs: number,
+    backoffMultiplier: number,
+    attempt: number,
+  ): number {
+    return Math.round(backoffMs * Math.pow(backoffMultiplier, attempt));
+  }
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // -------------------------------------------------------------------------
   // executeStep — dispatches to the correct handler by step type
   // -------------------------------------------------------------------------
 
@@ -906,41 +925,57 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
         await appendLog(runId, tenantId, `Step "${step.name}" started.`, { stepId: step.id });
 
-        // Execute the step
+        // Execute the step with per-step retry logic.
+        //
+        // Retry sequence (when retryConfig is present):
+        //   1. Attempt the step.
+        //   2. On failure, if attempts remaining > 0: log, increment attempt_count,
+        //      wait backoffMs * (backoffMultiplier ^ attemptIndex), then retry.
+        //   3. After retries are exhausted (or retryConfig absent): check fallbackStepId.
+        //      If set, jump to the fallback step instead of applying onError.
+        //   4. Otherwise apply onError ("skip" continues; "fail" breaks the traversal).
         let stepOutput: unknown;
         let nextStepId: string | undefined;
+        let stepSucceeded = false;
 
-        try {
-          const result = await executeStep(step, ctx);
-          stepOutput = result.output;
-          nextStepId = result.nextStepId;
+        const maxRetries = step.retryConfig?.maxRetries ?? 0;
+        let lastError: Error | null = null;
 
-          ctx.stepOutputs.set(step.id, stepOutput);
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          // Only increment attempt_count on retries (not the first attempt)
+          if (attempt > 0) {
+            const delayMs = computeBackoffMs(
+              step.retryConfig!.backoffMs,
+              step.retryConfig!.backoffMultiplier,
+              attempt - 1,
+            );
+            await appendLog(
+              runId,
+              tenantId,
+              `Step "${step.name}" retry ${attempt}/${maxRetries} after ${delayMs}ms (previous error: ${lastError?.message ?? "unknown"}).`,
+              { stepId: step.id, level: "warn", details: { attempt, delayMs } },
+            );
+            await runStepRepo.updateStatus(runId, runStepRow.step_id, {
+              attempt_count: attempt,
+            });
+            await sleep(delayMs);
+          }
 
-          await runStepRepo.updateStatus(runId, runStepRow.step_id, {
-            status: "completed",
-            completed_at: new Date(),
-          });
+          try {
+            const result = await executeStep(step, ctx);
+            stepOutput = result.output;
+            nextStepId = result.nextStepId;
+            stepSucceeded = true;
+            break;
+          } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            // Will retry if attempt < maxRetries; otherwise falls through to
+            // error handling below.
+          }
+        }
 
-          // Write output separately — updateOutput is a dedicated method because
-          // output can be large JSONB and is only set on success.
-          const outputRecord = (stepOutput !== null && typeof stepOutput === "object")
-            ? (stepOutput as Record<string, unknown>)
-            : { value: stepOutput };
-          await runStepRepo.updateOutput(runId, runStepRow.step_id, outputRecord);
-
-          await appendLog(runId, tenantId, `Step "${step.name}" completed.`, { stepId: step.id });
-
-          // Emit step completion platform event
-          await emitPlatformEvent("pipeline.step.completed", tenantId, {
-            pipelineId: run.pipeline_id,
-            runId,
-            stepId: step.id,
-            stepName: step.name,
-          });
-        } catch (err) {
-          const onError = step.onError ?? "fail";
-          const errMessage = err instanceof Error ? err.message : String(err);
+        if (!stepSucceeded) {
+          const errMessage = lastError?.message ?? "unknown error";
 
           await runStepRepo.updateStatus(runId, runStepRow.step_id, {
             status: "failed",
@@ -948,13 +983,23 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
             error: { code: "STEP_EXECUTION_FAILED", message: errMessage },
           });
 
-          await appendLog(runId, tenantId, `Step "${step.name}" failed: ${errMessage}`, {
+          await appendLog(runId, tenantId, `Step "${step.name}" failed after ${maxRetries + 1} attempt(s): ${errMessage}`, {
             stepId: step.id,
             level: "error",
           });
 
+          // Fallback step takes precedence over onError when configured.
+          // The fallback step executes next; this step's output is set to null
+          // so downstream steps that read from it receive null rather than undefined.
+          if (step.fallbackStepId !== undefined) {
+            ctx.stepOutputs.set(step.id, null);
+            currentStepId = step.fallbackStepId;
+            continue;
+          }
+
+          const onError = step.onError ?? "fail";
           if (onError === "skip") {
-            // Step failure is non-fatal — continue traversal with null output for this step
+            // Non-fatal — continue traversal with null output for this step
             ctx.stepOutputs.set(step.id, null);
             currentStepId = getNextStepIdFromMain(step, allSteps, undefined);
             continue;
@@ -962,9 +1007,33 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
           // onError === "fail": propagate failure
           failedStepId = step.id;
-          failureError = err instanceof Error ? err : new Error(errMessage);
+          failureError = lastError ?? new Error(errMessage);
           break stepTraversal;
         }
+
+        ctx.stepOutputs.set(step.id, stepOutput);
+
+        await runStepRepo.updateStatus(runId, runStepRow.step_id, {
+          status: "completed",
+          completed_at: new Date(),
+        });
+
+        // Write output separately — updateOutput is a dedicated method because
+        // output can be large JSONB and is only set on success.
+        const outputRecord = (stepOutput !== null && typeof stepOutput === "object")
+          ? (stepOutput as Record<string, unknown>)
+          : { value: stepOutput };
+        await runStepRepo.updateOutput(runId, runStepRow.step_id, outputRecord);
+
+        await appendLog(runId, tenantId, `Step "${step.name}" completed.`, { stepId: step.id });
+
+        // Emit step completion platform event
+        await emitPlatformEvent("pipeline.step.completed", tenantId, {
+          pipelineId: run.pipeline_id,
+          runId,
+          stepId: step.id,
+          stepName: step.name,
+        });
 
         // after:step hooks (advisory-only failure per design spec §9.1)
         const afterStepHooks = await resolveHookChain(

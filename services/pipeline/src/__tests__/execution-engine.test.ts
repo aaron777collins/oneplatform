@@ -697,3 +697,465 @@ describe("execution engine — SSRF constants", () => {
     expect(typeof engine.processRun).toBe("function");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Retry logic — shared engine setup factory used across all retry suites.
+// Fake timers (vi.useFakeTimers) let tests verify retry delays without
+// blocking on real wall-clock waits.
+// ---------------------------------------------------------------------------
+
+function makeRetryEngineSetup() {
+  const runRepo = makeRunRepo();
+  const runStepRepo = makeRunStepRepo();
+  const runLogRepo = makeRunLogRepo();
+  const client = makePoolClient();
+  const pool = makePool(client);
+  const redis = makeRedis();
+  const logger = makeLogger();
+
+  client.query.mockImplementation((sql: string) => {
+    if (sql.includes("pg_try_advisory_lock")) {
+      return Promise.resolve({ rows: [{ pg_try_advisory_lock: true }] });
+    }
+    return Promise.resolve({ rows: [] });
+  });
+
+  runRepo.updateStatus.mockResolvedValue(makeRunRow({ status: "running" }));
+  runStepRepo.createBatch.mockResolvedValue([makeRunStepRow()]);
+  runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow()]);
+  runStepRepo.updateStatus.mockResolvedValue(makeRunStepRow());
+  runStepRepo.updateOutput.mockResolvedValue(makeRunStepRow({ status: "completed" }));
+  runLogRepo.append.mockResolvedValue(undefined);
+  redis.get.mockResolvedValue(null); // not cancelled
+  redis.publish.mockResolvedValue(0);
+
+  const engine = createExecutionEngine({
+    runRepo: runRepo as unknown as RunEngineRepository,
+    runStepRepo: runStepRepo as unknown as RunStepEngineRepository,
+    runLogRepo: runLogRepo as unknown as RunLogEngineRepository,
+    pool: pool as unknown as Pool,
+    redis: redis as unknown as Redis,
+    executionServiceUrl: "http://exec:3000",
+    pluginServiceUrl: "http://plugins:3000",
+    ingestionServiceUrl: "http://ingestion:3000",
+    stepDefaultTimeoutMs: 30_000,
+    hookDefaultTimeoutMs: 5_000,
+    logger,
+    serviceTokenSigner: makeServiceTokenSigner(),
+  });
+
+  return { runRepo, runStepRepo, runLogRepo, client, pool, redis, logger, engine };
+}
+
+// ---------------------------------------------------------------------------
+// processRun — retry: step succeeds on second attempt
+// ---------------------------------------------------------------------------
+
+describe("processRun — retry: step succeeds on retry", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("calls execution service twice when first attempt fails and retryConfig.maxRetries=1", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    const stepWithRetry = {
+      ...minimalStep,
+      retryConfig: { maxRetries: 1, backoffMs: 500, backoffMultiplier: 2 },
+    };
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithRetry],
+    };
+
+    runRepo.findById.mockResolvedValue(
+      makeRunRow({ definition_snapshot: definition }),
+    );
+    runStepRepo.findByRunId.mockResolvedValue([
+      makeRunStepRow({ step_id: "step-1" }),
+    ]);
+
+    let execCallCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      if (String(url).includes("/internal/execution/run")) {
+        execCallCount++;
+        if (execCallCount === 1) {
+          // First attempt fails
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            text: () => Promise.resolve("transient error"),
+          });
+        }
+        // Second attempt succeeds
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executionId: "exec-002", output: { retried: true }, durationMs: 10, exitCode: 0 }),
+          status: 200,
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    // Run processRun and advance fake timers to let setTimeout in sleep() fire
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    expect(execCallCount).toBe(2);
+
+    // The run should ultimately complete successfully
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
+    expect(statuses).toContain("completed");
+  });
+
+  it("increments attempt_count in run_step row for each retry", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    const stepWithRetry = {
+      ...minimalStep,
+      retryConfig: { maxRetries: 2, backoffMs: 100, backoffMultiplier: 1 },
+    };
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithRetry],
+    };
+
+    runRepo.findById.mockResolvedValue(
+      makeRunRow({ definition_snapshot: definition }),
+    );
+    runStepRepo.findByRunId.mockResolvedValue([
+      makeRunStepRow({ step_id: "step-1" }),
+    ]);
+
+    let execCallCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      if (String(url).includes("/internal/execution/run")) {
+        execCallCount++;
+        if (execCallCount <= 2) {
+          return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("fail") });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executionId: "exec-ok", output: {}, durationMs: 5, exitCode: 0 }),
+          status: 200,
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    // attempt_count is updated once per retry (not the first attempt)
+    const updateStatusCalls = (runStepRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, string, Record<string, unknown>]>;
+    const attemptCountUpdates = updateStatusCalls
+      .map((c) => c[2])
+      .filter((d) => d["attempt_count"] !== undefined)
+      .map((d) => d["attempt_count"]);
+
+    // Two retries → attempt_count set to 1, then 2
+    expect(attemptCountUpdates).toEqual(expect.arrayContaining([1, 2]));
+  });
+
+  it("logs a retry warning message for each retry attempt", async () => {
+    const { runRepo, runStepRepo, runLogRepo, engine } = makeRetryEngineSetup();
+
+    const stepWithRetry = {
+      ...minimalStep,
+      retryConfig: { maxRetries: 1, backoffMs: 100, backoffMultiplier: 1 },
+    };
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithRetry],
+    };
+
+    runRepo.findById.mockResolvedValue(makeRunRow({ definition_snapshot: definition }));
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+
+    let execCallCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      if (String(url).includes("/internal/execution/run")) {
+        execCallCount++;
+        if (execCallCount === 1) {
+          return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("fail") });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executionId: "exec-ok", output: {}, durationMs: 5, exitCode: 0 }),
+          status: 200,
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    const logCalls = (runLogRepo.append as ReturnType<typeof vi.fn>).mock.calls as Array<[Record<string, unknown>]>;
+    const retryLogs = logCalls.filter(
+      (c) => typeof c[0]["message"] === "string" && (c[0]["message"] as string).includes("retry"),
+    );
+    expect(retryLogs.length).toBeGreaterThan(0);
+    // Safe access: the expect above already asserts length > 0
+    expect(retryLogs[0]?.[0]["level"]).toBe("warn");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processRun — retry: all retries exhausted → apply onError
+// ---------------------------------------------------------------------------
+
+describe("processRun — retry: all retries exhausted, no fallback", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("marks run as failed when all retries exhausted and onError=fail", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    const stepWithRetry = {
+      ...minimalStep,
+      retryConfig: { maxRetries: 2, backoffMs: 100, backoffMultiplier: 1 },
+      onError: "fail" as const,
+    };
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithRetry],
+    };
+
+    runRepo.findById.mockResolvedValue(makeRunRow({ definition_snapshot: definition }));
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+
+    // All attempts fail
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("always fails") });
+    }));
+
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
+    expect(statuses).toContain("failed");
+  });
+
+  it("skips step and continues when all retries exhausted and onError=skip", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    const stepWithRetrySkip = {
+      ...minimalStep,
+      id: "step-1",
+      retryConfig: { maxRetries: 1, backoffMs: 100, backoffMultiplier: 1 },
+      onError: "skip" as const,
+    };
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithRetrySkip],
+    };
+
+    runRepo.findById.mockResolvedValue(makeRunRow({ definition_snapshot: definition }));
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+
+    // All attempts fail
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("always fails") });
+    }));
+
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    // Single-step pipeline with onError=skip → run completes (not failed)
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
+    expect(statuses).toContain("completed");
+    expect(statuses).not.toContain("failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processRun — fallbackStepId: executes fallback step when primary fails
+// ---------------------------------------------------------------------------
+
+describe("processRun — fallbackStepId", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("jumps to fallbackStepId after primary step exhausts all retries", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    const primaryStep = {
+      id: "step-1",
+      name: "Primary Step",
+      type: "code" as const,
+      language: "javascript" as const,
+      code: 'throw new Error("fail");',
+      onError: "fail" as const,
+      retryConfig: { maxRetries: 1, backoffMs: 50, backoffMultiplier: 1 },
+      fallbackStepId: "step-fallback",
+    };
+
+    const fallbackStep = {
+      id: "step-fallback",
+      name: "Fallback Step",
+      type: "code" as const,
+      language: "javascript" as const,
+      code: 'return "fallback result";',
+      onError: "fail" as const,
+    };
+
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [primaryStep, fallbackStep],
+    };
+
+    runRepo.findById.mockResolvedValue(makeRunRow({ definition_snapshot: definition }));
+    runStepRepo.findByRunId.mockResolvedValue([
+      makeRunStepRow({ step_id: "step-1", step_name: "Primary Step" }),
+      makeRunStepRow({ id: "run-step-002", step_id: "step-fallback", step_name: "Fallback Step" }),
+    ]);
+
+    // Primary always fails; fallback succeeds
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      if (String(url).includes("/internal/execution/run")) {
+        const body = opts?.body ? JSON.parse(opts.body as string) : {};
+        if (body.stepId === "step-1") {
+          return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("primary fails") });
+        }
+        // fallback step succeeds
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executionId: "exec-fallback", output: { fallback: true }, durationMs: 5, exitCode: 0 }),
+          status: 200,
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    // Run should complete because fallback succeeded
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
+    expect(statuses).toContain("completed");
+    expect(statuses).not.toContain("failed");
+  });
+
+  it("falls back to onError=fail when fallbackStepId is absent and primary exhausts retries", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    const stepNoFallback = {
+      ...minimalStep,
+      retryConfig: { maxRetries: 1, backoffMs: 50, backoffMultiplier: 1 },
+      // no fallbackStepId — should use onError="fail"
+    };
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepNoFallback],
+    };
+
+    runRepo.findById.mockResolvedValue(makeRunRow({ definition_snapshot: definition }));
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("always fails") });
+    }));
+
+    const runPromise = engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    const calls = (runRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, Record<string, unknown>]>;
+    const statuses = calls.map((c) => c[1]["status"]).filter(Boolean);
+    expect(statuses).toContain("failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processRun — retry: no retryConfig → single attempt (existing behaviour)
+// ---------------------------------------------------------------------------
+
+describe("processRun — no retryConfig: single attempt (unchanged behaviour)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("calls execution service exactly once when retryConfig is absent", async () => {
+    const { runRepo, runStepRepo, engine } = makeRetryEngineSetup();
+
+    // Default minimalStep has no retryConfig
+    runRepo.findById.mockResolvedValue(makeRunRow());
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow()]);
+
+    let execCallCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      if (String(url).includes("/internal/execution/run")) {
+        execCallCount++;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executionId: "exec-001", output: {}, durationMs: 5, exitCode: 0 }),
+          status: 200,
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    await engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+
+    expect(execCallCount).toBe(1);
+  });
+});
