@@ -10,6 +10,7 @@ import { responseEnvelopeMiddleware } from "./middleware/response-envelope.js";
 import { errorHandlerMiddleware } from "./middleware/error-handler.js";
 import { rateLimitHeadersMiddleware } from "./middleware/rate-limit-headers.js";
 import { deprecationHeadersMiddleware } from "./middleware/deprecation-headers.js";
+import { otelMiddleware } from "./middleware/otel.js";
 
 // How long to wait for in-flight requests to drain before forcing exit.
 const GRACEFUL_SHUTDOWN_MS = 5_000;
@@ -169,8 +170,11 @@ export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariabl
     _c.res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   });
 
-  // 3. OTEL instrumentation (stub — wired in the observability task)
-  // app.use("*", otelMiddleware({ serviceName: config.serviceName }));
+  // 3. OTEL instrumentation — placed after requestId (which sets the request
+  // correlation ID) but before CORS and auth so the span covers the full
+  // request lifecycle including any auth failures or preflight short-circuits.
+  // Gracefully degrades when OTEL_EXPORTER_OTLP_ENDPOINT is not configured.
+  app.use("*", otelMiddleware({ serviceName: config.serviceName }));
 
   // 4. CORS — validates Origin, handles preflight
   app.use("*", corsMiddleware({ allowedOrigins: config.allowedOrigins }));

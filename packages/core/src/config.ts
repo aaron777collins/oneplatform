@@ -38,6 +38,10 @@ export const baseConfigSchema = z.object({
   OP_ALLOWED_ORIGINS: originsSchema.optional().default("https://localhost"),
   OP_DATABASE_URL: z.string().url(),
   OP_REDIS_URL: z.string().url(),
+  // Optional OTLP endpoint — when absent, the otelMiddleware still runs but
+  // span records only appear in stdout (no collector forwarding).
+  // Shared by all services so traces from every layer are correlated.
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 });
 
 // ─── Per-service schemas — extend base with service-specific vars ─────────────
@@ -100,7 +104,8 @@ export const appConfigSchema = baseConfigSchema.extend({
 export const loggingConfigSchema = baseConfigSchema.extend({
   OP_MINIO_USER: z.string().default("minioadmin"),
   OP_MINIO_PASSWORD: minioPasswordSchema,
-  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  // OTEL_EXPORTER_OTLP_ENDPOINT moved to baseConfigSchema so all services
+  // share the same validated config field. No need to redeclare here.
 });
 
 export const pluginConfigSchema = baseConfigSchema.extend({

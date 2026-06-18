@@ -181,3 +181,5 @@ export { errorHandlerMiddleware } from "./middleware/error-handler.js";
 export type { ErrorHandlerConfig } from "./middleware/error-handler.js";
 export { rateLimitHeadersMiddleware } from "./middleware/rate-limit-headers.js";
 export { deprecationHeadersMiddleware } from "./middleware/deprecation-headers.js";
+export { otelMiddleware } from "./middleware/otel.js";
+export type { OtelMiddlewareOptions } from "./middleware/otel.js";

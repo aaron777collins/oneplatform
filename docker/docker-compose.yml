@@ -16,6 +16,13 @@
 #   - Public Ed25519 keys live on shared-pubkeys at /data/service-keys/ (read-only)
 #   - Private Ed25519 keys live on init-data at /data/init/keys/<service>/private.pem
 
+# Shared OTEL environment variable injected into every service environment block.
+# Using a YAML anchor because YAML merge (<<:) does not deep-merge maps; adding
+# environment to x-service-common would be silently overridden by each service's
+# own environment block. The anchor is referenced explicitly in each service.
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+
 x-service-common: &service-common
   # All application services share this base configuration.
   # Override per-service values in the individual service definition.
@@ -231,6 +238,7 @@ services:
     container_name: gateway-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: gateway-service
       NODE_ENV: production
       PORT: "3000"
@@ -280,6 +288,7 @@ services:
     container_name: auth-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: auth-service
       NODE_ENV: production
       PORT: "3000"
@@ -325,6 +334,7 @@ services:
     container_name: ingestion-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: ingestion-service
       NODE_ENV: production
       PORT: "3000"
@@ -363,6 +373,7 @@ services:
     container_name: ontology-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: ontology-service
       NODE_ENV: production
       PORT: "3000"
@@ -401,6 +412,7 @@ services:
     container_name: pipeline-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: pipeline-service
       NODE_ENV: production
       PORT: "3000"
@@ -437,6 +449,7 @@ services:
     container_name: execution-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: execution-service
       NODE_ENV: production
       PORT: "3000"
@@ -491,6 +504,7 @@ services:
     container_name: app-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: app-service
       NODE_ENV: production
       PORT: "3000"
@@ -529,6 +543,7 @@ services:
     container_name: logging-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: logging-service
       NODE_ENV: production
       PORT: "3000"
@@ -565,6 +580,7 @@ services:
     container_name: plugin-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
+      <<: *otel-env
       SERVICE_NAME: plugin-service
       NODE_ENV: production
       PORT: "3000"
@@ -591,6 +607,32 @@ services:
         limits:
           memory: 512m
           cpus: "0.5"
+
+  # ─── Observability: Jaeger ───────────────────────────────────────────────
+  # All-in-one Jaeger image includes the collector, query UI, and agent.
+  # COLLECTOR_OTLP_ENABLED=true exposes the OTLP/HTTP endpoint on port 4318,
+  # which all services write spans to via OTEL_EXPORTER_OTLP_ENDPOINT.
+  # The query UI on port 16686 is bound to 127.0.0.1 only — not exposed publicly.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: op-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+    networks:
+      - oneplatform-internal
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ─── Log Aggregation: Vector ──────────────────────────────────────────────
   # File-based log collection — does NOT mount docker.sock (see ADR security model).
