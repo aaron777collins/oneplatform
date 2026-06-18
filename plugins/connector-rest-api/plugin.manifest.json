@@ -1,0 +1,93 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.connector-rest-api",
+  "name": "REST API",
+  "version": "1.0.0",
+  "type": "connector",
+  "description": "Connect to any REST API endpoint with support for offset, cursor, and link-header pagination, incremental sync, and API key, bearer token, or basic auth.",
+  "author": "OnePlatform",
+  "license": "BSL-1.1",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "connector",
+  "tags": ["rest", "api", "http", "generic", "connector"],
+  "configSchema": {
+    "type": "object",
+    "required": ["baseUrl", "endpoint"],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "format": "uri",
+        "description": "Base URL of the REST API (e.g. https://api.example.com/v1)"
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "Path to the resource endpoint, relative to baseUrl (e.g. /orders)"
+      },
+      "method": {
+        "type": "string",
+        "enum": ["GET", "POST"],
+        "default": "GET",
+        "description": "HTTP method to use when fetching records"
+      },
+      "headers": {
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "description": "Static request headers to include with every fetch (e.g. Accept, X-API-Version)"
+      },
+      "responseDataPath": {
+        "type": "string",
+        "description": "Dot-delimited JSON path to the array of records in the response body (e.g. 'data', 'results.items'). Omit to treat the root as the array."
+      },
+      "paginationType": {
+        "type": "string",
+        "enum": ["none", "offset", "cursor", "link"],
+        "default": "none",
+        "description": "Pagination strategy: none (single request), offset (?offset=N&limit=N), cursor (?cursor=TOKEN&limit=N), link (follow Link header rel=next)"
+      },
+      "pageSize": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10000,
+        "default": 100,
+        "description": "Number of records per page for offset and cursor pagination"
+      },
+      "incrementalField": {
+        "type": "string",
+        "description": "Field name used for incremental sync filtering (e.g. 'updated_at'). When set, appends ?{incrementalField}={cursor} to requests after the first."
+      }
+    },
+    "additionalProperties": false
+  },
+  "requiredCredentials": [
+    {
+      "name": "apiKey",
+      "description": "API key sent as the X-API-Key header",
+      "type": "secret",
+      "required": false
+    },
+    {
+      "name": "bearerToken",
+      "description": "Bearer token sent as the Authorization: Bearer header",
+      "type": "token",
+      "required": false
+    },
+    {
+      "name": "username",
+      "description": "Username for HTTP Basic authentication",
+      "type": "secret",
+      "required": false
+    },
+    {
+      "name": "password",
+      "description": "Password for HTTP Basic authentication",
+      "type": "password",
+      "required": false
+    }
+  ],
+  "requiredExternalUrls": [
+    "https://**"
+  ],
+  "requiredApis": ["credentials", "fetch", "cache", "tracing"],
+  "hooks": [],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}

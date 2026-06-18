@@ -1,0 +1,60 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.connector-mysql",
+  "name": "MySQL",
+  "version": "1.0.0",
+  "type": "connector",
+  "description": "Connect to a MySQL database and extract records from a table or custom query with offset and cursor-based pagination and incremental sync.",
+  "author": "OnePlatform",
+  "license": "BSL-1.1",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "connector",
+  "tags": ["mysql", "database", "sql", "connector"],
+  "configSchema": {
+    "type": "object",
+    "required": ["table", "database"],
+    "properties": {
+      "database": {
+        "type": "string",
+        "description": "Name of the MySQL database (schema) to connect to"
+      },
+      "table": {
+        "type": "string",
+        "description": "Name of the table to extract records from. Ignored when customQuery is set."
+      },
+      "incrementalColumn": {
+        "type": "string",
+        "description": "Column name used for incremental sync (e.g. updated_at). When set, each run fetches only rows where this column is greater than the last cursor value."
+      },
+      "batchSize": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10000,
+        "default": 1000,
+        "description": "Number of rows to fetch per batch"
+      },
+      "customQuery": {
+        "type": "string",
+        "description": "Optional SQL SELECT query. When provided, the table and incrementalColumn settings are ignored. The query must not include LIMIT or OFFSET — those are appended by the connector."
+      },
+      "proxyUrl": {
+        "type": "string",
+        "format": "uri",
+        "description": "URL of the MySQL REST proxy that executes parameterized queries on behalf of the sandbox. Required — plugins cannot open raw TCP sockets."
+      }
+    },
+    "additionalProperties": false
+  },
+  "requiredCredentials": [
+    {
+      "name": "connectionString",
+      "description": "MySQL connection string in the form mysql://user:password@host:port/database",
+      "type": "secret",
+      "required": true
+    }
+  ],
+  "requiredExternalUrls": [],
+  "requiredApis": ["credentials", "fetch", "cache", "tracing"],
+  "hooks": [],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}

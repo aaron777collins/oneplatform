@@ -1,0 +1,59 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.connector-csv",
+  "name": "CSV",
+  "version": "1.0.0",
+  "type": "connector",
+  "description": "Fetches records from a remote CSV file over HTTP/HTTPS. Supports custom delimiters, optional header rows, and authenticated endpoints via bearer token.",
+  "author": "OnePlatform",
+  "license": "BSL-1.1",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "connector",
+  "configSchema": {
+    "type": "object",
+    "required": ["url"],
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "URL to fetch the CSV file from (http:// or https://)."
+      },
+      "delimiter": {
+        "type": "string",
+        "default": ",",
+        "description": "Field delimiter character. Defaults to comma."
+      },
+      "hasHeader": {
+        "type": "boolean",
+        "default": true,
+        "description": "When true, the first row is treated as a header row and provides field names."
+      },
+      "encoding": {
+        "type": "string",
+        "default": "utf-8",
+        "description": "Character encoding of the CSV file."
+      },
+      "idColumn": {
+        "type": "string",
+        "description": "Column name to use as sourceId. When omitted, the row index is used."
+      },
+      "batchSize": {
+        "type": "number",
+        "default": 500,
+        "description": "Number of records to return per fetchBatch call."
+      }
+    }
+  },
+  "requiredCredentials": [
+    {
+      "name": "bearerToken",
+      "description": "Bearer token for authenticated CSV endpoints. Optional — omit if the URL is publicly accessible.",
+      "type": "token",
+      "required": false
+    }
+  ],
+  "requiredExternalUrls": ["https://**"],
+  "requiredApis": ["credentials", "fetch", "cache"],
+  "hooks": [],
+  "tags": ["csv", "file", "import", "data-source"],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}

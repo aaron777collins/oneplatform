@@ -1,0 +1,69 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.connector-webhook",
+  "name": "Webhook",
+  "version": "1.0.0",
+  "type": "connector",
+  "description": "Receives inbound webhook payloads from external services and ingests them as data records. Supports HMAC signature verification for payload authenticity.",
+  "author": "OnePlatform",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "webhookConnector",
+  "license": "BSL-1.1",
+  "configSchema": {
+    "type": "object",
+    "required": ["webhookPath"],
+    "properties": {
+      "webhookPath": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "pattern": "^[a-z0-9][a-z0-9-_]*$",
+        "title": "Webhook Path",
+        "description": "The path segment for receiving webhooks, e.g. 'my-webhook'. External services POST to /api/v1/ingestion/webhooks/{connectorId}."
+      },
+      "signatureHeader": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "title": "Signature Header",
+        "description": "The HTTP header containing the HMAC signature, e.g. 'X-Hub-Signature-256'. Required when signature verification is enabled."
+      },
+      "signatureAlgorithm": {
+        "type": "string",
+        "enum": ["sha256", "sha1"],
+        "default": "sha256",
+        "title": "Signature Algorithm",
+        "description": "The HMAC algorithm used to compute payload signatures. sha256 is strongly preferred; sha1 is provided for legacy compatibility only."
+      },
+      "idField": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "title": "ID Field",
+        "description": "A dot-notation path to a field in the webhook payload to use as the record's sourceId. When absent, the platform-assigned webhook payload ID is used."
+      },
+      "batchSize": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 1000,
+        "default": 100,
+        "title": "Batch Size",
+        "description": "Maximum number of queued webhook payloads to process per fetchBatch call."
+      }
+    },
+    "additionalProperties": false
+  },
+  "hooks": [],
+  "requiredExternalUrls": [],
+  "requiredApis": ["credentials", "cache"],
+  "requiredCredentials": [
+    {
+      "name": "signatureSecret",
+      "description": "HMAC secret used to verify webhook payload signatures. The ingestion service uses this to authenticate incoming payloads. Leave unconfigured to skip signature verification.",
+      "type": "secret",
+      "required": false
+    }
+  ],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000",
+  "tags": ["webhook", "api", "events", "ingestion", "http"]
+}

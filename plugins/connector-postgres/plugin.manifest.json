@@ -1,0 +1,64 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.connector-postgres",
+  "name": "PostgreSQL",
+  "version": "1.0.0",
+  "type": "connector",
+  "description": "Connects to a PostgreSQL database via a REST proxy (PostgREST or platform DB proxy), supports full and incremental cursor-based sync.",
+  "author": "OnePlatform",
+  "license": "BSL-1.1",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "connector",
+  "tags": ["database", "sql", "postgres", "postgresql"],
+  "configSchema": {
+    "type": "object",
+    "required": ["proxyUrl", "table"],
+    "properties": {
+      "proxyUrl": {
+        "type": "string",
+        "description": "Base URL of the Postgres REST proxy (e.g. PostgREST, pgweb, or the platform DB proxy). Must be HTTPS."
+      },
+      "table": {
+        "type": "string",
+        "description": "Table name to sync records from."
+      },
+      "schema": {
+        "type": "string",
+        "description": "Database schema name. Defaults to 'public'.",
+        "default": "public"
+      },
+      "incrementalColumn": {
+        "type": "string",
+        "description": "Column used as the cursor for incremental sync (e.g. 'updated_at'). When set, only rows with a value greater than the last cursor are fetched."
+      },
+      "batchSize": {
+        "type": "number",
+        "description": "Number of rows to fetch per batch. Defaults to 1000. Maximum 10000.",
+        "default": 1000,
+        "minimum": 1,
+        "maximum": 10000
+      },
+      "customQuery": {
+        "type": "string",
+        "description": "Optional raw SQL SELECT query. When provided, overrides 'table'. The proxy must support the /rpc/query endpoint."
+      },
+      "primaryKey": {
+        "type": "string",
+        "description": "Column to use as the record's sourceId. Defaults to 'id'. Required when the table does not have a column named 'id'."
+      }
+    },
+    "additionalProperties": false
+  },
+  "requiredCredentials": [
+    {
+      "name": "connectionString",
+      "description": "PostgreSQL connection string (postgresql://user:password@host:port/dbname). Used by the platform DB proxy to authenticate upstream connections. Never sent to plugin code directly.",
+      "type": "secret",
+      "required": true
+    }
+  ],
+  "requiredExternalUrls": [],
+  "requiredApis": ["credentials", "fetch", "cache", "tracing"],
+  "hooks": [],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}
