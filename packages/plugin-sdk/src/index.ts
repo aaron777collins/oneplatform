@@ -90,7 +90,7 @@ export type {
   HookDataFor,
 } from "./types/hooks.js";
 
-// Connector interface and CDC extension types
+// Connector interface, CDC extension types, and streaming connector types
 export type {
   ConnectorHandle,
   BatchResult,
@@ -101,6 +101,10 @@ export type {
   CdcOptions,
   ReplicationSlotInfo,
   CdcConnector,
+  StreamOptions,
+  StreamMessage,
+  ConsumerStatus,
+  StreamingConnector,
 } from "./types/connector.js";
 
 // Transformer interface

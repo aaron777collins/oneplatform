@@ -207,3 +207,117 @@ export interface CdcConnector extends Connector {
    */
   getReplicationSlotInfo?(): Promise<ReplicationSlotInfo>;
 }
+
+// ---------------------------------------------------------------------------
+// Streaming connector types (Kafka, NATS, Pulsar, etc.)
+//
+// StreamingConnector models push-based message brokers where the consumer
+// subscribes to topics and the broker delivers messages asynchronously.
+// The fundamental difference from Connector (pull-based cursor pagination)
+// is that the stream is unbounded — it runs until explicitly stopped.
+// The caller must call acknowledge() after each batch is durably written so
+// the broker can advance its committed offset.
+//
+// Offset resumability:
+//   After a crash the service reads the last acknowledged offset from the
+//   sync_state.last_cursor column and passes it as startOffset to subscribe().
+//   The broker redelivers messages from that position onward, so at-least-once
+//   delivery is guaranteed. The ingestion service deduplicates via upsert on
+//   the envelope _id (derived from topic + partition + offset).
+// ---------------------------------------------------------------------------
+
+/** Subscription parameters passed to StreamingConnector.subscribe(). */
+export interface StreamOptions {
+  /** Topics to subscribe to. Must contain at least one entry. */
+  topics: string[];
+  /**
+   * Consumer group identifier. All instances sharing the same groupId cooperate
+   * on partition assignment (Kafka) or queue-group delivery (NATS).
+   */
+  groupId: string;
+  /**
+   * Where to start consuming when no committed offset exists for this group.
+   *   "earliest" — start from the oldest available message
+   *   "latest"   — start from the current end of the topic (default)
+   *   "<cursor>" — connector-specific cursor string for deterministic resume
+   */
+  startOffset?: "earliest" | "latest" | string;
+  /** Max messages to accumulate before yielding a batch. Default: 100. */
+  maxBatchSize?: number;
+  /** Max ms to wait for a full batch before yielding a partial one. Default: 1000. */
+  maxWaitMs?: number;
+}
+
+/** A single message delivered from a message broker topic. */
+export interface StreamMessage {
+  /**
+   * Stable, globally-unique identifier for this message within the broker.
+   * Typically encoded as "<topic>:<partition>:<offset>" for Kafka or the
+   * message sequence number for NATS.
+   */
+  id: string;
+  /** Source topic name. */
+  topic: string;
+  /** Partition index within the topic. Undefined for brokers without partitions. */
+  partition?: number;
+  /** Broker-assigned monotonically increasing offset within the partition. */
+  offset?: string;
+  /** Optional message key for partition assignment and co-location. */
+  key?: string;
+  /** Decoded message payload. Must be a JSON object. */
+  value: Record<string, unknown>;
+  /** ISO 8601 timestamp when the message was produced (broker timestamp). */
+  timestamp: string;
+  /**
+   * Optional broker-level headers. Values are string-coerced;
+   * binary header values are base64-encoded.
+   */
+  headers?: Record<string, string>;
+}
+
+/** Current consumer state for monitoring and alerting. */
+export interface ConsumerStatus {
+  /** Whether the consumer is connected to the broker. */
+  connected: boolean;
+  /** Topics currently subscribed to. */
+  topics: string[];
+  /**
+   * Per-topic consumer lag (messages behind the head of the topic).
+   * Keys are topic names; values are message counts.
+   */
+  lag: Record<string, number>;
+  /** Total messages consumed since subscribe() was first called. */
+  messagesConsumed: number;
+}
+
+/**
+ * A connector that reads from a message broker (Kafka, NATS, etc.).
+ *
+ * The ingestion service lifecycle:
+ *   1. subscribe() — open consumer, return AsyncIterable<StreamMessage>
+ *   2. consume the iterable, accumulate batches
+ *   3. write batch to raw table
+ *   4. acknowledge(messageIds) — commit offsets to the broker
+ *   5. getConsumerStatus() — optional: poll lag for the status endpoint
+ *
+ * Implementations MUST NOT auto-commit offsets — the platform controls
+ * offset commits via explicit acknowledge() calls so messages are never
+ * discarded before they reach durable storage.
+ */
+export interface StreamingConnector {
+  /** Discriminant that the ingestion service uses to identify stream connectors. */
+  readonly type: "streaming";
+  /**
+   * Open a consumer subscription and return an AsyncIterable of StreamMessage
+   * values. The iterable runs indefinitely until the caller breaks out of the
+   * loop or the connector throws a fatal error.
+   */
+  subscribe(context: PluginContext, options: StreamOptions): AsyncIterable<StreamMessage>;
+  /**
+   * Acknowledge that the given message IDs have been durably written.
+   * Must not throw — log errors and return on failure.
+   */
+  acknowledge(messageIds: string[]): Promise<void>;
+  /** Return the current consumer status. Must not throw. */
+  getConsumerStatus(): Promise<ConsumerStatus>;
+}
