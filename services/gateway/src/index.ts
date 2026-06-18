@@ -423,7 +423,23 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   ontologyCache.startPubSubListener(redis);
   sseService.startPubSubListener(redis);
 
+  // Step 13: Metering flush — drain Redis counters to the DB every 60 seconds.
+  // The interval is intentionally short so billing data is never more than
+  // one minute stale. Errors inside flushPendingEvents are logged and swallowed
+  // so a transient DB failure cannot bring down the gateway.
+  const METERING_FLUSH_INTERVAL_MS = 60_000;
+  const meteringFlushTimer = setInterval(() => {
+    void meteringService.flushPendingEvents().catch((err: unknown) => {
+      logger.error("Metering flush failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }, METERING_FLUSH_INTERVAL_MS);
+
   const cleanup = async (): Promise<void> => {
+    clearInterval(meteringFlushTimer);
+    // Final flush on shutdown to avoid losing the last minute of counters.
+    await meteringService.flushPendingEvents().catch(() => { /* best-effort */ });
     ontologyCache.stopSafetyPoll();
     ontologyCache.stopPubSubListener();
     sseService.stopPubSubListener();
