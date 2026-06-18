@@ -102,6 +102,47 @@ export const listGdprRequestsQuery = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Data residency
+// ---------------------------------------------------------------------------
+
+const dataRegionEnum = z.enum([
+  "US_EAST",
+  "US_WEST",
+  "EU_WEST",
+  "EU_CENTRAL",
+  "AP_SOUTHEAST",
+  "AP_NORTHEAST",
+]);
+
+const storageClassEnum = z.enum(["standard", "reduced_redundancy", "archive"]);
+
+const replicationPolicyEnum = z.enum(["single_region", "multi_az", "cross_region_backup"]);
+
+const transferPolicyEnum = z.enum(["allow", "deny", "audit"]);
+
+export const upsertResidencyPolicyRequest = z.object({
+  region: dataRegionEnum,
+  storageClass: storageClassEnum.optional(),
+  replicationPolicy: replicationPolicyEnum.optional(),
+});
+
+export const createTransferRuleRequest = z.object({
+  sourceRegion: dataRegionEnum,
+  targetRegion: dataRegionEnum,
+  policy: transferPolicyEnum,
+  justificationRequired: z.boolean().optional(),
+});
+
+export const queryAuditLogParams = z.object({
+  region: dataRegionEnum.optional(),
+  service: z.string().min(1).optional(),
+  startTime: z.string().datetime().optional(),
+  endTime: z.string().datetime().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+// ---------------------------------------------------------------------------
 // Rate limit config (admin)
 // ---------------------------------------------------------------------------
 

@@ -5,6 +5,11 @@ export {
 } from "./webhook-delivery-repository.js";
 export { RateLimitConfigRepository } from "./rate-limit-config-repository.js";
 export { GdprRequestRepository } from "./gdpr-request-repository.js";
+export {
+  DataResidencyPolicyRepository,
+  DataTransferRuleRepository,
+  DataLocationLogRepository,
+} from "./data-residency-repository.js";
 export type {
   WebhookRow,
   WebhookDeliveryRow,
@@ -17,4 +22,14 @@ export type {
   CreateWebhookData,
   UpdateWebhookData,
   CreateWebhookDeliveryData,
+  DataResidencyPolicyRow,
+  UpsertDataResidencyPolicyData,
+  DataTransferRuleRow,
+  CreateDataTransferRuleData,
+  DataLocationLogRow,
+  CreateDataLocationLogData,
+  DataRegion,
+  StorageClass,
+  ReplicationPolicy,
+  TransferPolicy,
 } from "./types.js";
