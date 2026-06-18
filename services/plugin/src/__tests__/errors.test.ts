@@ -1,6 +1,6 @@
 // Unit tests for services/errors.ts
 //
-// Verifies all 19 plugin error classes have the correct code, statusCode,
+// Verifies all 17 plugin error classes have the correct code, statusCode,
 // message propagation, details payload propagation, AppError/Error inheritance,
 // and correct name property.
 
@@ -9,8 +9,6 @@ import { AppError } from "@oneplatform/core";
 import {
   InvalidManifestError,
   ChecksumMismatchError,
-  GpgVerificationFailedError,
-  GpgSignatureMissingError,
   InvalidPackageStructureError,
   EntrypointNotCallableError,
   PlatformVersionTooOldError,
@@ -88,14 +86,6 @@ describe("InvalidManifestError", () => {
 
 describe("ChecksumMismatchError", () => {
   assertErrorContract(ChecksumMismatchError, "CHECKSUM_MISMATCH", 422);
-});
-
-describe("GpgVerificationFailedError", () => {
-  assertErrorContract(GpgVerificationFailedError, "GPG_VERIFICATION_FAILED", 422);
-});
-
-describe("GpgSignatureMissingError", () => {
-  assertErrorContract(GpgSignatureMissingError, "GPG_SIGNATURE_MISSING", 422);
 });
 
 describe("InvalidPackageStructureError", () => {
@@ -260,12 +250,10 @@ describe("error details propagation", () => {
 // ---------------------------------------------------------------------------
 
 describe("prototype chain integrity", () => {
-  it("all 21 error instances pass instanceof AppError at runtime", () => {
+  it("all 17 error instances pass instanceof AppError at runtime", () => {
     const instances: AppError[] = [
       new InvalidManifestError("e"),
       new ChecksumMismatchError("e"),
-      new GpgVerificationFailedError("e"),
-      new GpgSignatureMissingError("e"),
       new InvalidPackageStructureError("e"),
       new EntrypointNotCallableError("e"),
       new PlatformVersionTooOldError("e"),
@@ -294,12 +282,6 @@ describe("prototype chain integrity", () => {
     const e = new PluginNotFoundError("e");
     expect(e).toBeInstanceOf(PluginNotFoundError);
     expect(e).not.toBeInstanceOf(InstanceNotFoundError);
-  });
-
-  it("instanceof check correctly distinguishes ChecksumMismatchError from GpgVerificationFailedError", () => {
-    const e = new ChecksumMismatchError("e");
-    expect(e).toBeInstanceOf(ChecksumMismatchError);
-    expect(e).not.toBeInstanceOf(GpgVerificationFailedError);
   });
 
   it("instanceof check correctly distinguishes ConnectorRegistrationFailedError from ExecutionValidationFailedError", () => {
@@ -361,8 +343,6 @@ describe("status code grouping", () => {
   const status422Errors = [
     new InvalidManifestError("e"),
     new ChecksumMismatchError("e"),
-    new GpgVerificationFailedError("e"),
-    new GpgSignatureMissingError("e"),
     new InvalidPackageStructureError("e"),
     new EntrypointNotCallableError("e"),
     new PlatformVersionTooOldError("e"),

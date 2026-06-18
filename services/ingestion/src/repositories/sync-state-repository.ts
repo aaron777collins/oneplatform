@@ -168,6 +168,22 @@ export class SyncStateRepository {
     );
   }
 
+  // findStaleSyncs returns sync_state rows currently in 'running' status whose
+  // updated_at timestamp is older than olderThanMs milliseconds ago. The
+  // watchdog uses this to log each affected connector before resetting them,
+  // keeping the bulk reset in resetStaleSyncs as a single atomic UPDATE.
+  async findStaleSyncs(olderThanMs: number): Promise<SyncStateRow[]> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const result = await this.pool.query<SyncStateRow>(
+      `SELECT ${SYNC_STATE_COLUMNS}
+         FROM ingestion.sync_state
+        WHERE status     = 'running'
+          AND updated_at < $1`,
+      [cutoff],
+    );
+    return result.rows;
+  }
+
   // resetStaleSyncs bulk-resets sync_state rows that have been stuck in
   // 'running' for longer than staleThresholdMs. Returns the count of reset rows.
   // The watchdog calls this periodically so connectors are never permanently
@@ -177,11 +193,11 @@ export class SyncStateRepository {
     const result = await this.pool.query(
       `UPDATE ingestion.sync_state
             SET status     = 'failed',
-                last_error = 'Sync reset by watchdog: exceeded stale threshold',
+                last_error = 'Sync timed out — reset by watchdog',
                 updated_at = now()
           WHERE status     = 'running'
             AND updated_at < $1`,
-      [cutoff]
+      [cutoff],
     );
     return result.rowCount ?? 0;
   }

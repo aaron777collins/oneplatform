@@ -101,6 +101,12 @@ export class TenantNotFoundError extends AppError {
   readonly statusCode = 404;
 }
 
+export class TenantHasActiveUsersError extends AppError {
+  readonly code = "AUTH_TENANT_HAS_ACTIVE_USERS" as const;
+  // 409 Conflict — the tenant cannot be deleted while it still has active users
+  readonly statusCode = 409;
+}
+
 export class RegistrationDisabledError extends AppError {
   readonly code = "AUTH_REGISTRATION_DISABLED" as const;
   readonly statusCode = 403;

@@ -81,6 +81,9 @@ export interface ApprovedUrlRow {
 // Create / Update input types
 // ---------------------------------------------------------------------------
 
+// GPG verification deferred — see G-034 in GAP-ANALYSIS.md
+// gpg_fingerprint is stored in the DB column but never populated at install time;
+// the column remains to avoid a migration until verification is implemented.
 export interface CreatePluginData {
   manifest_id: string;
   name: string;
@@ -92,7 +95,6 @@ export interface CreatePluginData {
   manifest: PluginManifest;
   is_platform_wide: boolean;
   installed_by: string;
-  gpg_fingerprint?: string;
 }
 
 export interface UpdatePluginData {

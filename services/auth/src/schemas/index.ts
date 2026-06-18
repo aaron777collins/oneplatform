@@ -350,6 +350,35 @@ export const updateRolePermissionsRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// 4.5b Tenants
+// ---------------------------------------------------------------------------
+
+export const updateTenantRequest = z.object({
+  name: z.string().min(1).max(100).trim().optional(),
+  settings: z.record(z.unknown()).optional(),
+});
+
+const tenantResponseItem = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  slug: z.string(),
+  settings: z.record(z.unknown()),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export const tenantResponse = tenantResponseItem;
+
+export const tenantListResponse = z.object({
+  data: z.array(tenantResponseItem),
+  pagination: z.object({
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // 4.6 Users
 // ---------------------------------------------------------------------------
 
@@ -495,6 +524,10 @@ export type RolePermissionsResponse = z.infer<typeof rolePermissionsResponse>;
 export type UpdateRolePermissionsRequest = z.infer<
   typeof updateRolePermissionsRequest
 >;
+
+export type UpdateTenantRequest = z.infer<typeof updateTenantRequest>;
+export type TenantResponse = z.infer<typeof tenantResponse>;
+export type TenantListResponse = z.infer<typeof tenantListResponse>;
 
 export type UpdateUserRequest = z.infer<typeof updateUserRequest>;
 export type UserResponse = z.infer<typeof userResponse>;

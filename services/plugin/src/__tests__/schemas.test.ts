@@ -414,14 +414,6 @@ describe("PluginManifestSchema — optional fields", () => {
     expect(r.success).toBe(true);
   });
 
-  it("accepts manifest with gpgFingerprint", () => {
-    const r = PluginManifestSchema.safeParse({
-      ...minimalManifest,
-      gpgFingerprint: "ABCDEF1234567890",
-    });
-    expect(r.success).toBe(true);
-  });
-
   it("accepts manifest with tags array", () => {
     const r = PluginManifestSchema.safeParse({
       ...minimalManifest,

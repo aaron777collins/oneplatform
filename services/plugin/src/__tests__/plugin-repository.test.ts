@@ -115,27 +115,6 @@ describe("PluginRepository.create", () => {
     expect(values[0]).toBe("com.example.test");
   });
 
-  it("passes gpg_fingerprint as null when not provided", async () => {
-    const expected = makePluginRow();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [expected] });
-
-    const data = makeCreateData();
-    delete (data as Partial<CreatePluginData>).gpg_fingerprint;
-    await repo.create(data);
-    const values = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]![1] as unknown[];
-    // gpg_fingerprint is the last param (index 10)
-    expect(values[10]).toBeNull();
-  });
-
-  it("passes gpg_fingerprint when provided", async () => {
-    const expected = makePluginRow();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [expected] });
-
-    await repo.create(makeCreateData({ gpg_fingerprint: "ABCDEF1234" }));
-    const values = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]![1] as unknown[];
-    expect(values[10]).toBe("ABCDEF1234");
-  });
-
   it("throws an Error when INSERT returns no rows", async () => {
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
 

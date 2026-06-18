@@ -140,8 +140,9 @@ export interface SyncService {
   processSyncJob(job: Job<SyncJobPayload>): Promise<void>;
   processBatchJob(job: Job<BatchJobPayload>): Promise<void>;
   // runWatchdog scans for sync_state rows stuck in 'running' beyond the stale
-  // threshold and resets them. Called periodically by the background scheduler.
-  runWatchdog(staleThresholdMs?: number): Promise<void>;
+  // threshold and resets them. Returns the count of rows reset. Called
+  // periodically by the background scheduler.
+  runWatchdog(staleThresholdMs?: number): Promise<number>;
 }
 
 export interface SyncServiceDeps {
@@ -171,6 +172,58 @@ interface FetchBatchResponse {
   records: DataRecord[];
   nextCursor: string | null;
   hasMore: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// executeWatchdog — pure watchdog logic, exported for direct unit testing.
+//
+// Decoupled from the full SyncService so tests can exercise the watchdog
+// without constructing BullMQ queues. The createSyncService factory delegates
+// its runWatchdog method to this function.
+// ---------------------------------------------------------------------------
+
+export async function executeWatchdog(
+  syncStateRepo: SyncStateRepository,
+  logger: Logger,
+  staleThresholdMs: number,
+): Promise<number> {
+  try {
+    // Phase 1: identify stale rows so we can emit a per-connector log entry.
+    // This is a read-before-write; a concurrent trigger could race between
+    // the SELECT and the UPDATE, but that is acceptable — worst case we log
+    // a connector that was already reset by another instance, which is harmless.
+    const staleRows = await syncStateRepo.findStaleSyncs(staleThresholdMs);
+
+    for (const row of staleRows) {
+      logger.warn("Watchdog detected stale sync — will reset to failed", {
+        connectorId: row.connector_id,
+        lastSyncJobId: row.last_sync_job_id,
+        updatedAt: row.updated_at,
+        staleThresholdMs,
+      });
+    }
+
+    // Phase 2: bulk reset to 'failed'. Uses a single UPDATE statement to
+    // avoid N individual queries and to be atomic relative to new triggers.
+    const resetCount = await syncStateRepo.resetStaleSyncs(staleThresholdMs);
+
+    if (resetCount > 0) {
+      logger.warn("Watchdog reset stale sync states", {
+        resetCount,
+        staleThresholdMs,
+      });
+    } else {
+      logger.debug("Watchdog: no stale sync states found", { staleThresholdMs });
+    }
+
+    return resetCount;
+  } catch (err) {
+    logger.error("Watchdog failed to reset stale syncs", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Do not rethrow — the watchdog must not crash the scheduler.
+    return 0;
+  }
 }
 
 export function createSyncService(deps: SyncServiceDeps): SyncService {
@@ -785,28 +838,12 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
   const DEFAULT_STALE_THRESHOLD_MS = 15 * 60 * 1_000;
 
   // -------------------------------------------------------------------------
-  // runWatchdog — resets sync_state rows stuck in 'running' beyond the
-  // configurable stale threshold. Called periodically by the ingestion service
-  // background scheduler so downed workers never leave connectors stuck forever.
+  // runWatchdog — delegates to the exported executeWatchdog function so the
+  // watchdog logic remains testable without constructing BullMQ queues.
   // -------------------------------------------------------------------------
 
-  async function runWatchdog(staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS): Promise<void> {
-    try {
-      const resetCount = await syncStateRepo.resetStaleSyncs(staleThresholdMs);
-      if (resetCount > 0) {
-        logger.warn("Watchdog reset stale sync states", {
-          resetCount,
-          staleThresholdMs,
-        });
-      } else {
-        logger.debug("Watchdog: no stale sync states found", { staleThresholdMs });
-      }
-    } catch (err) {
-      logger.error("Watchdog failed to reset stale syncs", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      // Do not rethrow — the watchdog must not crash the scheduler.
-    }
+  function runWatchdog(staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS): Promise<number> {
+    return executeWatchdog(syncStateRepo, logger, staleThresholdMs);
   }
 
   return {

@@ -14,3 +14,6 @@ tmp/
 .turbo/
 site/
 docs/development-process.md
+# Generated API docs are built fresh in CI — never commit them
+docs/generated/**
+!docs/generated/.gitkeep

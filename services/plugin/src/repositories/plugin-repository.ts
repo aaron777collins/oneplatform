@@ -20,8 +20,8 @@ export class PluginRepository {
     const result = await this.pool.query<PluginRow>(
       `INSERT INTO plugin.plugins
          (manifest_id, name, version, type, status, bundle_bucket, bundle_key,
-          manifest, is_platform_wide, installed_by, gpg_fingerprint)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          manifest, is_platform_wide, installed_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING ${PLUGIN_COLUMNS}`,
       [
         data.manifest_id,
@@ -34,7 +34,6 @@ export class PluginRepository {
         JSON.stringify(data.manifest),
         data.is_platform_wide,
         data.installed_by,
-        data.gpg_fingerprint ?? null,
       ]
     );
 

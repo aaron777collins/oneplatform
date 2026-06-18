@@ -9,6 +9,10 @@ on:
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
       - 'DEVELOPMENT-PROCESS.md'
+      # Re-trigger when source code that feeds doc generation changes
+      - 'services/**/src/**'
+      - 'packages/**/src/**'
+      - 'tools/**'
   workflow_dispatch:
 
 permissions:
@@ -20,8 +24,57 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9"
+
 jobs:
+  generate-api-docs:
+    name: Generate API Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build all packages first — docs:generate tasks depend on ^build
+      - name: Build packages
+        run: pnpm build
+
+      # Run every docs:generate task across the monorepo via Turbo
+      - name: Generate OpenAPI specs and TypeDoc
+        run: pnpm turbo docs:generate
+
+      # Merge per-service OpenAPI specs + copy TypeDoc/CLI output into docs/generated/
+      # This script intentionally runs outside Turbo because it writes to the repo
+      # root (docs/generated/), which crosses Turbo's package-boundary rules.
+      - name: Merge docs artifacts into docs/generated/
+        run: pnpm docs:merge
+
+      # Upload the populated docs/generated/ tree so the build job can consume it
+      # without re-running the expensive generation step.
+      - name: Upload generated docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-api-docs
+          path: docs/generated/
+          # Retain only for the duration of this workflow run
+          retention-days: 1
+
   build:
+    name: Build MkDocs Site
+    needs: generate-api-docs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,6 +93,14 @@ jobs:
       - name: Copy root-level markdown files into docs/
         run: |
           cp DEVELOPMENT-PROCESS.md docs/development-process.md
+
+      # Restore the generated OpenAPI/TypeDoc/CLI docs produced by generate-api-docs.
+      # The checkout above only contains .gitkeep — the real content lives in the artifact.
+      - name: Restore generated API docs
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-api-docs
+          path: docs/generated/
 
       - name: Build documentation
         run: mkdocs build --strict

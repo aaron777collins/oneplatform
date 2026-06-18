@@ -22,6 +22,8 @@ export type {
   PasswordResetToken,
   EntityPermission,
   CreateTenantData,
+  UpdateTenantData,
+  ListTenantsOptions,
   CreateUserData,
   UpdateUserData,
   CreateSessionData,

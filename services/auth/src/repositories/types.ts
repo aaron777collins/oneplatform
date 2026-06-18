@@ -8,6 +8,7 @@ export interface Tenant {
   slug: string;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
   settings: Record<string, unknown>;
 }
 
@@ -135,6 +136,16 @@ export interface CreateTenantData {
   name: string;
   slug: string;
   settings?: Record<string, unknown>;
+}
+
+export interface UpdateTenantData {
+  name?: string;
+  settings?: Record<string, unknown>;
+}
+
+export interface ListTenantsOptions {
+  limit: number;
+  offset: number;
 }
 
 export interface CreateUserData {

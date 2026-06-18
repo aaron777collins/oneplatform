@@ -121,6 +121,10 @@ export interface SyncStateRepository {
   // staleThresholdMs. Returns the number of rows reset so the caller can log
   // the count. The watchdog is the only caller.
   resetStaleSyncs(staleThresholdMs: number): Promise<number>;
+  // findStaleSyncs returns rows currently in 'running' status whose updated_at
+  // is older than olderThanMs milliseconds ago. Used by the watchdog to log
+  // each affected connector before bulk-resetting them.
+  findStaleSyncs(olderThanMs: number): Promise<SyncStateRow[]>;
 }
 
 // ---------------------------------------------------------------------------

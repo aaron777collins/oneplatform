@@ -25,17 +25,7 @@ export class ChecksumMismatchError extends AppError {
   readonly statusCode = 422;
 }
 
-// GPG signature invalid or key not in trusted list.
-export class GpgVerificationFailedError extends AppError {
-  readonly code = "GPG_VERIFICATION_FAILED" as const;
-  readonly statusCode = 422;
-}
-
-// gpgFingerprint set in manifest but no .sig file was uploaded.
-export class GpgSignatureMissingError extends AppError {
-  readonly code = "GPG_SIGNATURE_MISSING" as const;
-  readonly statusCode = 422;
-}
+// GPG verification deferred — see G-034 in GAP-ANALYSIS.md
 
 // Required files missing from the tarball.
 export class InvalidPackageStructureError extends AppError {

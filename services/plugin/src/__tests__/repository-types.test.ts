@@ -107,6 +107,8 @@ describe("PluginRow", () => {
     expect(validRow.bundle_key).toBe("com.example.my-plugin/1.0.0/bundle.js");
   });
 
+  // GPG verification deferred — see G-034 in GAP-ANALYSIS.md
+  // Column stays in DB; type stays in PluginRow so the SELECT result is correctly typed.
   it("gpg_fingerprint can be null", () => {
     expect(validRow.gpg_fingerprint).toBeNull();
   });
@@ -353,13 +355,6 @@ describe("CreatePluginData", () => {
     expect(validData.manifest_id).toBeDefined();
     expect(validData.name).toBeDefined();
     expect(validData.bundle_key).toBeDefined();
-  });
-
-  it("gpg_fingerprint is optional", () => {
-    const data: CreatePluginData = { ...validData, gpg_fingerprint: "ABCDEF" };
-    expect(data.gpg_fingerprint).toBe("ABCDEF");
-    const noGpg: CreatePluginData = { ...validData };
-    expect(noGpg.gpg_fingerprint).toBeUndefined();
   });
 
   it("status accepts all 6 plugin statuses", () => {
