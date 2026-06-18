@@ -125,8 +125,9 @@ export class BffClient {
       }
     }
 
-    // Strip trailing slash so path concatenation is always "/path" not "//path".
-    this.baseUrl = resolved.replace(/\/$/, "");
+    // Strip one-or-more trailing slashes so path concatenation is always "/path"
+    // not "//path", regardless of how many slashes the caller appended.
+    this.baseUrl = resolved.replace(/\/+$/, "");
   }
 
   /**

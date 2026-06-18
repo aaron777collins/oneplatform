@@ -53,7 +53,10 @@ async function parseErrorBody(res: Response): Promise<{ error?: { code?: string;
 }
 
 export function createHttpClient(cfg: HttpClientConfig): HttpClient {
-  const { platformUrl, apiKey, timeout, verbose } = cfg;
+  // Strip trailing slashes once at construction so every buildUrl() call
+  // receives a clean base; the URL constructor preserves extra slashes otherwise.
+  const platformUrl = cfg.platformUrl.replace(/\/+$/, "");
+  const { apiKey, timeout, verbose } = cfg;
 
   if (cfg.insecureTls) {
     // NODE_TLS_REJECT_UNAUTHORIZED is a process-level flag in Node.js — there is no

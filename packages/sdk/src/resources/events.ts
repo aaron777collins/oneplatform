@@ -6,6 +6,7 @@ import type { Transport } from '../transport.js';
 import type { AuthHandler } from '../auth/api-key.js';
 import type { SubscriptionOptions, Subscription, PlatformEvent } from '../types/subscription.js';
 import { createSseSubscription } from '../subscriptions/sse-subscriber.js';
+import { ValidationError } from '../errors/client-errors.js';
 
 export interface EventNamespace {
   /**
@@ -30,9 +31,13 @@ export function createEventNamespace(
   return {
     subscribe(options: SubscriptionOptions, handler: (event: PlatformEvent) => void): Subscription {
       if (options.events.length === 0) {
-        throw new Error(
-          '[OnePlatform SDK] events.subscribe() requires at least one event pattern.',
-        );
+        // Empty events array is a caller mistake detectable before hitting the network.
+        throw new ValidationError({
+          code: 'VALIDATION_ERROR',
+          message: '[OnePlatform SDK] events.subscribe() requires at least one event pattern.',
+          retryable: false,
+          constraints: [{ constraint: 'events.minLength', message: 'At least one event pattern is required.' }],
+        });
       }
 
       // transport.buildUrl() prepends the stored baseUrl — do not pass baseUrl here

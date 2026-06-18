@@ -42,6 +42,12 @@ export {
   ServerError,
   NetworkError,
 } from './errors/index.js';
+export type {
+  OnePlatformErrorOptions,
+  ValidationFieldError,
+  ValidationConstraintViolation,
+  ValidationErrorOptions,
+} from './errors/index.js';
 
 // Pagination types
 export type { PaginatedIterable, PageFetcher } from './pagination/index.js';

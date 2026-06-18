@@ -13,7 +13,7 @@
 import type { SubscriptionOptions, Subscription, PlatformEvent } from '../types/subscription.js';
 import type { AuthHandler } from '../auth/api-key.js';
 import { NetworkError } from '../errors/network-error.js';
-import { AuthError } from '../errors/client-errors.js';
+import { AuthError, ValidationError } from '../errors/client-errors.js';
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_MS = 1_000;
@@ -26,11 +26,14 @@ type ErrorHandler = (error: NetworkError | AuthError) => void;
 function validateEventPattern(pattern: string): void {
   // Allow: letters, digits, dots, and optionally a single trailing wildcard
   if (!/^[\w]+(\.[\w]+)*(\.\*)?$|^\*$/.test(pattern)) {
-    throw new Error(
-      `[OnePlatform SDK] Invalid event pattern: "${pattern}". ` +
-        'Patterns must be dot-separated alphanumeric segments with an optional trailing ".*" ' +
-        'or the global wildcard "*".',
-    );
+    // Surface a typed error immediately so callers can distinguish malformed
+    // patterns from network failures in their catch blocks.
+    throw new ValidationError({
+      code: 'VALIDATION_ERROR',
+      message: `[OnePlatform SDK] Invalid event pattern: "${pattern}". Patterns must be dot-separated alphanumeric segments with an optional trailing ".*" or the global wildcard "*".`,
+      retryable: false,
+      fields: [{ field: 'events', message: `Invalid event pattern: "${pattern}". Use dot-separated segments with optional trailing ".*" or "*".` }],
+    });
   }
 }
 

@@ -10,6 +10,8 @@
  *   // → { 'filter[status][eq]': 'active', 'filter[price][gt]': '100' }
  */
 
+import { ValidationError } from '../errors/client-errors.js';
+
 /** Represents a single accumulated filter condition. */
 interface FilterCondition {
   readonly field: string;
@@ -48,10 +50,13 @@ export interface FieldConditionBuilder extends FilterBuilder {
 /** Validates that a field name contains only safe characters to prevent injection. */
 function assertValidFieldName(field: string): void {
   if (!/^[\w.[\]]+$/.test(field)) {
-    throw new Error(
-      `[OnePlatform SDK] Invalid filter field name: "${field}". ` +
-        'Field names must contain only word characters, dots, and brackets.',
-    );
+    // Reject at the DSL boundary so callers get a typed error they can catch.
+    throw new ValidationError({
+      code: 'VALIDATION_ERROR',
+      message: `[OnePlatform SDK] Invalid filter field name: "${field}". Field names must contain only word characters, dots, and brackets.`,
+      retryable: false,
+      fields: [{ field, message: 'Field name must contain only word characters, dots, and brackets.' }],
+    });
   }
 }
 

@@ -20,6 +20,7 @@ import type {
   MigrationStatus,
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { ConfigurationError } from '../errors/client-errors.js';
 
 /**
  * Namespace for ontology schema management.
@@ -126,7 +127,12 @@ export function createOntologyNamespace(transport: Transport): OntologyNamespace
       // compatibility during the deprecation window — callers that pass two
       // strings receive a descriptive error so they can migrate.
       if (typeof proposedSchemaOrToVersion === 'string') {
-        throw new Error(
+        // Two-string signature was never wired to a service endpoint and was
+        // removed in the API redesign. Throw ConfigurationError (not
+        // ValidationError) because this is a programmer error — the wrong
+        // method overload — not bad user input that the caller can retry with
+        // corrected field values.
+        throw new ConfigurationError(
           '[SDK] diff(fromVersion, toVersion) is deprecated and has no service endpoint. ' +
           'Use diff(entityTypeId, proposedSchema) instead — see SDK CHANGELOG for migration guidance.',
         );

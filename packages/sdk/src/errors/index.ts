@@ -12,6 +12,11 @@ export {
   ConfigurationError,
   PaginationLimitError,
 } from './client-errors.js';
+export type {
+  ValidationFieldError,
+  ValidationConstraintViolation,
+  ValidationErrorOptions,
+} from './client-errors.js';
 
 export { RateLimitError } from './rate-limit-error.js';
 export type { RateLimitErrorOptions } from './rate-limit-error.js';

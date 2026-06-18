@@ -439,6 +439,58 @@ services:
           memory: 1g
           cpus: "1"
 
+  # ─── Sandbox VM ──────────────────────────────────────────────────────────────
+  # Runs isolated-vm (V8 Isolate) for JS/TS plugin code. Communicates with the
+  # Execution Service exclusively via the sandbox-socket Unix socket volume.
+  # Design spec §5.1, §7.6: no internal network access, read-only root fs,
+  # non-root user (uid 1002), no Linux capabilities.
+  op-sandbox-vm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sandbox
+    container_name: op-sandbox-vm
+    # Network isolation: sandbox can only reach the execution service via the
+    # shared Unix socket (sandbox-socket volume). It has no TCP routes to any
+    # internal service and no routes to the public network.
+    networks:
+      - oneplatform-sandbox
+    volumes:
+      # Shared Unix socket — execution-service dials /run/sandbox/op.sock
+      - sandbox-socket:/run/sandbox
+    restart: unless-stopped
+    # No external secrets are injected — sandbox has no DB, Redis, or API access.
+    environment:
+      NODE_ENV: production
+      # V8 hardening flags mirrored from Dockerfile.sandbox CMD. NODE_OPTIONS
+      # ensures the flags apply even if the container is started with a custom
+      # command (e.g., docker run overrides). Flags explained in Dockerfile.sandbox.
+      NODE_OPTIONS: "--max-old-space-size=512 --disallow-code-generation-from-strings --jitless"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=50M
+    healthcheck:
+      # Verify the sandbox socket is listening before marking the service healthy.
+      # The execution service depends_on this check before accepting traffic.
+      test: ["CMD", "node", "-e", "require('net').createConnection('/run/sandbox/op.sock').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   execution-service:
     <<: *service-common
     build:
@@ -463,7 +515,7 @@ services:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
     # x-service-common provides pgbouncer + redis deps, but YAML merge does not
     # deep-merge maps — overriding depends_on here replaces the whole map, so
-    # pgbouncer and redis must be repeated explicitly alongside docker-socket-proxy.
+    # pgbouncer, redis, docker-socket-proxy, and op-sandbox-vm must all be listed.
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -471,6 +523,8 @@ services:
         condition: service_healthy
       docker-socket-proxy:
         condition: service_started
+      op-sandbox-vm:
+        condition: service_healthy
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro

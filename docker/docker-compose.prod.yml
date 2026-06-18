@@ -114,6 +114,22 @@ services:
           memory: 1g
           cpus: "1"
 
+  # ── Sandbox VM ────────────────────────────────────────────────────────────────
+  op-sandbox-vm:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          # Isolate heap is bounded by NODE_OPTIONS --max-old-space-size=512.
+          # Container memory limit is higher to cover Node.js runtime overhead,
+          # native isolated-vm buffers, and OS page cache.
+          memory: 768m
+          cpus: "1"
+
   # ── Execution service ──────────────────────────────────────────────────────
   execution-service:
     environment:

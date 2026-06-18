@@ -54,6 +54,32 @@ describe("buildFilterParams", () => {
   });
 });
 
+// ─── BffClient constructor ─────────────────────────────────────────────────────
+
+describe("BffClient constructor", () => {
+  it("strips a single trailing slash from bffBaseUrl", () => {
+    const client = new BffClient("https://api.example.com/");
+    // Access private field via type cast to verify normalisation
+    expect((client as unknown as { baseUrl: string }).baseUrl).toBe(
+      "https://api.example.com",
+    );
+  });
+
+  it("strips multiple trailing slashes from bffBaseUrl", () => {
+    const client = new BffClient("https://api.example.com///");
+    expect((client as unknown as { baseUrl: string }).baseUrl).toBe(
+      "https://api.example.com",
+    );
+  });
+
+  it("leaves a URL without trailing slash unchanged", () => {
+    const client = new BffClient("https://api.example.com");
+    expect((client as unknown as { baseUrl: string }).baseUrl).toBe(
+      "https://api.example.com",
+    );
+  });
+});
+
 // ─── BffClient.request ─────────────────────────────────────────────────────────
 
 describe("BffClient.request", () => {

@@ -54,17 +54,27 @@ USER sandbox
 # The socket path is /run/sandbox/op.sock — mounted from sandbox-socket volume.
 
 ENV NODE_ENV=production
-# Cap heap size to 512 MB — sandbox jobs should be small and short-lived.
-ENV NODE_OPTIONS=--max-old-space-size=512
+# NODE_OPTIONS applies V8 hardening flags to this Node.js process (the sandbox host).
+# User plugin code runs inside isolated-vm Isolates, which are separate V8 contexts,
+# so these flags do not affect plugin execution — they harden the host process itself.
+#
+#   --max-old-space-size=512
+#     Cap the host process heap. Sandbox jobs are small; this prevents the host from
+#     ballooning under load.
+#
+#   --disallow-code-generation-from-strings
+#     Prevents eval() and new Function() from compiling strings to native code in the
+#     host process, closing a common code-injection escape vector.
+#
+#   --jitless
+#     Disables the JIT compiler in the host process, eliminating JIT-spray attacks
+#     where an attacker shapes executable memory through JIT-compiled stubs.
+#     Accepted performance trade-off: this process is I/O-bound (socket + IPC),
+#     not CPU-bound, so interpreter-only mode has negligible throughput impact.
+ENV NODE_OPTIONS="--max-old-space-size=512 --disallow-code-generation-from-strings --jitless"
 
 # Unix socket listener: accepts JSON-RPC requests from Execution Service.
 # The socket path must match what Execution Service dials.
-#
-# V8 hardening flags:
-#   --disallow-code-generation-from-strings  prevents eval() / new Function()
-#     from compiling strings into executable code, closing a common escape vector.
-#   --jitless  disables the JIT compiler entirely, eliminating JIT-spray attacks
-#     where an attacker sprays executable shellcode through JIT-compiled stubs.
-#   Both are safe for the sandbox workload because user code is executed inside
-#   isolated-vm, not in the outer Node.js process.
+# The V8 flags are redundantly specified here (they are already in NODE_OPTIONS above)
+# so that the intent is clear to any operator who inspects the running process cmdline.
 CMD ["node", "--disallow-code-generation-from-strings", "--jitless", "src/server.js", "--socket", "/run/sandbox/op.sock"]

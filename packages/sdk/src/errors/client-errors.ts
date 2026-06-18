@@ -36,13 +36,87 @@ export class ConflictError extends ClientError {
   override readonly statusCode = 409 as const;
 }
 
-/** 422 Unprocessable Entity. Schema validation failed. */
+// ---------------------------------------------------------------------------
+// ValidationError
+// ---------------------------------------------------------------------------
+
+/**
+ * A single per-field validation failure.
+ * `field` uses dot notation for nested paths (e.g. "address.zip").
+ */
+export interface ValidationFieldError {
+  readonly field: string;
+  readonly message: string;
+}
+
+/**
+ * A constraint violation that spans the whole request (not tied to one field).
+ * Example: "At least one of 'name' or 'slug' must be provided."
+ */
+export interface ValidationConstraintViolation {
+  readonly constraint: string;
+  readonly message: string;
+}
+
+/** Constructor options for {@link ValidationError}. */
+export interface ValidationErrorOptions extends OnePlatformErrorOptions {
+  /**
+   * Per-field validation failures. Each entry identifies the failing field and
+   * the human-readable reason. Use dot notation for nested paths.
+   */
+  readonly fields?: ValidationFieldError[];
+  /**
+   * Cross-field or whole-request constraint violations that cannot be attributed
+   * to a single field.
+   */
+  readonly constraints?: ValidationConstraintViolation[];
+}
+
+/**
+ * 422 Unprocessable Entity. Input failed validation before reaching the server,
+ * or the server rejected it after schema/semantic checks.
+ *
+ * Callers can discriminate with `instanceof ValidationError` without changing
+ * existing catch blocks that already handle `OnePlatformError`.
+ *
+ * ```ts
+ * try {
+ *   await client.data.entity('Product').create(body);
+ * } catch (err) {
+ *   if (err instanceof ValidationError) {
+ *     for (const f of err.fields) console.error(f.field, f.message);
+ *   }
+ * }
+ * ```
+ */
 export class ValidationError extends ClientError {
   override readonly statusCode = 422 as const;
 
   /**
+   * Typed per-field validation failures.
+   * Empty when the error is not field-specific.
+   */
+  readonly fields: readonly ValidationFieldError[];
+
+  /**
+   * Whole-request constraint violations not attributable to a single field.
+   * Empty when there are no cross-field failures.
+   */
+  readonly constraints: readonly ValidationConstraintViolation[];
+
+  constructor(options: ValidationErrorOptions) {
+    super(options);
+    this.fields = options.fields ?? [];
+    this.constraints = options.constraints ?? [];
+  }
+
+  /**
    * Per-field validation messages extracted from details.fields.
    * Keys are field names; values are arrays of error strings.
+   *
+   * @deprecated Prefer the typed {@link fields} array. This getter exists for
+   * backward compatibility with server responses that embed field errors inside
+   * the generic `details` bag.
    */
   get fieldErrors(): Record<string, string[]> {
     return (this.details?.['fields'] as Record<string, string[]> | undefined) ?? {};
