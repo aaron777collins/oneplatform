@@ -71,9 +71,8 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
         tenantName: orgName,
         bootstrapToken,
       });
-      // Full store reset — no form data persists after success
       reset();
-      onNext();
+      window.location.href = "/";
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.statusCode === 410) {

@@ -30,12 +30,12 @@ export function SuccessStep() {
             OnePlatform is configured and ready.
           </p>
           <p className="text-sm text-[var(--color-muted-foreground)]">
-            Sign in with the admin account you created to start using the platform.
+            You are now signed in and can start using the platform.
           </p>
         </div>
 
         <Button asChild size="lg" className="w-full max-w-xs">
-          <Link to="/login">Go to sign-in</Link>
+          <Link to="/">Go to dashboard</Link>
         </Button>
       </div>
     </WizardStep>

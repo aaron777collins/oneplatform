@@ -46,6 +46,25 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
       ipAddress,
     });
 
+    if (c.req.header("Origin") !== undefined && result.accessToken !== undefined) {
+      const isSecure = c.req.url.startsWith("https://");
+      c.res = new Response(JSON.stringify(result), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+      c.header(
+        "Set-Cookie",
+        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/${isSecure ? "; Secure" : ""}`,
+      );
+      if (result.refreshToken !== undefined) {
+        c.header(
+          "Set-Cookie",
+          `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+        );
+      }
+      return c.res;
+    }
+
     return c.json(result, 201);
   });
 
