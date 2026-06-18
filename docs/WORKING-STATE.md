@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 12 — Docker Compose, Docs & TLS (COMPLETE)
+## Current Phase: Phase 13 — P1 Gap Closure, Connectors, OTEL & Process Hardening (COMPLETE)
 
 ### Completed Phases
 
@@ -173,8 +173,18 @@ This document tracks the current state of development. Read this FIRST when resu
 - [x] Code review — 3 parallel reviews (TLS, API docs, ops docs), all blockers fixed
 - [x] Final E2E verification — 17/17 build, 20/20 test suites, 19/19 docs, 25-page Starlight site, Docker Compose valid
 
+#### Phase 13: P1 Gap Closure, Connectors, OTEL & Process Hardening
+- [x] P1 gap audit — 53 P1 gaps audited, 49 confirmed fixed, 4 remaining identified
+- [x] G-011: Post-bootstrap wizard routing fix — httpOnly cookies + redirect to /dashboard
+- [x] G-025: OTEL observability wired — W3C Trace Context middleware, Jaeger container, all 9 services
+- [x] G-042: 5 built-in connector plugins (REST API, PostgreSQL, MySQL, CSV, Webhook) — 214 tests
+- [x] G-107: CI/CD pipeline — GitHub Actions (lint, typecheck, test, build, Docker image build)
+- [x] DEVELOPMENT-PROCESS.md — 8 new sections: CI/CD, rollback, dependency mgmt, perf testing, migration strategy, hotfix process, accessibility testing, API versioning
+
 ### Pending
-1. BSL license file (explicitly deferred by user)
+- P2 gaps (42 gaps) — enterprise auth, workflow editor, visual app builder, developer experience
+- P3 gaps (23 gaps) — CDC, lineage, sub-workflows, K8s, SOC2
+- P4 gaps (10 gaps) — GraphQL, gRPC, multi-region, mobile
 
 ## Test Totals
 
@@ -185,10 +195,11 @@ This document tracks the current state of development. Read this FIRST when resu
 | Plugin SDK | 61 |
 | App SDK | 105 |
 | Frontend | 367 |
+| Connectors | 214 |
 | Integration L1 | ~126 |
 | Integration L2 | ~50 |
 | Integration L3 (E2E) | ~28 |
-| **Total** | **~6,442** |
+| **Total** | **~6,656** |
 
 ## Key References
 
@@ -200,11 +211,12 @@ This document tracks the current state of development. Read this FIRST when resu
 | `docs/USER-STORIES-ANALYSIS-V3.md` | Friction point analysis v3 (53 net-new findings) |
 | `docs/USER-STORIES-ANALYSIS-V4.md` | Friction point analysis v4 (148 net-new findings) |
 | `docs/GAP-ANALYSIS.md` | Gap analysis (127 gaps across 9 categories) |
-| `docs/ARCH-REVIEW-REMAINING-ISSUES.md` | Architecture review of remaining issues |
 | `docs/OPERATIONS.md` | Day-to-day platform operations |
 | `docs/MONITORING.md` | Observability and alerting setup |
 | `docs/TROUBLESHOOTING.md` | Common issues and debug procedures |
 | `docs/UPGRADE.md` | Version upgrade and migration procedures |
 | `docs/BACKUP.md` | Backup and disaster recovery |
 | `DEVELOPMENT-PROCESS.md` | Development pipeline and quality gates |
+| `.github/workflows/ci.yml` | CI/CD pipeline |
+| `plugins/connector-*` | 5 built-in connector plugins |
 | `.claude/handoff.md` | Session continuity handoff |
