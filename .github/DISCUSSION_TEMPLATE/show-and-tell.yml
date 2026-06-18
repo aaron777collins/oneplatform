@@ -1,0 +1,59 @@
+title: "[Show & Tell] "
+labels: ["show-and-tell"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Built something cool with OnePlatform? Share it here — connectors, plugins, apps,
+        integrations, deployment setups, or anything else you have created. This is the place
+        to show your work and inspire others.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you build?
+      description: Describe your project — what it does, why you built it, and who it is for.
+      placeholder: |
+        A brief description of the project and its purpose.
+    validations:
+      required: true
+
+  - type: textarea
+    id: how
+    attributes:
+      label: How it works
+      description: >
+        Walk us through the interesting parts — which OnePlatform features you used, how data
+        flows through the system, any challenges you solved. Code snippets, config examples,
+        and architecture diagrams are very welcome.
+
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      description: Repository, demo, documentation, plugin registry entry, etc.
+      placeholder: |
+        - GitHub: https://github.com/...
+        - Demo: https://...
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Project type
+      options:
+        - Plugin / Connector
+        - App (built on the App Platform)
+        - Integration / Automation workflow
+        - Deployment setup / Infrastructure
+        - Tutorial / Guide
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before posting
+      options:
+        - label: This project uses OnePlatform and is ready to share (not just an idea).
+          required: true

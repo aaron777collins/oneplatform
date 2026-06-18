@@ -1,0 +1,70 @@
+title: "[Idea] "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose a new feature or a significant improvement to OnePlatform.
+        Early-stage ideas that need community feedback are welcome here before a formal
+        [Feature Request issue](https://github.com/aaron777collins/oneplatform/issues/new?template=feature_request.md)
+        is opened.
+
+        Good feature discussions explain the problem before proposing a solution. The community
+        can then explore multiple approaches rather than anchoring on one implementation detail.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve? Who is affected and how often?
+      placeholder: |
+        As a [persona], I want to [goal] so that [outcome].
+        Currently I have to [workaround], which is painful because [reason].
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: >
+        Describe the feature or change you have in mind. How should it work from a user's
+        perspective? Diagrams, API sketches, or CLI examples are very helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you think about, and why did you prefer this one?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the platform does this idea relate to?
+      options:
+        - Data Ingestion / Connectors
+        - Ontology / Schema
+        - Pipelines / Automation
+        - Code Execution
+        - App Platform
+        - Auth / RBAC
+        - Plugin System
+        - SDK / CLI
+        - Observability / Logging
+        - Developer Experience
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before posting
+      options:
+        - label: I searched existing Issues and Discussions and this has not been proposed before.
+          required: true
+        - label: This is a platform-level idea, not a project-specific connector request.

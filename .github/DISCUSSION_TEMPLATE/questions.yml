@@ -1,0 +1,63 @@
+title: "[Q&A] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for questions about using OnePlatform — setup, configuration, connectors,
+        pipelines, the SDK, the CLI, or anything else. For reproducible bugs, please open a
+        [Bug Report](https://github.com/aaron777collins/oneplatform/issues/new?template=bug_report.md)
+        instead.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What do you want to know or understand?
+      placeholder: Describe what you are trying to do and what is unclear.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: >
+        What have you already tried? Include relevant config snippets, CLI output, or error
+        messages — this lets others answer faster and avoids back-and-forth.
+      placeholder: |
+        OnePlatform version:
+        Deployment: Docker Compose / Kubernetes / other
+        What I tried:
+        What happened:
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the platform does your question relate to?
+      options:
+        - Setup / Installation
+        - Configuration
+        - Data Ingestion / Connectors
+        - Ontology / Schema
+        - Pipelines / Automation
+        - Code Execution
+        - App Platform
+        - Auth / RBAC
+        - Plugin Development
+        - SDK / CLI
+        - Observability / Logging
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before posting
+      options:
+        - label: I searched existing Discussions and did not find an answer.
+          required: true
+        - label: I checked the [documentation](https://aaron777collins.github.io/oneplatform/).
+          required: true
