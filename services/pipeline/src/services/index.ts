@@ -5,13 +5,16 @@ export {
   type PipelineService,
   type PipelineServiceDeps,
   type PipelineRepository,
+  type PipelineVersionRepository,
   type CreatePipelineInput,
   type UpdatePipelineInput,
   type PipelineListQuery,
   type PipelineListResult,
+  type PipelineVersionListResult,
   type PipelineDefinition,
   type PipelineOptions,
   type PipelineRow,
+  type PipelineVersionRow,
   type Step,
   type CodeStep,
   type ConnectorStep,
@@ -75,5 +78,20 @@ export {
   type EventTriggerConfig,
   type WebhookTriggerConfig,
 } from "./trigger-service.js";
+
+export {
+  createExecutionTracker,
+  type ExecutionTracker,
+  type ExecutionStatus,
+  type StepStatus,
+  type StepDefinition,
+  type ExecutionProgress,
+  type ExecutionOverallStatus,
+  type ExecutionEvent,
+  type StepStartEvent,
+  type StepCompleteEvent,
+  type StepErrorEvent,
+  type ExecutionCompleteEvent,
+} from "./execution-tracker.js";
 
 export * from "./errors.js";

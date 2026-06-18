@@ -5,3 +5,4 @@ export { createRunRoutes, type RunRouteDeps } from "./runs.js";
 export { createScheduleRoutes, type ScheduleRouteDeps } from "./schedules.js";
 export { createHealthRoutes, type HealthRouteDeps } from "./health.js";
 export { createInternalRoutes, type InternalRouteDeps } from "./internal.js";
+export { createExecutionRoutes, type ExecutionRouteDeps } from "./executions.js";

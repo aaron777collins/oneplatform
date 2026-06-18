@@ -94,6 +94,22 @@ export const uploadStatusQuery = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+export const connectorAnalyticsQuery = z.object({
+  period: z.enum(["hourly", "daily", "weekly"]).optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+// tenantOverviewQuery has no parameters today but is defined explicitly so
+// future additions (e.g. a custom time window) don't require a route change.
+export const tenantOverviewQuery = z.object({});
+
+// ---------------------------------------------------------------------------
 // Internal endpoints
 // ---------------------------------------------------------------------------
 

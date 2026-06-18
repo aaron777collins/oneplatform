@@ -25,6 +25,7 @@ import type {
   RunLogRepository,
 } from "./run-service.js";
 import { StepExecutionError } from "./errors.js";
+import type { ExecutionTracker } from "./execution-tracker.js";
 
 // ---------------------------------------------------------------------------
 // Repository interfaces required by the execution engine
@@ -210,6 +211,9 @@ export interface ExecutionEngineDeps {
   hookDefaultTimeoutMs: number;
   logger: Logger;
   serviceTokenSigner: ServiceTokenSigner;
+  // Optional — when provided, step transitions are reflected in the real-time
+  // SSE tracker. Tests can omit this to avoid coupling to the tracker.
+  executionTracker?: ExecutionTracker;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +234,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     hookDefaultTimeoutMs,
     logger,
     serviceTokenSigner,
+    executionTracker,
   } = deps;
 
   // -------------------------------------------------------------------------
@@ -785,6 +790,14 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
         })),
       );
 
+      // Initialize in-memory execution tracking so SSE subscribers get immediate
+      // visibility into the pending step list.
+      executionTracker?.startExecution(
+        runId,
+        run.pipeline_id,
+        allSteps.map((s) => ({ stepId: s.id, name: s.name, type: s.type })),
+      );
+
       // Step 5: Run after:pipeline.trigger hooks
       const afterTriggerHooks = await resolveHookChain("after:pipeline.trigger", tenantId);
       if (afterTriggerHooks.length > 0) {
@@ -859,25 +872,29 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
         const runStepRow = runStepMap.get(currentStepId);
         if (runStepRow === undefined) break;
 
-        // Evaluate skip condition (JSONata, 100ms timeout)
-        if (step.condition !== undefined && step.condition.length > 0) {
+        // Evaluate per-step skipIf expression (JSONata, 100ms timeout).
+        // skipIf is separate from the conditional step type; it is a pre-execution
+        // guard on any step type that short-circuits to the next sequential step
+        // without executing the step body.
+        if (step.skipIf !== undefined && step.skipIf.length > 0) {
           const stepsCtx: Record<string, unknown> = {};
           for (const [sid, out] of ctx.stepOutputs) {
             stepsCtx[sid] = { output: out };
           }
           let skip = false;
           try {
-            const condTrue = await evaluateConditional(step.condition, {
+            const condTrue = await evaluateConditional(step.skipIf, {
               input: run.input,
               steps: stepsCtx,
             });
             skip = !condTrue;
           } catch {
-            skip = false; // On condition error, proceed
+            skip = false; // On skipIf error, proceed with the step
           }
 
           if (skip) {
             await runStepRepo.updateStatus(runId, runStepRow.step_id, { status: "skipped" });
+            executionTracker?.updateStepStatus(runId, step.id, "skipped");
             currentStepId = getNextStepIdFromMain(step, allSteps, undefined);
             continue;
           }
@@ -922,6 +939,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           status: "running",
           started_at: new Date(),
         });
+        executionTracker?.updateStepStatus(runId, step.id, "running");
 
         await appendLog(runId, tenantId, `Step "${step.name}" started.`, { stepId: step.id });
 
@@ -982,6 +1000,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
             completed_at: new Date(),
             error: { code: "STEP_EXECUTION_FAILED", message: errMessage },
           });
+          executionTracker?.updateStepStatus(runId, step.id, "failed", { error: errMessage });
 
           await appendLog(runId, tenantId, `Step "${step.name}" failed after ${maxRetries + 1} attempt(s): ${errMessage}`, {
             stepId: step.id,
@@ -1017,6 +1036,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           status: "completed",
           completed_at: new Date(),
         });
+        executionTracker?.updateStepStatus(runId, step.id, "completed");
 
         // Write output separately — updateOutput is a dedicated method because
         // output can be large JSONB and is only set on success.
@@ -1101,6 +1121,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           error: { message: failureError.message },
         });
 
+        // Notify SSE subscribers that the execution has reached a terminal state.
+        executionTracker?.completeExecution(runId, "failed");
         await runAfterCompleteHooks(ctx, "failed");
         return;
       }
@@ -1149,6 +1171,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
         stepCount: allSteps.length,
       });
 
+      // Notify SSE subscribers that the execution has finished successfully.
+      executionTracker?.completeExecution(runId, "completed");
       await runAfterCompleteHooks(ctx, "completed");
     } finally {
       // Advisory lock MUST be released even if the worker crashes mid-run.

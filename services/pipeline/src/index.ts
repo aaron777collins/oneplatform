@@ -21,12 +21,14 @@ import {
   createScheduleService,
   createTriggerService,
   createExecutionEngine,
+  createExecutionTracker,
 } from "./services/index.js";
 import type {
   PipelineRunJobPayload,
 } from "./services/index.js";
 import {
   PipelineRepository,
+  PipelineVersionRepository,
   RunRepository,
   RunStepRepository,
   RunLogRepository,
@@ -39,6 +41,7 @@ import {
   createRunRoutes,
   createScheduleRoutes,
   createInternalRoutes,
+  createExecutionRoutes,
 } from "./routes/index.js";
 
 export interface ServiceApp {
@@ -161,6 +164,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
 
   // Repositories
   const pipelineRepo = new PipelineRepository(db);
+  const pipelineVersionRepo = new PipelineVersionRepository(db);
   const runRepo = new RunRepository(db);
   const runStepRepo = new RunStepRepository(db);
   const runLogRepo = new RunLogRepository(db);
@@ -176,6 +180,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
   // Services
   const pipelineService = createPipelineService({
     pipelineRepo,
+    versionRepo: pipelineVersionRepo,
     scheduleRepo,
     runRepo,
     logger,
@@ -211,6 +216,11 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
   const privateKeyPem = await loadServicePrivateKey("pipeline-service", serviceKeysDir);
   const serviceTokenSigner = await createServiceTokenSigner("pipeline-service", privateKeyPem);
 
+  // Execution tracker is created before the engine so it can be passed into
+  // the engine for real-time step-event emission. It is also passed to the
+  // execution routes for the SSE and REST status endpoints.
+  const executionTracker = createExecutionTracker();
+
   const executionEngine = createExecutionEngine({
     runRepo,
     runStepRepo,
@@ -224,6 +234,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     hookDefaultTimeoutMs,
     logger,
     serviceTokenSigner,
+    executionTracker,
   });
 
   // Workers are optional so tests can wire the app without consuming Redis connections
@@ -328,6 +339,11 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
 
   const pipelineRoutes = createPipelineRoutes({ pipelineService, runService });
   app.route("/api/v1/pipelines", pipelineRoutes);
+
+  // Execution status routes are mounted under the pipelines prefix so the
+  // pipelineId path param is available at /api/v1/pipelines/:pipelineId/executions.
+  const executionRoutes = createExecutionRoutes({ executionTracker, pipelineService });
+  app.route("/api/v1/pipelines/:pipelineId/executions", executionRoutes);
 
   const runRoutes = createRunRoutes({ runService });
   app.route("/api/v1/pipeline-runs", runRoutes);
