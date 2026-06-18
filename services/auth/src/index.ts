@@ -49,6 +49,7 @@ import {
   createOAuthService,
   createRbacService,
   createGuestSessionService,
+  createBrandingService,
 } from "./services/index.js";
 import { registerRoutes } from "./routes/index.js";
 
@@ -226,6 +227,8 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
 
   const guestSessionService = createGuestSessionService({ redis });
 
+  const brandingService = createBrandingService({ db });
+
   // Step 6: Load peer service public keys for service-to-service auth.
   const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
 
@@ -267,6 +270,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
     apiKeyService,
     oauthService,
     guestSessionService,
+    brandingService,
     // Repositories (used directly by routes that don't need a full service)
     tenantRepository,
     roleRepository,

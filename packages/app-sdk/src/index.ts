@@ -28,12 +28,24 @@
  */
 
 export { AppProvider } from "./provider/AppProvider.js";
+export {
+  BrandingProvider,
+  BrandLogo,
+  useBranding,
+  applyBranding,
+  BrandingContext,
+} from "./providers/BrandingProvider.js";
 export { useQuery } from "./hooks/useQuery.js";
 export { useMutation } from "./hooks/useMutation.js";
 export { useSubscription } from "./hooks/useSubscription.js";
 export { useUser } from "./hooks/useUser.js";
 export { usePermission } from "./hooks/usePermission.js";
 export { useAppStorage } from "./hooks/useAppStorage.js";
+
+export type {
+  TenantBrandingConfig,
+  BrandingContextValue,
+} from "./providers/branding-types.js";
 
 export type {
   // Query

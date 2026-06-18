@@ -13,6 +13,7 @@ import type { UserRouteDeps } from "./users.js";
 import type { OAuthRouteDeps } from "./oauth.js";
 import type { InternalRouteDeps } from "./internal.js";
 import type { TenantRouteDeps } from "./tenants.js";
+import type { BrandingRouteDeps } from "./branding.js";
 import { createBootstrapRoutes } from "./bootstrap.js";
 import { createAuthRoutes } from "./auth.js";
 import { createApiKeyRoutes } from "./api-keys.js";
@@ -21,6 +22,7 @@ import { createUserRoutes } from "./users.js";
 import { createOAuthRoutes } from "./oauth.js";
 import { createInternalRoutes } from "./internal.js";
 import { createTenantRoutes } from "./tenants.js";
+import { createBrandingRoutes } from "./branding.js";
 import { createJwksRoutes } from "./jwks.js";
 import type pg from "pg";
 import type { Redis } from "ioredis";
@@ -33,7 +35,8 @@ export interface RegisterRoutesConfig
     UserRouteDeps,
     OAuthRouteDeps,
     InternalRouteDeps,
-    TenantRouteDeps {
+    TenantRouteDeps,
+    BrandingRouteDeps {
   db: pg.Pool;
   redis: Redis;
   serviceName: string;
@@ -74,6 +77,7 @@ export function registerRoutes(
   app.route("/", createTenantRoutes(config));
   app.route("/", createOAuthRoutes(config));
   app.route("/", createInternalRoutes(config));
+  app.route("/", createBrandingRoutes(config));
   // JWKS endpoint — no deps required; reads algorithm config from env at request time
   app.route("/", createJwksRoutes());
 }
@@ -103,5 +107,8 @@ export type { InternalRouteDeps } from "./internal.js";
 
 export { createTenantRoutes } from "./tenants.js";
 export type { TenantRouteDeps } from "./tenants.js";
+
+export { createBrandingRoutes } from "./branding.js";
+export type { BrandingRouteDeps } from "./branding.js";
 
 export { createJwksRoutes } from "./jwks.js";

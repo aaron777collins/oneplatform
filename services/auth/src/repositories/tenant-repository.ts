@@ -9,7 +9,7 @@ import type {
 // Column list shared by all SELECT queries — keeps the list in one place so
 // adding new columns doesn't require updating every query individually.
 const TENANT_COLUMNS =
-  "id, name, slug, created_at, updated_at, deleted_at, settings";
+  "id, name, slug, created_at, updated_at, deleted_at, settings, branding";
 
 export class TenantRepository {
   constructor(private readonly pool: pg.Pool) {}

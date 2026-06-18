@@ -10,6 +10,7 @@ export interface Tenant {
   updated_at: Date;
   deleted_at: Date | null;
   settings: Record<string, unknown>;
+  branding: Record<string, unknown>;
 }
 
 export interface User {
