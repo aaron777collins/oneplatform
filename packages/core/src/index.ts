@@ -188,3 +188,14 @@ export { rateLimitHeadersMiddleware } from "./middleware/rate-limit-headers.js";
 export { deprecationHeadersMiddleware } from "./middleware/deprecation-headers.js";
 export { otelMiddleware } from "./middleware/otel.js";
 export type { OtelMiddlewareOptions } from "./middleware/otel.js";
+export {
+  createIpAllowlistMiddleware,
+  isIpInCidr,
+  isIpInAllowlist,
+  parseIpFromRequest,
+} from "./middleware/ip-allowlist.js";
+export type { IpAllowlistOptions } from "./middleware/ip-allowlist.js";
+export { meteringMiddleware } from "./middleware/metering.js";
+export type { MeteringRecorder, MeteringMiddlewareConfig } from "./middleware/metering.js";
+export { dataResidencyMiddleware } from "./middleware/data-residency.js";
+export type { ResidencyEnforcer, DataResidencyMiddlewareConfig } from "./middleware/data-residency.js";

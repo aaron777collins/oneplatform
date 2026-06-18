@@ -67,6 +67,82 @@ export interface RateLimitConfigRow {
 }
 
 // ---------------------------------------------------------------------------
+// gateway.usage_events
+// ---------------------------------------------------------------------------
+
+export type UsageEventType =
+  | "api_call"
+  | "rows_ingested"
+  | "rows_transformed"
+  | "storage_delta"
+  | "pipeline_execution";
+
+export type UsagePeriodType = "hourly" | "daily" | "monthly";
+
+export interface UsageEventRow {
+  id: string;
+  tenant_id: string;
+  type: UsageEventType;
+  value: bigint;
+  metadata: Record<string, string> | null;
+  timestamp: Date;
+}
+
+export interface CreateUsageEventData {
+  tenant_id: string;
+  type: UsageEventType;
+  value: number;
+  metadata?: Record<string, string>;
+  timestamp?: Date;
+}
+
+// ---------------------------------------------------------------------------
+// gateway.usage_summaries
+// ---------------------------------------------------------------------------
+
+export interface UsageSummaryRow {
+  id: string;
+  tenant_id: string;
+  period_type: UsagePeriodType;
+  period_start: Date;
+  event_type: UsageEventType;
+  total_value: bigint;
+  event_count: bigint;
+  updated_at: Date;
+}
+
+// ---------------------------------------------------------------------------
+// gateway.billing_webhook_configs
+// ---------------------------------------------------------------------------
+
+export type BillingWebhookProvider = "stripe" | "custom";
+
+export interface BillingWebhookConfigRow {
+  id: string;
+  tenant_id: string;
+  url: string;
+  provider: BillingWebhookProvider;
+  api_call_threshold: bigint | null;
+  rows_ingested_threshold: bigint | null;
+  storage_bytes_threshold: bigint | null;
+  secret_encrypted: string | null;
+  enabled: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface UpsertBillingWebhookConfigData {
+  tenant_id: string;
+  url: string;
+  provider?: BillingWebhookProvider;
+  api_call_threshold?: number | null;
+  rows_ingested_threshold?: number | null;
+  storage_bytes_threshold?: number | null;
+  secret_encrypted?: string | null;
+  enabled?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // gateway.gdpr_requests
 // ---------------------------------------------------------------------------
 
@@ -126,6 +202,91 @@ export interface UpdateWebhookData {
   enabled?: boolean;
   custom_headers?: Record<string, string> | null;
 }
+
+// ---------------------------------------------------------------------------
+// gateway.data_residency_policies
+// ---------------------------------------------------------------------------
+
+export type DataRegion =
+  | "US_EAST"
+  | "US_WEST"
+  | "EU_WEST"
+  | "EU_CENTRAL"
+  | "AP_SOUTHEAST"
+  | "AP_NORTHEAST";
+
+export type StorageClass = "standard" | "reduced_redundancy" | "archive";
+
+export type ReplicationPolicy = "single_region" | "multi_az" | "cross_region_backup";
+
+export interface DataResidencyPolicyRow {
+  id: string;
+  tenant_id: string;
+  region: DataRegion;
+  storage_class: StorageClass;
+  replication_policy: ReplicationPolicy;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface UpsertDataResidencyPolicyData {
+  tenant_id: string;
+  region: DataRegion;
+  storage_class?: StorageClass;
+  replication_policy?: ReplicationPolicy;
+}
+
+// ---------------------------------------------------------------------------
+// gateway.data_transfer_rules
+// ---------------------------------------------------------------------------
+
+export type TransferPolicy = "allow" | "deny" | "audit";
+
+export interface DataTransferRuleRow {
+  id: string;
+  source_region: DataRegion;
+  target_region: DataRegion;
+  policy: TransferPolicy;
+  justification_required: boolean;
+  created_at: Date;
+}
+
+export interface CreateDataTransferRuleData {
+  source_region: DataRegion;
+  target_region: DataRegion;
+  policy: TransferPolicy;
+  justification_required?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// gateway.data_location_log
+// ---------------------------------------------------------------------------
+
+export interface DataLocationLogRow {
+  id: string;
+  record_id: string;
+  tenant_id: string;
+  region: DataRegion;
+  service: string;
+  operation: string;
+  actor_id: string | null;
+  metadata: Record<string, unknown> | null;
+  timestamp: Date;
+}
+
+export interface CreateDataLocationLogData {
+  record_id: string;
+  tenant_id: string;
+  region: DataRegion;
+  service: string;
+  operation?: string;
+  actor_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Input shapes for create / update operations
+// ---------------------------------------------------------------------------
 
 export interface CreateWebhookDeliveryData {
   webhook_id: string;
