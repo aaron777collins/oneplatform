@@ -1,5 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import { jwtVerify, type JWTPayload } from "jose";
+import { createPublicKey } from "crypto";
+import type { KeyLike } from "jose";
 import type { Redis } from "ioredis";
 import type { UserContext } from "../types.js";
 
@@ -19,6 +21,13 @@ interface JwtClaims extends JWTPayload {
 
 export interface AuthMiddlewareConfig {
   jwtSecret: string;
+  /**
+   * Ed25519 public key for verifying EdDSA-signed tokens.
+   * Provide as a base64-encoded SPKI PEM string (the same format written by
+   * generate-jwt-keys.sh and exported via OP_JWT_PUBLIC_KEY).
+   * When absent, EdDSA tokens are rejected with 401.
+   */
+  jwtPublicKey?: string;
   redis: Redis;
   // validateApiKey looks up the API key in the auth service's database.
   // Returns UserContext if valid, null if not found or revoked.
@@ -34,6 +43,10 @@ export interface AuthMiddlewareConfig {
  * to the resolved {@link UserContext} on success. Bypasses auth for routes
  * listed in `config.publicRoutes`.
  *
+ * Supports both HS256 (symmetric) and EdDSA (Ed25519 asymmetric) tokens.
+ * The algorithm is read from the token header; the appropriate key is selected
+ * automatically. EdDSA verification requires `config.jwtPublicKey` to be set.
+ *
  * Runs after `requestId` and `cors`, before `serviceAuth` (spec §5).
  * Wired automatically by {@link createApp}.
  */
@@ -41,6 +54,22 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
   const secretBytes = new TextEncoder().encode(config.jwtSecret);
   const exactPublicRoutes = new Set<string>();
   const prefixPublicRoutes: string[] = [];
+
+  // Pre-parse the Ed25519 public key once at middleware-creation time so we
+  // pay the PEM-parse cost on startup, not on every request.
+  let edDsaPublicKey: KeyLike | null = null;
+  if (config.jwtPublicKey) {
+    try {
+      const pem = Buffer.from(config.jwtPublicKey, "base64").toString("utf8");
+      edDsaPublicKey = createPublicKey(pem) as unknown as KeyLike;
+    } catch (err) {
+      // Fail loudly at startup if the key is malformed — a silent failure would
+      // allow all EdDSA tokens through without verification.
+      throw new Error(
+        `authMiddleware: failed to parse jwtPublicKey: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
 
   for (const route of config.publicRoutes ?? []) {
     const normalized = route.endsWith("/") && route.length > 1
@@ -64,6 +93,25 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       if (path === prefix || path.startsWith(prefix + "/")) return true;
     }
     return false;
+  }
+
+  /**
+   * Reads the `alg` field from the JWT header without verifying the signature.
+   * Used to pick the correct verification key before calling jwtVerify.
+   * Returns "HS256" as the default when the header cannot be decoded or has
+   * an unrecognised algorithm — the downstream jwtVerify call will reject it.
+   */
+  function readTokenAlgorithm(token: string): "HS256" | "EdDSA" {
+    try {
+      const headerPart = token.split(".")[0];
+      if (!headerPart) return "HS256";
+      const header = JSON.parse(
+        Buffer.from(headerPart, "base64url").toString("utf8")
+      ) as { alg?: string };
+      return header.alg === "EdDSA" ? "EdDSA" : "HS256";
+    } catch {
+      return "HS256";
+    }
   }
 
   return createMiddleware(async (c, next) => {
@@ -90,8 +138,28 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       let claims: JwtClaims;
 
       try {
-        const { payload } = await jwtVerify(token, secretBytes, { algorithms: ["HS256"] });
-        claims = payload as JwtClaims;
+        const alg = readTokenAlgorithm(token);
+        if (alg === "EdDSA") {
+          // EdDSA requires the public key to be configured — reject loudly if
+          // it was not provided rather than silently falling back to HS256.
+          if (!edDsaPublicKey) {
+            return c.json(
+              {
+                error: {
+                  code: "UNAUTHORIZED",
+                  message: "EdDSA token received but no public key is configured.",
+                  requestId,
+                },
+              },
+              401
+            );
+          }
+          const { payload } = await jwtVerify(token, edDsaPublicKey, { algorithms: ["EdDSA"] });
+          claims = payload as JwtClaims;
+        } else {
+          const { payload } = await jwtVerify(token, secretBytes, { algorithms: ["HS256"] });
+          claims = payload as JwtClaims;
+        }
       } catch {
         return c.json(
           { error: { code: "UNAUTHORIZED", message: "Invalid or expired token.", requestId } },

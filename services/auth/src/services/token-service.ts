@@ -1,15 +1,20 @@
-// TODO: Migrate from HS256 to RS256/EdDSA asymmetric signing for better security (M-04)
-
 // JWT issuance, verification, and revocation for access tokens.
 // Refresh token rotation and family-detection replay logic.
 //
-// Access tokens are HS256 JWTs signed with OP_JWT_SECRET.
+// Access tokens support two signing algorithms selected by OP_JWT_ALGORITHM:
+//   HS256 (default) — symmetric, signed and verified with OP_JWT_SECRET
+//   EdDSA          — asymmetric Ed25519; signed with OP_JWT_PRIVATE_KEY,
+//                    verified with OP_JWT_PUBLIC_KEY (base64-encoded DER)
+//
+// HS256 remains the default so existing deployments that have not generated
+// an Ed25519 key pair continue to work without any configuration change.
+//
 // Refresh tokens are opaque 32-byte random hex strings stored in Redis.
 // The L2 design (§6.3, §6.4, §6.6) specifies the exact shape of every
 // operation here.
 
-import { randomBytes, randomUUID } from "crypto";
-import { SignJWT, jwtVerify, type JWTPayload } from "jose";
+import { randomBytes, randomUUID, createPublicKey, createPrivateKey } from "crypto";
+import { SignJWT, jwtVerify, type JWTPayload, type KeyLike } from "jose";
 import type { Redis } from "ioredis";
 import type pg from "pg";
 import type { JwtClaims, UserForToken } from "./types.js";
@@ -93,8 +98,28 @@ export function resolveScopes(roles: string[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Supported signing algorithms
+// ---------------------------------------------------------------------------
+
+export type JwtAlgorithm = "HS256" | "EdDSA";
+
+// ---------------------------------------------------------------------------
 // Configuration helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Returns the configured signing algorithm.
+ * Defaults to HS256 so deployments without OP_JWT_ALGORITHM set continue
+ * to use the existing symmetric path without any reconfiguration.
+ */
+export function getJwtAlgorithm(): JwtAlgorithm {
+  const raw = process.env["OP_JWT_ALGORITHM"];
+  if (raw === undefined || raw === "HS256") return "HS256";
+  if (raw === "EdDSA") return "EdDSA";
+  throw new Error(
+    `Unsupported OP_JWT_ALGORITHM "${raw}". Supported values: HS256, EdDSA.`
+  );
+}
 
 function getJwtSecret(): Uint8Array {
   const secret = process.env["OP_JWT_SECRET"];
@@ -107,6 +132,48 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
+/**
+ * Loads and caches the Ed25519 signing key derived from OP_JWT_PRIVATE_KEY.
+ * OP_JWT_PRIVATE_KEY is the PKCS#8 PEM private key as a base64-encoded string
+ * (base64 of the raw PEM bytes, not just the key material).
+ *
+ * We decode → PEM → native KeyObject once at call time and return it.
+ * The caller is responsible for caching the result if desired.
+ */
+async function loadEdDsaPrivateKey(): Promise<KeyLike> {
+  const raw = process.env["OP_JWT_PRIVATE_KEY"];
+  if (!raw) {
+    throw new Error(
+      "OP_JWT_PRIVATE_KEY is required when OP_JWT_ALGORITHM=EdDSA. " +
+        "Generate a key pair with: scripts/generate-jwt-keys.sh"
+    );
+  }
+  // OP_JWT_PRIVATE_KEY is the base64-encoded PEM so it survives env var injection
+  // as a single-line value. Decode it back to the PEM string.
+  const pem = Buffer.from(raw, "base64").toString("utf8");
+  const keyObject = createPrivateKey(pem);
+  // jose requires a KeyLike (CryptoKey or KeyObject). Node.js KeyObject satisfies
+  // the KeyLike interface directly when passed to jose's SignJWT.
+  return keyObject as unknown as KeyLike;
+}
+
+/**
+ * Loads the Ed25519 verification key from OP_JWT_PUBLIC_KEY.
+ * OP_JWT_PUBLIC_KEY is the SPKI PEM public key, base64-encoded.
+ */
+async function loadEdDsaPublicKey(): Promise<KeyLike> {
+  const raw = process.env["OP_JWT_PUBLIC_KEY"];
+  if (!raw) {
+    throw new Error(
+      "OP_JWT_PUBLIC_KEY is required when OP_JWT_ALGORITHM=EdDSA. " +
+        "Generate a key pair with: scripts/generate-jwt-keys.sh"
+    );
+  }
+  const pem = Buffer.from(raw, "base64").toString("utf8");
+  const keyObject = createPublicKey(pem);
+  return keyObject as unknown as KeyLike;
+}
+
 function getJwtExpirySeconds(): number {
   const raw = process.env["OP_JWT_EXPIRY_SECONDS"];
   return raw !== undefined ? parseInt(raw, 10) : 900;
@@ -115,6 +182,48 @@ function getJwtExpirySeconds(): number {
 function getRefreshTokenTtlSeconds(): number {
   const raw = process.env["OP_REFRESH_TOKEN_TTL_SECONDS"];
   return raw !== undefined ? parseInt(raw, 10) : 604_800; // 7 days
+}
+
+// ---------------------------------------------------------------------------
+// JWKS helpers — converts an Ed25519 public key to JWK format for the
+// /.well-known/jwks.json endpoint consumed by downstream verifiers.
+// ---------------------------------------------------------------------------
+
+export interface JwkPublicKey {
+  kty: "OKP";
+  crv: "Ed25519";
+  x: string;
+  use: "sig";
+  alg: "EdDSA";
+  kid: string;
+}
+
+/**
+ * Exports the currently-configured Ed25519 public key as a JWK.
+ * Returns null when the algorithm is HS256 (symmetric keys have no JWKS).
+ *
+ * The `kid` value is the base64url-encoded first 8 bytes of the raw public
+ * key material — stable across restarts for the same key pair, short enough
+ * to be practical as a cache/rotation identifier.
+ */
+export async function exportPublicKeyAsJwk(): Promise<JwkPublicKey | null> {
+  if (getJwtAlgorithm() !== "EdDSA") return null;
+
+  const raw = process.env["OP_JWT_PUBLIC_KEY"];
+  if (!raw) return null;
+
+  const pem = Buffer.from(raw, "base64").toString("utf8");
+  const keyObject = createPublicKey(pem);
+
+  // Export the raw 32-byte Ed25519 public key from the SubjectPublicKeyInfo DER
+  // encoding. The last 32 bytes of the DER are the key material itself.
+  const der = keyObject.export({ type: "spki", format: "der" });
+  const keyMaterial = der.slice(der.length - 32);
+  const x = keyMaterial.toString("base64url");
+  // kid = first 8 bytes of key material as base64url — short, stable identifier
+  const kid = keyMaterial.slice(0, 8).toString("base64url");
+
+  return { kty: "OKP", crv: "Ed25519", x, use: "sig", alg: "EdDSA", kid };
 }
 
 // ---------------------------------------------------------------------------
@@ -165,13 +274,14 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
   async function issueAccessToken(user: UserForToken): Promise<string> {
     const expirySeconds = getJwtExpirySeconds();
     const now = Math.floor(Date.now() / 1000);
+    const algorithm = getJwtAlgorithm();
 
     // resolveScopes handles predefined roles; callers with custom roles pass
     // them with scopes already injected into the roles array or rely on the
     // predefined mapping for standard role names.
     const scopes = resolveScopes(user.roles);
 
-    return new SignJWT({
+    const builder = new SignJWT({
       sub: user.id,
       tid: user.tenantId,
       roles: user.roles,
@@ -182,10 +292,16 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       unverified: !user.emailVerified,
       jti: randomUUID(),
     } satisfies Omit<JwtClaims, "iat" | "exp">)
-      .setProtectedHeader({ alg: "HS256" })
+      .setProtectedHeader({ alg: algorithm })
       .setIssuedAt(now)
-      .setExpirationTime(now + expirySeconds)
-      .sign(getJwtSecret());
+      .setExpirationTime(now + expirySeconds);
+
+    if (algorithm === "EdDSA") {
+      const privateKey = await loadEdDsaPrivateKey();
+      return builder.sign(privateKey);
+    }
+
+    return builder.sign(getJwtSecret());
   }
 
   // -------------------------------------------------------------------------
@@ -233,9 +349,30 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
 
   async function verifyAccessToken(token: string): Promise<JwtClaims | null> {
     try {
-      const { payload } = await jwtVerify(token, getJwtSecret(), {
-        algorithms: ["HS256"],
-      });
+      // Read the algorithm from the token header so verification works for
+      // tokens issued under the old algorithm during a rolling key rotation.
+      // A token's header is unauthenticated data, but the subsequent signature
+      // check ensures the correct key was used — there is no algorithm confusion
+      // risk here because we only accept the two known algorithms and each uses
+      // completely separate key material.
+      let tokenAlgorithm: JwtAlgorithm;
+      try {
+        const headerPart = token.split(".")[0];
+        if (!headerPart) throw new Error("empty");
+        const headerJson = Buffer.from(headerPart, "base64url").toString("utf8");
+        const header = JSON.parse(headerJson) as { alg?: string };
+        tokenAlgorithm = header.alg === "EdDSA" ? "EdDSA" : "HS256";
+      } catch {
+        return null;
+      }
+
+      let payload: JWTPayload;
+      if (tokenAlgorithm === "EdDSA") {
+        const publicKey = await loadEdDsaPublicKey();
+        ({ payload } = await jwtVerify(token, publicKey, { algorithms: ["EdDSA"] }));
+      } else {
+        ({ payload } = await jwtVerify(token, getJwtSecret(), { algorithms: ["HS256"] }));
+      }
 
       const claims = payload as JWTPayload & Partial<JwtClaims>;
 
