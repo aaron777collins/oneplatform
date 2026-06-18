@@ -64,6 +64,18 @@ export {
   type RetentionRawTableRepository,
 } from "./retention-service.js";
 
+export {
+  createWebhookDeliveryService,
+  type WebhookDeliveryService,
+  type DeliveryLogEntry,
+  type DeliveryLogDetail,
+  MAX_DELIVERIES_PER_WEBHOOK,
+} from "./webhook-delivery-service.js";
+
+export {
+  createWebhookDeliveryLogger,
+} from "./webhook-delivery-logger.js";
+
 // Re-export error classes so routes only need to import from services/index.js
 export {
   ConnectorNotFoundError,

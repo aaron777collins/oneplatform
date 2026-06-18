@@ -17,6 +17,7 @@ import {
   CredentialRepository,
   SyncStateRepository,
   WebhookReceiverRepository,
+  WebhookDeliveryLogRepositoryImpl,
   UploadJobRepository,
   RawTableRepository,
 } from "./repositories/index.js";
@@ -27,6 +28,8 @@ import {
   createWebhookReceiveService,
   createUploadService,
   createRetentionService,
+  createWebhookDeliveryService,
+  createWebhookDeliveryLogger,
 } from "./services/index.js";
 import type { SyncJobPayload, BatchJobPayload } from "./services/index.js";
 import type { FileParseJobPayload } from "./services/upload-service.js";
@@ -109,6 +112,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   const credentialRepo = new CredentialRepository(db);
   const syncStateRepo = new SyncStateRepository(db);
   const webhookReceiverRepo = new WebhookReceiverRepository(db);
+  const webhookDeliveryLogRepo = new WebhookDeliveryLogRepositoryImpl(db);
   const uploadJobRepo = new UploadJobRepository(db);
   const rawTableRepo = new RawTableRepository(db);
 
@@ -138,11 +142,24 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     executionServiceUrl: config.executionServiceUrl,
   });
 
-  const webhookReceiveService = createWebhookReceiveService({
+  const coreWebhookReceiveService = createWebhookReceiveService({
     receiverRepo: webhookReceiverRepo,
     rawTableRepo,
     credentialService,
     masterKey: config.masterKey,
+    logger,
+  });
+
+  // Wrap the core receive service with the delivery logger so every inbound
+  // event is recorded in webhook_delivery_log without touching the HMAC path.
+  const webhookReceiveService = createWebhookDeliveryLogger(
+    coreWebhookReceiveService,
+    { deliveryLogRepo: webhookDeliveryLogRepo, logger },
+  );
+
+  const webhookDeliveryService = createWebhookDeliveryService({
+    deliveryLogRepo: webhookDeliveryLogRepo,
+    receiverRepo: webhookReceiverRepo,
     logger,
   });
 
@@ -293,6 +310,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   const webhookRoutes = createWebhookRoutes({
     webhookManagementService,
     webhookReceiveService,
+    webhookDeliveryService,
     masterKey: config.masterKey,
   });
   app.route("/api/v1/webhooks", webhookRoutes);
