@@ -27,6 +27,7 @@ import {
   BarChart2,
   Puzzle,
   Settings,
+  Store,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -65,6 +66,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Overview", to: "/", icon: LayoutDashboard },
       { label: "Connectors", to: "/connectors", icon: Database },
+      {
+        label: "Marketplace",
+        to: "/connectors/marketplace",
+        icon: Store,
+        description: "Browse and install connectors from the catalog.",
+      },
       {
         label: "Ontology",
         to: "/ontology",

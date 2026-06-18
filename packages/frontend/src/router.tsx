@@ -179,6 +179,17 @@ const connectorDetailRoute = createRoute({
   ),
 });
 
+// Marketplace must be registered before the :id wildcard route so TanStack
+// Router matches the literal "marketplace" segment first, not as a connector ID.
+const connectorMarketplaceRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/connectors/marketplace",
+  component: lazyRouteComponent(
+    () => import("./pages/connectors/ConnectorMarketplacePage.js"),
+    "ConnectorMarketplacePage",
+  ),
+});
+
 // --- Ontology ---
 const ontologyRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
@@ -195,6 +206,17 @@ const migrationsRoute = createRoute({
   component: lazyRouteComponent(
     () => import("./pages/ontology/MigrationsPage.js"),
     "MigrationsPage",
+  ),
+});
+
+// Query builder must be registered before :entityType so the static path
+// /ontology/query is matched before the wildcard segment.
+const queryBuilderRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/ontology/query",
+  component: lazyRouteComponent(
+    () => import("./pages/ontology/QueryBuilderPage.js"),
+    "QueryBuilderPage",
   ),
 });
 
@@ -273,6 +295,16 @@ const appEditorRoute = createRoute({
   component: lazyRouteComponent(
     () => import("./pages/apps/AppEditorPage.js"),
     "AppEditorPage",
+  ),
+});
+
+// Visual drag-and-drop builder — G-067
+const appBuilderRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/apps/$id/build",
+  component: lazyRouteComponent(
+    () => import("./pages/apps/AppBuilderPage.js"),
+    "AppBuilderPage",
   ),
 });
 
@@ -436,9 +468,12 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     connectorsRoute,
     newConnectorRoute,
+    // marketplace before :id so the literal segment wins over the param wildcard
+    connectorMarketplaceRoute,
     connectorDetailRoute,
     ontologyRoute,
     migrationsRoute,
+    queryBuilderRoute,
     entityDetailRoute,
     pipelinesRoute,
     pipelineDetailRoute,
@@ -447,6 +482,7 @@ const routeTree = rootRoute.addChildren([
     appsRoute,
     appDetailRoute,
     appEditorRoute,
+    appBuilderRoute,
     logsRoute,
     auditRoute,
     dlqRoute,

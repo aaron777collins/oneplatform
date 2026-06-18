@@ -2,6 +2,15 @@ export { PluginRepository } from "./plugin-repository.js";
 export { InstanceRepository } from "./instance-repository.js";
 export { HookRepository } from "./hook-repository.js";
 export { CacheRepository } from "./cache-repository.js";
+export { MarketplaceRepository } from "./marketplace-repository.js";
+export type {
+  MarketplacePluginRow,
+  PluginRatingRow,
+  MarketplacePluginType,
+  CreateMarketplacePluginData,
+  UpsertRatingData,
+  MarketplaceListQuery,
+} from "./marketplace-types.js";
 export type {
   PluginRow,
   InstanceRow,

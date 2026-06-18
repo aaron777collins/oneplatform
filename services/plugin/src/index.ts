@@ -17,6 +17,7 @@ import {
   InstanceRepository,
   HookRepository,
   CacheRepository,
+  MarketplaceRepository,
 } from "./repositories/index.js";
 import {
   createBundleService,
@@ -25,6 +26,7 @@ import {
   createPluginService,
   createInstanceService,
   createUpgradeService,
+  createMarketplaceService,
 } from "./services/index.js";
 import {
   createHealthRoutes,
@@ -33,6 +35,7 @@ import {
   createHookRoutes,
   createInternalRoutes,
   createUpgradeRoutes,
+  createMarketplaceRoutes,
 } from "./routes/index.js";
 
 // ---------------------------------------------------------------------------
@@ -227,6 +230,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   const instanceRepo = new InstanceRepository(db);
   const hookRepo = new HookRepository(db);
   const cacheRepo = new CacheRepository(redis);
+  const marketplaceRepo = new MarketplaceRepository(db);
 
   // Step 8: Create event publisher.
   const eventPublisher = createEventPublisher({ redis });
@@ -270,6 +274,14 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     executionServiceUrl,
     serviceToken,
     drainGraceSeconds,
+    logger,
+    eventPublisher,
+  });
+
+  // Step 12a: Create marketplace service.
+  const marketplaceService = createMarketplaceService({
+    pool: db,
+    marketplaceRepo,
     logger,
     eventPublisher,
   });
@@ -343,6 +355,9 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   // B2 fix: register upgrade and rollback endpoints.
   const upgradeRoutes = createUpgradeRoutes({ upgradeService });
   app.route("/api/v1/plugins", upgradeRoutes);
+
+  const marketplaceRoutes = createMarketplaceRoutes({ marketplaceService });
+  app.route("/api/v1/marketplace", marketplaceRoutes);
 
   const internalRoutes = createInternalRoutes({
     bundleService,

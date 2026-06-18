@@ -109,6 +109,43 @@ export const UpgradeSchema = z.object({
 export const RollbackSchema = z.object({}).optional();
 
 // ---------------------------------------------------------------------------
+// Marketplace schemas — spec G-131
+// ---------------------------------------------------------------------------
+
+// GET /api/v1/marketplace/plugins — query parameters
+export const MarketplaceListQuerySchema = z.object({
+  search: z.string().max(200).optional(),
+  type: z
+    .enum(["connector", "transformer", "destination", "auth-provider", "custom"])
+    .optional(),
+  category: z.string().max(100).optional(),
+  sortBy: z.enum(["popular", "recent", "rating", "name"]).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+// POST /api/v1/marketplace/plugins — publish plugin body
+export const PublishPluginSchema = z.object({
+  // The entire manifest is submitted as JSON; it is re-validated via PluginManifestSchema
+  // in the service layer where we have access to the schema import.
+  manifest: z.record(z.unknown()),
+  category: z.string().min(1).max(100),
+  tags: z.array(z.string().max(50)).max(20).optional(),
+});
+
+// POST /api/v1/marketplace/plugins/:id/ratings — rate a plugin
+export const RatePluginSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  review: z.string().max(2000).optional(),
+});
+
+// GET /api/v1/marketplace/plugins/:id/ratings — query parameters
+export const MarketplaceRatingsQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+// ---------------------------------------------------------------------------
 // Internal endpoint schemas — spec §8
 // ---------------------------------------------------------------------------
 
@@ -140,6 +177,12 @@ export type PatchInstanceInput = z.infer<typeof PatchInstanceSchema>;
 export type UpgradeInput = z.infer<typeof UpgradeSchema>;
 export type CachePutBody = z.infer<typeof CachePutBodySchema>;
 export type DrainCompleteRequest = z.infer<typeof DrainCompleteRequestSchema>;
+
+// Marketplace schema types
+export type MarketplaceListQuery = z.infer<typeof MarketplaceListQuerySchema>;
+export type PublishPluginSchemaInput = z.infer<typeof PublishPluginSchema>;
+export type RatePluginSchemaInput = z.infer<typeof RatePluginSchema>;
+export type MarketplaceRatingsQuery = z.infer<typeof MarketplaceRatingsQuerySchema>;
 
 // Plugin types and statuses — used across layers
 export type PluginType = "connector" | "transformer" | "destination" | "auth-provider" | "widget";

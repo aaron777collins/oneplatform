@@ -15,3 +15,6 @@ export type { InternalRouteDeps } from "./internal.js";
 
 export { createUpgradeRoutes } from "./upgrade.js";
 export type { UpgradeRouteDeps } from "./upgrade.js";
+
+export { createMarketplaceRoutes } from "./marketplace.js";
+export type { MarketplaceRouteDeps } from "./marketplace.js";

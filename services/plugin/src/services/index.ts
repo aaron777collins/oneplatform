@@ -1,6 +1,16 @@
 export { createBundleService } from "./bundle-service.js";
 export type { BundleService, BundleServiceConfig } from "./bundle-service.js";
 
+export { createMarketplaceService } from "./marketplace-service.js";
+export type {
+  MarketplaceService,
+  MarketplaceServiceDeps,
+  MarketplacePlugin,
+  MarketplacePluginRating,
+  MarketplaceListOptions,
+  MarketplaceListResult,
+} from "./marketplace-service.js";
+
 export { createConnectorRegistrationService } from "./connector-registration-service.js";
 export type {
   ConnectorRegistrationService,
