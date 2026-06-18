@@ -167,6 +167,11 @@ export { createServiceTokenSigner, loadServicePrivateKey } from "./service-token
 export type { ServiceTokenSigner } from "./service-token.js";
 
 // ---------------------------------------------------------------------------
+// Package version reader
+// ---------------------------------------------------------------------------
+export { readPackageVersion } from "./version.js";
+
+// ---------------------------------------------------------------------------
 // Middleware (exported for services that need to compose custom stacks)
 // ---------------------------------------------------------------------------
 export { requestIdMiddleware } from "./middleware/request-id.js";

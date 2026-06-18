@@ -12,6 +12,7 @@ import {
   loadMasterKey,
   createServiceTokenSigner,
   loadServicePrivateKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -208,6 +209,7 @@ export interface AppConfig {
 
 export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   const serviceStartedAt = new Date();
+  const version = readPackageVersion(import.meta.url);
 
   const {
     databaseUrl,
@@ -350,7 +352,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   // Step 8: Create Hono app via core factory (attaches full middleware stack)
   const honoApp = createApp({
     serviceName:    "app-service",
-    version:        process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret,
     redis,
     validateApiKey: async () => null,

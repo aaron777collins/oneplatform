@@ -6,12 +6,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSubscription } from "./useSubscription.js";
 import { useAppContext } from "../provider/AppContext.js";
+import { queryCache } from "../cache/QueryCache.js";
 import type { EntityEvent } from "../types/entities.js";
 import type { SubscriptionRegistration, WsStatus } from "../ws/WebSocketManager.js";
 
 vi.mock("../provider/AppContext.js", () => ({
   useAppContext: vi.fn(),
 }));
+
+vi.mock("../cache/QueryCache.js", () => ({
+  queryCache: {
+    invalidate: vi.fn(),
+  },
+}));
+
+const mockInvalidate = vi.mocked(queryCache.invalidate);
 
 const mockUseAppContext = vi.mocked(useAppContext);
 
@@ -154,5 +163,130 @@ describe("useSubscription", () => {
   it("starts with lastEvent: null", () => {
     const { result } = renderHook(() => useSubscription("orders"));
     expect(result.current.lastEvent).toBeNull();
+  });
+});
+
+// ─── Auto-invalidation integration tests ─────────────────────────────────────
+// These tests verify that useSubscription calls queryCache.invalidate when
+// mutation events arrive, exercising the integration between the hook and
+// useQueryInvalidation.
+
+describe("useSubscription — auto-invalidation", () => {
+  let mockWsManager: ReturnType<typeof createMockWsManager>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWsManager = createMockWsManager();
+    mockUseAppContext.mockReturnValue({
+      wsManager: mockWsManager,
+    } as unknown as ReturnType<typeof useAppContext>);
+  });
+
+  function dispatchEvent(
+    registrations: Map<string, SubscriptionRegistration>,
+    event: EntityEvent<unknown>,
+  ) {
+    const id = [...registrations.keys()][0]!;
+    registrations.get(id)!.onEvent(event);
+  }
+
+  it("invalidates the cache when a 'created' event is received (default autoInvalidate)", () => {
+    renderHook(() => useSubscription("orders"));
+
+    act(() => {
+      dispatchEvent(mockWsManager.getRegistrations(), {
+        type: "created",
+        entity: "orders",
+        id: "o1",
+        data: {},
+        timestamp: "2026-01-01T00:00:00Z",
+        tenantId: "t1",
+      });
+    });
+
+    expect(mockInvalidate).toHaveBeenCalledOnce();
+    expect(mockInvalidate).toHaveBeenCalledWith("orders");
+  });
+
+  it("invalidates the cache when an 'updated' event is received", () => {
+    renderHook(() => useSubscription("orders"));
+
+    act(() => {
+      dispatchEvent(mockWsManager.getRegistrations(), {
+        type: "updated",
+        entity: "orders",
+        id: "o1",
+        data: {},
+        timestamp: "2026-01-01T00:00:00Z",
+        tenantId: "t1",
+      });
+    });
+
+    expect(mockInvalidate).toHaveBeenCalledOnce();
+    expect(mockInvalidate).toHaveBeenCalledWith("orders");
+  });
+
+  it("invalidates the cache when a 'deleted' event is received", () => {
+    renderHook(() => useSubscription("orders"));
+
+    act(() => {
+      dispatchEvent(mockWsManager.getRegistrations(), {
+        type: "deleted",
+        entity: "orders",
+        id: "o1",
+        data: {},
+        timestamp: "2026-01-01T00:00:00Z",
+        tenantId: "t1",
+      });
+    });
+
+    expect(mockInvalidate).toHaveBeenCalledOnce();
+    expect(mockInvalidate).toHaveBeenCalledWith("orders");
+  });
+
+  it("does not invalidate when autoInvalidate: false", () => {
+    renderHook(() => useSubscription("orders", { autoInvalidate: false }));
+
+    act(() => {
+      dispatchEvent(mockWsManager.getRegistrations(), {
+        type: "created",
+        entity: "orders",
+        id: "o1",
+        data: {},
+        timestamp: "2026-01-01T00:00:00Z",
+        tenantId: "t1",
+      });
+    });
+
+    expect(mockInvalidate).not.toHaveBeenCalled();
+  });
+
+  it("invalidates once per distinct event object", () => {
+    renderHook(() => useSubscription("orders"));
+    const regs = mockWsManager.getRegistrations();
+
+    act(() => {
+      dispatchEvent(regs, {
+        type: "created",
+        entity: "orders",
+        id: "o1",
+        data: {},
+        timestamp: "2026-01-01T00:00:00Z",
+        tenantId: "t1",
+      });
+    });
+
+    act(() => {
+      dispatchEvent(regs, {
+        type: "updated",
+        entity: "orders",
+        id: "o1",
+        data: {},
+        timestamp: "2026-01-01T00:00:01Z",
+        tenantId: "t1",
+      });
+    });
+
+    expect(mockInvalidate).toHaveBeenCalledTimes(2);
   });
 });

@@ -12,6 +12,7 @@ import {
   createQueue,
   createServiceTokenSigner,
   loadServicePrivateKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -94,6 +95,7 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
 export async function createServiceApp(config: PipelineConfig): Promise<ServiceApp> {
   const startWorkers = config.startWorkers ?? true;
   const serviceStartedAt = new Date();
+  const version = readPackageVersion(import.meta.url);
 
   const maxConcurrentRuns = parseInt(
     process.env["OP_PIPELINE_MAX_CONCURRENT_RUNS"] ?? "20",
@@ -303,7 +305,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
 
   const app = createApp({
     serviceName: "pipeline-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,

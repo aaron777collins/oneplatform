@@ -29,6 +29,7 @@
 
 import React from "react";
 import { useAppContext } from "../provider/AppContext.js";
+import { useQueryInvalidation } from "./useQueryInvalidation.js";
 import type {
   EntityEvent,
   SubscriptionOptions,
@@ -36,7 +37,6 @@ import type {
 } from "../types/entities.js";
 import type { WsStatus } from "../ws/WebSocketManager.js";
 
-// TODO: Auto-invalidate related queries on entity mutation events (M-14)
 export function useSubscription<T = unknown>(
   entity: string,
   options: SubscriptionOptions = {},
@@ -64,6 +64,15 @@ export function useSubscription<T = unknown>(
   React.useEffect(() => {
     optionsRef.current = options;
   });
+
+  // autoInvalidate is read directly from the current render's options, not from
+  // optionsRef: it is a boolean consumed by useQueryInvalidation's dependency
+  // array and must reflect the caller's latest value at render time.
+  const autoInvalidate = options.autoInvalidate !== false;
+
+  // Delegate cache invalidation to its own hook (Single Responsibility).
+  // Runs after every new lastEvent; is a no-op when autoInvalidate is false.
+  useQueryInvalidation(entity, lastEvent, autoInvalidate);
 
   React.useEffect(() => {
     // Use spread pattern to avoid assigning `FilterSpec | undefined` to

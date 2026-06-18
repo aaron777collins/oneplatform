@@ -34,6 +34,7 @@ import {
   createEventPublisher,
   createApp,
   loadMasterKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -108,6 +109,7 @@ export interface LoggingConfig {
 
 export async function createServiceApp(config: LoggingConfig): Promise<ServiceApp> {
   const serviceKeysDir = config.serviceKeysDir ?? "/data/service-keys";
+  const version = readPackageVersion(import.meta.url);
   // startBackgroundJobs defaults to true so production behaviour is unchanged
   // when callers omit the flag.
   const startBackgroundJobs = config.startBackgroundJobs !== false;
@@ -179,7 +181,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
   // Step 8: Create the Hono app with the standard middleware stack.
   const app = createApp({
     serviceName: "logging-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret: config.jwtSecret,
     redis,
     // The Logging Service validates user JWTs for /api/v1/* routes but does
@@ -196,7 +198,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
     db,
     redis,
     serviceName: "logging-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     logEventRepository,
     auditEventRepository,
     batchAccumulator: accumulator,

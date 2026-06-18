@@ -9,6 +9,7 @@ import {
   createApp,
   loadMasterKey,
   createEventPublisher,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -128,6 +129,7 @@ export interface PluginConfig {
 
 export async function createServiceApp(config: PluginConfig): Promise<ServiceApp> {
   const serviceStartedAt = new Date();
+  const version = readPackageVersion(import.meta.url);
 
   const {
     databaseUrl,
@@ -308,7 +310,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   // Step 16: Create Hono app.
   const app = createApp({
     serviceName: "plugin-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret,
     redis,
     validateApiKey: async () => null,

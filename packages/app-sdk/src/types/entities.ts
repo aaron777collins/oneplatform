@@ -103,6 +103,16 @@ export interface SubscriptionOptions {
   /** Default: all three event types */
   events?: EntityEventType[];
   onEvent?: (event: EntityEvent<unknown>) => void;
+  /**
+   * When true (default), mutation events (created / updated / deleted) cause
+   * the QueryCache to invalidate all entries for the subscribed entity. This
+   * triggers a fresh fetch in any mounted useQuery for that entity.
+   *
+   * Set to false to manage cache invalidation manually (e.g. when applying
+   * optimistic updates via useMutation and a WebSocket event would cause a
+   * redundant refetch).
+   */
+  autoInvalidate?: boolean;
 }
 
 export interface SubscriptionResult<T> {

@@ -1,0 +1,247 @@
+# Grafana Unified Alerting — provisioned alert rules
+#
+# These rules are loaded at Grafana startup from the provisioning directory.
+# Provisioned rules are read-only in the UI; edit this file and restart Grafana
+# (or wait for the 30s polling interval) to apply changes.
+#
+# All rules use the Jaeger datasource because the stack does not yet include
+# Prometheus. The rule expressions use Grafana's "Classic conditions" reducer,
+# which counts matching spans returned by a Jaeger search query.
+#
+# When Prometheus is added (see MONITORING.md §5 and §9 for the full rule set),
+# migrate these rules to PromQL for accurate rate and percentile computations.
+# The Jaeger-based versions here provide operational visibility from day one
+# without requiring an additional scrape infrastructure.
+#
+# Ref: https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/
+
+apiVersion: 1
+
+groups:
+  # ── Error rate ────────────────────────────────────────────────────────────
+  - orgId: 1
+    name: error-rate
+    folder: OnePlatform
+    # Evaluate every 1 minute; alert fires after the condition is true for 5m.
+    interval: 1m
+    rules:
+      - uid: op-alert-high-error-rate
+        title: High Error Rate (>5% spans in 5 minutes)
+        condition: C
+        # Data query: count of error spans from gateway-service over the last 5 minutes.
+        # The threshold is intentionally conservative for a Jaeger-only datasource;
+        # replace with a PromQL rate() expression once Prometheus is available.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: jaeger
+            model:
+              queryType: search
+              service: gateway-service
+              tags: "error=true"
+              refId: A
+
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: jaeger
+            model:
+              queryType: search
+              service: gateway-service
+              refId: B
+
+          # Classic condition: fire when (A / B) > 0.05 — error fraction exceeds 5%.
+          # Uses the "reduce" + "math" pipeline supported by Grafana Unified Alerting.
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: classic_conditions
+              refId: C
+              conditions:
+                - evaluator:
+                    params: [0.05]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: count
+                  type: query
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High error rate detected on gateway-service"
+          description: >
+            More than 5% of gateway-service spans in the last 5 minutes are
+            tagged error=true. This likely indicates 5xx responses reaching
+            clients. Check the Jaeger UI for the specific traces and review
+            gateway-service logs for the root cause.
+          runbook_url: "https://docs.oneplatform.internal/runbooks/high-error-rate"
+
+  # ── Service availability ──────────────────────────────────────────────────
+  - orgId: 1
+    name: service-availability
+    folder: OnePlatform
+    interval: 1m
+    rules:
+      - uid: op-alert-service-down
+        title: Service Down (no traces for >2 minutes)
+        condition: C
+        # Data query: count of spans from each critical service over the last 2 minutes.
+        # Zero spans for a service that is normally active is a strong signal that the
+        # container has crashed or the OTEL exporter endpoint is misconfigured.
+        # Note: a service with no traffic will also trigger this alert — suppress with
+        # an absence-of-load condition once Prometheus scrape metrics are available.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: jaeger
+            model:
+              queryType: search
+              service: gateway-service
+              refId: A
+
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: classic_conditions
+              refId: C
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: count
+                  type: query
+        noDataState: Alerting
+        execErrState: Alerting
+        # The "for" duration here is 0 because the query window already covers 2m.
+        # The alert fires immediately when the condition evaluates true.
+        for: 0s
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Service gateway-service appears to be down"
+          description: >
+            No spans received from gateway-service in the last 2 minutes.
+            Verify the container is running with `docker compose ps`, check
+            `/healthz` via `docker exec gateway-service wget -qO- http://localhost:3000/healthz`,
+            and confirm OTEL_EXPORTER_OTLP_ENDPOINT is reachable from within the container.
+          runbook_url: "https://docs.oneplatform.internal/runbooks/service-down"
+
+      - uid: op-alert-auth-service-down
+        title: Auth Service Down (no traces for >2 minutes)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: jaeger
+            model:
+              queryType: search
+              service: auth-service
+              refId: A
+
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: classic_conditions
+              refId: C
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: count
+                  type: query
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 0s
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Auth service appears to be down"
+          description: >
+            No spans received from auth-service in the last 2 minutes.
+            An auth-service outage prevents all authenticated API requests.
+            Check `docker compose ps auth-service` and `/healthz` immediately.
+          runbook_url: "https://docs.oneplatform.internal/runbooks/service-down"
+
+  # ── Ingestion failures ────────────────────────────────────────────────────
+  - orgId: 1
+    name: ingestion-failures
+    folder: OnePlatform
+    interval: 1m
+    rules:
+      - uid: op-alert-sync-failure
+        title: Sync Failure (>=3 consecutive error spans in 5 minutes)
+        condition: C
+        # Data query: error spans on the sync.run operation in the last 5 minutes.
+        # Three failures in 5 minutes maps to roughly the BullMQ retry window
+        # (5 attempts with exponential back-off, starting at 1s — see MONITORING.md §8).
+        # By the time this alert fires the job is likely headed to the DLQ.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: jaeger
+            model:
+              queryType: search
+              service: ingestion-service
+              operation: sync.run
+              tags: "error=true"
+              refId: A
+
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: classic_conditions
+              refId: C
+              conditions:
+                - evaluator:
+                    params: [3]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: count
+                  type: query
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Ingestion sync failures exceeding threshold"
+          description: >
+            More than 3 sync.run error spans in the last 5 minutes on
+            ingestion-service. This may indicate connector credential expiry,
+            a network partition to the source system, or a schema mismatch.
+            Open the Ingestion dashboard to identify which connector is failing,
+            then inspect the full trace in the Jaeger UI for the root cause.
+          runbook_url: "https://docs.oneplatform.internal/runbooks/sync-failure"

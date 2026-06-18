@@ -11,6 +11,7 @@ import {
   loadMasterKey,
   createServiceTokenSigner,
   loadServicePrivateKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -94,6 +95,7 @@ async function healStuckMigrations(
 
 export async function createServiceApp(config: OntologyConfig): Promise<ServiceApp> {
   const startBackgroundJobs = config.startBackgroundJobs ?? true;
+  const version = readPackageVersion(import.meta.url);
 
   // Create infrastructure clients using config values — never reads env directly
   const db = createDbClient({
@@ -188,7 +190,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
 
   const app = createApp({
     serviceName: "ontology-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,
@@ -205,7 +207,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     db,
     redis,
     serviceName: "ontology-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     entityService,
     relationshipService,
     migrationService,

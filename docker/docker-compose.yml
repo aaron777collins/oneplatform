@@ -688,6 +688,50 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  # ─── Observability: Grafana ──────────────────────────────────────────────
+  # Grafana visualises Jaeger traces and exposes pre-built dashboards for
+  # service health, ingestion metrics, and alerting rules via provisioning.
+  # Port 3100 on the host maps to Grafana's internal 3000 — chosen to avoid
+  # clashing with the application services, which all listen on :3000 inside
+  # their containers.
+  grafana:
+    image: grafana/grafana-oss:11.0.0
+    container_name: op-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${OP_GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Disable analytics and update checks — this stack is air-gapped by default.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3100:3000"
+    networks:
+      - oneplatform-internal
+    depends_on:
+      jaeger:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   # ─── Log Aggregation: Vector ──────────────────────────────────────────────
   # File-based log collection — does NOT mount docker.sock (see ADR security model).
   # Vector tails Docker container JSON log files from the host path and writes
@@ -798,6 +842,8 @@ volumes:
   sandbox-socket:
   # Aggregated structured logs written by Vector from all service containers
   log-data:
+  # Grafana persistent state (user preferences, alert state, annotations)
+  grafana-data:
   # TLS certificate storage and Caddy runtime config
   caddy-data:
   caddy-config:

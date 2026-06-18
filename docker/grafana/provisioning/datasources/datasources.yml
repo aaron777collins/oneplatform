@@ -1,0 +1,24 @@
+apiVersion: 1
+
+# Grafana datasource provisioning — evaluated at container start.
+# Changes here take effect on the next `docker compose restart grafana`.
+# The Jaeger datasource is the primary signal source for this stack: span data
+# drives both the tracing explorer and the synthetic request-rate/latency panels
+# in the pre-built dashboards.
+datasources:
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    isDefault: true
+    editable: false
+    jsonData:
+      # Trace-to-logs correlation: when a user clicks a span in Jaeger explorer
+      # Grafana will link to the corresponding log lines if a Loki datasource is
+      # added later. The field is pre-populated so enabling Loki requires only
+      # adding the Loki datasource with uid "loki" — no dashboard edits needed.
+      tracesToLogsV2:
+        datasourceUid: loki
+        filterByTraceID: true
+        filterBySpanID: false

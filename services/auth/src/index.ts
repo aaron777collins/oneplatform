@@ -30,6 +30,7 @@ import {
   createEventPublisher,
   createApp,
   loadMasterKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -136,6 +137,7 @@ export interface AuthConfig {
 
 export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> {
   const serviceKeysDir = config.serviceKeysDir ?? "/data/service-keys";
+  const version = readPackageVersion(import.meta.url);
 
   // Capture token in closure so the in-memory reference can be zeroed without
   // the service layer needing to know about the source file.
@@ -230,7 +232,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
   // Step 7: Create the Hono app with the standard middleware stack.
   const app = createApp({
     serviceName: "auth-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: (key) => apiKeyService.validate(key),
@@ -257,7 +259,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
     db,
     redis,
     serviceName: "auth-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     // Services
     bootstrapService,
     authService,

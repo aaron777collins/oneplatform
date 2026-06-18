@@ -10,6 +10,7 @@ import {
   createLogger,
   createApp,
   loadMasterKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import { WebhookRepository } from "./repositories/webhook-repository.js";
@@ -94,6 +95,7 @@ export interface GatewayConfig {
 export async function createServiceApp(config: GatewayConfig): Promise<ServiceApp> {
   const serviceKeysDir = config.serviceKeysDir ?? "/data/service-keys";
   const serviceStartedAt = new Date();
+  const version = readPackageVersion(import.meta.url);
 
   // Step 1: Database
   const db = createDbClient({
@@ -181,7 +183,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   // Step 10: Create Hono app
   const app = createApp({
     serviceName: "gateway-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,

@@ -9,6 +9,7 @@ import {
   createLogger,
   createApp,
   loadMasterKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -83,6 +84,7 @@ async function loadServicePublicKeys(): Promise<Record<string, string>> {
 export async function createServiceApp(config: IngestionConfig): Promise<ServiceApp> {
   const startWorkers = config.startWorkers ?? true;
   const serviceStartedAt = new Date();
+  const version = readPackageVersion(import.meta.url);
 
   // Create infrastructure clients using config values — never reads env directly
   const db = createDbClient({
@@ -267,7 +269,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
 
   const app = createApp({
     serviceName: "ingestion-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret: config.jwtSecret,
     redis,
     validateApiKey: async () => null,

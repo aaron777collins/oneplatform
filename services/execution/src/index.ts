@@ -7,6 +7,7 @@ import {
   createLogger,
   createApp,
   loadMasterKey,
+  readPackageVersion,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -108,6 +109,7 @@ export interface ExecutionConfig {
 
 export async function createServiceApp(config: ExecutionConfig): Promise<ServiceApp> {
   const serviceStartedAt = new Date();
+  const version = readPackageVersion(import.meta.url);
 
   const {
     databaseUrl,
@@ -267,7 +269,7 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
   // Step 16: Create Hono app (NO Redis — use noop stub for auth middleware)
   const app = createApp({
     serviceName: "execution-service",
-    version: process.env["OP_SERVICE_VERSION"] ?? "0.0.0-dev",
+    version,
     jwtSecret,
     redis: noopRedis,
     validateApiKey: async () => null,
