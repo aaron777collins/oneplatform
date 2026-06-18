@@ -1,0 +1,66 @@
+{
+  "manifestVersion": "1",
+  "id": "com.oneplatform.auth-provider-oidc",
+  "name": "OIDC Auth Provider",
+  "version": "1.0.0",
+  "type": "auth-provider",
+  "description": "OpenID Connect auth provider. Works with Okta, Azure AD, Auth0, Google Workspace, and Keycloak via standard OIDC discovery.",
+  "author": "OnePlatform",
+  "license": "BSL-1.1",
+  "minPlatformVersion": "1.0.0",
+  "entrypoint": "authProvider",
+  "tags": ["oidc", "oauth2", "sso", "okta", "azure", "auth0", "google", "keycloak"],
+  "configSchema": {
+    "type": "object",
+    "required": ["issuerUrl", "clientId", "scopes"],
+    "properties": {
+      "issuerUrl": {
+        "type": "string",
+        "format": "uri",
+        "description": "OIDC issuer URL (e.g. https://dev-xxxxx.okta.com, https://login.microsoftonline.com/{tenant}/v2.0). Must host a /.well-known/openid-configuration document."
+      },
+      "clientId": {
+        "type": "string",
+        "description": "OAuth client ID registered with the identity provider."
+      },
+      "scopes": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1,
+        "default": ["openid", "profile", "email"],
+        "description": "OIDC scopes to request. 'openid' is always included."
+      },
+      "roleClaimPath": {
+        "type": "string",
+        "description": "Dot-delimited path to the roles claim in the ID token or userinfo response (e.g. 'groups', 'resource_access.myapp.roles'). Omit to disable role mapping."
+      },
+      "roleMapping": {
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "description": "Map of IdP role name → OnePlatform role name. Roles absent from this map are dropped."
+      },
+      "jwksCacheTtlSeconds": {
+        "type": "number",
+        "minimum": 60,
+        "maximum": 86400,
+        "default": 3600,
+        "description": "How long to cache JWKS public keys. Increase for high-traffic deployments."
+      }
+    },
+    "additionalProperties": false
+  },
+  "requiredCredentials": [
+    {
+      "name": "clientSecret",
+      "description": "OAuth client secret for the confidential client. Required for the authorization code flow token exchange.",
+      "type": "secret",
+      "required": true
+    }
+  ],
+  "requiredExternalUrls": [
+    "https://**"
+  ],
+  "requiredApis": ["credentials", "fetch", "cache", "tracing"],
+  "hooks": [],
+  "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"
+}

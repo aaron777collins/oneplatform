@@ -1,0 +1,20 @@
+{
+  "name": "@oneplatform/auth-provider-oidc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=es2022 --format=esm --outfile=dist/bundle.js --external:@oneplatform/plugin-sdk",
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@oneplatform/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "vitest": "3.2.6",
+    "typescript": "^5.5.0"
+  }
+}

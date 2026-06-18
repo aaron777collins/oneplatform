@@ -14,6 +14,8 @@ import {
   normalizeToEnvelope,
   type DataRecord,
 } from "../utils/data-envelope.js";
+import type { SchemaDriftService } from "./schema-drift-service.js";
+import type { DataQualityService } from "./data-quality-service.js";
 
 // ---------------------------------------------------------------------------
 // Raw table repository interface — matches the concrete RawTableRepository.
@@ -154,6 +156,10 @@ export interface SyncServiceDeps {
   masterKey: Buffer;
   logger: Logger;
   executionServiceUrl?: string;
+  /** Optional — when omitted, schema drift detection is skipped. */
+  schemaDriftService?: SchemaDriftService;
+  /** Optional — when omitted, data quality analysis is skipped. */
+  dataQualityService?: DataQualityService;
 }
 
 // BullMQ queue capacity guard. Exceeding this triggers QueueFullError so the
@@ -235,6 +241,8 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     masterKey,
     redis,
     logger,
+    schemaDriftService,
+    dataQualityService,
   } = deps;
 
   const executionServiceUrl =
@@ -776,6 +784,77 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
       );
 
       await rawTableRepo.insertBatch(connectorId, envelopes);
+
+      // Schema drift detection runs after the raw insert so it never delays
+      // persistence. captureAndDetect swallows all errors internally and
+      // returns an empty diff on failure, so the batch job is never blocked.
+      if (schemaDriftService !== undefined) {
+        const rawRecords = records.map((r) => r.data);
+        const drift = await schemaDriftService.captureAndDetect(connectorId, rawRecords);
+
+        if (drift.hasDrift) {
+          // Publish to Redis so any subscriber (pipeline, alerting, SSE stream)
+          // can react without polling the database.
+          await redis.publish(
+            "ingestion.schema.drift.detected",
+            JSON.stringify({
+              connectorId,
+              tenantId,
+              syncJobId,
+              batchId,
+              drift,
+            }),
+          );
+        }
+      }
+
+      // Data quality analysis runs after the raw insert and schema drift check.
+      // The entire block is fire-and-forget (void promise) — a quality check
+      // failure must never fail the batch job. Issues are logged and published
+      // to Redis for downstream alerting without blocking the critical path.
+      if (dataQualityService !== undefined) {
+        void (async () => {
+          try {
+            const previousStats = await dataQualityService.getStats(connectorId);
+            const report = dataQualityService.analyzeBatch(connectorId, records, previousStats);
+
+            if (report.issues.length > 0) {
+              logger.warn("Data quality issues detected", {
+                connectorId,
+                tenantId,
+                syncJobId,
+                batchId,
+                batchSeqNum,
+                score: report.score,
+                issueCount: report.issues.length,
+                issues: report.issues,
+              });
+
+              await redis.publish(
+                "ingestion.quality.issues.detected",
+                JSON.stringify({
+                  connectorId,
+                  tenantId,
+                  syncJobId,
+                  batchId,
+                  batchSeqNum,
+                  score: report.score,
+                  issues: report.issues,
+                }),
+              );
+            }
+
+            await dataQualityService.updateStats(connectorId, report, previousStats);
+          } catch (qualityErr) {
+            // Log but do not rethrow — quality analysis must never block ingestion.
+            logger.error("Data quality analysis failed", {
+              connectorId,
+              batchId,
+              error: qualityErr instanceof Error ? qualityErr.message : String(qualityErr),
+            });
+          }
+        })();
+      }
 
       await ontologyQueue.add("map", {
         connectorId,

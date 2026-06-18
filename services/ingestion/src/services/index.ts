@@ -76,6 +76,28 @@ export {
   createWebhookDeliveryLogger,
 } from "./webhook-delivery-logger.js";
 
+export {
+  createSyncAnalyticsService,
+  type SyncAnalyticsService,
+  type SyncAnalyticsServiceDeps,
+  type TrendPeriod,
+  type SyncTrendPoint,
+  type SyncHistoryResult,
+  type TenantSyncOverview,
+  type ConnectorSyncStat,
+  type FailingConnectorStat,
+} from "./sync-analytics-service.js";
+
+export {
+  createSchemaDriftService,
+  compareSchemasForDrift,
+  inferSchema,
+  type SchemaDriftService,
+  type DriftResult,
+  type DriftHistoryEntry,
+  type ChangedField,
+} from "./schema-drift-service.js";
+
 // Re-export error classes so routes only need to import from services/index.js
 export {
   ConnectorNotFoundError,

@@ -8,6 +8,9 @@ export { WebhookDeliveryLogRepositoryImpl } from "./webhook-delivery-log-reposit
 export type { WebhookDeliveryLogRepository } from "./webhook-delivery-log-repository.js";
 export { UploadJobRepository } from "./upload-job-repository.js";
 export { RawTableRepository } from "./raw-table-repository.js";
+export { SchemaSnapshotRepository } from "./schema-snapshot-repository.js";
+export type { FieldSchema, SchemaSnapshotRow } from "./schema-snapshot-repository.js";
+export { QualityStatsRepository } from "./quality-stats-repository.js";
 
 export type {
   WebhookDeliveryLogRow,
