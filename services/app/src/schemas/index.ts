@@ -163,6 +163,37 @@ export const CreateAppFromTemplateSchema = z.object({
 export type CreateAppFromTemplateInput = z.infer<typeof CreateAppFromTemplateSchema>;
 
 // ---------------------------------------------------------------------------
+// Embed token schemas — G-071
+// ---------------------------------------------------------------------------
+
+// Origin validation: must be a plain hostname or "*.hostname" or "*".
+// Path, query, and hash are not allowed — an origin is just a scheme+host+port.
+const originPattern = /^(\*|\*\.[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*|[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*(:\d+)?)$/;
+
+export const CreateEmbedTokenSchema = z.object({
+  expiresIn:      z.number().int().positive().max(30 * 86_400).optional(),
+  allowedOrigins: z
+    .array(
+      z.string().regex(originPattern, "Each origin must be a hostname, *.hostname, or *")
+    )
+    .max(20)
+    .default([]),
+  permissions:    z.enum(["read", "read-write"]).default("read"),
+});
+
+export type CreateEmbedTokenInput = z.infer<typeof CreateEmbedTokenSchema>;
+
+// ---------------------------------------------------------------------------
+// App version control schemas — G-072
+// ---------------------------------------------------------------------------
+
+export const CreateVersionSchema = z.object({
+  message: z.string().max(512).optional(),
+});
+
+export type CreateVersionInput = z.infer<typeof CreateVersionSchema>;
+
+// ---------------------------------------------------------------------------
 // Shared pagination query schema
 // ---------------------------------------------------------------------------
 

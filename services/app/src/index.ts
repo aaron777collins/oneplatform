@@ -18,9 +18,11 @@ import { runMigrations } from "./db/migrate.js";
 import {
   AppRepository,
   VersionRepository,
+  AppVersionRepository,
   DeploymentRepository,
   PermissionRepository,
   WidgetRepository,
+  EmbedTokenRepository,
 } from "./repositories/index.js";
 import {
   createAppService,
@@ -28,13 +30,18 @@ import {
   createDeployService,
   createPermissionService,
   createWidgetService,
+  createEmbedService,
+  createAppVersionService,
 } from "./services/index.js";
 import {
   createHealthRoutes,
   createAppRoutes,
   createVersionRoutes,
+  createAppVersionRoutes,
   createDeploymentRoutes,
   createInternalRoutes,
+  createEmbedManagementRoutes,
+  createEmbedServeRoutes,
 } from "./routes/index.js";
 import { createBffRoutes } from "./routes/bff.js";
 import type { AppRepository as AppRepositoryType } from "./repositories/app-repository.js";
@@ -254,11 +261,13 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   });
 
   // Step 4: Instantiate repositories
-  const appRepo      = new AppRepository(db);
-  const fileRepo     = new VersionRepository(db);
-  const buildRepo    = new DeploymentRepository(db);
-  const permRepo     = new PermissionRepository(db);
-  const widgetRepo   = new WidgetRepository(db);
+  const appRepo          = new AppRepository(db);
+  const fileRepo         = new VersionRepository(db);
+  const appVersionRepo   = new AppVersionRepository(db);
+  const buildRepo        = new DeploymentRepository(db);
+  const permRepo         = new PermissionRepository(db);
+  const widgetRepo       = new WidgetRepository(db);
+  const embedTokenRepo   = new EmbedTokenRepository(db);
 
   // Step 5: Create services
   const appService = createAppService({ appRepo, fileRepo, logger });
@@ -293,6 +302,33 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
   // Widget service — persisted to Postgres, in-memory Map used as a read cache (M-15)
   const widgetService = createWidgetService({ widgetRepo, logger });
+
+  // App version service — G-072
+  const appVersionService = createAppVersionService({
+    appVersionRepo,
+    fileRepo,
+    appRepo,
+    logger,
+  });
+
+  // Embed token service — G-071.
+  // Derive a dedicated signing secret from the master key with a distinct context
+  // label.  This ensures the embed JWT secret is cryptographically separate from
+  // the user auth JWT secret even though both originate from the same master key.
+  const embedSecret = new Uint8Array(
+    createHash("sha256")
+      .update(masterKey)
+      .update("embed-token-v1")
+      .digest()
+  );
+
+  const embedService = createEmbedService({
+    embedTokenRepo,
+    appRepo,
+    embedSecret,
+    baseUrl,
+    logger,
+  });
 
   // Step 5b: Run startup tasks before the HTTP server accepts traffic.
   // recoverInterruptedBuilds cleans up stale build records; initialize seeds the
@@ -357,7 +393,13 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     redis,
     validateApiKey: async () => null,
     allowedOrigins,
-    publicRoutes:   ["/healthz", "/readyz"],
+    publicRoutes:   [
+      "/healthz",
+      "/readyz",
+      // Embed serve route — auth is enforced by the embed token itself, not the
+      // user session middleware.  The token IS the credential for this route.
+      "/api/v1/embed/:token",
+    ],
     targetService:  "app-service",
     servicePublicKeys,
   });
@@ -380,6 +422,10 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   const versionRoutes = createVersionRoutes({ appService, buildService, redis });
   honoApp.route("/api/v1/apps/:appId", versionRoutes);
 
+  // App version control routes — G-072
+  const appVersionRoutes = createAppVersionRoutes({ appVersionService, appService });
+  honoApp.route("/api/v1/apps/:appId", appVersionRoutes);
+
   const deploymentRoutes = createDeploymentRoutes({ deployService });
   honoApp.route("/api/v1/apps/:appId", deploymentRoutes);
 
@@ -400,6 +446,25 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     serviceTokenSigner,
   });
   honoApp.route("/bff", bffRoutes);
+
+  // Embed routes — G-071
+  // Management routes require user auth (handled by global auth middleware).
+  // The serve route is intentionally public — the token is the credential.
+  const embedManagementRoutes = createEmbedManagementRoutes({
+    embedService,
+    appService,
+    baseUrl,
+  });
+  honoApp.route("/api/v1/apps/:appId/embed", embedManagementRoutes);
+
+  const embedServeRoutes = createEmbedServeRoutes({
+    embedService,
+    appService,
+    baseUrl,
+  });
+  // Register serve route as a public route so the auth middleware skips it.
+  // The token-based auth is enforced inside the handler itself.
+  honoApp.route("/api/v1/embed", embedServeRoutes);
 
   // ---------------------------------------------------------------------------
   // App serving routes — HTML shell + bundle proxy

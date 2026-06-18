@@ -128,3 +128,52 @@ export class AppSlugConflictError extends AppError {
   readonly code = "APP_SLUG_CONFLICT" as const;
   readonly statusCode = 409;
 }
+
+// ---------------------------------------------------------------------------
+// Version control errors — G-072
+// ---------------------------------------------------------------------------
+
+// The requested version_number does not exist for the given app.
+export class AppVersionNotFoundError extends AppError {
+  readonly code = "APP_VERSION_NOT_FOUND" as const;
+  readonly statusCode = 404;
+}
+
+// ---------------------------------------------------------------------------
+// Embed token errors — G-071
+// ---------------------------------------------------------------------------
+
+// The embed token JWT is malformed, has an invalid signature, or is missing
+// required claims.  Distinct from EmbedTokenExpiredError so callers can
+// distinguish structural problems from normal expiry.
+export class EmbedTokenInvalidError extends AppError {
+  readonly code = "EMBED_TOKEN_INVALID" as const;
+  readonly statusCode = 401;
+}
+
+// The jti in the JWT does not correspond to any row in app.embed_tokens, or
+// the token id in a management API call is unknown.
+export class EmbedTokenNotFoundError extends AppError {
+  readonly code = "EMBED_TOKEN_NOT_FOUND" as const;
+  readonly statusCode = 404;
+}
+
+// The token's expires_at has passed.  Returned by validateEmbedToken() when
+// the DB row confirms expiry (belt-and-suspenders beyond JWT exp claim).
+export class EmbedTokenExpiredError extends AppError {
+  readonly code = "EMBED_TOKEN_EXPIRED" as const;
+  readonly statusCode = 401;
+}
+
+// The token has been explicitly revoked via DELETE /apps/:id/embed/:tokenId.
+export class EmbedTokenRevokedError extends AppError {
+  readonly code = "EMBED_TOKEN_REVOKED" as const;
+  readonly statusCode = 401;
+}
+
+// The request Origin header is not in the token's allowedOrigins list.
+// Returned by the embed serve route to enforce per-token origin policy.
+export class EmbedOriginNotAllowedError extends AppError {
+  readonly code = "EMBED_ORIGIN_NOT_ALLOWED" as const;
+  readonly statusCode = 403;
+}

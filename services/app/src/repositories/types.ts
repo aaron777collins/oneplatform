@@ -221,3 +221,49 @@ export interface UpsertUserStorageData {
   key:     string;
   value:   unknown;
 }
+
+// ---------------------------------------------------------------------------
+// app.app_versions — G-072
+// ---------------------------------------------------------------------------
+
+export interface AppVersionRow {
+  id:              string;
+  app_id:          string;
+  version_number:  number;
+  files_snapshot:  Record<string, string>;
+  message:         string | null;
+  created_by:      string;
+  created_at:      Date;
+}
+
+export interface CreateAppVersionData {
+  app_id:         string;
+  files_snapshot: Record<string, string>;
+  message?:       string;
+  created_by:     string;
+}
+
+// ---------------------------------------------------------------------------
+// app.embed_tokens — G-071
+// ---------------------------------------------------------------------------
+
+export interface EmbedTokenRow {
+  id:              string;
+  app_id:          string;
+  tenant_id:       string;
+  allowed_origins: string[];
+  permissions:     "read" | "read-write";
+  expires_at:      Date;
+  revoked_at:      Date | null;
+  created_at:      Date;
+  created_by:      string;
+}
+
+export interface CreateEmbedTokenData {
+  app_id:          string;
+  tenant_id:       string;
+  allowed_origins: string[];
+  permissions:     "read" | "read-write";
+  expires_at:      Date;
+  created_by:      string;
+}

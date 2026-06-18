@@ -32,6 +32,17 @@ import { createOpenApiRoutes } from "./routes/openapi.js";
 import { createGdprRoutes } from "./routes/gdpr.js";
 import { GdprRequestRepository } from "./repositories/gdpr-request-repository.js";
 import { createGdprService } from "./services/gdpr-service.js";
+import { createLineageRoutes } from "./routes/lineage.js";
+import { createLineageService } from "./services/lineage-service.js";
+import { createStorageRoutes } from "./routes/storage.js";
+import { createStorageService } from "./services/storage-service.js";
+import { createTenantAllowlistService } from "./services/tenant-allowlist-service.js";
+import { parseIpFromRequest, isIpInAllowlist, meteringMiddleware } from "@oneplatform/core";
+import { createGraphQLRoutes } from "./routes/graphql.js";
+import { createMeteringService } from "./services/metering-service.js";
+import { UsageEventRepository, UsageSummaryRepository, BillingWebhookConfigRepository } from "./repositories/usage-event-repository.js";
+import { createUsageRoutes } from "./routes/usage.js";
+import { createBillingRoutes } from "./routes/billing.js";
 
 async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
@@ -79,8 +90,10 @@ export interface GatewayConfig {
   authServiceUrl?: string;
   /** URL of the logging service (internal). Used by GDPR fan-out. */
   loggingServiceUrl?: string;
-  /** URL of the app service (internal). Used by GDPR fan-out. */
+  /** URL of the app service (internal). Used by GDPR fan-out and lineage. */
   appServiceUrl?: string;
+  /** URL of the pipeline service (internal). Used by lineage. */
+  pipelineServiceUrl?: string;
   /** Bearer token for outbound service-to-service requests. */
   serviceToken?: string;
   /** Directory containing peer service public key files. Defaults to /data/service-keys. */
@@ -134,6 +147,9 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const deliveryRepo = new WebhookDeliveryRepository(db);
   const rateLimitConfigRepo = new RateLimitConfigRepository(db);
   const gdprRequestRepo = new GdprRequestRepository(db);
+  const usageEventRepo = new UsageEventRepository(db);
+  const usageSummaryRepo = new UsageSummaryRepository(db);
+  const billingWebhookConfigRepo = new BillingWebhookConfigRepository(db);
 
   // Step 6: Services
   const webhookService = createWebhookService({
@@ -161,8 +177,31 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     },
   });
 
+  const lineageService = createLineageService({
+    config: {
+      ingestionServiceUrl: config.ingestionServiceUrl,
+      ontologyServiceUrl: config.ontologyServiceUrl,
+      pipelineServiceUrl: config.pipelineServiceUrl ?? process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
+      appServiceUrl: config.appServiceUrl ?? process.env["APP_SERVICE_URL"] ?? "http://app-service:3000",
+      serviceToken: config.serviceToken ?? "",
+    },
+    logger,
+  });
+
   const proxyService = createProxyService();
   const sseService = createSseService({ logger });
+
+  const meteringService = createMeteringService({
+    redis,
+    usageEventRepo,
+    usageSummaryRepo,
+    billingWebhookConfigRepo,
+    logger,
+  });
+
+  // Tenant IP allowlist service — queries auth.tenants.ip_allowlist with
+  // short-lived cache to avoid DB hits on every request.
+  const tenantAllowlistService = createTenantAllowlistService({ db, logger });
 
   // Step 7: Rate limiter
   const rateLimiter = createSlidingWindowLimiter({
@@ -257,6 +296,49 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     await next();
   });
 
+  // Step 10.6: Tenant IP allowlist enforcement.
+  // Runs after auth middleware (c.var.user is populated). Unauthenticated
+  // requests (e.g. /api/v1/auth/login) pass through — they have no tenantId.
+  // Health probes are excluded by the same path check.
+  app.use("*", async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (path === "/healthz" || path === "/readyz") {
+      await next();
+      return;
+    }
+
+    const user = c.var.user;
+    // Guest sessions and unauthenticated paths have no tenant context
+    if (!user?.tenantId) {
+      await next();
+      return;
+    }
+
+    const allowlist = await tenantAllowlistService.getAllowlist(user.tenantId);
+    if (allowlist.length > 0) {
+      const clientIp = parseIpFromRequest(c);
+      if (!clientIp || !isIpInAllowlist(clientIp, allowlist)) {
+        const requestId: string = c.var["requestId"] ?? "";
+        return c.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: `Access denied: IP address ${clientIp || "(unknown)"} is not in the tenant allowlist.`,
+              requestId,
+            },
+          },
+          403,
+        );
+      }
+    }
+
+    await next();
+  });
+
+  // Step 10.7: Metering middleware — records one API call per authenticated
+  // request into a Redis counter. Fire-and-forget: never delays the response.
+  app.use("*", meteringMiddleware({ recorder: meteringService }));
+
   // Step 11: Register routes
   const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt });
   app.route("/", healthRoutes);
@@ -286,6 +368,31 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
 
   const gdprRoutes = createGdprRoutes({ gdprService });
   app.route("/api/v1/gdpr", gdprRoutes);
+
+  const lineageRoutes = createLineageRoutes({ lineageService });
+  app.route("/api/v1/lineage", lineageRoutes);
+
+  // Storage browser routes — serve MinIO/S3 bucket and object APIs.
+  // Must be registered before the catch-all proxy so that /api/v1/storage/*
+  // is handled directly by the Gateway rather than proxied to another service.
+  const storageService = createStorageService({
+    endpoint: process.env["OP_MINIO_ENDPOINT"] ?? "http://minio:9000",
+    region: process.env["OP_MINIO_REGION"] ?? "us-east-1",
+    accessKeyId: process.env["OP_MINIO_ACCESS_KEY"] ?? (process.env["OP_MINIO_USER"] ?? "minioadmin"),
+    secretAccessKey: process.env["OP_MINIO_SECRET_KEY"] ?? (process.env["OP_MINIO_PASSWORD"] ?? "dev_minio_password_change_me"),
+  });
+  const storageRoutes = createStorageRoutes({ storageService });
+  app.route("/api/v1/storage", storageRoutes);
+
+  // GraphQL endpoint — registered before the catch-all proxy so that
+  // /api/v1/graphql is handled directly by the Gateway.
+  const graphqlRoutes = createGraphQLRoutes({
+    ontologyCache,
+    ontologyServiceUrl: config.ontologyServiceUrl,
+    ingestionServiceUrl: config.ingestionServiceUrl,
+    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+  });
+  app.route("/api/v1/graphql", graphqlRoutes);
 
   // OpenAPI spec endpoints must be registered before the catch-all proxy routes
   // so that /api/v1/openapi.json is never intercepted by the proxy.
