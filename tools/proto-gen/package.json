@@ -1,0 +1,16 @@
+{
+  "name": "@oneplatform/proto-gen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsx src/generate.ts --proto-dir ../../proto/oneplatform/v1 --out ../../packages/sdk/src/grpc-types",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "tsx": "*",
+    "typescript": "*",
+    "vitest": "*"
+  }
+}

@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package oneplatform.v1;
+
+// ---------------------------------------------------------------------------
+// IngestionService — connector sync lifecycle over gRPC.
+//
+// Mirrors the REST ingestion API so clients can choose between REST and gRPC
+// for sync orchestration. StreamSyncEvents provides real-time progress without
+// client-side SSE reconnect logic.
+// ---------------------------------------------------------------------------
+
+service IngestionService {
+  // Enqueue a full or incremental sync for a connector.
+  rpc TriggerSync(TriggerSyncRequest) returns (TriggerSyncResponse);
+
+  // Fetch the current progress for a running or completed sync job.
+  rpc GetSyncStatus(GetSyncStatusRequest) returns (SyncStatus);
+
+  // Server-streaming progress events — streams updates until the sync reaches
+  // a terminal state (success | failed | cancelled) or the client cancels.
+  rpc StreamSyncEvents(StreamSyncEventsRequest) returns (stream SyncEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+message TriggerSyncRequest {
+  string connector_id = 1;
+  string tenant_id = 2;
+  // "full" or "incremental". Empty string → connector default.
+  string sync_mode = 3;
+  // When true, bypasses the concurrent-sync guard.
+  bool force = 4;
+}
+
+message TriggerSyncResponse {
+  string sync_job_id = 1;
+  // Always "queued" on success.
+  string status = 2;
+  // Estimated milliseconds before a worker picks up the job.
+  int64 estimated_start_ms = 3;
+}
+
+message GetSyncStatusRequest {
+  string sync_job_id = 1;
+}
+
+message SyncStatus {
+  string sync_job_id = 1;
+  string connector_id = 2;
+  string tenant_id = 3;
+  // queued | running | success | failed | cancelled
+  string status = 4;
+  string sync_mode = 5;
+  int32 total_batches = 6;
+  int32 completed_batches = 7;
+  int32 failed_batches = 8;
+  int64 total_records = 9;
+  int64 processed_records = 10;
+  // ISO-8601 timestamps; empty string when not yet set.
+  string started_at = 11;
+  string completed_at = 12;
+  string last_batch_at = 13;
+  repeated SyncError errors = 14;
+}
+
+message SyncError {
+  string batch_id = 1;
+  string message = 2;
+  string code = 3;
+  int32 record_count = 4;
+}
+
+message StreamSyncEventsRequest {
+  string sync_job_id = 1;
+  // How often (ms) the server should emit a heartbeat even if no progress
+  // changed. 0 = no heartbeat. Useful for detecting stalled connections.
+  int32 heartbeat_interval_ms = 2;
+}
+
+message SyncEvent {
+  // Type: "progress" | "heartbeat" | "terminal"
+  string event_type = 1;
+  SyncStatus status = 2;
+  // ISO-8601 timestamp of when the event was emitted.
+  string emitted_at = 3;
+}

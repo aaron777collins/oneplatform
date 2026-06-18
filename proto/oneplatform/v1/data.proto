@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package oneplatform.v1;
+
+// ---------------------------------------------------------------------------
+// DataService — high-throughput entity CRUD and streaming operations.
+//
+// Designed to be called over gRPC-Web (HTTP/1.1 or HTTP/2). Binary protobuf
+// framing can be added later; the gateway currently uses JSON serialization
+// inside the standard gRPC-Web envelope so the wire format is self-describing
+// during the initial rollout.
+// ---------------------------------------------------------------------------
+
+service DataService {
+  // Fetch a single entity by its stable identifier.
+  rpc GetEntity(GetEntityRequest) returns (Entity);
+
+  // Paginated entity listing within a tenant + entity-type scope.
+  rpc ListEntities(ListEntitiesRequest) returns (ListEntitiesResponse);
+
+  // Create a new entity record and return the server-assigned shape.
+  rpc CreateEntity(CreateEntityRequest) returns (Entity);
+
+  // Partial update — only supplied fields are written.
+  rpc UpdateEntity(UpdateEntityRequest) returns (Entity);
+
+  // Soft-delete an entity by id.
+  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityResponse);
+
+  // Server-streaming variant — pushes matching entities to the client as they
+  // are iterated. Useful for large datasets that would OOM a single ListEntities
+  // response.
+  rpc StreamEntities(StreamEntitiesRequest) returns (stream Entity);
+
+  // Client-streaming bulk ingest — the client streams IngestRecord messages and
+  // receives a single summary response when the stream closes.
+  rpc BulkIngest(stream IngestRecord) returns (BulkIngestResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Scalar messages
+// ---------------------------------------------------------------------------
+
+message Entity {
+  string id = 1;
+  string entity_type = 2;
+  string tenant_id = 3;
+  // Serialized as a JSON object string so we avoid codegen coupling to
+  // tenant-specific ontology fields at the proto layer.
+  string data_json = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}
+
+message GetEntityRequest {
+  string entity_type = 1;
+  string id = 2;
+  string tenant_id = 3;
+}
+
+message ListEntitiesRequest {
+  string entity_type = 1;
+  string tenant_id = 2;
+  int32 page_size = 3;
+  // Opaque cursor from a previous ListEntitiesResponse.nextCursor.
+  string page_cursor = 4;
+  // JSON-encoded filter expression (mirrors REST filter parameter).
+  string filter_json = 5;
+}
+
+message ListEntitiesResponse {
+  repeated Entity items = 1;
+  string next_cursor = 2;
+  int32 total = 3;
+}
+
+message CreateEntityRequest {
+  string entity_type = 1;
+  string tenant_id = 2;
+  // JSON-encoded field map.
+  string data_json = 3;
+}
+
+message UpdateEntityRequest {
+  string entity_type = 1;
+  string id = 2;
+  string tenant_id = 3;
+  // JSON-encoded partial field map.
+  string data_json = 4;
+}
+
+message DeleteEntityRequest {
+  string entity_type = 1;
+  string id = 2;
+  string tenant_id = 3;
+}
+
+message DeleteEntityResponse {
+  bool success = 1;
+  string id = 2;
+}
+
+message StreamEntitiesRequest {
+  string entity_type = 1;
+  string tenant_id = 2;
+  // JSON-encoded filter expression.
+  string filter_json = 3;
+  // Max number of entities to stream. 0 = no limit.
+  int32 limit = 4;
+}
+
+message IngestRecord {
+  string connector_id = 1;
+  string tenant_id = 2;
+  // JSON-encoded record payload.
+  string data_json = 3;
+  // Optional stable external ID used for upsert deduplication.
+  string external_id = 4;
+}
+
+message BulkIngestResponse {
+  int32 accepted = 1;
+  int32 rejected = 2;
+  repeated IngestError errors = 3;
+}
+
+message IngestError {
+  int32 record_index = 1;
+  string code = 2;
+  string message = 3;
+}
