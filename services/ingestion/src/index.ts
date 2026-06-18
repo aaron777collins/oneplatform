@@ -20,6 +20,7 @@ import {
   WebhookDeliveryLogRepositoryImpl,
   UploadJobRepository,
   RawTableRepository,
+  ReconciliationReportRepositoryImpl,
 } from "./repositories/index.js";
 import {
   createCredentialService,
@@ -32,8 +33,12 @@ import {
   createWebhookDeliveryLogger,
   createSyncAnalyticsService,
   createConnectorHealthService,
+  createCdcIngestionService,
+  createReconciliationService,
+  createConnectorRegistryService,
+  registerBuiltinConnectors,
 } from "./services/index.js";
-import type { SyncJobPayload, BatchJobPayload } from "./services/index.js";
+import type { SyncJobPayload, BatchJobPayload, ReconcileJobPayload } from "./services/index.js";
 import type { FileParseJobPayload } from "./services/upload-service.js";
 import { createWebhookManagementService } from "./services/webhook-management-service.js";
 import {
@@ -44,7 +49,13 @@ import {
   createInternalRoutes,
   createAnalyticsRoutes,
   createConnectorHealthRoutes,
+  createCdcRoutes,
+  createReconciliationRoutes,
+  createConnectorRegistryRoutes,
 } from "./routes/index.js";
+
+// TTL for reconciliation report data stored in BullMQ job results (7 days).
+const REPORT_REDIS_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface ServiceApp {
   app: ReturnType<typeof createApp>;
@@ -119,6 +130,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   const webhookDeliveryLogRepo = new WebhookDeliveryLogRepositoryImpl(db);
   const uploadJobRepo = new UploadJobRepository(db);
   const rawTableRepo = new RawTableRepository(db);
+  const reconciliationReportRepo = new ReconciliationReportRepositoryImpl(db);
 
   // Services
   const credentialService = createCredentialService({
@@ -204,6 +216,31 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     logger,
   });
 
+  const cdcIngestionService = createCdcIngestionService({
+    connectorRepo,
+    syncStateRepo,
+    rawTableRepo,
+    redis,
+    logger,
+  });
+
+  const reconciliationService = createReconciliationService({
+    connectorRepo,
+    credentialService,
+    rawRecordReader: rawTableRepo,
+    reportRepo: reconciliationReportRepo,
+    redis,
+    masterKey: config.masterKey,
+    logger,
+    executionServiceUrl: config.executionServiceUrl,
+  });
+
+  // Connector registry — in-process catalog of available connector types.
+  // Built-ins are registered immediately so the catalog is always populated,
+  // even in test environments that skip the workers block.
+  const connectorRegistryService = createConnectorRegistryService();
+  await registerBuiltinConnectors(connectorRegistryService);
+
   const webhookManagementService = createWebhookManagementService({
     receiverRepo: webhookReceiverRepo,
     connectorRepo,
@@ -223,6 +260,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
 
   // Workers are optional so tests can wire the app without consuming Redis connections
   let syncWorker: Worker<SyncJobPayload> | undefined;
+  let reconcileWorker: Worker<ReconcileJobPayload> | undefined;
   let batchWorker: Worker<BatchJobPayload> | undefined;
   let fileParseWorker: Worker<FileParseJobPayload> | undefined;
 
@@ -257,6 +295,17 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
         concurrency: parseInt(process.env["OP_FILE_PARSE_WORKER_CONCURRENCY"] ?? "5", 10),
         removeOnComplete: { age: 86_400 },
         removeOnFail: { age: 604_800 },
+      },
+    );
+
+    reconcileWorker = new Worker<ReconcileJobPayload>(
+      "ingestion:reconcile",
+      async (job) => reconciliationService.processReconcileJob(job),
+      {
+        connection: { url: config.redisUrl },
+        concurrency: parseInt(process.env["OP_RECONCILE_WORKER_CONCURRENCY"] ?? "2", 10),
+        removeOnComplete: { age: REPORT_REDIS_TTL_SECONDS },
+        removeOnFail: { age: REPORT_REDIS_TTL_SECONDS },
       },
     );
 
@@ -346,6 +395,12 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   });
   app.route("/api/v1/uploads", uploadRoutes);
 
+  const reconciliationRoutes = createReconciliationRoutes({
+    connectorService,
+    reconciliationService,
+  });
+  app.route("/api/v1/connectors", reconciliationRoutes);
+
   const internalRoutes = createInternalRoutes({
     connectorService,
     connectorRepo,
@@ -355,6 +410,12 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   });
   app.route("/internal", internalRoutes);
 
+  const cdcRoutes = createCdcRoutes({ connectorService, cdcIngestionService });
+  app.route("/api/v1/connectors", cdcRoutes);
+
+  const connectorRegistryRoutes = createConnectorRegistryRoutes({ connectorRegistryService });
+  app.route("/api/v1/connector-registry", connectorRegistryRoutes);
+
   const cleanup = async (): Promise<void> => {
     // Cancel any background timers registered during startup (e.g. watchdog).
     for (const fn of extraCleanupFns) fn();
@@ -363,6 +424,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       retentionService.stop();
       await Promise.all([
         syncWorker?.close(),
+        reconcileWorker?.close(),
         batchWorker?.close(),
         fileParseWorker?.close(),
       ]);

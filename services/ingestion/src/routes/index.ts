@@ -18,3 +18,12 @@ export type { AnalyticsRouteDeps } from "./analytics.js";
 
 export { createConnectorHealthRoutes } from "./connector-health.js";
 export type { ConnectorHealthRouteDeps } from "./connector-health.js";
+
+export { createReconciliationRoutes } from "./reconciliation.js";
+export type { ReconciliationRouteDeps } from "./reconciliation.js";
+
+export { createConnectorRegistryRoutes } from "./connector-registry.js";
+export type { ConnectorRegistryRouteDeps } from "./connector-registry.js";
+
+export { createCdcRoutes } from "./cdc.js";
+export type { CdcRouteDeps } from "./cdc.js";

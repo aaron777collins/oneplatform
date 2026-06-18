@@ -130,3 +130,18 @@ export const internalSyncRequest = z.object({
   stepId: z.string().optional(),
   waitForCompletion: z.boolean().default(true),
 });
+
+// ---------------------------------------------------------------------------
+// Reconciliation
+// ---------------------------------------------------------------------------
+
+export const triggerReconcileRequest = z.object({
+  idField: z.string().min(1, "idField is required and must be non-empty"),
+  sampleSize: z.coerce.number().int().min(1).max(10_000).optional(),
+  fields: z.array(z.string().min(1)).optional(),
+});
+
+export const listReconciliationReportsQuery = z.object({
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});

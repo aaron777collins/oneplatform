@@ -113,6 +113,50 @@ export {
   buildDailyTrend,
 } from "./connector-health-service.js";
 
+export {
+  createCdcIngestionService,
+  type CdcIngestionService,
+  type CdcIngestionServiceDeps,
+  type CdcStatus,
+  type CdcStreamStatus,
+  type StartCdcOptions,
+} from "./cdc-ingestion-service.js";
+
+export {
+  createReconciliationService,
+  executeReconcileJob,
+  computeMatchRate,
+  deriveStatus,
+  valuesEqual,
+  type ReconciliationService,
+  type ReconciliationServiceDeps,
+  type ExecuteReconcileJobDeps,
+  type ReconcileOptions,
+  type ReconciliationReport,
+  type FieldMismatch,
+  type ReconcileJobPayload,
+  type TriggerReconcileResult,
+  type ReconciliationReportRepository,
+  type RawRecordReader,
+} from "./reconciliation-service.js";
+
+export {
+  createConnectorRegistryService,
+  registerBuiltinConnectors,
+  BUILTIN_CONNECTOR_MANIFESTS,
+  ConnectorTypeNotFoundError,
+  ConnectorTypeAlreadyExistsError,
+  ConnectorRegistryValidationError,
+  type ConnectorRegistryService,
+  type ConnectorRegistryEntry,
+  type ConnectorVersionEntry,
+  type RegistryListOptions,
+  type RegistryListResult,
+  type RegisterConnectorInput,
+  type ConnectorCategory,
+  type ConnectorCapabilities,
+} from "./connector-registry-service.js";
+
 // Re-export error classes so routes only need to import from services/index.js
 export {
   ConnectorNotFoundError,
@@ -131,4 +175,7 @@ export {
   UploadParseFailedError,
   UploadJobNotFoundError,
   WebhookReceiverNotFoundError,
+  CdcAlreadyRunningError,
+  CdcNotRunningError,
+  CdcConnectorConfigError,
 } from "./errors.js";

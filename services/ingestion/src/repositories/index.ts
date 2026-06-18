@@ -31,3 +31,4 @@ export type {
   CreateUploadJobData,
   UpdateUploadJobData,
 } from "./types.js";
+export { ReconciliationReportRepositoryImpl } from "./reconciliation-report-repository.js";

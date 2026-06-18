@@ -76,9 +76,13 @@ export interface RunStepRow {
     | "code"
     | "connector"
     | "transformer"
+    | "transform"
     | "conditional"
     | "parallel"
-    | "webhook";
+    | "webhook"
+    | "wait"
+    | "approval"
+    | "sub_workflow";
   status:
     | "pending"
     | "running"
@@ -195,9 +199,13 @@ export interface CreateRunStepData {
     | "code"
     | "connector"
     | "transformer"
+    | "transform"
     | "conditional"
     | "parallel"
-    | "webhook";
+    | "webhook"
+    | "wait"
+    | "approval"
+    | "sub_workflow";
   input?: Record<string, unknown>;
 }
 
