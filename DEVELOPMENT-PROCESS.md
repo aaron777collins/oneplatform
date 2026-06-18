@@ -340,12 +340,15 @@ Verdicts:
 - **YELLOW** — Issues that SHOULD be fixed. Fix then re-review.
 - **GREEN** — Approved. Proceed to commit.
 
-### 4.6 Phase 6: Commit & Document
+### 4.6 Phase 6: Commit, CI & Document
 
 1. **Commit** with a descriptive message explaining WHY, not just WHAT
-2. **Update `docs/WORKING-STATE.md`** — Mark completed items, add new items
-3. **Update `.claude/handoff.md`** — Session continuity for the next developer
-4. **Push** to remote
+2. **Push** to remote — CI pipeline runs automatically
+3. **Verify CI passes** — All checks must be green (lint, typecheck, test, build)
+4. **If CI fails** — Fix locally, commit, push again. Never merge red CI.
+5. **Update `docs/WORKING-STATE.md`** — Mark completed items, add new items
+6. **Update `.claude/handoff.md`** — Session continuity for the next developer
+7. **Verify observability** — After deploy, confirm metrics/traces appear in Jaeger/Grafana
 
 ---
 
@@ -616,3 +619,177 @@ Every Redis key set for revocation, caching, or rate limiting MUST have a TTL. K
 | Quickstarts | `docs/quickstart/` |
 | Test infrastructure | `tests/` |
 | Build tools | `tools/` |
+| CI/CD pipeline | `.github/workflows/ci.yml` |
+| Built-in connectors | `plugins/connector-*` |
+
+---
+
+## 13. CI/CD Pipeline
+
+All pushes to `main` and all pull requests trigger the CI pipeline (`.github/workflows/ci.yml`).
+
+### 13.1 Pipeline Stages
+
+```
+lint → typecheck → test → build → docker (main only)
+```
+
+| Stage | What It Does | Failure Action |
+|-------|-------------|----------------|
+| **Lint & Format** | ESLint + Prettier check | Fix lint issues locally |
+| **Type Check** | `turbo build` (TypeScript compilation) | Fix type errors |
+| **Test** | `turbo test` (all unit tests) | Fix failing tests |
+| **Build** | Full production build | Fix build errors |
+| **Docker** | Build all 9 service images + frontend | Fix Dockerfile or build |
+
+### 13.2 Rules
+
+- Never merge with failing CI — no exceptions
+- CI runs concurrently across stages where possible
+- Docker builds only run on pushes to `main` (not on PRs)
+- Use `pnpm install --frozen-lockfile` — lockfile must be committed
+
+---
+
+## 14. Rollback & Incident Response
+
+### 14.1 Rollback Process
+
+If a deployed change causes issues:
+
+1. **Assess severity** — Is the platform down (P1)? Degraded (P2)? Annoying (P3)?
+2. **P1 (platform down)** — Revert immediately: `git revert HEAD && git push`
+3. **P2 (degraded)** — Fix forward if < 30 minutes, otherwise revert
+4. **P3 (annoying)** — Fix forward in next session
+
+### 14.2 Docker Rollback
+
+```bash
+# Roll back to previous image
+docker compose pull  # if using registry
+docker compose up -d --force-recreate <service-name>
+```
+
+### 14.3 Database Rollback
+
+Schema migrations must be reversible. Every migration file should include a `down` function that undoes the `up` changes. Test rollback in staging before production.
+
+---
+
+## 15. Dependency Management
+
+### 15.1 Update Schedule
+
+- **Security patches** — Apply immediately when `pnpm audit` reports vulnerabilities
+- **Minor updates** — Review and apply monthly
+- **Major updates** — Evaluate impact, test thoroughly, apply quarterly
+
+### 15.2 Process
+
+1. Run `pnpm audit` to check for known vulnerabilities
+2. Run `pnpm outdated` to see available updates
+3. Update one dependency at a time — never batch unrelated updates
+4. Run full test suite after each update
+5. Document breaking changes in commit message
+
+---
+
+## 16. Performance Testing
+
+### 16.1 When Required
+
+- Any change to hot paths (request handling, database queries, sync jobs)
+- Any change to data structures used at scale (arrays → maps, etc.)
+- Any new external service call in a request path
+- Before major releases
+
+### 16.2 What to Measure
+
+| Metric | Target | How |
+|--------|--------|-----|
+| API response time (p95) | < 200ms | Load test with realistic payloads |
+| Ingestion throughput | > 1000 records/second | Batch sync with varying sizes |
+| Concurrent users | > 100 simultaneous | Parallel request simulation |
+| Memory under load | < 512MB per service | Monitor during load test |
+
+---
+
+## 17. Database Migration Strategy
+
+### 17.1 Migration Rules
+
+- Every schema change is a versioned migration file
+- Migrations run automatically on service startup (via init.sh)
+- Migrations must be idempotent — running twice produces the same result
+- Never modify a migration that has been applied to any environment
+- Destructive changes (DROP, ALTER TYPE) require a two-phase approach:
+  1. Phase 1: Add new column/table, dual-write
+  2. Phase 2: Migrate data, remove old column/table
+
+### 17.2 Testing Migrations
+
+- Test migration up AND down in CI
+- Test with representative data volumes (not just empty tables)
+- Verify indexes are created and used by the query planner
+
+---
+
+## 18. Hotfix Process
+
+For urgent production fixes that cannot wait for the full pipeline:
+
+1. **Create a hotfix branch** from the latest production tag
+2. **Apply the minimal fix** — smallest possible change
+3. **Run tests** — full test suite must pass
+4. **Code review** — at minimum one reviewer, security-focused
+5. **Deploy** — push to main, verify CI, deploy
+6. **Post-mortem** — document what happened and how to prevent recurrence
+
+Hotfixes skip Phase 1 (Analysis) and Phase 2/3 (Architecture/Design) ONLY if the fix is a pure bug fix with no design implications. If the fix changes an interface or data model, the full pipeline applies.
+
+---
+
+## 19. Accessibility Testing
+
+### 19.1 Requirements
+
+All frontend components must meet WCAG 2.1 Level AA. Key requirements:
+
+| Criterion | How to Verify |
+|-----------|--------------|
+| Color contrast | 4.5:1 for normal text, 3:1 for large text |
+| Keyboard navigation | All interactive elements reachable via Tab |
+| Screen reader | All images have alt text, forms have labels |
+| Focus indicators | Visible focus ring on all interactive elements |
+| Motion | Respect `prefers-reduced-motion` |
+
+### 19.2 Testing Process
+
+- Use axe-core or similar in component tests
+- Manual keyboard navigation test for new UI flows
+- Screen reader verification for critical paths (login, bootstrap, dashboard)
+
+---
+
+## 20. API Versioning Strategy
+
+### 20.1 Current Version
+
+All APIs are versioned at `/api/v1/`. The `v1` prefix is included in every route.
+
+### 20.2 Breaking Changes
+
+A change is breaking if it:
+- Removes or renames an endpoint
+- Removes or renames a field in a response body
+- Changes the type of a field
+- Adds a required field to a request body
+- Changes the semantics of an existing field
+
+### 20.3 Process for Breaking Changes
+
+1. **Introduce v2 endpoint** alongside v1
+2. **Deprecation notice** — v1 endpoint returns `Sunset` header with removal date
+3. **Migration period** — minimum 3 months of dual support
+4. **Remove v1** — only after all known consumers have migrated
+5. **Document** — changelog entry with migration guide
