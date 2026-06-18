@@ -4,6 +4,7 @@ import { UnauthorizedError, ValidationError } from "@oneplatform/core";
 import type {
   ConnectorService,
   SyncService,
+  SchemaDriftService,
 } from "../services/index.js";
 import {
   listConnectorsQuery,
@@ -18,11 +19,12 @@ export interface ConnectorRouteDeps {
   connectorService: ConnectorService;
   syncService: SyncService;
   masterKey: Buffer;
+  schemaDriftService?: SchemaDriftService;
 }
 
 export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { connectorService, syncService, masterKey } = deps;
+  const { connectorService, syncService, masterKey, schemaDriftService } = deps;
 
   routes.get("/", async (c) => {
     const user = c.var.user;
@@ -230,6 +232,28 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
 
     const progress = await syncService.getSyncProgress(c.req.param("syncId"));
     return c.json({ data: progress });
+  });
+
+  // GET /api/v1/connectors/:id/schema-drift
+  // Returns the last 10 schema snapshots for the connector, newest first.
+  // Callers can diff consecutive entries to reconstruct the full drift history.
+  routes.get("/:id/schema-drift", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+
+    // Ownership check — throws ConnectorNotFoundError (404) for unknown or
+    // cross-tenant connector IDs, matching the pattern used by other endpoints.
+    await connectorService.getConnector(user.tenantId, c.req.param("id"));
+
+    if (schemaDriftService === undefined) {
+      // Service not wired — return an empty history rather than 500-ing.
+      return c.json({ data: [] });
+    }
+
+    const history = await schemaDriftService.getHistory(c.req.param("id"));
+    return c.json({ data: history });
   });
 
   return routes;

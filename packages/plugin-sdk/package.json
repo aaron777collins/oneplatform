@@ -19,6 +19,10 @@
     "./dev": {
       "import": "./dist/dev/index.js",
       "types": "./dist/dev/index.d.ts"
+    },
+    "./dev-server": {
+      "import": "./dist/dev-server/index.js",
+      "types": "./dist/dev-server/index.d.ts"
     }
   },
   "main": "./dist/index.js",

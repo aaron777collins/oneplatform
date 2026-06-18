@@ -77,6 +77,31 @@ export const sseQuery = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// GDPR data subject requests
+// ---------------------------------------------------------------------------
+
+export const gdprAccessRequestSchema = z.object({
+  // Platform-admin submitting on behalf of a user must pass userId explicitly.
+  // A regular user may omit it — the route infers it from the auth token.
+  userId: z.string().uuid().optional(),
+});
+
+export const gdprDeletionRequestSchema = z.object({
+  userId: z.string().uuid().optional(),
+});
+
+export const gdprExportRequestSchema = z.object({
+  userId: z.string().uuid().optional(),
+});
+
+export const listGdprRequestsQuery = z.object({
+  userId: z.string().uuid().optional(),
+  status: z.enum(["pending", "processing", "completed", "failed"]).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+// ---------------------------------------------------------------------------
 // Rate limit config (admin)
 // ---------------------------------------------------------------------------
 

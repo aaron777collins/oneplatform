@@ -67,6 +67,40 @@ export interface RateLimitConfigRow {
 }
 
 // ---------------------------------------------------------------------------
+// gateway.gdpr_requests
+// ---------------------------------------------------------------------------
+
+export type GdprRequestType = "access" | "deletion" | "export";
+export type GdprRequestStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface GdprRequestRow {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  type: GdprRequestType;
+  status: GdprRequestStatus;
+  requester_id: string;
+  requested_at: Date;
+  completed_at: Date | null;
+  result_url: string | null;
+  error_detail: string | null;
+}
+
+export interface CreateGdprRequestData {
+  tenant_id: string;
+  user_id: string;
+  type: GdprRequestType;
+  requester_id: string;
+}
+
+export interface UpdateGdprRequestData {
+  status: GdprRequestStatus;
+  completed_at?: Date;
+  result_url?: string;
+  error_detail?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Input shapes for create / update operations
 // ---------------------------------------------------------------------------
 

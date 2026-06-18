@@ -29,6 +29,9 @@ import { createDataRoutes } from "./routes/data.js";
 import { createAdminRoutes } from "./routes/admin.js";
 import { createHealthRoutes } from "./routes/health.js";
 import { createOpenApiRoutes } from "./routes/openapi.js";
+import { createGdprRoutes } from "./routes/gdpr.js";
+import { GdprRequestRepository } from "./repositories/gdpr-request-repository.js";
+import { createGdprService } from "./services/gdpr-service.js";
 
 async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
@@ -72,6 +75,12 @@ export interface GatewayConfig {
   ontologyServiceUrl: string;
   /** URL of the upstream ingestion service. */
   ingestionServiceUrl: string;
+  /** URL of the auth service (internal). Used by GDPR fan-out. */
+  authServiceUrl?: string;
+  /** URL of the logging service (internal). Used by GDPR fan-out. */
+  loggingServiceUrl?: string;
+  /** URL of the app service (internal). Used by GDPR fan-out. */
+  appServiceUrl?: string;
   /** Bearer token for outbound service-to-service requests. */
   serviceToken?: string;
   /** Directory containing peer service public key files. Defaults to /data/service-keys. */
@@ -124,6 +133,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const webhookRepo = new WebhookRepository(db);
   const deliveryRepo = new WebhookDeliveryRepository(db);
   const rateLimitConfigRepo = new RateLimitConfigRepository(db);
+  const gdprRequestRepo = new GdprRequestRepository(db);
 
   // Step 6: Services
   const webhookService = createWebhookService({
@@ -137,6 +147,18 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     logger,
     ontologyServiceUrl: config.ontologyServiceUrl,
     ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+  });
+
+  const gdprService = createGdprService({
+    gdprRequestRepo,
+    logger,
+    config: {
+      authServiceUrl: config.authServiceUrl ?? process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
+      loggingServiceUrl: config.loggingServiceUrl ?? process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
+      ingestionServiceUrl: config.ingestionServiceUrl,
+      appServiceUrl: config.appServiceUrl ?? process.env["APP_SERVICE_URL"] ?? "http://app-service:3000",
+      serviceToken: config.serviceToken ?? "",
+    },
   });
 
   const proxyService = createProxyService();
@@ -261,6 +283,9 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
 
   const adminRoutes = createAdminRoutes({ rateLimitConfigRepo });
   app.route("/api/v1/admin", adminRoutes);
+
+  const gdprRoutes = createGdprRoutes({ gdprService });
+  app.route("/api/v1/gdpr", gdprRoutes);
 
   // OpenAPI spec endpoints must be registered before the catch-all proxy routes
   // so that /api/v1/openapi.json is never intercepted by the proxy.

@@ -8,9 +8,11 @@ import type { CommandContext } from "../../lib/context.js";
 import { CliError, EXIT } from "../../lib/errors.js";
 import { confirmDestructive, promptText, promptSelect } from "../../lib/prompts.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { generateScaffold, packPlugin, runSimulateHook } from "@oneplatform/plugin-sdk/dev";
 import type { PluginType } from "@oneplatform/plugin-sdk/dev";
+import { PluginDevServer } from "@oneplatform/plugin-sdk/dev-server";
+import type { DevServerOptions } from "@oneplatform/plugin-sdk/dev-server";
 
 const PLUGIN_COLUMNS = [
   { header: "ID", key: "id" },
@@ -366,6 +368,116 @@ async function simulateHookAction(stage: string, opts: SimulateOpts, ctx: Comman
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// op plugin dev
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DevOpts {
+  /** Directory containing plugin.manifest.json. Default: process.cwd(). */
+  dir?: string;
+  /** TCP port for a webhook testing endpoint. Omit to run headless. */
+  port?: string;
+  /** JSON file mapping credential name → value (kept local, never sent to server). */
+  credentials?: string;
+  /** JSON file with plugin instance config values. */
+  config?: string;
+  /** JSON file with URL-keyed mock API responses. */
+  mockData?: string;
+  /** Enable real network fetch (default: mock). */
+  realFetch?: boolean;
+  /** Watch for source changes and hot-reload. */
+  watch?: boolean;
+  /** Maximum fetchBatch iterations before halting (safety guard). */
+  maxBatches?: string;
+  /** Per-call timeout in milliseconds. */
+  timeout?: string;
+  /** Tenant ID injected into the dev context. */
+  tenantId?: string;
+}
+
+async function devAction(opts: DevOpts): Promise<void> {
+  // Resolve the plugin directory — default to cwd so the developer can run
+  // "op plugin dev" from the plugin root without any arguments.
+  const pluginDir = resolve(opts.dir ?? process.cwd());
+
+  // Load optional JSON files for credentials, config, and mock data.
+  // We parse these here (boundary layer) so that PluginDevServer receives
+  // clean typed options and does not need to know about file I/O.
+  const credentials = opts.credentials !== undefined
+    ? loadStringRecord(opts.credentials, "--credentials")
+    : undefined;
+
+  const config = opts.config !== undefined
+    ? loadJsonRecord(opts.config, "--config")
+    : undefined;
+
+  const mockData = opts.mockData !== undefined
+    ? loadJsonRecord(opts.mockData, "--mock-data")
+    : undefined;
+
+  const devOptions: DevServerOptions = {
+    ...(opts.port !== undefined ? { port: parseInt(opts.port, 10) } : {}),
+    ...(credentials !== undefined ? { credentials } : {}),
+    ...(config !== undefined ? { config } : {}),
+    ...(mockData !== undefined ? { mockData } : {}),
+    ...(opts.realFetch === true ? { allowRealFetch: true } : {}),
+    ...(opts.maxBatches !== undefined ? { maxBatches: parseInt(opts.maxBatches, 10) } : {}),
+    ...(opts.timeout !== undefined ? { callTimeoutMs: parseInt(opts.timeout, 10) } : {}),
+    ...(opts.tenantId !== undefined ? { tenantId: opts.tenantId } : {}),
+  };
+
+  const server = new PluginDevServer();
+
+  // Graceful shutdown on Ctrl+C so the watcher is cleaned up and the terminal
+  // is restored to a clean state.
+  process.on("SIGINT", () => {
+    server.stop();
+    process.stderr.write("\nDev server stopped.\n");
+    process.exit(0);
+  });
+
+  await server.start(pluginDir, devOptions);
+
+  if (opts.watch === true) {
+    server.startWatching(pluginDir, devOptions);
+
+    // Keep the process alive until SIGINT. The watcher's async callbacks keep
+    // Node's event loop active, so we only need to avoid returning here.
+    await new Promise<void>(() => {
+      // This promise intentionally never resolves; SIGINT handler calls process.exit().
+    });
+  }
+}
+
+// File-loading helpers used by devAction to validate boundary inputs.
+
+function loadJsonRecord(filePath: string, label: string): Record<string, unknown> {
+  const raw = readFileSync(filePath, "utf-8");
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new CliError(`${label}: expected a JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`, EXIT.GENERAL);
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof CliError) throw err;
+    throw new CliError(`${label}: invalid JSON in "${filePath}" — ${String(err)}`, EXIT.GENERAL);
+  }
+}
+
+function loadStringRecord(filePath: string, label: string): Record<string, string> {
+  const obj = loadJsonRecord(filePath, label);
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v !== "string") {
+      throw new CliError(
+        `${label}: all values must be strings, but "${k}" is ${typeof v}`,
+        EXIT.GENERAL,
+      );
+    }
+  }
+  return obj as Record<string, string>;
+}
+
 export function registerPlugin(program: Command): void {
   const plugin = program.command("plugin").description("Plugin management");
 
@@ -438,4 +550,27 @@ export function registerPlugin(program: Command): void {
     .option("--sandbox", "Use isolated-vm for production-accurate sandboxing (requires isolated-vm to be installed)")
     .option("--remote", "Execute on the running OnePlatform server instead of locally (requires --plugin <plugin-id>)")
     .action(withContext<[string, SimulateOpts]>(simulateHookAction));
+
+  plugin.command("dev")
+    .description(
+      "Run the connector lifecycle locally for development (no server required). " +
+        "Drives metadata() → connect() → fetchBatch() → disconnect() and displays results. " +
+        "Use --watch to hot-reload on source changes.",
+    )
+    .option("--dir <path>", "Plugin project root (default: current directory)")
+    .option("--credentials <file.json>", "JSON file mapping credential name → value")
+    .option("--config <file.json>",      "JSON file with plugin instance config values")
+    .option("--mock-data <file.json>",   "JSON file mapping URL substrings → mock response bodies")
+    .option("--port <number>",           "TCP port for a webhook testing endpoint (optional)")
+    .option("--real-fetch",              "Allow real network requests (default: all fetch calls are mocked)")
+    .option("--watch",                   "Watch plugin source for changes and reload automatically")
+    .option("--max-batches <n>",         "Maximum fetchBatch iterations before halting (default: 100)")
+    .option("--timeout <ms>",            "Per-call timeout in milliseconds (default: 30000)")
+    .option("--tenant-id <id>",          "Tenant ID in the dev context (default: dev-tenant)")
+    .action(async (opts: DevOpts) => {
+      // devAction does not need a CommandContext (no HTTP calls, no auth token).
+      // We call it directly rather than through withContext to avoid a spurious
+      // "not authenticated" error when the developer is working offline.
+      await devAction(opts);
+    });
 }
