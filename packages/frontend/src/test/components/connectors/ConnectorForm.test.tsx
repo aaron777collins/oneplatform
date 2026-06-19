@@ -90,19 +90,19 @@ describe("ConnectorForm", () => {
       expect(input).toBeInTheDocument();
     });
 
-    it("renders a password input when the field key is 'apiToken'", () => {
+    it("renders a password input when the field key is 'token'", () => {
       renderForm({
         type: "object",
-        properties: { apiToken: { type: "string", title: "API Token" } },
+        properties: { token: { type: "string", title: "Token" } },
       });
       const input = document.querySelector("input[type='password']");
       expect(input).toBeInTheDocument();
     });
 
-    it("renders a password input for a field key containing 'password'", () => {
+    it("renders a password input for a field key that is exactly 'password'", () => {
       renderForm({
         type: "object",
-        properties: { adminPassword: { type: "string", title: "Admin Password" } },
+        properties: { password: { type: "string", title: "Password" } },
       });
       const input = document.querySelector("input[type='password']");
       expect(input).toBeInTheDocument();

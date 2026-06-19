@@ -139,15 +139,11 @@ vi.mock("@/components/ui/select.js", () => {
 // ---------------------------------------------------------------------------
 
 const ENTITY_LIST_RESPONSE = {
-  data: {
-    items: [
-      { id: "e1", name: "Order", slug: "order", fieldCount: 2 },
-      { id: "e2", name: "Customer", slug: "customer", fieldCount: 3 },
-    ],
-    nextCursor: null,
-    total: 2,
-    hasMore: false,
-  },
+  data: [
+    { id: "e1", name: "Order", slug: "order", fieldCount: 2 },
+    { id: "e2", name: "Customer", slug: "customer", fieldCount: 3 },
+  ],
+  pagination: { nextCursor: null, total: 2 },
 };
 
 const ENTITY_DETAIL_RESPONSE = {
@@ -472,14 +468,16 @@ describe("QueryBuilderPage — Run query", () => {
     });
   });
 
-  it("sends select: ['*'] when no fields are explicitly checked", async () => {
+  it("sends all fields in select when no fields are explicitly unchecked", async () => {
     const apiClient = makeApiClient();
     await selectEntityAndRun(apiClient);
 
     await waitFor(() => {
       expect(apiClient.post).toHaveBeenCalledWith(
         "/v1/ontology/query",
-        expect.objectContaining({ select: ["*"] }),
+        expect.objectContaining({
+          select: expect.arrayContaining(["_id", "_created_at", "_updated_at", "status", "amount"]),
+        }),
       );
     });
   });

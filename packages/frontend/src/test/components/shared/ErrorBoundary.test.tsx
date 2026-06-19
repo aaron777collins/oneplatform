@@ -77,7 +77,11 @@ describe("ErrorBoundary", () => {
           <ThrowingChild shouldThrow={true} />
         </ErrorBoundary>,
       );
-      expect(screen.getByText("Test error")).toBeInTheDocument();
+      // The classified error boundary shows the error message in both the
+      // description and the technical details section, so use getAllByText.
+      const matches = screen.getAllByText("Test error");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
+      expect(matches[0]).toBeInTheDocument();
     });
 
     it("renders the fallback with role='alert'", () => {

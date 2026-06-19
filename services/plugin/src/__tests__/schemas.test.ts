@@ -512,16 +512,16 @@ describe("PluginManifestSchema — name and description boundaries", () => {
     fails(PluginManifestSchema, { ...minimalManifest, name: "A".repeat(101) });
   });
 
-  it("accepts description with exactly 200 chars", () => {
+  it("accepts description with exactly 500 chars", () => {
     const r = PluginManifestSchema.safeParse({
       ...minimalManifest,
-      description: "D".repeat(200),
+      description: "D".repeat(500),
     });
     expect(r.success).toBe(true);
   });
 
-  it("rejects description longer than 200 chars", () => {
-    fails(PluginManifestSchema, { ...minimalManifest, description: "D".repeat(201) });
+  it("rejects description longer than 500 chars", () => {
+    fails(PluginManifestSchema, { ...minimalManifest, description: "D".repeat(501) });
   });
 });
 
