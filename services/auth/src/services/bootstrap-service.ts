@@ -274,6 +274,7 @@ export function createBootstrapService(
         tenantId,
         roles: ["platform-admin"],
         emailVerified: true,
+        email: data.adminEmail,
       });
 
       const { token: refreshToken, jti: refreshJti } =

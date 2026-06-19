@@ -281,7 +281,7 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // predefined mapping for standard role names.
     const scopes = resolveScopes(user.roles);
 
-    const issuer = process.env["OP_SERVICE_URL"] || "oneplatform";
+    const issuer = "oneplatform";
     const audience = "oneplatform";
 
     const builder = new SignJWT({
@@ -294,6 +294,10 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       // for users who registered with email verification required.
       unverified: !user.emailVerified,
       jti: randomUUID(),
+      // Include email and displayName for downstream services (e.g. BFF /me)
+      // so they can display user identity without a separate profile lookup.
+      ...(user.email ? { email: user.email } : {}),
+      ...(user.displayName ? { displayName: user.displayName } : {}),
     } satisfies Omit<JwtClaims, "iat" | "exp">)
       .setProtectedHeader({ alg: algorithm })
       .setIssuedAt(now)
@@ -371,7 +375,7 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
         return null;
       }
 
-      const expectedIssuer = process.env["OP_SERVICE_URL"] || "oneplatform";
+      const expectedIssuer = "oneplatform";
       const expectedAudience = "oneplatform";
 
       let payload: JWTPayload;
@@ -555,8 +559,10 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       tenant_id: string;
       roles: string[];
       email_verified: boolean;
+      email: string;
+      display_name: string | null;
     }>(
-      "SELECT id, tenant_id, roles, email_verified FROM auth.users WHERE id = $1",
+      "SELECT id, tenant_id, roles, email_verified, email, display_name FROM auth.users WHERE id = $1",
       [payload.userId]
     );
 
@@ -570,6 +576,8 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       tenantId: user.tenant_id,
       roles: user.roles,
       emailVerified: user.email_verified,
+      email: user.email,
+      displayName: user.display_name ?? undefined,
     });
 
     return {

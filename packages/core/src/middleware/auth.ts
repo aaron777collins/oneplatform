@@ -17,6 +17,8 @@ interface JwtClaims extends JWTPayload {
   roles: string[];
   scopes: string[];
   unverified?: boolean;
+  email?: string;
+  displayName?: string;
 }
 
 export interface AuthMiddlewareConfig {
@@ -209,6 +211,8 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
         isGuest: false,
         isService: false,
         emailVerified: !isUnverified,
+        ...(claims.email ? { email: claims.email } : {}),
+        ...(claims.displayName ? { displayName: claims.displayName } : {}),
       };
 
       c.set("user", user);

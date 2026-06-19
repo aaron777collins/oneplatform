@@ -12,15 +12,27 @@ import {
   BootstrapAlreadyCompletedError,
   BootstrapInvalidTokenError,
 } from "../../services/errors.js";
+import type { Redis } from "ioredis";
+
+// ---------------------------------------------------------------------------
+// Mock Redis factory
+// ---------------------------------------------------------------------------
+
+function makeMockRedis(): Redis {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue("OK"),
+  } as unknown as Redis;
+}
 
 // ---------------------------------------------------------------------------
 // Test app factory
 // ---------------------------------------------------------------------------
 
-function buildApp(bootstrapService: BootstrapService): Hono<{ Variables: AppVariables }> {
+function buildApp(bootstrapService: BootstrapService, redis?: Redis): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   app.onError(errorHandlerMiddleware());
-  const routes = createBootstrapRoutes({ bootstrapService });
+  const routes = createBootstrapRoutes({ bootstrapService, redis: redis ?? makeMockRedis() });
   app.route("/", routes);
   return app;
 }

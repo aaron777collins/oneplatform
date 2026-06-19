@@ -290,8 +290,10 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
       tenant_id: string;
       roles: string[];
       email_verified: boolean;
+      email: string;
+      display_name: string | null;
     }>(
-      "SELECT id, tenant_id, roles, email_verified FROM auth.users WHERE id = $1",
+      "SELECT id, tenant_id, roles, email_verified, email, display_name FROM auth.users WHERE id = $1",
       [userId]
     );
     const user = userResult.rows[0];
@@ -317,6 +319,8 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
       tenantId: user.tenant_id,
       roles: user.roles,
       emailVerified: user.email_verified,
+      email: user.email,
+      displayName: user.display_name ?? undefined,
     });
 
     const { token: refreshToken, jti: refreshJti } =

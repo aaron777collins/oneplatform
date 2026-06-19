@@ -208,6 +208,10 @@ const SSRF_BLOCKED_PATTERNS = [
   /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^\[?::1\]?(:\d+)?(\/|$)/,
+  /^https?:\/\/0\.0\.0\.0(:\d+)?(\/|$)/,
+  /^https?:\/\/metadata\.google\.internal(\/|$)/,
+  /^https?:\/\/100\.100\.100\.200(:\d+)?(\/|$)/,
 ];
 
 function isUrlSsrfBlocked(url: string): boolean {

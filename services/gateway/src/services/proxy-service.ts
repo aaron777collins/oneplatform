@@ -36,7 +36,6 @@ const SERVICE_MAP: Record<string, string> = {
   "api-keys": process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
   "tenants": process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
   "bootstrap": process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
-  "data-residency": process.env["GATEWAY_INTERNAL"] ?? "http://localhost:3000",
   "marketplace": process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3000",
 };
 

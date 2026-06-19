@@ -123,15 +123,21 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     const userRoleNames = new Set(user.roles);
     const roles = allAppRoles.filter((r) => userRoleNames.has(r.name));
 
-    // Map userId → id and provide email/displayName placeholders so the
-    // response matches the app-sdk UserContext interface (id, email, displayName).
-    // The core UserContext only carries userId; email/displayName require a
-    // lookup against the Auth Service user profile — a future enhancement.
+    // Map userId → id and resolve email/displayName from JWT claims with a
+    // graceful fallback chain so every user gets a meaningful identity:
+    //   1. displayName claim from JWT (set during login/registration)
+    //   2. email claim from JWT
+    //   3. "User " + first 8 chars of userId (always available)
+    const resolvedDisplayName =
+      user.displayName ||
+      user.email ||
+      `User ${user.userId.slice(0, 8)}`;
+
     return c.json({
       data: {
         id:          user.userId,
-        email:       null,
-        displayName: "User",
+        email:       user.email ?? null,
+        displayName: resolvedDisplayName,
         tenantId:    user.tenantId,
         appId,
         // User's roles within the app — the SDK uses this for permission checks

@@ -699,6 +699,191 @@ describe("execution engine — SSRF constants", () => {
 });
 
 // ---------------------------------------------------------------------------
+// processRun — skipIf expression evaluation
+// ---------------------------------------------------------------------------
+
+describe("processRun — skipIf expression", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("skips a step when skipIf expression evaluates to true", async () => {
+    const runRepo = makeRunRepo();
+    const runStepRepo = makeRunStepRepo();
+    const runLogRepo = makeRunLogRepo();
+    const client = makePoolClient();
+    const pool = makePool(client);
+    const redis = makeRedis();
+    const logger = makeLogger();
+
+    client.query.mockImplementation((sql: string) => {
+      if (sql.includes("pg_try_advisory_lock")) {
+        return Promise.resolve({ rows: [{ pg_try_advisory_lock: true }] });
+      }
+      if (sql.includes("pg_advisory_unlock")) {
+        return Promise.resolve({ rows: [] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    // Step with skipIf that evaluates to true — the step should be SKIPPED
+    const stepWithSkipIf = {
+      ...minimalStep,
+      id: "step-1",
+      skipIf: "input.shouldSkip = true",
+    };
+
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithSkipIf],
+    };
+
+    runRepo.findById.mockResolvedValue(
+      makeRunRow({ definition_snapshot: definition, input: { shouldSkip: true } }),
+    );
+    runRepo.updateStatus.mockResolvedValue(makeRunRow({ status: "running" }));
+    runStepRepo.createBatch.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+    runStepRepo.updateStatus.mockResolvedValue(makeRunStepRow({ status: "skipped" }));
+    runStepRepo.updateOutput.mockResolvedValue(makeRunStepRow());
+    runLogRepo.append.mockResolvedValue(undefined);
+    redis.get.mockResolvedValue(null); // not cancelled
+    redis.publish.mockResolvedValue(0);
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    const engine = createExecutionEngine({
+      runRepo: runRepo as unknown as RunEngineRepository,
+      runStepRepo: runStepRepo as unknown as RunStepEngineRepository,
+      runLogRepo: runLogRepo as unknown as RunLogEngineRepository,
+      pool: pool as unknown as Pool,
+      redis: redis as unknown as Redis,
+      executionServiceUrl: "http://exec:3000",
+      pluginServiceUrl: "http://plugins:3000",
+      ingestionServiceUrl: "http://ingestion:3000",
+      stepDefaultTimeoutMs: 30_000,
+      hookDefaultTimeoutMs: 5_000,
+      logger,
+      serviceTokenSigner: makeServiceTokenSigner(),
+    });
+
+    await engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+
+    // The step should have been marked as "skipped"
+    const updateStatusCalls = (runStepRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, string, Record<string, unknown>]>;
+    const skippedCalls = updateStatusCalls.filter((c) => c[2]["status"] === "skipped");
+    expect(skippedCalls.length).toBeGreaterThan(0);
+
+    // The execution service should NOT have been called for a skipped step
+    const fetchCalls = (vi.mocked(fetch)).mock.calls as Array<[string, ...unknown[]]>;
+    const execCalls = fetchCalls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("/internal/execution/run"),
+    );
+    expect(execCalls.length).toBe(0);
+  });
+
+  it("executes a step normally when skipIf expression evaluates to false", async () => {
+    const runRepo = makeRunRepo();
+    const runStepRepo = makeRunStepRepo();
+    const runLogRepo = makeRunLogRepo();
+    const client = makePoolClient();
+    const pool = makePool(client);
+    const redis = makeRedis();
+    const logger = makeLogger();
+
+    client.query.mockImplementation((sql: string) => {
+      if (sql.includes("pg_try_advisory_lock")) {
+        return Promise.resolve({ rows: [{ pg_try_advisory_lock: true }] });
+      }
+      if (sql.includes("pg_advisory_unlock")) {
+        return Promise.resolve({ rows: [] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    // Step with skipIf that evaluates to false — the step should EXECUTE
+    const stepWithSkipIfFalse = {
+      ...minimalStep,
+      id: "step-1",
+      skipIf: "input.shouldSkip = true",
+    };
+
+    const definition: PipelineDefinition = {
+      version: 1,
+      entryStepId: "step-1",
+      steps: [stepWithSkipIfFalse],
+    };
+
+    // Input has shouldSkip = false, so the skipIf condition evaluates to false
+    runRepo.findById.mockResolvedValue(
+      makeRunRow({ definition_snapshot: definition, input: { shouldSkip: false } }),
+    );
+    runRepo.updateStatus.mockResolvedValue(makeRunRow({ status: "running" }));
+    runStepRepo.createBatch.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+    runStepRepo.findByRunId.mockResolvedValue([makeRunStepRow({ step_id: "step-1" })]);
+    runStepRepo.updateStatus.mockResolvedValue(makeRunStepRow({ status: "completed" }));
+    runStepRepo.updateOutput.mockResolvedValue(makeRunStepRow({ status: "completed" }));
+    runLogRepo.append.mockResolvedValue(undefined);
+    redis.get.mockResolvedValue(null); // not cancelled
+    redis.publish.mockResolvedValue(0);
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/internal/plugins/hooks")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hooks: [] }), status: 200 });
+      }
+      if (String(url).includes("/internal/execution/run")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executionId: "exec-001", output: { result: "ok" }, durationMs: 42, exitCode: 0 }),
+          status: 200,
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), status: 200 });
+    }));
+
+    const engine = createExecutionEngine({
+      runRepo: runRepo as unknown as RunEngineRepository,
+      runStepRepo: runStepRepo as unknown as RunStepEngineRepository,
+      runLogRepo: runLogRepo as unknown as RunLogEngineRepository,
+      pool: pool as unknown as Pool,
+      redis: redis as unknown as Redis,
+      executionServiceUrl: "http://exec:3000",
+      pluginServiceUrl: "http://plugins:3000",
+      ingestionServiceUrl: "http://ingestion:3000",
+      stepDefaultTimeoutMs: 30_000,
+      hookDefaultTimeoutMs: 5_000,
+      logger,
+      serviceTokenSigner: makeServiceTokenSigner(),
+    });
+
+    await engine.processRun(makeJob({ runId: "run-001", tenantId: TENANT_UUID }));
+
+    // The step should NOT have been skipped — it should have been executed
+    const updateStatusCalls = (runStepRepo.updateStatus as ReturnType<typeof vi.fn>).mock.calls as Array<[string, string, Record<string, unknown>]>;
+    const skippedCalls = updateStatusCalls.filter((c) => c[2]["status"] === "skipped");
+    expect(skippedCalls.length).toBe(0);
+
+    // The step should have been marked as running then completed
+    const statusValues = updateStatusCalls.map((c) => c[2]["status"]).filter(Boolean);
+    expect(statusValues).toContain("running");
+    expect(statusValues).toContain("completed");
+
+    // The execution service SHOULD have been called
+    const fetchCalls = (vi.mocked(fetch)).mock.calls as Array<[string, ...unknown[]]>;
+    const execCalls = fetchCalls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("/internal/execution/run"),
+    );
+    expect(execCalls.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Retry logic — shared engine setup factory used across all retry suites.
 // Fake timers (vi.useFakeTimers) let tests verify retry delays without
 // blocking on real wall-clock waits.

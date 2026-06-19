@@ -6,24 +6,27 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError } from "@oneplatform/core";
+import type { Redis } from "ioredis";
 import type { BootstrapService } from "../services/index.js";
 import { bootstrapRequest } from "../schemas/index.js";
+
+/** Redis key used to track whether the master key has already been served.
+ *  SET NX EX 3600 — once set, the key survives process restarts and
+ *  scale-out for one hour before auto-expiring (defense in depth). */
+const MASTER_KEY_SERVED_REDIS_KEY = "auth:master-key-served";
+const MASTER_KEY_SERVED_TTL_SEC = 3600;
 
 export interface BootstrapRouteDeps {
   bootstrapService: BootstrapService;
   /** Returns the hex-encoded master key, or null if unavailable. */
   getMasterKeyHex?: () => string | null;
+  /** Redis client for distributed state (master-key-served flag). */
+  redis: Redis;
 }
 
 export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { bootstrapService, getMasterKeyHex } = deps;
-
-  // Track whether the master key has already been served in this process
-  // lifetime. Once fetched, subsequent requests return 410 to prevent
-  // repeated exposure (defense in depth — the key is also in env, but the
-  // endpoint should not serve it indefinitely).
-  let masterKeyAlreadyServed = false;
+  const { bootstrapService, getMasterKeyHex, redis } = deps;
 
   // GET /api/v1/bootstrap/status — public, no auth required
   // Returns { completed: boolean; bootstrapToken?: string } so the setup UI
@@ -45,7 +48,9 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
       );
     }
 
-    if (masterKeyAlreadyServed) {
+    // Check the distributed flag — survives restarts and works across replicas.
+    const alreadyServed = await redis.get(MASTER_KEY_SERVED_REDIS_KEY);
+    if (alreadyServed !== null) {
       return c.json(
         { error: { code: "MASTER_KEY_ALREADY_SERVED", message: "The master key has already been displayed." } },
         410,
@@ -60,7 +65,17 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
       );
     }
 
-    masterKeyAlreadyServed = true;
+    // SET NX EX — only sets the key if it does not already exist (atomic).
+    // This ensures exactly one process "wins" the serve even under concurrent requests.
+    const wasSet = await redis.set(MASTER_KEY_SERVED_REDIS_KEY, "1", "EX", MASTER_KEY_SERVED_TTL_SEC, "NX");
+    if (wasSet === null) {
+      // Another request beat us — treat as already served.
+      return c.json(
+        { error: { code: "MASTER_KEY_ALREADY_SERVED", message: "The master key has already been displayed." } },
+        410,
+      );
+    }
+
     return c.json({ data: { masterKey: hex } });
   });
 

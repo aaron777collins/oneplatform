@@ -213,7 +213,11 @@ export const resetPasswordRequest = z
       .regex(/[a-z]/, "Must contain lowercase")
       .regex(/[0-9]/, "Must contain a digit")
       .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
-    confirmPassword: z.string().min(12).max(128),
+    confirmPassword: z.string().min(12).max(128)
+      .regex(/[A-Z]/, "Must contain uppercase")
+      .regex(/[a-z]/, "Must contain lowercase")
+      .regex(/[0-9]/, "Must contain a digit")
+      .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
   })
   .refine((d) => d.newPassword === d.confirmPassword, {
     message: "Passwords do not match",
@@ -238,7 +242,11 @@ export const changePasswordRequest = z
       .regex(/[a-z]/, "Must contain lowercase")
       .regex(/[0-9]/, "Must contain a digit")
       .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
-    confirmPassword: z.string().min(12).max(128),
+    confirmPassword: z.string().min(12).max(128)
+      .regex(/[A-Z]/, "Must contain uppercase")
+      .regex(/[a-z]/, "Must contain lowercase")
+      .regex(/[0-9]/, "Must contain a digit")
+      .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
   })
   .refine((d) => d.newPassword === d.confirmPassword, {
     message: "Passwords do not match",
@@ -436,6 +444,13 @@ export const createUserRequest = z.object({
   email: z.string().email().max(254).toLowerCase(),
   roles: z.array(z.string()).min(1),
   displayName: z.string().min(1).max(100).trim().optional(),
+  // If omitted, a password reset email is sent to the user.
+  temporaryPassword: z.string().min(12).max(128)
+    .regex(/[A-Z]/, "Must contain uppercase")
+    .regex(/[a-z]/, "Must contain lowercase")
+    .regex(/[0-9]/, "Must contain a digit")
+    .regex(/[^A-Za-z0-9]/, "Must contain a special character")
+    .optional(),
 });
 
 export const updateUserRequest = z.object({

@@ -17,6 +17,10 @@ export interface UserForToken {
   tenantId: string;
   roles: string[];
   emailVerified: boolean;
+  /** User's email — included in JWT claims for downstream display. */
+  email?: string | undefined;
+  /** User's display name — included in JWT claims for downstream display. */
+  displayName?: string | undefined;
 }
 
 /**
@@ -33,6 +37,10 @@ export interface JwtClaims {
   scopes: string[];
   ev: boolean;
   unverified: boolean;
+  /** User's email — present when the token was issued with email context. */
+  email?: string | undefined;
+  /** User's display name — present when the token was issued with display name context. */
+  displayName?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------

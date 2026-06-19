@@ -27,6 +27,10 @@ export interface UserContext {
   isGuest: boolean;
   isService: boolean;
   emailVerified: boolean;
+  /** User's email address — carried in JWT claims when available. */
+  email?: string | undefined;
+  /** User's display name — carried in JWT claims when available. */
+  displayName?: string | undefined;
 }
 
 export interface PlatformEvent {

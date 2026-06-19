@@ -127,11 +127,24 @@ export function createTenantRoutes(
     return c.json(formatTenant(tenant), 201);
   });
 
-  // GET /api/v1/tenants/:id — fetch a single tenant by ID (platform-admin only)
+  // GET /api/v1/tenants/:id — fetch a single tenant by ID.
+  // Platform-admin can read ANY tenant. Tenant-admin can read their OWN tenant.
   routes.get("/api/v1/tenants/:id", async (c) => {
-    requirePlatformAdmin(c.var.user.scopes);
-
     const id = c.req.param("id");
+    const scopes = c.var.user.scopes;
+    const roles = c.var.user.roles;
+    const userTenantId = c.var.user.tenantId;
+
+    const isPlatformAdmin = scopes.includes(PLATFORM_ADMIN_SCOPE);
+    const isTenantAdmin = roles.includes("tenant-admin");
+    const isOwnTenant = id === userTenantId;
+
+    if (!isPlatformAdmin && !(isTenantAdmin && isOwnTenant)) {
+      throw new ForbiddenError(
+        "admin scope is required to read other tenants. Tenant admins may only read their own tenant."
+      );
+    }
+
     const tenant = await tenantRepository.findById(id);
     if (!tenant) {
       throw new NotFoundError(`Tenant ${id} not found.`);

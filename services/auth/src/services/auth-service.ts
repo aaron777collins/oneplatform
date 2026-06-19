@@ -238,6 +238,8 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       tenantId: data.tenantId,
       roles: ["viewer"],
       emailVerified: true,
+      email: data.email,
+      displayName: data.displayName,
     });
 
     const { token: refreshToken, jti: refreshJti } =
@@ -385,6 +387,8 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       tenantId: user.tenant_id,
       roles: user.roles,
       emailVerified: user.email_verified,
+      email: user.email,
+      displayName: user.display_name ?? undefined,
     });
 
     const { token: refreshToken, jti: refreshJti } =
