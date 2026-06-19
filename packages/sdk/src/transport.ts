@@ -176,9 +176,6 @@ function makeLogger(level: LogLevel) {
   };
 }
 
-/** Tracks deprecated endpoint paths already warned about (per Transport instance). */
-const warnedDeprecations = new Set<string>();
-
 export interface TransportOptions {
   readonly baseUrl: string;
   readonly authHandler: AuthHandler | AccessTokenHandler;
@@ -207,10 +204,27 @@ export class Transport {
   private readonly resolvedRetry: ReturnType<typeof resolveRetryPolicy>;
   private readonly logger: ReturnType<typeof makeLogger>;
 
+  /** Tracks deprecated endpoint paths already warned about for this instance. */
+  private readonly warnedDeprecations = new Set<string>();
+
+  /** Active AbortControllers for in-flight requests — aborted on destroy(). */
+  readonly activeControllers = new Set<AbortController>();
+
   constructor(opts: TransportOptions) {
     this.opts = opts;
     this.resolvedRetry = resolveRetryPolicy(opts.retry);
     this.logger = makeLogger(opts.logLevel);
+  }
+
+  /**
+   * Aborts all in-flight requests tracked by this transport instance.
+   * Called by the client's destroy() method.
+   */
+  destroy(): void {
+    for (const controller of this.activeControllers) {
+      controller.abort();
+    }
+    this.activeControllers.clear();
   }
 
   async request<T>(requestOptions: RequestOptions): Promise<T> {
@@ -265,6 +279,7 @@ export class Transport {
     form: FormData,
   ): Promise<T> {
     const controller = new AbortController();
+    this.activeControllers.add(controller);
     const timeoutMs = this.opts.timeout;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -332,6 +347,7 @@ export class Transport {
       if (envelope.data !== undefined) return envelope.data;
       return parsed as T;
     } finally {
+      this.activeControllers.delete(controller);
       if (timeoutId !== null) clearTimeout(timeoutId);
     }
   }
@@ -344,6 +360,7 @@ export class Transport {
     idempotencyKey?: string,
   ): Promise<T> {
     const controller = new AbortController();
+    this.activeControllers.add(controller);
     const timeoutMs = this.opts.timeout;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -398,8 +415,8 @@ export class Transport {
       // Emit deprecation warning once per unique endpoint
       if (response.headers.get('Deprecation') === 'true') {
         const key = `${method} ${new URL(url).pathname}`;
-        if (!warnedDeprecations.has(key)) {
-          warnedDeprecations.add(key);
+        if (!this.warnedDeprecations.has(key)) {
+          this.warnedDeprecations.add(key);
           const sunset = response.headers.get('Sunset') ?? 'unknown';
           const link = response.headers.get('Link') ?? '';
           this.logger.warn(
@@ -456,6 +473,7 @@ export class Transport {
       // Some endpoints return the result directly (e.g., non-standard 2xx)
       return parsed as T;
     } finally {
+      this.activeControllers.delete(controller);
       if (timeoutId !== null) clearTimeout(timeoutId);
     }
   }

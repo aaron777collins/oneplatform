@@ -42,7 +42,7 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-The platform will be available at `https://localhost` (Caddy provides TLS with a self-signed cert for development).
+The platform will be available at `https://localhost` (Caddy provides TLS with a self-signed certificate for local development; your browser will show a security warning that you can safely accept).
 
 ## Tech Stack
 

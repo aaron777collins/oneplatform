@@ -651,9 +651,10 @@ class PostgresConnector implements Connector {
       // hasMore is true when the batch is full — a partial batch means we've
       // reached the end of currently available rows.
       hasMore = records.length === cfg.batchSize;
-      nextCursor = hasMore
-        ? encodeCursor({ mode: "incremental", lastValue: String(colValue) })
-        : null;
+      // Always persist the cursor so a partial (final) batch saves its
+      // position.  Without this, restarting after a partial batch would
+      // re-fetch rows that were already processed (V5-116).
+      nextCursor = encodeCursor({ mode: "incremental", lastValue: String(colValue) });
     }
 
     context.logger.debug("fetchBatch (incremental)", {

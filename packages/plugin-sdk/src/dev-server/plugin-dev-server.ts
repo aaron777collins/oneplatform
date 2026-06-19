@@ -158,8 +158,8 @@ export class PluginDevServer {
       printRunStart(plugin.manifest.id);
 
       if (plugin.connector === undefined) {
-        // Non-connector plugins do not have a lifecycle the dev server can drive.
-        // Return a synthetic summary to satisfy the return type.
+        // Non-connector plugins do not have a connector lifecycle the dev server
+        // can drive. Print type-specific guidance and return a synthetic summary.
         return buildNonConnectorSummary(plugin.manifest);
       }
 
@@ -187,10 +187,31 @@ export class PluginDevServer {
 import type { PluginManifest } from "../manifest/schema.js";
 
 function buildNonConnectorSummary(manifest: PluginManifest): ConnectorRunSummary {
+  const typeGuidance: Record<string, string> = {
+    transformer:
+      `  Transformer plugins can be tested with:\n` +
+      `    op plugin simulate-hook before:pipeline.transform --input data.json\n` +
+      `  Or run your test suite: npm test\n`,
+    destination:
+      `  Destination plugins can be tested with:\n` +
+      `    op plugin simulate-hook before:destination.write --input records.json\n` +
+      `  Or run your test suite: npm test\n`,
+    "auth-provider":
+      `  Auth provider plugins can be tested with:\n` +
+      `    op plugin simulate-hook before:auth.callback --input params.json\n` +
+      `  Or run your test suite: npm test\n`,
+    widget:
+      `  Widget plugins can be tested by running your test suite: npm test\n` +
+      `  Widget rendering preview is not yet supported in the dev server.\n`,
+  };
+
+  const guidance = typeGuidance[manifest.type] ??
+    `  Use "op plugin simulate-hook" to test ${manifest.type} plugins.\n`;
+
   process.stderr.write(
-    `[dev-server] Plugin type "${manifest.type}" does not have a connector lifecycle.\n` +
+    `[dev-server] Plugin type "${manifest.type}" is not supported by the dev server yet.\n` +
       `  The dev server currently drives the connector lifecycle only.\n` +
-      `  Use "op plugin simulate-hook" to test ${manifest.type} plugins.\n`,
+      guidance,
   );
 
   return {

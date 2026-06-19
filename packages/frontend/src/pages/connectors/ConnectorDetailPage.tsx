@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.js";
@@ -69,6 +69,113 @@ interface SyncRecord {
   completedAt?: string;
   recordsIngested?: number;
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// SyncHistoryTable — extracted so we can use local state for expandable rows
+// ---------------------------------------------------------------------------
+
+function SyncHistoryTable({ syncs }: { syncs: SyncRecord[] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (syncs.length === 0) {
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Status</TableHead>
+            <TableHead>Started</TableHead>
+            <TableHead>Duration</TableHead>
+            <TableHead className="text-right">Records</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell colSpan={4} className="py-8 text-center text-sm text-[var(--color-muted-foreground)]">
+              No sync history yet.
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-8" />
+          <TableHead>Status</TableHead>
+          <TableHead>Started</TableHead>
+          <TableHead>Duration</TableHead>
+          <TableHead className="text-right">Records</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {syncs.map((sync) => {
+          const hasFailed = sync.status === "failed" && sync.error;
+          const isExpanded = expandedId === sync.id;
+          return (
+            <React.Fragment key={sync.id}>
+              <TableRow
+                className={hasFailed ? "cursor-pointer hover:bg-[var(--color-muted)]/50" : undefined}
+                onClick={() => {
+                  if (hasFailed) setExpandedId(isExpanded ? null : sync.id);
+                }}
+              >
+                <TableCell className="w-8 px-2">
+                  {hasFailed ? (
+                    isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-[var(--color-muted-foreground)]" aria-hidden />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-[var(--color-muted-foreground)]" aria-hidden />
+                    )
+                  ) : null}
+                </TableCell>
+                <TableCell>
+                  <Badge
+                    className={
+                      sync.status === "success"
+                        ? "bg-[var(--color-status-success)]/20 text-[var(--color-status-success)]"
+                        : sync.status === "failed"
+                        ? "bg-[var(--color-destructive)]/20 text-[var(--color-destructive)]"
+                        : "bg-[var(--color-status-warning)]/20 text-[var(--color-status-warning)]"
+                    }
+                  >
+                    {sync.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <RelativeTime value={sync.startedAt} className="text-sm" />
+                </TableCell>
+                <TableCell className="text-sm">
+                  {sync.completedAt !== undefined
+                    ? `${Math.round((new Date(sync.completedAt).getTime() - new Date(sync.startedAt).getTime()) / 1000)}s`
+                    : "—"}
+                </TableCell>
+                <TableCell className="text-right text-sm">
+                  {sync.recordsIngested ?? "—"}
+                </TableCell>
+              </TableRow>
+
+              {hasFailed && isExpanded && (
+                <TableRow>
+                  <TableCell colSpan={5} className="bg-[var(--color-destructive)]/5 px-4 py-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-destructive)]" aria-hidden />
+                      <pre className="whitespace-pre-wrap break-all text-xs text-[var(--color-destructive)]">
+                        {sync.error}
+                      </pre>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -246,54 +353,7 @@ export function ConnectorDetailPage() {
               {syncsLoading ? (
                 <Skeleton className="h-32 w-full" />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Started</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead className="text-right">Records</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(syncsData?.data ?? []).length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-[var(--color-muted-foreground)]">
-                          No sync history yet.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      (syncsData?.data ?? []).map((sync) => (
-                        <TableRow key={sync.id}>
-                          <TableCell>
-                            <Badge
-                              className={
-                                sync.status === "success"
-                                  ? "bg-[var(--color-status-success)]/20 text-[var(--color-status-success)]"
-                                  : sync.status === "failed"
-                                  ? "bg-[var(--color-destructive)]/20 text-[var(--color-destructive)]"
-                                  : "bg-[var(--color-status-warning)]/20 text-[var(--color-status-warning)]"
-                              }
-                            >
-                              {sync.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <RelativeTime value={sync.startedAt} className="text-sm" />
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {sync.completedAt !== undefined
-                              ? `${Math.round((new Date(sync.completedAt).getTime() - new Date(sync.startedAt).getTime()) / 1000)}s`
-                              : "—"}
-                          </TableCell>
-                          <TableCell className="text-right text-sm">
-                            {sync.recordsIngested ?? "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                <SyncHistoryTable syncs={syncsData?.data ?? []} />
               )}
             </TabsContent>
 

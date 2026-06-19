@@ -7,7 +7,7 @@ import { withContext } from "../../lib/context.js";
 import type { CommandContext } from "../../lib/context.js";
 import { CliError, EXIT } from "../../lib/errors.js";
 import { confirmDestructive } from "../../lib/prompts.js";
-import { readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { readFileSync, writeFileSync, createReadStream, statSync } from "node:fs";
 
 interface QueryOpts {
   filter?: string; sort?: string; sortDir?: string;
@@ -87,6 +87,19 @@ async function deleteAction(entityType: string, id: string, _opts: Record<string
 
 async function importAction(entityType: string, opts: ImportOpts, ctx: CommandContext): Promise<void> {
   const batchSize = parseInt(opts.batchSize ?? "500", 10);
+
+  // Warn when the file is large since we currently buffer the entire contents
+  // in memory (V5-128). A future improvement could stream the upload.
+  const FILE_SIZE_WARNING_BYTES = 50 * 1024 * 1024; // 50 MB
+  const fileSize = statSync(opts.file).size;
+  if (fileSize >= FILE_SIZE_WARNING_BYTES) {
+    ctx.renderer.warn(
+      `File is ${(fileSize / (1024 * 1024)).toFixed(1)} MB — it will be buffered entirely in memory. ` +
+      `Consider splitting large files into smaller chunks.`,
+    );
+  }
+  ctx.renderer.info(`Importing ${opts.file} (${(fileSize / 1024).toFixed(1)} KB) ...`);
+
   const content = readFileSync(opts.file, "utf8");
   const format = opts.format ?? opts.file.split(".").pop() ?? "json";
 

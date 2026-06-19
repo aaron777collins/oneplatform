@@ -17,7 +17,7 @@ export interface Profile {
   name: string;
   platformUrl: string;
   tenantId?: string;
-  defaultOutput?: "json" | "table" | "tsv";
+  defaultOutput?: "json" | "table" | "tsv" | "jsonl";
   timeout?: number;
   insecureTls?: boolean;
 }

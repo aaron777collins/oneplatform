@@ -12,6 +12,33 @@ export interface Entity {
   updatedAt: string;
 }
 
+/**
+ * Returns the parsed `dataJson` field of an {@link Entity} as a typed object.
+ *
+ * Caches the parsed result on the entity instance so subsequent calls avoid
+ * redundant JSON.parse() overhead.
+ *
+ * @param entity - A gRPC Entity whose `dataJson` field contains serialised JSON.
+ * @returns The parsed data object, typed as `T`.
+ *
+ * @example
+ * ```ts
+ * const entity = await grpc.data.GetEntity({ entityType: 'Product', id: '1', tenantId: 't1' });
+ * const product = parseEntityData<Product>(entity);
+ * ```
+ */
+export function parseEntityData<T = Record<string, unknown>>(entity: Entity): T {
+  // Cache parsed result on the entity to avoid repeated parsing
+  const cacheKey = '__parsedData';
+  const entityAny = entity as unknown as Record<string, unknown>;
+  const cached = entityAny[cacheKey];
+  if (cached !== undefined) return cached as T;
+
+  const parsed = JSON.parse(entity.dataJson) as T;
+  entityAny[cacheKey] = parsed;
+  return parsed;
+}
+
 export interface GetEntityRequest {
   entityType: string;
   id: string;

@@ -13,10 +13,13 @@
 #   POSTGRES_PASSWORD   — Postgres superuser password (openssl rand -hex 32)
 #   OP_ALLOWED_ORIGINS  — Comma-separated list of allowed CORS origins
 #   OP_BASE_URL         — Public base URL (e.g. https://platform.example.com)
-#   OP_JWT_SECRET       — JWT signing secret (min 32 chars)
-#   OP_MASTER_KEY       — Master encryption key
 #   OP_DOMAIN           — Public domain name (e.g. platform.example.com)
 #   OP_TLS_EMAIL        — Let's Encrypt account email
+#
+# The following secrets are set in docker-compose.yml with dev defaults and do
+# NOT need to be overridden here (the base file handles them):
+#   OP_JWT_SECRET       — JWT signing secret (set via base compose)
+#   OP_MASTER_KEY       — Master encryption key (set via base compose)
 #
 # ── Scaling note ────────────────────────────────────────────────────────────
 # This file does NOT set deploy.replicas. In standalone Docker Compose,

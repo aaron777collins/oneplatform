@@ -74,7 +74,7 @@ export function httpErrorToCliError(
       return new CliError(msg, EXIT.GENERAL);
     case status === 429:
       return new CliError(
-        "Rate limit exceeded after 3 retries. Wait and try again.",
+        "Rate limited. Wait and retry.",
         EXIT.RATE_LIMIT,
       );
     case status >= 500 && status <= 504:

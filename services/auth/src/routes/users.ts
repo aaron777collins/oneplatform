@@ -13,7 +13,7 @@ import {
 import type { Redis } from "ioredis";
 import type pg from "pg";
 import type { UserRepository } from "../repositories/index.js";
-import { updateUserRequest } from "../schemas/index.js";
+import { createUserRequest, updateUserRequest } from "../schemas/index.js";
 
 export interface UserRouteDeps {
   userRepository: UserRepository;
@@ -27,6 +27,56 @@ export interface UserRouteDeps {
 export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { userRepository, db, redis } = deps;
+
+  // POST /api/v1/users — admin-create a new user in the caller's tenant
+  // Requires users:manage scope. The created user has no password and must
+  // complete onboarding (password reset or OAuth link) before they can log in.
+  routes.post("/api/v1/users", async (c) => {
+    const user = c.var.user;
+    const canManage = user.scopes.includes("users:manage") || user.scopes.includes("admin");
+    if (!canManage) {
+      throw new ForbiddenError("users:manage scope is required to create users.");
+    }
+
+    const body = await c.req.json();
+    const parsed = createUserRequest.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid create-user request", parsed.error.issues);
+    }
+
+    // Privilege escalation guard: only platform-admin can assign platform-admin.
+    const requestedRoles = parsed.data.roles as string[];
+    if (requestedRoles.includes("platform-admin") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError(
+        "Only platform-admin users can assign the platform-admin role."
+      );
+    }
+
+    // Prevent duplicate emails within the tenant.
+    const existing = await userRepository.findByEmail(user.tenantId, parsed.data.email);
+    if (existing) {
+      throw new ValidationError("A user with this email already exists in the tenant.");
+    }
+
+    const created = await userRepository.create({
+      tenant_id: user.tenantId,
+      email: parsed.data.email,
+      display_name: parsed.data.displayName,
+      roles: parsed.data.roles,
+      email_verified: false,
+    });
+
+    return c.json({
+      id: created.id,
+      email: created.email,
+      displayName: created.display_name,
+      roles: created.roles,
+      emailVerified: created.email_verified,
+      isActive: created.is_active,
+      lastLoginAt: null,
+      createdAt: created.created_at.toISOString(),
+    }, 201);
+  });
 
   // GET /api/v1/users — list users in the caller's tenant
   // Requires users:read scope.

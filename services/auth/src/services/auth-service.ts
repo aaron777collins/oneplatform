@@ -102,6 +102,7 @@ export interface AuthService {
   logout(refreshToken: string | undefined, accessTokenJti: string, accessTokenExp: number, userId: string, all?: boolean): Promise<void>;
   forgotPassword(email: string, tenantId: string): Promise<ForgotPasswordResult>;
   resetPassword(token: string, newPassword: string): Promise<void>;
+  changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void>;
   verifyEmail(token: string): Promise<VerifyEmailResult>;
 }
 
@@ -675,6 +676,87 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
   }
 
   // -------------------------------------------------------------------------
+  // Change password (authenticated) — V5-023
+  //
+  // Requires the caller to supply their current password to prevent
+  // hijacked-session escalation. On success, all refresh tokens for the
+  // user are revoked so the user must re-authenticate with the new password.
+  // -------------------------------------------------------------------------
+
+  async function changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    // 1. Look up user
+    const userResult = await db.query<UserRow>(
+      `SELECT id, tenant_id, password_hash
+       FROM auth.users
+       WHERE id = $1`,
+      [userId],
+    );
+    const user = userResult.rows[0];
+    if (!user) {
+      throw new UnauthorizedError("User not found.");
+    }
+
+    // 2. OAuth-only accounts have no password hash — cannot change password
+    if (user.password_hash === null) {
+      throw new UnauthorizedError("Account does not use password authentication.");
+    }
+
+    // 3. Verify current password
+    const valid = await passwordService.compare(currentPassword, user.password_hash);
+    if (!valid) {
+      throw new UnauthorizedError("Current password is incorrect.");
+    }
+
+    // 4. Hash new password and update
+    const newHash = await passwordService.hash(newPassword);
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        "UPDATE auth.users SET password_hash = $1 WHERE id = $2",
+        [newHash, userId],
+      );
+
+      // Revoke all active sessions so the user must re-login
+      await client.query(
+        `UPDATE auth.sessions
+         SET revoked_at = now(), revoked_reason = 'password_changed'
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [userId],
+      );
+
+      await client.query("COMMIT");
+
+      // 5. Delete all refresh tokens from Redis
+      const tokenKeys = await redis.smembers(`auth:user-sessions:${userId}`);
+      for (const tokenKey of tokenKeys) {
+        await redis.del(`auth:refresh:${tokenKey}`);
+        await redis.del(`auth:token-family:${tokenKey}`);
+      }
+      await redis.del(`auth:user-sessions:${userId}`);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    await events.publish({
+      eventType: "auth.password.changed",
+      eventVersion: "1.0",
+      tenantId: user.tenant_id,
+      actor: { type: "user", id: userId },
+      data: { userId },
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Verify email (L2 design §6.8)
   // -------------------------------------------------------------------------
 
@@ -776,6 +858,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     logout,
     forgotPassword,
     resetPassword,
+    changePassword,
     verifyEmail,
   };
 }

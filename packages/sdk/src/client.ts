@@ -290,6 +290,8 @@ export function createClient(options: ClientOptions): OnePlatformClient {
         sub.unsubscribe();
       }
       activeSubscriptions.clear();
+      // Abort all in-flight HTTP requests tracked by the transport
+      transport.destroy();
     },
   };
 

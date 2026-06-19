@@ -202,12 +202,12 @@ function evaluateWithTimeout(expr: ReturnType<typeof jsonata>, data: unknown): P
 // ---------------------------------------------------------------------------
 
 const SSRF_BLOCKED_PATTERNS = [
-  /^https?:\/\/localhost(:\d+)?\//i,
-  /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?\//,
+  /^https?:\/\/localhost(:\d+)?(\/|$)/i,
+  /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
 ];
 
 function isUrlSsrfBlocked(url: string): boolean {

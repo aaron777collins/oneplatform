@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/layout/PageHeader.js";
 import { AuditLogTable } from "@/components/logs/AuditLogTable.js";
 import { Input } from "@/components/ui/input.js";
 import { Label } from "@/components/ui/label.js";
+import { Button } from "@/components/ui/button.js";
+import { X } from "lucide-react";
 
 export function AuditPage() {
   const [from, setFrom] = React.useState("");
@@ -43,6 +45,18 @@ export function AuditPage() {
                 aria-label="Filter to date"
               />
             </div>
+            {(from !== "" || to !== "") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setFrom(""); setTo(""); }}
+                className="text-xs gap-1"
+                aria-label="Clear date filters"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Clear
+              </Button>
+            )}
           </div>
         }
       />

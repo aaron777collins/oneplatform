@@ -302,9 +302,12 @@ describe("ApiKeyService.list()", () => {
     vi.resetModules();
   });
 
-  it("returns an array of ApiKeyRecord for the user", async () => {
+  it("returns keys and total for the user (default: active only)", async () => {
     const { createApiKeyService } = await import("../services/api-key-service.js");
     const db = makeDb((sql: string) => {
+      if (sql.includes("count(*)")) {
+        return { rows: [{ count: "2" }] };
+      }
       if (sql.includes("SELECT") && sql.includes("auth.api_keys")) {
         return {
           rows: [
@@ -316,18 +319,25 @@ describe("ApiKeyService.list()", () => {
       return { rows: [] };
     });
     const svc = createApiKeyService(makeDeps({ db }));
-    const keys = await svc.list("user-1");
+    const { keys, total } = await svc.list("user-1");
     expect(keys).toHaveLength(2);
+    expect(total).toBe(2);
     expect(keys[0]?.id).toBe("k1");
     expect(keys[1]?.id).toBe("k2");
   });
 
-  it("returns an empty array when the user has no keys", async () => {
+  it("returns empty keys and zero total when the user has no keys", async () => {
     const { createApiKeyService } = await import("../services/api-key-service.js");
-    const db = makeDb(() => ({ rows: [] }));
+    const db = makeDb((sql: string) => {
+      if (sql.includes("count(*)")) {
+        return { rows: [{ count: "0" }] };
+      }
+      return { rows: [] };
+    });
     const svc = createApiKeyService(makeDeps({ db }));
-    const keys = await svc.list("user-1");
+    const { keys, total } = await svc.list("user-1");
     expect(keys).toHaveLength(0);
+    expect(total).toBe(0);
   });
 });
 

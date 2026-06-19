@@ -459,27 +459,76 @@ export function createCdcIngestionService(deps: CdcIngestionServiceDeps): CdcIng
 import type { PluginContext } from "@oneplatform/plugin-sdk";
 
 function makeMinimalContext(): PluginContext {
-  const noop = (): never => {
-    throw new Error("PluginContext method not available in built-in connector context");
+  // Built-in connectors do not run inside the plugin sandbox, so most
+  // PluginContext services are unavailable. Instead of throwing (which would
+  // crash the CDC stream if any code path accidentally touches these),
+  // we log a warning and return a safe no-op/empty value. This keeps the
+  // connector resilient while making the gap visible through logs.
+
+  const contextLogger: PluginContext["logger"] = {
+    debug: () => {},
+    info: () => {},
+    warn: console.warn.bind(console, "[cdc-minimal-context]"),
+    error: console.error.bind(console, "[cdc-minimal-context]"),
+  };
+
+  const notAvailable = (service: string, method: string) => {
+    contextLogger.warn(
+      `${service}.${method}() called on built-in connector minimal context — ` +
+      `this method is not available outside the plugin sandbox. Returning empty/null.`,
+    );
   };
 
   return {
-    credentials: { get: noop, list: noop },
-    fetch: { fetch: noop },
-    cache: { get: noop, set: noop, delete: noop, lock: noop },
-    logger: {
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
+    credentials: {
+      get: async (name: string): Promise<string> => {
+        notAvailable("credentials", "get");
+        return `__credential_unavailable:${name}__`;
+      },
+      list: async (): Promise<string[]> => {
+        notAvailable("credentials", "list");
+        return [];
+      },
     },
+    fetch: {
+      fetch: async (url: string): Promise<Response> => {
+        notAvailable("fetch", "fetch");
+        return new Response(null, { status: 503, statusText: "Plugin fetch proxy not available in built-in connector context" });
+      },
+    },
+    cache: {
+      get: async <T>(_key: string): Promise<T | null> => {
+        notAvailable("cache", "get");
+        return null;
+      },
+      set: async <T>(_key: string, _value: T, _ttlSeconds?: number): Promise<void> => {
+        notAvailable("cache", "set");
+      },
+      delete: async (_key: string): Promise<void> => {
+        notAvailable("cache", "delete");
+      },
+      lock: async (_key: string, _ttlSeconds: number): Promise<null> => {
+        notAvailable("cache", "lock");
+        return null;
+      },
+    },
+    logger: contextLogger,
     tenant: {
       tenantId: "",
       tenantName: "",
       config: {},
       instanceId: "",
     },
-    ontology: { getSchema: noop, getEntitySchema: noop },
+    ontology: {
+      getSchema: async () => {
+        notAvailable("ontology", "getSchema");
+        return { entityTypes: [], version: 0 } as any;
+      },
+      getEntitySchema: async (_entityType: string) => {
+        notAvailable("ontology", "getEntitySchema");
+        return null;
+      },
+    },
     tracing: {
       injectHeaders: (h) => h,
       startSpan: () => ({ setAttribute: () => {}, end: () => {} }),

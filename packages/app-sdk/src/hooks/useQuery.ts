@@ -160,13 +160,21 @@ export function useQuery<T = unknown>(
   // function can abort it when the component unmounts or the effect re-runs.
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
+  // Keep a ref to options so fetchPage always reads the latest values
+  // without needing options in its dependency array (which would cause
+  // refetches on every render when callers pass unstable object literals).
+  const optionsRef = React.useRef(options);
+  React.useEffect(() => {
+    optionsRef.current = options;
+  });
+
   const fetchPage = React.useCallback(
     async (cursor: string | undefined, append: boolean): Promise<void> => {
       const controller = new AbortController();
       // Replace any previous controller; the old request is already settled or
       // will be ignored because its abort signal fires independently.
       abortControllerRef.current = controller;
-      const params = buildQueryParams(options, cursor);
+      const params = buildQueryParams(optionsRef.current, cursor);
 
       try {
         const result = await bffClient.request<BffDataResponse<T>>(
@@ -195,7 +203,7 @@ export function useQuery<T = unknown>(
           fetchedAt: Date.now(),
           promise: null,
         });
-        options.onError?.(sdkError);
+        optionsRef.current.onError?.(sdkError);
       }
     },
     // Intentionally stable: rebuilding fetchPage on every options change would
@@ -234,13 +242,12 @@ export function useQuery<T = unknown>(
     await fetchPage(nextCursor, true);
   }, [cachedEntry, fetchPage]);
 
-  const isLoading =
-    !isReady || (enabled && cachedEntry === undefined && !cachedEntry);
+  const isLoading = !isReady || (enabled && cachedEntry === undefined);
 
   return {
     data: cachedEntry?.data ?? null,
     pagination: cachedEntry?.pagination ?? null,
-    isLoading: isLoading && cachedEntry === undefined,
+    isLoading,
     isError: cachedEntry?.error != null,
     error: cachedEntry?.error ?? null,
     refetch,

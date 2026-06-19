@@ -410,11 +410,12 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     query: ListSyncsOptions,
   ): Promise<ListSyncsResult> {
     const states: Array<"completed" | "failed" | "active"> = ["completed", "failed", "active"];
-    // BullMQ returns jobs newest-first. We fetch up to 10,000 to ensure the
-    // cursor-based page window can reach any historical job. Fetching only 100
-    // (the old limit) meant jobs beyond position 100 were unreachable regardless
-    // of the cursor the caller supplied.
-    const jobs = await syncQueue.getJobs(states, 0, 10_000);
+    // Cap the BullMQ fetch to a reasonable ceiling (default 100, caller may
+    // raise via query.limit). The previous 10K cap loaded far more jobs than
+    // any single page could display and caused unnecessary memory pressure
+    // (V5-126).
+    const fetchLimit = Math.min(query.limit * 10, 1_000);
+    const jobs = await syncQueue.getJobs(states, 0, fetchLimit);
 
     const filtered = jobs
       .filter((job) => job.data.connectorId === connectorId)

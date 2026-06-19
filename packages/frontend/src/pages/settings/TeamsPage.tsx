@@ -5,20 +5,9 @@
  */
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { UserPlus, Trash2, Info } from "lucide-react";
+import { Trash2, Info } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form.js";
-import { Input } from "@/components/ui/input.js";
 import { Button } from "@/components/ui/button.js";
 import {
   Select,
@@ -78,20 +67,6 @@ export function TeamsPage() {
 
   const members = membersQuery.data?.data ?? [];
 
-  const form = useForm<InviteValues>({
-    resolver: zodResolver(inviteSchema),
-    defaultValues: { email: "", role: "viewer" },
-  });
-
-  // Invite functionality is not yet available on the backend
-  const inviteMutation = useMutation({
-    mutationFn: (_values: InviteValues) =>
-      Promise.reject(new Error("Invite API is not yet available")),
-    onError: () => {
-      toast({ title: "Not available", description: "Team invitations are coming soon.", variant: "destructive" });
-    },
-  });
-
   const updateRoleMutation = useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
       client.put(`/v1/users/${memberId}`, { roles: [role] }),
@@ -123,66 +98,17 @@ export function TeamsPage() {
     <div>
       <PageHeader title="Teams" description="Manage members and their access roles." />
 
-      {/* Invite form — Coming Soon */}
-      <div className="mb-8 mt-6 max-w-lg rounded-lg border border-[var(--color-border)] p-4">
-        <div className="mb-4 flex items-start gap-3 rounded-md border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-3">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
-          <p className="text-xs text-[var(--color-muted-foreground)]">
-            Team invitations are coming soon. You can view existing members below.
-          </p>
+      {/* Invite — Coming Soon placeholder */}
+      <div className="mb-8 mt-6 max-w-lg rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/30 p-6">
+        <div className="flex items-start gap-3">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
+          <div>
+            <h2 className="text-sm font-semibold">Team invitations coming soon</h2>
+            <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+              The ability to invite team members is under development. You can view existing members below.
+            </p>
+          </div>
         </div>
-        <h2 className="mb-4 text-sm font-semibold">Invite member</h2>
-        <Form {...form}>
-          <form
-            onSubmit={(e) => { e.preventDefault(); }}
-            className="flex items-end gap-3 opacity-60"
-          >
-            <FormField
-              control={form.control}
-              name="email"
-              render={({ field }) => (
-                <FormItem className="flex-1">
-                  <FormLabel>Email address</FormLabel>
-                  <FormControl>
-                    <Input type="email" placeholder="colleague@example.com" {...field} disabled />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem className="w-32">
-                  <FormLabel>Role</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value} disabled>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="viewer">Viewer</SelectItem>
-                      <SelectItem value="editor">Editor</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <Button
-              type="submit"
-              disabled
-              aria-disabled="true"
-              className="mb-0"
-            >
-              <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
-              Invite
-            </Button>
-          </form>
-        </Form>
       </div>
 
       {/* Members table */}

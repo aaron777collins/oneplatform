@@ -395,8 +395,18 @@ export interface GrpcClientOptions {
    * the REST client so gRPC-Web and REST share the same auth context.
    */
   readonly baseUrl: string;
-  /** Auth config — same shape as ClientOptions.auth. */
-  readonly auth: ClientOptions["auth"];
+  /**
+   * Auth config — same shape as ClientOptions.auth.
+   * Alternatively, pass an already-constructed AuthHandler directly via
+   * `authHandler` to avoid duplicating credentials when you already have
+   * a REST client instance.
+   */
+  readonly auth?: ClientOptions["auth"];
+  /**
+   * Pre-constructed auth handler. When provided, `auth` is ignored.
+   * Use this to share a single auth handler between the REST and gRPC clients.
+   */
+  readonly authHandler?: AuthHandler;
   /** Request timeout in milliseconds. Defaults to 30 000. */
   readonly timeout?: number;
   /** Override fetch implementation (useful in tests). */
@@ -425,23 +435,29 @@ export function createGrpcClient(options: GrpcClientOptions): GrpcClient {
     );
   }
 
-  if (options.auth === undefined) {
-    throw new ConfigurationError("GrpcClientOptions.auth is required");
-  }
-
   let authHandler: AuthHandler;
-  const auth = options.auth;
 
-  if ("apiKey" in auth) {
-    authHandler = createApiKeyHandler(auth.apiKey);
-  } else if ("accessToken" in auth) {
-    authHandler = createAccessTokenHandler(auth);
+  if (options.authHandler !== undefined) {
+    // Caller provided a pre-constructed handler — use it directly.
+    authHandler = options.authHandler;
+  } else if (options.auth !== undefined) {
+    const auth = options.auth;
+
+    if ("apiKey" in auth) {
+      authHandler = createApiKeyHandler(auth.apiKey);
+    } else if ("accessToken" in auth) {
+      authHandler = createAccessTokenHandler(auth);
+    } else {
+      // Browser PKCE auth is not supported for gRPC calls (no token storage in
+      // the scope of this client). Use accessToken mode with PKCE-obtained tokens.
+      throw new ConfigurationError(
+        "gRPC client supports apiKey and accessToken auth only. " +
+        "For PKCE-authenticated calls, extract the access token and use auth: { accessToken: '...' }.",
+      );
+    }
   } else {
-    // Browser PKCE auth is not supported for gRPC calls (no token storage in
-    // the scope of this client). Use accessToken mode with PKCE-obtained tokens.
     throw new ConfigurationError(
-      "gRPC client supports apiKey and accessToken auth only. " +
-      "For PKCE-authenticated calls, extract the access token and use auth: { accessToken: '...' }.",
+      "GrpcClientOptions requires either auth or authHandler",
     );
   }
 

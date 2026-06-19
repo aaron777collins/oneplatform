@@ -26,6 +26,20 @@ https://localhost {
 		-Server
 	}
 
+	handle /healthz {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+
+	handle /readyz {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+
 	handle /api/* {
 		reverse_proxy gateway-service:3000 {
 			header_up X-Forwarded-Proto {scheme}

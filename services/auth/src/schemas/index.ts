@@ -69,7 +69,11 @@ export const bootstrapStatusResponse = z.object({
 
 export const bootstrapRequest = z.object({
   adminEmail: z.string().email().max(254),
-  adminPassword: z.string().min(12).max(128),
+  adminPassword: z.string().min(12).max(128)
+    .regex(/[A-Z]/, "Must contain uppercase")
+    .regex(/[a-z]/, "Must contain lowercase")
+    .regex(/[0-9]/, "Must contain a digit")
+    .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
   tenantName: z.string().min(1).max(100).trim(),
   // 32 bytes hex-encoded = exactly 64 hex characters
   bootstrapToken: z.string().length(64).regex(/^[0-9a-f]{64}$/i, "Bootstrap token must be 64 hex characters"),
@@ -98,7 +102,11 @@ export const masterKeyDisplayResponse = z.object({
 
 export const registerRequest = z.object({
   email: z.string().email().max(254).toLowerCase(),
-  password: z.string().min(12).max(128),
+  password: z.string().min(12).max(128)
+    .regex(/[A-Z]/, "Must contain uppercase")
+    .regex(/[a-z]/, "Must contain lowercase")
+    .regex(/[0-9]/, "Must contain a digit")
+    .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
   displayName: z.string().min(1).max(100).trim().optional(),
   // tenantId required — self-registration is always scoped to an existing tenant
   tenantId: z.string().uuid(),
@@ -200,7 +208,11 @@ export const forgotPasswordResponse = z.object({
 
 export const resetPasswordRequest = z
   .object({
-    newPassword: z.string().min(12).max(128),
+    newPassword: z.string().min(12).max(128)
+      .regex(/[A-Z]/, "Must contain uppercase")
+      .regex(/[a-z]/, "Must contain lowercase")
+      .regex(/[0-9]/, "Must contain a digit")
+      .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
     confirmPassword: z.string().min(12).max(128),
   })
   .refine((d) => d.newPassword === d.confirmPassword, {
@@ -211,6 +223,31 @@ export const resetPasswordRequest = z
 export const resetPasswordResponse = z.object({
   data: z.object({
     message: z.literal("Password reset successfully. Please log in again."),
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// 4.2 Authenticated password change
+// ---------------------------------------------------------------------------
+
+export const changePasswordRequest = z
+  .object({
+    currentPassword: z.string().min(1).max(128),
+    newPassword: z.string().min(12).max(128)
+      .regex(/[A-Z]/, "Must contain uppercase")
+      .regex(/[a-z]/, "Must contain lowercase")
+      .regex(/[0-9]/, "Must contain a digit")
+      .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
+    confirmPassword: z.string().min(12).max(128),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+export const changePasswordResponse = z.object({
+  data: z.object({
+    message: z.literal("Password changed successfully."),
   }),
 });
 
@@ -395,6 +432,12 @@ export const tenantListResponse = z.object({
 // 4.6 Users
 // ---------------------------------------------------------------------------
 
+export const createUserRequest = z.object({
+  email: z.string().email().max(254).toLowerCase(),
+  roles: z.array(z.string()).min(1),
+  displayName: z.string().min(1).max(100).trim().optional(),
+});
+
 export const updateUserRequest = z.object({
   displayName: z.string().min(1).max(100).optional(),
   // Role changes require users:manage scope
@@ -518,6 +561,8 @@ export type ForgotPasswordRequest = z.infer<typeof forgotPasswordRequest>;
 export type ForgotPasswordResponse = z.infer<typeof forgotPasswordResponse>;
 export type ResetPasswordRequest = z.infer<typeof resetPasswordRequest>;
 export type ResetPasswordResponse = z.infer<typeof resetPasswordResponse>;
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequest>;
+export type ChangePasswordResponse = z.infer<typeof changePasswordResponse>;
 
 export type VerifyEmailResponse = z.infer<typeof verifyEmailResponse>;
 
@@ -543,6 +588,7 @@ export type UpdateTenantRequest = z.infer<typeof updateTenantRequest>;
 export type TenantResponse = z.infer<typeof tenantResponse>;
 export type TenantListResponse = z.infer<typeof tenantListResponse>;
 
+export type CreateUserRequest = z.infer<typeof createUserRequest>;
 export type UpdateUserRequest = z.infer<typeof updateUserRequest>;
 export type UserResponse = z.infer<typeof userResponse>;
 export type UserListResponse = z.infer<typeof userListResponse>;

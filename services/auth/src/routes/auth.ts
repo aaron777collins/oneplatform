@@ -8,7 +8,7 @@
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { ValidationError, NotFoundError } from "@oneplatform/core";
+import { ValidationError, NotFoundError, RateLimitError } from "@oneplatform/core";
 import type { AuthService } from "../services/index.js";
 import type { TokenService } from "../services/token-service.js";
 import type { UserRepository, TenantRepository } from "../repositories/index.js";
@@ -19,6 +19,7 @@ import {
   refreshRequest,
   forgotPasswordRequest,
   resetPasswordRequest,
+  changePasswordRequest,
 } from "../schemas/index.js";
 
 export interface AuthRouteDeps {
@@ -26,11 +27,53 @@ export interface AuthRouteDeps {
   tokenService: TokenService;
   userRepository: UserRepository;
   tenantRepository: TenantRepository;
+  redis?: import("ioredis").Redis;
 }
 
 export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { authService, tokenService, userRepository, tenantRepository } = deps;
+  const { authService, tokenService, userRepository, tenantRepository, redis } = deps;
+
+  // -------------------------------------------------------------------------
+  // In-memory rate limiter for the refresh endpoint (V5-026).
+  // 10 requests per 60-second window per IP. Uses Redis when available
+  // (multi-instance safe); falls back to in-memory for single-instance
+  // deployments and tests.
+  // -------------------------------------------------------------------------
+
+  const REFRESH_RATE_LIMIT = 10;
+  const REFRESH_RATE_WINDOW_SEC = 60;
+  const refreshAttempts = new Map<string, { count: number; windowStartMs: number }>();
+
+  async function checkRefreshRateLimit(ip: string): Promise<void> {
+    const key = `auth:refresh-rate:${ip}`;
+    if (redis) {
+      // Atomic Redis increment with TTL
+      const count = await redis.incr(key);
+      if (count === 1) {
+        await redis.expire(key, REFRESH_RATE_WINDOW_SEC);
+      }
+      if (count > REFRESH_RATE_LIMIT) {
+        const ttl = await redis.ttl(key);
+        throw new RateLimitError(Math.max(ttl, 1));
+      }
+      return;
+    }
+    // In-memory fallback
+    const now = Date.now();
+    const entry = refreshAttempts.get(ip);
+    if (!entry || now - entry.windowStartMs >= REFRESH_RATE_WINDOW_SEC * 1_000) {
+      refreshAttempts.set(ip, { count: 1, windowStartMs: now });
+      return;
+    }
+    entry.count++;
+    if (entry.count > REFRESH_RATE_LIMIT) {
+      const retryAfter = Math.ceil(
+        (REFRESH_RATE_WINDOW_SEC * 1_000 - (now - entry.windowStartMs)) / 1_000,
+      );
+      throw new RateLimitError(Math.max(retryAfter, 1));
+    }
+  }
 
   // POST /api/v1/auth/register — public
   routes.post("/api/v1/auth/register", async (c) => {
@@ -150,7 +193,13 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
 
   // POST /api/v1/auth/refresh — public (the refresh token is in the body)
   // Rotates the refresh token and issues a new access token.
+  // Rate limited to 10 req/min per IP (V5-026).
   routes.post("/api/v1/auth/refresh", async (c) => {
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim()
+      ?? c.req.header("x-real-ip")
+      ?? "unknown";
+    await checkRefreshRateLimit(ip);
+
     const body = await c.req.json();
     const parsed = refreshRequest.safeParse(body);
     if (!parsed.success) {
@@ -186,6 +235,20 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
     }
     await authService.resetPassword(token, parsed.data.newPassword);
     return c.json({ message: "Password reset successfully. Please log in again." });
+  });
+
+  // POST /api/v1/auth/change-password — requires auth (V5-023)
+  // Validates the caller's current password before setting the new one.
+  // Revokes all sessions on success so the user must re-authenticate.
+  routes.post("/api/v1/auth/change-password", async (c) => {
+    const body = await c.req.json();
+    const parsed = changePasswordRequest.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid change-password request", parsed.error.issues);
+    }
+    const user = c.var.user;
+    await authService.changePassword(user.userId, parsed.data.currentPassword, parsed.data.newPassword);
+    return c.json({ data: { message: "Password changed successfully." } });
   });
 
   // GET /api/v1/auth/verify-email/:token — public

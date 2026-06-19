@@ -356,7 +356,60 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   const upgradeRoutes = createUpgradeRoutes({ upgradeService });
   app.route("/api/v1/plugins", upgradeRoutes);
 
-  const marketplaceRoutes = createMarketplaceRoutes({ marketplaceService });
+  const marketplaceRoutes = createMarketplaceRoutes({
+    marketplaceService,
+    onInstallPlugin: async ({ manifest, tenantId, installedBy }) => {
+      // The marketplace stores the full manifest. For marketplace installs we
+      // create the plugin record directly via the plugin repository, skipping
+      // the bundle upload step (marketplace plugins are pre-validated during
+      // the publish flow). The plugin is created in 'installed' status so an
+      // admin can activate it.
+      const manifestData = manifest as unknown as import("./schemas/index.js").PluginManifest;
+
+      const existing = await pluginRepo.findByManifestIdAndVersion(
+        manifestData.id,
+        manifestData.version,
+      );
+      if (existing !== null) {
+        // Already installed — idempotent, no error.
+        return;
+      }
+
+      await pluginRepo.create({
+        manifest_id: manifestData.id,
+        name: manifestData.name,
+        version: manifestData.version,
+        type: manifestData.type,
+        status: "installed",
+        bundle_bucket: bundleBucket,
+        bundle_key: `marketplace/${manifestData.id}/${manifestData.version}/bundle.js`,
+        manifest: manifestData,
+        is_platform_wide: false,
+        installed_by: installedBy,
+      });
+
+      await eventPublisher.publish({
+        eventType: "plugin.installed",
+        eventVersion: "1.0.0",
+        tenantId,
+        actor: { type: "user", id: installedBy },
+        data: {
+          pluginId: manifestData.id,
+          pluginName: manifestData.name,
+          version: manifestData.version,
+          installedBy,
+          source: "marketplace",
+        },
+      });
+
+      logger.info("Plugin installed from marketplace", {
+        manifestId: manifestData.id,
+        version: manifestData.version,
+        tenantId,
+        installedBy,
+      });
+    },
+  });
   app.route("/api/v1/marketplace", marketplaceRoutes);
 
   const internalRoutes = createInternalRoutes({

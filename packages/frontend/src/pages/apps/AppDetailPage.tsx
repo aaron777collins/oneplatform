@@ -13,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Pencil, Code2, Trash2, Globe, Lock, ExternalLink } from "lucide-react";
+import { Pencil, Code2, Trash2, Globe, Lock, ExternalLink, LayoutGrid } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.js";
 import { Button } from "@/components/ui/button.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
@@ -134,6 +134,13 @@ export function AppDetailPage() {
           <div className="flex gap-2">
             <Button
               variant="outline"
+              onClick={() => void navigate({ to: "/apps/$id/build", params: { id } })}
+            >
+              <LayoutGrid className="mr-2 h-4 w-4" aria-hidden="true" />
+              Visual Builder
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => void navigate({ to: "/apps/$id/edit", params: { id } })}
             >
               <Code2 className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -199,7 +206,7 @@ export function AppDetailPage() {
                 >
                   Rollback…
                 </Button>
-                {app.accessMode === "public" && (
+                {app.lastDeployedAt !== undefined && (
                   <Button
                     variant="ghost"
                     size="sm"

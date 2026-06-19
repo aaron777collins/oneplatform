@@ -64,7 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     heading: "Platform",
     items: [
-      { label: "Overview", to: "/", icon: LayoutDashboard },
+      { label: "Overview", to: "/dashboard", icon: LayoutDashboard },
       { label: "Connectors", to: "/connectors", icon: Database },
       {
         label: "Marketplace",
@@ -136,11 +136,10 @@ interface NavLinkItemProps {
 
 function NavLinkItem({ item, collapsed }: NavLinkItemProps) {
   const matchRoute = useMatchRoute();
-  // Exact match only for "/" so Overview doesn't light up on every page
   const isActive = Boolean(
     matchRoute({
       to: item.to,
-      ...(item.to === "/" ? { fuzzy: false } : { fuzzy: true }),
+      fuzzy: true,
     }),
   );
   const Icon = item.icon;

@@ -135,15 +135,24 @@ export function useAppStorage<T>(
         throw error;
       }
 
-      // Optimistic update — apply locally before the network round-trip
+      // Optimistic update — apply locally before the network round-trip.
+      // Capture the previous value so we can revert if the server request fails.
+      const previousValue = value;
       setValueState(newValue);
 
-      await bffClient.request(`/bff/storage/${encodeURIComponent(key)}`, {
-        method: "PUT",
-        body: { value: newValue },
-      });
+      try {
+        await bffClient.request(`/bff/storage/${encodeURIComponent(key)}`, {
+          method: "PUT",
+          body: { value: newValue },
+        });
+      } catch (err) {
+        // Revert the optimistic update on failure so the UI stays consistent
+        // with the persisted server state.
+        setValueState(previousValue);
+        throw err;
+      }
     },
-    [isKeyValid, key, bffClient],
+    [isKeyValid, key, bffClient, value],
   );
 
   const meta: AppStorageMeta = {

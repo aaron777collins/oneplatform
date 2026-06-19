@@ -13,6 +13,30 @@ type: Opaque
 stringData:
   admin-password: {{ .Values.grafana.adminPassword | quote }}
 ---
+# Dashboard provisioning configuration — tells Grafana where to find
+# dashboard JSON files on disk (V5-123).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-dashboards" (include "oneplatform.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" "grafana" "root" .) | nindent 4 }}
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: OnePlatform
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -75,13 +99,19 @@ spec:
             {{- toYaml .Values.grafana.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          {{- if .Values.grafana.persistence.enabled }}
           volumeMounts:
+            - name: grafana-dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+          {{- if .Values.grafana.persistence.enabled }}
             - name: grafana-data
               mountPath: /var/lib/grafana
           {{- end }}
-      {{- if .Values.grafana.persistence.enabled }}
       volumes:
+        - name: grafana-dashboard-provider
+          configMap:
+            name: {{ printf "%s-grafana-dashboards" (include "oneplatform.fullname" .) }}
+      {{- if .Values.grafana.persistence.enabled }}
         - name: grafana-data
           persistentVolumeClaim:
             claimName: {{ printf "%s-grafana-data" (include "oneplatform.fullname" .) }}

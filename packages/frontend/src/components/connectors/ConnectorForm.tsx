@@ -115,7 +115,7 @@ function buildZodSchema(schema: ConnectorConfigSchema): z.ZodObject<z.ZodRawShap
 // Helper: detect password fields
 // ---------------------------------------------------------------------------
 
-const PASSWORD_PATTERNS = /password|secret|token|key|credential/i;
+const PASSWORD_PATTERNS = /\b(password|secret|api[_-]?key|token|credential)\b/i;
 
 function isPasswordField(key: string, prop: JsonSchemaProperty): boolean {
   return prop.format === "password" || PASSWORD_PATTERNS.test(key);

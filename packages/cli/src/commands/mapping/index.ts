@@ -62,6 +62,11 @@ interface PreviewOpts {
   sample: string;
 }
 
+interface ImportOpts {
+  connector: string;
+  format?: "json" | "csv";
+}
+
 // ---------------------------------------------------------------------------
 // Field slug resolution
 // ---------------------------------------------------------------------------
@@ -241,6 +246,82 @@ async function previewAction(entityType: string, opts: PreviewOpts, ctx: Command
   ctx.renderer.json(resp);
 }
 
+async function importAction(entityType: string, file: string, opts: ImportOpts, ctx: CommandContext): Promise<void> {
+  const raw = readFileSync(file, "utf8");
+  const ext = file.split(".").pop()?.toLowerCase();
+  const format = opts.format ?? (ext === "csv" ? "csv" : "json");
+
+  let rules: Array<Record<string, unknown>>;
+
+  if (format === "csv") {
+    // Simple CSV parsing: first line is header, remaining lines are data rows.
+    const lines = raw.trim().split("\n");
+    if (lines.length < 2) {
+      throw new CliError("CSV file must have a header row and at least one data row.", EXIT.GENERAL);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length >= 2 guaranteed above
+    const headers = lines[0]!.split(",").map((h) => h.trim());
+    rules = lines.slice(1).map((line) => {
+      const values = line.split(",").map((v) => v.trim());
+      const record: Record<string, unknown> = {};
+      headers.forEach((h, i) => {
+        record[h] = values[i] ?? "";
+      });
+      return record;
+    });
+  } else {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        throw new CliError("JSON import file must contain an array of mapping rule objects.", EXIT.GENERAL);
+      }
+      rules = parsed as Array<Record<string, unknown>>;
+    } catch (err) {
+      if (err instanceof CliError) throw err;
+      throw new CliError(`Failed to parse import file: ${String(err)}`, EXIT.GENERAL);
+    }
+  }
+
+  if (rules.length === 0) {
+    throw new CliError("Import file contains no mapping rules.", EXIT.GENERAL);
+  }
+
+  let created = 0;
+  const errors: Array<{ index: number; error: string }> = [];
+
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i]!;
+    try {
+      const targetField = String(rule["targetField"] ?? rule["targetFieldId"] ?? "");
+      const resolvedTargetFieldId = await resolveFieldId(entityType, targetField, ctx);
+
+      const body: Record<string, unknown> = {
+        connectorId: opts.connector,
+        sourceFieldPath: rule["sourceField"] ?? rule["sourceFieldPath"],
+        targetFieldId: resolvedTargetFieldId,
+        transformType: rule["transformType"] ?? "direct",
+        ...(rule["transform"] !== undefined ? { transform: rule["transform"] } : {}),
+        ...(rule["priority"] !== undefined ? { priority: Number(rule["priority"]) } : {}),
+      };
+
+      await ctx.http.post(
+        `/api/v1/ontology/${encodeURIComponent(entityType)}/mappings`,
+        body,
+      );
+      created++;
+    } catch (err) {
+      errors.push({ index: i, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  ctx.renderer.success(`Imported ${created}/${rules.length} mapping rules.`);
+  if (errors.length > 0) {
+    for (const e of errors) {
+      process.stderr.write(`  Row ${e.index}: ${e.error}\n`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -294,6 +375,15 @@ export function registerMapping(program: Command): void {
     .argument("<entity-type>", "Ontology entity type slug")
     .argument("<rule-id>", "Mapping rule UUID")
     .action(withContext<[string, string, Record<string, never>]>(deleteAction));
+
+  mapping
+    .command("import")
+    .description("Batch-import mapping rules from a JSON or CSV file")
+    .argument("<entity-type>", "Ontology entity type slug")
+    .argument("<file>", "Path to JSON array or CSV file of mapping rules")
+    .requiredOption("--connector <connector-id>", "Connector ID to assign the imported rules to")
+    .option("--format <format>", "File format: json|csv (auto-detected from extension if omitted)")
+    .action(withContext<[string, string, ImportOpts]>(importAction));
 
   mapping
     .command("preview")

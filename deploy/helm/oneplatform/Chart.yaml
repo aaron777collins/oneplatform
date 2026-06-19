@@ -8,6 +8,9 @@ appVersion: "0.1.0"
 # Optional subcharts. Set postgresql.enabled=false or redis.enabled=false
 # to use externally-managed instances (recommended for Medium/Large tiers).
 # See values.yaml for external host/port/password configuration.
+#
+# NOTE: After modifying dependencies, run `helm dependency build` to generate
+# or update Chart.lock and download chart tarballs into charts/.
 dependencies:
   - name: postgresql
     version: "15.5.38"

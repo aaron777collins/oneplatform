@@ -8,7 +8,7 @@
  */
 import * as React from "react";
 import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
-import { User, Users, Key, Webhook, Shield } from "lucide-react";
+import { User, Users, Key, Webhook, HardDrive, Shield } from "lucide-react";
 import { usePermission } from "@/hooks/use-auth.js";
 import { cn } from "@/lib/utils.js";
 
@@ -31,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Teams", to: "/settings/teams", icon: Users as IconComponent },
   { label: "API Keys", to: "/settings/api-keys", icon: Key as IconComponent },
   { label: "Webhooks", to: "/settings/webhooks", icon: Webhook as IconComponent },
+  { label: "Storage", to: "/settings/storage", icon: HardDrive as IconComponent },
   { label: "Admin", to: "/settings/admin", icon: Shield as IconComponent, adminOnly: true },
 ];
 
@@ -51,19 +52,19 @@ export function SettingsPage() {
     <div className="flex-1 p-6">
       <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
 
-      <div className="flex gap-8">
-        {/* Sidebar nav */}
-        <nav aria-label="Settings navigation" className="w-48 shrink-0">
-          <ul className="space-y-1">
+      <div className="flex flex-col md:flex-row gap-8">
+        {/* Sidebar nav — horizontal scroll on mobile, vertical sidebar on md+ */}
+        <nav aria-label="Settings navigation" className="shrink-0 md:w-48">
+          <ul className="flex gap-1 overflow-x-auto pb-2 md:flex-col md:space-y-1 md:overflow-x-visible md:pb-0">
             {visibleItems.map((item) => {
               const Icon = item.icon;
               const isActive = matchRoute({ to: item.to }) !== false;
               return (
-                <li key={item.to}>
+                <li key={item.to} className="shrink-0">
                   <Link
                     to={item.to}
                     className={cn(
-                      "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
                       isActive
                         ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
                         : "text-[var(--color-foreground)] hover:bg-[var(--color-muted)]",

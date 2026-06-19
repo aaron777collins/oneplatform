@@ -58,23 +58,22 @@ fi
 # not available — the operator can install mc and re-run the MinIO section.
 echo "[backup] Backing up MinIO..."
 
-if command -v mc > /dev/null 2>&1; then
-  MC_ALIAS="oneplatform_backup_$$"
-  # OP_MINIO_USER and OP_MINIO_PASSWORD must be set in the environment or .env.
-  # The backup script does not read secrets files directly.
-  if [ -z "${OP_MINIO_USER:-}" ] || [ -z "${OP_MINIO_PASSWORD:-}" ]; then
-    echo "[backup] WARNING: OP_MINIO_USER or OP_MINIO_PASSWORD not set." >&2
-    echo "[backup] MinIO backup skipped. Set these vars and re-run to include MinIO." >&2
-  else
-    mkdir -p "${BACKUP_DIR}/minio"
-    mc alias set "${MC_ALIAS}" "http://localhost:9000" "${OP_MINIO_USER}" "${OP_MINIO_PASSWORD}" --quiet
-    mc mirror "${MC_ALIAS}" "${BACKUP_DIR}/minio" --quiet
-    mc alias remove "${MC_ALIAS}" --quiet
-    echo "[backup] MinIO: OK (${BACKUP_DIR}/minio)"
-  fi
+# Run mc inside the minio container on the internal Docker network so that
+# no host port mapping for MinIO is required.
+MC_ALIAS="oneplatform_backup_$$"
+if [ -z "${OP_MINIO_USER:-}" ] || [ -z "${OP_MINIO_PASSWORD:-}" ]; then
+  echo "[backup] WARNING: OP_MINIO_USER or OP_MINIO_PASSWORD not set." >&2
+  echo "[backup] MinIO backup skipped. Set these vars and re-run to include MinIO." >&2
 else
-  echo "[backup] WARNING: 'mc' (MinIO Client) not found in PATH." >&2
-  echo "[backup] MinIO backup skipped. Install mc from https://min.io/docs/minio/linux/reference/minio-mc.html" >&2
+  mkdir -p "${BACKUP_DIR}/minio"
+  # Configure mc alias inside the container, then mirror to a temp dir, then
+  # copy the files out. mc ships with the official minio/minio image.
+  docker compose exec -T minio mc alias set "${MC_ALIAS}" "http://localhost:9000" "${OP_MINIO_USER}" "${OP_MINIO_PASSWORD}" --quiet
+  docker compose exec -T minio mc mirror "${MC_ALIAS}" "/tmp/minio_backup" --quiet
+  docker compose cp "minio:/tmp/minio_backup/." "${BACKUP_DIR}/minio"
+  docker compose exec -T minio mc alias remove "${MC_ALIAS}" --quiet
+  docker compose exec -T minio rm -rf /tmp/minio_backup
+  echo "[backup] MinIO: OK (${BACKUP_DIR}/minio)"
 fi
 
 # ── Redis backup ─────────────────────────────────────────────────────────────
@@ -117,6 +116,26 @@ if docker compose cp "redis:/data/dump.rdb" "${BACKUP_DIR}/redis.rdb"; then
 else
   echo "[backup] ERROR: Failed to copy Redis RDB file." >&2
   exit 1
+fi
+
+# ── Init-data volume backup ──────────────────────────────────────────────────
+# The init-data volume contains bootstrap secrets (master key, JWT keys, etc.)
+# that are generated once and never recreated. Losing this volume without a
+# backup makes recovery impossible.
+echo "[backup] Backing up init-data volume..."
+
+mkdir -p "${BACKUP_DIR}/init-data"
+# The init-data volume is mounted into multiple containers. We use a temporary
+# alpine container to tar the contents out. This avoids depending on a
+# specific service being up.
+if docker run --rm \
+    -v "$(docker volume ls -q | grep init-data | head -1):/vol:ro" \
+    -v "$(cd "${BACKUP_DIR}/init-data" && pwd):/out" \
+    alpine tar cf /out/init-data.tar -C /vol .; then
+  echo "[backup] init-data: OK (${BACKUP_DIR}/init-data/init-data.tar)"
+else
+  echo "[backup] WARNING: init-data volume backup failed." >&2
+  echo "[backup] The volume may not exist or Docker may lack permissions." >&2
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────

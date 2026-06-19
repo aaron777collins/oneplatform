@@ -243,4 +243,24 @@ export class DataLocationLogRepository {
     );
     return result.rows;
   }
+
+  /**
+   * Count location-log entries grouped by region, excluding the assigned
+   * region.  Returns only regions with at least one violation row, avoiding
+   * the need to pull all rows into application memory (V5-127).
+   */
+  async countViolationsByRegion(
+    tenantId: string,
+    assignedRegion: DataRegion,
+  ): Promise<Array<{ region: DataRegion; count: number }>> {
+    const result = await this.pool.query<{ region: DataRegion; count: string }>(
+      `SELECT region, COUNT(*)::text AS count
+         FROM gateway.data_location_log
+        WHERE tenant_id = $1
+          AND region <> $2
+        GROUP BY region`,
+      [tenantId, assignedRegion],
+    );
+    return result.rows.map((row) => ({ region: row.region, count: Number(row.count) }));
+  }
 }

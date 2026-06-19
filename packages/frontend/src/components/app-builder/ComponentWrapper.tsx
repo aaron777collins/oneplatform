@@ -24,6 +24,8 @@ import type { BuilderMode, DragState } from "./types.js";
 interface ComponentWrapperProps {
   componentId: string;
   columnId: string;
+  /** Display type of the placed component (e.g. "DataTable", "StatCard"). */
+  componentType?: string;
   mode: BuilderMode;
   isSelected: boolean;
   onSelect: () => void;
@@ -41,6 +43,7 @@ interface ComponentWrapperProps {
 export function ComponentWrapper({
   componentId,
   columnId,
+  componentType,
   mode,
   isSelected,
   onSelect,
@@ -128,9 +131,9 @@ export function ComponentWrapper({
       </div>
 
       {/* Selection ring label — shows component type when selected */}
-      {isSelected && (
+      {isSelected && componentType && (
         <div className="absolute -top-5 left-0 rounded-t-sm bg-[var(--color-primary,#6366f1)] px-1.5 py-0.5 text-[10px] font-medium text-white leading-none">
-          {/* populated by parent with component type via data attribute */}
+          {componentType}
         </div>
       )}
     </div>

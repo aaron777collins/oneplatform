@@ -1,6 +1,6 @@
 /**
  * ServiceHealthGrid — polls GET /healthz on the gateway every 30 seconds
- * and displays the gateway health status.
+ * and displays the gateway health status only (not all services).
  *
  * Per-service health aggregation is a planned future feature. Currently only
  * the gateway health check endpoint is available.

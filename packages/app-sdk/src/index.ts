@@ -42,6 +42,39 @@ export { useUser } from "./hooks/useUser.js";
 export { usePermission } from "./hooks/usePermission.js";
 export { useAppStorage } from "./hooks/useAppStorage.js";
 
+// UI components
+export {
+  DataTable,
+  StatCard,
+  StatusBadge,
+  FilterBar,
+  EmptyState,
+  PageHeader,
+  DetailPanel,
+} from "./components/index.js";
+export type {
+  Column,
+  DataTableProps,
+  StatCardProps,
+  StatCardVariant,
+  StatusBadgeProps,
+  PredefinedStatus,
+  StatusColor,
+  FilterBarProps,
+  FilterDef,
+  FilterValues,
+  FilterType,
+  SelectOption,
+  DateRange,
+  EmptyStateProps,
+  EmptyStateAction,
+  PageHeaderProps,
+  BreadcrumbItem,
+  ActionItem,
+  ActionVariant,
+  DetailPanelProps,
+} from "./components/index.js";
+
 export type {
   TenantBrandingConfig,
   BrandingContextValue,

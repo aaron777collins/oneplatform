@@ -68,7 +68,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       name: d.name,
       ...(d.description ? { description: d.description } : {}),
       config: d.config,
-      credentials: d.credentials,
+      credentials: d.credentials ?? {},
       syncMode: d.syncMode,
       ...(d.scheduleCron ? { scheduleCron: d.scheduleCron } : {}),
       isEnabled: d.isEnabled,

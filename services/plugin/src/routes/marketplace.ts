@@ -17,6 +17,18 @@ import {
 
 export interface MarketplaceRouteDeps {
   marketplaceService: MarketplaceService;
+  /**
+   * Optional callback invoked after telemetry is recorded to perform the
+   * actual plugin registration. Receives the marketplace plugin details and
+   * the installing user's information. When omitted, the endpoint falls back
+   * to telemetry-only mode (backwards compatible).
+   */
+  onInstallPlugin?: (params: {
+    marketplacePluginId: string;
+    manifest: Record<string, unknown>;
+    tenantId: string;
+    installedBy: string;
+  }) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +83,7 @@ export function createMarketplaceRoutes(
   deps: MarketplaceRouteDeps
 ): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { marketplaceService } = deps;
+  const { marketplaceService, onInstallPlugin } = deps;
 
   // --------------------------------------------------------------------------
   // GET /api/v1/marketplace/plugins — browse/search
@@ -362,11 +374,34 @@ export function createMarketplaceRoutes(
     }
 
     const id = c.req.param("id");
+
+    // Step 1: Record telemetry (download counter + event).
     await marketplaceService.installPlugin(id, user.tenantId, user.userId);
 
-    // The marketplace install endpoint records the download and fires the event.
-    // Actual plugin bundle installation is handled separately via the existing
-    // POST /api/v1/plugins endpoint — this endpoint is the discovery/telemetry step.
+    // Step 2: Actually install the plugin via the plugin service callback.
+    // The marketplace entry has the full manifest; the callback delegates to
+    // the plugin service to create the plugin record and set up instances.
+    if (onInstallPlugin !== undefined) {
+      const details = await marketplaceService.getPluginDetails(id);
+
+      await onInstallPlugin({
+        marketplacePluginId: id,
+        manifest: details.manifest as unknown as Record<string, unknown>,
+        tenantId: user.tenantId,
+        installedBy: user.userId,
+      });
+
+      return c.json(
+        {
+          status: "installed",
+          message: "Plugin installed from marketplace successfully.",
+          pluginId: id,
+        },
+        200
+      );
+    }
+
+    // Fallback when onInstallPlugin is not wired (backwards compat).
     return c.json(
       {
         status: "recorded",

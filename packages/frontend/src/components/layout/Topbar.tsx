@@ -190,15 +190,27 @@ export function Topbar({ className, onMobileMenuToggle, mobileMenuOpen }: Topbar
           ) : (
             <div className="max-h-80 overflow-y-auto">
               {notifications.slice(0, 20).map((n) => (
-                <div
+                <DropdownMenuItem
                   key={n.id}
-                  className={cn(
-                    "px-2 py-2 text-sm",
-                    !n.read && "font-medium",
-                  )}
+                  asChild
                 >
-                  {n.message}
-                </div>
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full cursor-pointer px-2 py-2 text-sm text-left",
+                      !n.read && "font-medium",
+                    )}
+                    onClick={() => {
+                      setNotifications((prev) =>
+                        prev.map((item) =>
+                          item.id === n.id ? { ...item, read: true } : item,
+                        ),
+                      );
+                    }}
+                  >
+                    {n.message}
+                  </button>
+                </DropdownMenuItem>
               ))}
             </div>
           )}

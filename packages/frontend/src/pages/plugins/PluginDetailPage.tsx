@@ -13,6 +13,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.j
 import { Button } from "@/components/ui/button.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog.js";
+import { Input } from "@/components/ui/input.js";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog.js";
 import { RelativeTime } from "@/components/shared/RelativeTime.js";
 import { PluginStatusBadge } from "@/components/plugins/PluginStatusBadge.js";
@@ -51,6 +60,8 @@ export function PluginDetailPage() {
   const queryClient = useQueryClient();
 
   const [uninstallOpen, setUninstallOpen] = React.useState(false);
+  const [upgradeOpen, setUpgradeOpen] = React.useState(false);
+  const [upgradeUrl, setUpgradeUrl] = React.useState("");
 
   const query = useQuery({
     queryKey: ["plugins", id],
@@ -87,10 +98,12 @@ export function PluginDetailPage() {
   });
 
   const upgradeMutation = useMutation({
-    mutationFn: (url: string) =>
-      client.post(`/v1/plugins/${id}/upgrade`, { sourceUrl: url }),
+    mutationFn: (toVersion: string) =>
+      client.post(`/v1/plugins/${id}/upgrade`, { toVersion }),
     onSuccess: () => {
       toast({ title: "Upgrade initiated" });
+      setUpgradeOpen(false);
+      setUpgradeUrl("");
       void queryClient.invalidateQueries({ queryKey: ["plugins", id] });
     },
     onError: (error) => {
@@ -194,20 +207,15 @@ export function PluginDetailPage() {
           <div className="rounded-lg border border-[var(--color-border)] p-4 space-y-3">
             <h3 className="text-sm font-semibold">Upgrade</h3>
             <p className="text-sm text-[var(--color-muted-foreground)]">
-              Provide a new plugin URL to upgrade to a later version.
+              Upgrade to a staged version of this plugin.
             </p>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                const url = window.prompt("Enter upgrade URL:");
-                if (url !== null && url.trim() !== "") {
-                  upgradeMutation.mutate(url.trim());
-                }
-              }}
+              onClick={() => setUpgradeOpen(true)}
               disabled={upgradeMutation.isPending}
             >
-              {upgradeMutation.isPending ? "Upgrading…" : "Upgrade from URL…"}
+              {upgradeMutation.isPending ? "Upgrading…" : "Upgrade…"}
             </Button>
           </div>
 
@@ -236,6 +244,59 @@ export function PluginDetailPage() {
         onConfirm={() => uninstallMutation.mutate()}
         isLoading={uninstallMutation.isPending}
       />
+
+      <Dialog
+        open={upgradeOpen}
+        onOpenChange={(open) => {
+          setUpgradeOpen(open);
+          if (!open) setUpgradeUrl("");
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upgrade plugin</DialogTitle>
+            <DialogDescription>
+              Enter the target version to upgrade to. The version must already be staged (installed but not yet active).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Input
+              placeholder="e.g. 2.0.0"
+              value={upgradeUrl}
+              onChange={(e) => setUpgradeUrl(e.target.value)}
+              aria-label="Target version"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && upgradeUrl.trim() !== "") {
+                  upgradeMutation.mutate(upgradeUrl.trim());
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setUpgradeOpen(false);
+                setUpgradeUrl("");
+              }}
+              disabled={upgradeMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (upgradeUrl.trim() !== "") {
+                  upgradeMutation.mutate(upgradeUrl.trim());
+                }
+              }}
+              disabled={upgradeMutation.isPending || upgradeUrl.trim() === ""}
+              aria-busy={upgradeMutation.isPending}
+            >
+              {upgradeMutation.isPending ? "Upgrading…" : "Upgrade"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

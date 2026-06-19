@@ -27,7 +27,7 @@ export const PluginManifestSchema = z.object({
     "Must be SemVer"
   ),
   type: z.enum(["connector", "transformer", "destination", "auth-provider", "widget"]),
-  description: z.string().max(200),
+  description: z.string().max(500),
   author: z.string().min(1),
   supportUrl: z.string().url().optional(),
   homepageUrl: z.string().url().optional(),

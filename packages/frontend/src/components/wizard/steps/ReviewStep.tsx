@@ -72,7 +72,7 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
         bootstrapToken,
       });
       reset();
-      window.location.href = "/";
+      onNext();
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.statusCode === 410) {

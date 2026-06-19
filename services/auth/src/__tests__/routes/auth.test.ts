@@ -121,6 +121,7 @@ function makeAuthService(overrides: Partial<AuthService> = {}): AuthService {
       message: "If an account with this email exists, a reset link has been sent.",
     }),
     resetPassword: vi.fn().mockResolvedValue(undefined),
+    changePassword: vi.fn().mockResolvedValue(undefined),
     verifyEmail: vi.fn().mockResolvedValue({
       message: "Email verified successfully.",
       userId: "user-1",

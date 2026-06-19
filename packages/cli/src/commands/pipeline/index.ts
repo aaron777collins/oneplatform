@@ -29,7 +29,7 @@ const RUN_COLUMNS = [
 ];
 
 interface ListOpts { status?: string }
-interface TriggerOpts { input?: string; wait?: boolean }
+interface TriggerOpts { input?: string; wait?: boolean; pollTimeout?: string }
 interface RunsOpts { limit?: string; status?: string }
 interface RunLogsOpts { follow?: boolean; step?: string; level?: string }
 
@@ -84,8 +84,16 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
   if (!opts.wait) return;
 
   // Poll status and stream logs to stderr while waiting
+  const pollTimeoutSec = parseInt(opts.pollTimeout ?? "600", 10);
+  const deadline = Date.now() + pollTimeoutSec * 1000;
   while (true) {
     await new Promise((r) => setTimeout(r, 3000));
+    if (Date.now() > deadline) {
+      throw new CliError(
+        `Poll timeout: pipeline run did not complete within ${pollTimeoutSec}s.`,
+        EXIT.GENERAL,
+      );
+    }
     const status = await ctx.http.get<{ status: string }>(
       `/api/v1/pipeline-runs/${resp.runId}`,
     );
@@ -170,6 +178,7 @@ export function registerPipeline(program: Command): void {
     .argument("<id>", "Pipeline ID")
     .option("--input <json>", "JSON string of runtime input parameters")
     .option("--wait", "Poll until run completes (run ID still printed to stdout)")
+    .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600)")
     .action(withContext<[string, TriggerOpts]>(triggerAction));
 
   pipeline.command("runs").description("List runs for a pipeline")

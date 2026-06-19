@@ -137,6 +137,7 @@ export type {
 export {
   DataServiceDescriptor,
   IngestionServiceDescriptor,
+  parseEntityData,
 } from './grpc-types/index.js';
 
 // Platform resource types — stable shapes for server-returned data
@@ -180,4 +181,6 @@ export type {
   BulkOperation,
   BulkResult,
   BulkResultItem,
+  SyncJob,
+  SyncProgress,
 } from './resources/platform-types.js';

@@ -29,6 +29,21 @@ spec:
     - host: {{ .Values.ingress.hostname | quote }}
       http:
         paths:
+          # Health/readiness probes route to the gateway, not the SPA.
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: {{ printf "%s-gateway" (include "oneplatform.fullname" .) }}
+                port:
+                  number: {{ .Values.gateway.service.port }}
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: {{ printf "%s-gateway" (include "oneplatform.fullname" .) }}
+                port:
+                  number: {{ .Values.gateway.service.port }}
           # All /api/* traffic routes to the gateway service.
           # The gateway performs JWT validation, rate limiting, and service routing.
           - path: /api

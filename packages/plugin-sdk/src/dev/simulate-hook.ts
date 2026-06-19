@@ -118,7 +118,7 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
     process.exit(1);
   }
 
-  // Resolve the hook entrypoint: explicit CLI arg > manifest field > error.
+  // Resolve the hook entrypoint: explicit CLI arg > manifest hooks[] match > error.
   // We read the manifest here (not in the vm context) so the CLI arg can override it.
   let entrypoint: string;
   if (args.entrypoint !== undefined) {
@@ -132,11 +132,32 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
       process.exit(1);
     }
     const rawManifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
-    if (typeof rawManifest["entrypoint"] !== "string") {
-      process.stderr.write(`Error: plugin.manifest.json is missing a valid "entrypoint" field\n`);
+
+    // Search the hooks[] array for a hook declaration matching the requested stage.
+    const hooks = Array.isArray(rawManifest["hooks"]) ? rawManifest["hooks"] as Array<Record<string, unknown>> : [];
+    const matchingHook = hooks.find((h) => h["stage"] === args.stage);
+
+    if (matchingHook && typeof matchingHook["entrypoint"] === "string") {
+      entrypoint = matchingHook["entrypoint"];
+    } else if (hooks.length > 0) {
+      // Hooks are declared but none match the requested stage — show helpful error.
+      const availableStages = hooks
+        .map((h) => typeof h["stage"] === "string" ? h["stage"] : "(unknown)")
+        .join(", ");
+      process.stderr.write(
+        `Error: no hook found for stage "${args.stage}" in plugin.manifest.json.\n` +
+        `  Available hook stages: ${availableStages}\n` +
+        `  Provide --entrypoint to override, or add a hook declaration for "${args.stage}".\n`,
+      );
       process.exit(1);
+    } else {
+      // No hooks declared — fall back to top-level entrypoint for backward compatibility.
+      if (typeof rawManifest["entrypoint"] !== "string") {
+        process.stderr.write(`Error: plugin.manifest.json has no hooks[] and no top-level "entrypoint" field\n`);
+        process.exit(1);
+      }
+      entrypoint = rawManifest["entrypoint"];
     }
-    entrypoint = rawManifest["entrypoint"];
   }
 
   // Load the HookPayload data from --input file or use an empty object

@@ -104,8 +104,13 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-8"
-          aria-label="Search audit log"
+          aria-label="Search audit log (searches loaded results)"
         />
+        {search !== "" && (
+          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-[var(--color-muted-foreground)] pointer-events-none">
+            (searches loaded results)
+          </span>
+        )}
       </div>
 
       <Table>

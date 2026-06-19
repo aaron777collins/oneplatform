@@ -443,6 +443,15 @@ export function QueryBuilderPage() {
       ]
     : [];
 
+  // When entity detail loads, initialize selectedFields to all field slugs so
+  // the visual "all checked" state matches the actual selection state.
+  React.useEffect(() => {
+    if (fieldOptions.length > 0 && selectedFields.size === 0) {
+      setSelectedFields(new Set(fieldOptions.map((f) => f.slug)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldOptions.length]);
+
   // Reset field selections when entity type changes
   const handleEntityTypeChange = useCallback((slug: string) => {
     setSelectedEntityType(slug);
@@ -639,7 +648,7 @@ export function QueryBuilderPage() {
               ) : (
                 <div className="flex flex-wrap gap-2" role="group" aria-label="Fields">
                   {fieldOptions.map((f) => {
-                    const checked = selectedFields.size === 0 || selectedFields.has(f.slug);
+                    const checked = selectedFields.has(f.slug);
                     return (
                       <label
                         key={f.slug}
@@ -654,16 +663,7 @@ export function QueryBuilderPage() {
                           type="checkbox"
                           className="sr-only"
                           checked={checked}
-                          onChange={() => {
-                            // When nothing is explicitly selected we treat that as "all".
-                            // The first toggle into the "some selected" state selects only
-                            // the clicked field, so the user can then deselect others.
-                            if (selectedFields.size === 0) {
-                              setSelectedFields(new Set([f.slug]));
-                            } else {
-                              toggleField(f.slug);
-                            }
-                          }}
+                          onChange={() => toggleField(f.slug)}
                         />
                         {f.name}
                       </label>
@@ -673,7 +673,7 @@ export function QueryBuilderPage() {
               )}
               {selectedFields.size === 0 && fieldOptions.length > 0 && (
                 <p className="mt-1.5 text-xs text-[var(--color-muted-foreground)]">
-                  All columns will be returned when none are selected.
+                  Select at least one column to include in the query.
                 </p>
               )}
             </section>

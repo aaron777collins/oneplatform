@@ -302,7 +302,7 @@ export const ${entrypoint}: Destination = {
     context.logger.info("Writing batch", { count: records.length });
 
     // Minimal scaffold: acknowledges all records as written without sending them.
-    // Replace with actual HTTP delivery to context.config["endpointUrl"].
+    // Replace with actual HTTP delivery using context.fetch and context.credentials.
     return {
       written: records.length,
       failed: 0,
@@ -451,26 +451,212 @@ export const ${entrypoint}: Widget = {
 }
 
 function buildTestSource(opts: ScaffoldOptions, entrypoint: string): string {
+  const typeTests: Record<PluginType, () => string> = {
+    connector: () => buildConnectorTestSource(opts, entrypoint),
+    transformer: () => buildTransformerTestSource(opts, entrypoint),
+    destination: () => buildDestinationTestSource(opts, entrypoint),
+    "auth-provider": () => buildAuthProviderTestSource(opts, entrypoint),
+    widget: () => buildWidgetTestSource(opts, entrypoint),
+  };
+  return typeTests[opts.type]();
+}
+
+function buildConnectorTestSource(opts: ScaffoldOptions, entrypoint: string): string {
   return `import { describe, it, expect } from "vitest";
-// @oneplatform/plugin-sdk/testing is available once the SDK is installed (npm install).
-// If the SDK is used from a workspace link, run \`pnpm build\` in packages/plugin-sdk first.
-import { createMockContext } from "@oneplatform/plugin-sdk/testing";
+import { createConnectorMockContext } from "@oneplatform/plugin-sdk/testing";
 import { ${entrypoint} } from "../index.js";
 
 describe("${entrypoint}", () => {
-  it("returns valid metadata", () => {
+  it("returns valid connector metadata", () => {
     const meta = ${entrypoint}.metadata();
-    expect(meta.type).toBe("${opts.type}");
+    expect(meta.type).toBe("connector");
     expect(meta.id).toBe("${opts.id}");
+    expect(meta.supportsIncremental).toBeDefined();
   });
 
-  it("has all required methods", () => {
-    expect(typeof ${entrypoint}.metadata).toBe("function");
+  it("connects successfully with valid config", async () => {
+    const ctx = createConnectorMockContext({
+      credentials: { apiKey: "test-key" },
+    });
+    const handle = await ${entrypoint}.connect({ baseUrl: "https://api.example.com" }, ctx);
+    expect(handle.connectionId).toBeTruthy();
   });
 
-  it("creates a mock context without errors", () => {
-    const ctx = createMockContext({ config: {} });
-    expect(ctx.tenant.tenantId).toBe("test-tenant");
+  it("throws on missing baseUrl", async () => {
+    const ctx = createConnectorMockContext({
+      credentials: { apiKey: "test-key" },
+    });
+    await expect(${entrypoint}.connect({}, ctx)).rejects.toThrow("baseUrl");
+  });
+
+  it("fetches an empty batch", async () => {
+    const ctx = createConnectorMockContext({
+      credentials: { apiKey: "test-key" },
+    });
+    const handle = await ${entrypoint}.connect({ baseUrl: "https://api.example.com" }, ctx);
+    const batch = await ${entrypoint}.fetchBatch(handle, null, ctx);
+    expect(batch.records).toEqual([]);
+    expect(batch.hasMore).toBe(false);
+  });
+
+  it("disconnects without error", async () => {
+    const ctx = createConnectorMockContext({
+      credentials: { apiKey: "test-key" },
+    });
+    const handle = await ${entrypoint}.connect({ baseUrl: "https://api.example.com" }, ctx);
+    await expect(${entrypoint}.disconnect(handle, ctx)).resolves.toBeUndefined();
+  });
+});
+`;
+}
+
+function buildTransformerTestSource(opts: ScaffoldOptions, entrypoint: string): string {
+  return `import { describe, it, expect } from "vitest";
+import { createTransformerMockContext } from "@oneplatform/plugin-sdk/testing";
+import { ${entrypoint} } from "../index.js";
+
+describe("${entrypoint}", () => {
+  it("returns valid transformer metadata", () => {
+    const meta = ${entrypoint}.metadata();
+    expect(meta.type).toBe("transformer");
+    expect(meta.id).toBe("${opts.id}");
+    expect(meta.idempotent).toBeDefined();
+  });
+
+  it("passes a record through unchanged", async () => {
+    const ctx = createTransformerMockContext();
+    const record = {
+      sourceId: "rec-001",
+      entityType: "contact",
+      data: { name: "Test" },
+      timestamp: new Date().toISOString(),
+    };
+    const result = await ${entrypoint}.transform(record, ctx);
+    expect(result).toEqual(record);
+  });
+
+  it("throws on record missing sourceId", async () => {
+    const ctx = createTransformerMockContext();
+    const record = {
+      sourceId: "",
+      entityType: "contact",
+      data: { name: "Test" },
+      timestamp: new Date().toISOString(),
+    };
+    await expect(${entrypoint}.transform(record, ctx)).rejects.toThrow("sourceId");
+  });
+});
+`;
+}
+
+function buildDestinationTestSource(opts: ScaffoldOptions, entrypoint: string): string {
+  return `import { describe, it, expect } from "vitest";
+import { createDestinationMockContext } from "@oneplatform/plugin-sdk/testing";
+import { ${entrypoint} } from "../index.js";
+
+describe("${entrypoint}", () => {
+  it("returns valid destination metadata", () => {
+    const meta = ${entrypoint}.metadata();
+    expect(meta.type).toBe("destination");
+    expect(meta.id).toBe("${opts.id}");
+    expect(meta.deliveryGuarantee).toBeDefined();
+  });
+
+  it("writes an empty batch successfully", async () => {
+    const ctx = createDestinationMockContext();
+    const result = await ${entrypoint}.write([], ctx);
+    expect(result.written).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("writes a batch and reports correct counts", async () => {
+    const ctx = createDestinationMockContext();
+    const records = [
+      { sourceId: "rec-001", entityType: "contact", data: { name: "A" }, operation: "upsert" as const },
+      { sourceId: "rec-002", entityType: "contact", data: { name: "B" }, operation: "upsert" as const },
+    ];
+    const result = await ${entrypoint}.write(records, ctx);
+    expect(result.written).toBe(2);
+    expect(result.failed).toBe(0);
+  });
+});
+`;
+}
+
+function buildAuthProviderTestSource(opts: ScaffoldOptions, entrypoint: string): string {
+  return `import { describe, it, expect } from "vitest";
+import { createAuthProviderMockContext } from "@oneplatform/plugin-sdk/testing";
+import { ${entrypoint} } from "../index.js";
+
+describe("${entrypoint}", () => {
+  it("returns valid auth-provider metadata", () => {
+    const meta = ${entrypoint}.metadata();
+    expect(meta.type).toBe("auth-provider");
+    expect(meta.id).toBe("${opts.id}");
+    expect(meta.protocol).toBeDefined();
+  });
+
+  it("generates a valid authorization URL", () => {
+    const url = ${entrypoint}.getAuthorizationUrl("test-state", {
+      redirectUri: "https://localhost/callback",
+      additionalParams: { clientId: "test-client-id" },
+    });
+    expect(url).toContain("https://auth.example.com");
+    expect(url).toContain("test-state");
+    expect(url).toContain("test-client-id");
+  });
+
+  it("throws on missing clientId", () => {
+    expect(() =>
+      ${entrypoint}.getAuthorizationUrl("test-state", {
+        redirectUri: "https://localhost/callback",
+        additionalParams: {},
+      }),
+    ).toThrow("clientId");
+  });
+
+  it("returns empty role array from mapClaimsToRoles", () => {
+    const roles = ${entrypoint}.mapClaimsToRoles({ sub: "user-1" });
+    expect(roles).toEqual([]);
+  });
+});
+`;
+}
+
+function buildWidgetTestSource(opts: ScaffoldOptions, entrypoint: string): string {
+  return `import { describe, it, expect } from "vitest";
+import { ${entrypoint} } from "../index.js";
+
+describe("${entrypoint}", () => {
+  it("returns valid widget metadata", () => {
+    const meta = ${entrypoint}.metadata();
+    expect(meta.type).toBe("widget");
+    expect(meta.id).toBe("${opts.id}");
+    expect(meta.minWidth).toBeGreaterThan(0);
+    expect(meta.minHeight).toBeGreaterThan(0);
+  });
+
+  it("renders valid HTML", () => {
+    const html = ${entrypoint}.render({
+      config: { title: "Test Widget" },
+      user: { id: "user-1", roles: ["viewer"] },
+      data: {},
+    });
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("Test Widget");
+    expect(html).toContain("user-1");
+  });
+
+  it("returns data requirements as an array", () => {
+    const queries = ${entrypoint}.declareDataRequirements();
+    expect(Array.isArray(queries)).toBe(true);
+  });
+
+  it("declares a slot", () => {
+    const slot = ${entrypoint}.declareSlot();
+    expect(slot.slot).toBe("main");
+    expect(slot.defaultWidth).toBeGreaterThan(0);
   });
 });
 `;

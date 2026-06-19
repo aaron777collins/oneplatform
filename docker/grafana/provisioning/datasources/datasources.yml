@@ -2,9 +2,14 @@ apiVersion: 1
 
 # Grafana datasource provisioning — evaluated at container start.
 # Changes here take effect on the next `docker compose restart grafana`.
+#
 # The Jaeger datasource is the primary signal source for this stack: span data
 # drives both the tracing explorer and the synthetic request-rate/latency panels
 # in the pre-built dashboards.
+#
+# Prometheus is NOT deployed in the default Docker Compose stack. If you add a
+# Prometheus container, uncomment the block at the bottom of this file to
+# register it as a datasource.
 datasources:
   - name: Jaeger
     type: jaeger
@@ -22,3 +27,14 @@ datasources:
         datasourceUid: loki
         filterByTraceID: true
         filterBySpanID: false
+
+  # --- Uncomment when a Prometheus instance is deployed ---
+  # - name: Prometheus
+  #   type: prometheus
+  #   uid: prometheus
+  #   access: proxy
+  #   url: http://prometheus:9090
+  #   isDefault: false
+  #   editable: false
+  #   jsonData:
+  #     timeInterval: "15s"

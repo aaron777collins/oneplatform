@@ -59,7 +59,7 @@ export interface Subscription {
   /** Terminate the subscription and close the SSE connection. */
   unsubscribe(): void;
 
-  /** Register a listener for status changes. */
+  /** Register a listener for status changes or errors (generic overload). */
   on(event: 'status', handler: (status: Subscription['status']) => void): this;
 
   /**
@@ -68,4 +68,18 @@ export interface Subscription {
    * in that case and no reconnection is attempted.
    */
   on(event: 'error', handler: (error: NetworkError | AuthError) => void): this;
+
+  /**
+   * Type-safe shorthand for `on('status', handler)`.
+   * Registers a listener invoked whenever the subscription status changes.
+   */
+  onStatus(handler: (status: Subscription['status']) => void): this;
+
+  /**
+   * Type-safe shorthand for `on('error', handler)`.
+   * Registers a listener invoked on connection errors, including
+   * {@link AuthError} for 401 responses (which close the subscription
+   * immediately without reconnect).
+   */
+  onError(handler: (error: NetworkError | AuthError) => void): this;
 }

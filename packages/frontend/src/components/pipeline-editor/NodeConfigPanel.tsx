@@ -21,8 +21,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.js";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils.js";
+import { useApiClient } from "@/lib/api-client.js";
 import type { GraphNode, StepConfig } from "./graph-model.js";
+
+// ---------------------------------------------------------------------------
+// Connector list types (mirrors ConnectorsPage shapes for the picker)
+// ---------------------------------------------------------------------------
+
+interface ConnectorRowApi {
+  id: string;
+  name: string;
+  plugin_id: string;
+}
+
+interface ConnectorListItem {
+  connector: ConnectorRowApi;
+}
+
+interface ConnectorListResponse {
+  items?: ConnectorListItem[];
+  data?: ConnectorListItem[];
+}
 
 // Monaco is loaded lazily — it is a heavy dependency and not every user will
 // open a code step, so we avoid pulling it into the main bundle.
@@ -442,15 +463,52 @@ function ConnectorFields({
   config: StepConfig;
   onConfigChange: (k: string, v: unknown) => void;
 }) {
+  const client = useApiClient();
+  const { data: connectorList, isLoading: connectorsLoading } = useQuery({
+    queryKey: ["connectors"],
+    queryFn: () => client.get<ConnectorListResponse>("/v1/connectors"),
+    staleTime: 60_000,
+  });
+
+  const connectors: ConnectorListItem[] =
+    connectorList?.items ?? connectorList?.data ?? [];
+
+  const selectedId = (config["connectorInstanceId"] as string | undefined) ?? "";
+
   return (
     <>
-      <FormField label="Connector instance ID" htmlFor="cfg-conn-id">
-        <Input
-          id="cfg-conn-id"
-          placeholder="UUID"
-          value={(config["connectorInstanceId"] as string | undefined) ?? ""}
-          onChange={(e) => onConfigChange("connectorInstanceId", e.target.value)}
-        />
+      <FormField label="Connector" htmlFor="cfg-conn-id">
+        {connectorsLoading ? (
+          <Input id="cfg-conn-id" disabled placeholder="Loading connectors..." />
+        ) : connectors.length === 0 ? (
+          <>
+            <Input
+              id="cfg-conn-id"
+              placeholder="Connector UUID (no connectors found)"
+              value={selectedId}
+              onChange={(e) => onConfigChange("connectorInstanceId", e.target.value)}
+            />
+            <p className="mt-1 text-[10px] text-[var(--color-muted-foreground)]">
+              No connectors available. Enter an ID manually or create a connector first.
+            </p>
+          </>
+        ) : (
+          <Select
+            value={selectedId}
+            onValueChange={(v) => onConfigChange("connectorInstanceId", v)}
+          >
+            <SelectTrigger id="cfg-conn-id">
+              <SelectValue placeholder="Select a connector..." />
+            </SelectTrigger>
+            <SelectContent>
+              {connectors.map(({ connector: c }) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name} ({c.plugin_id})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </FormField>
 
       <FormField label="Sync mode" htmlFor="cfg-sync-mode">
@@ -508,12 +566,48 @@ function TransformFields({
   const transform = (config["transform"] as Record<string, unknown> | undefined) ?? {};
   const operation = (transform["operation"] as string | undefined) ?? "filter";
 
+  // Extract params (everything except "operation") for the JSON textarea.
+  const { operation: _op, ...params } = transform;
+  const [paramsText, setParamsText] = React.useState(() =>
+    Object.keys(params).length > 0 ? JSON.stringify(params, null, 2) : "",
+  );
+  const [parseError, setParseError] = React.useState<string | null>(null);
+
+  const handleOperationChange = React.useCallback(
+    (v: string) => {
+      // Merge new operation with existing params.
+      try {
+        const parsed = paramsText.trim() ? JSON.parse(paramsText) : {};
+        onConfigChange("transform", { ...parsed, operation: v });
+      } catch {
+        onConfigChange("transform", { operation: v });
+      }
+    },
+    [paramsText, onConfigChange],
+  );
+
+  const handleParamsBlur = React.useCallback(() => {
+    const trimmed = paramsText.trim();
+    if (trimmed === "") {
+      setParseError(null);
+      onConfigChange("transform", { operation });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      setParseError(null);
+      onConfigChange("transform", { ...parsed, operation });
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : "Invalid JSON");
+    }
+  }, [paramsText, operation, onConfigChange]);
+
   return (
     <>
       <FormField label="Operation" htmlFor="cfg-transform-op">
         <Select
           value={operation}
-          onValueChange={(v) => onConfigChange("transform", { operation: v })}
+          onValueChange={handleOperationChange}
         >
           <SelectTrigger id="cfg-transform-op">
             <SelectValue />
@@ -526,8 +620,26 @@ function TransformFields({
         </Select>
       </FormField>
 
+      <FormField label="Parameters (JSON)" htmlFor="cfg-transform-params">
+        <Textarea
+          id="cfg-transform-params"
+          className="font-mono text-xs"
+          rows={6}
+          placeholder={'{\n  "field": "status",\n  "equals": "active"\n}'}
+          value={paramsText}
+          onChange={(e) => {
+            setParamsText(e.target.value);
+            if (parseError) setParseError(null);
+          }}
+          onBlur={handleParamsBlur}
+        />
+        {parseError !== null && (
+          <p className="mt-1 text-[11px] text-[var(--color-destructive)]">{parseError}</p>
+        )}
+      </FormField>
+
       <p className="text-[10px] text-[var(--color-muted-foreground)]">
-        Additional operation options are available in the JSON editor.
+        Enter operation-specific parameters as a JSON object. Changes apply on blur.
       </p>
     </>
   );

@@ -239,6 +239,17 @@ const pipelinesRoute = createRoute({
   ),
 });
 
+// /pipelines/new must be registered before /pipelines/$id so the literal
+// "new" segment is matched as a dedicated route, not as a pipeline ID.
+// Redirects to /pipelines/new/edit where PipelineBuilderPage handles creation.
+const newPipelineRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/pipelines/new",
+  beforeLoad: () => {
+    throw redirect({ to: "/pipelines/$id/edit", params: { id: "new" } });
+  },
+});
+
 const pipelineDetailRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/pipelines/$id",
@@ -426,6 +437,15 @@ const webhooksRoute = createRoute({
   ),
 });
 
+const storageRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/storage",
+  component: lazyRouteComponent(
+    () => import("./pages/settings/StorageBrowserPage.js"),
+    "StorageBrowserPage",
+  ),
+});
+
 const adminRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/admin",
@@ -476,6 +496,8 @@ const routeTree = rootRoute.addChildren([
     queryBuilderRoute,
     entityDetailRoute,
     pipelinesRoute,
+    // newPipelineRoute before $id so the literal "new" wins over the param wildcard
+    newPipelineRoute,
     pipelineDetailRoute,
     pipelineBuilderRoute,
     runDetailRoute,
@@ -495,6 +517,7 @@ const routeTree = rootRoute.addChildren([
       teamsRoute,
       apiKeysRoute,
       webhooksRoute,
+      storageRoute,
       adminRoute,
     ]),
   ]),

@@ -33,6 +33,13 @@ export class NetworkError extends OnePlatformError {
   /** Configured timeout duration in ms, present when reason === 'timeout'. */
   readonly timeoutMs: number | undefined;
 
+  /**
+   * The underlying exception that caused this network error, if available.
+   * Useful for debugging DNS failures, TLS issues, or other low-level errors
+   * without inspecting the stack trace.
+   */
+  override readonly cause: unknown;
+
   constructor(options: NetworkErrorOptions) {
     super({
       code: 'SDK_NETWORK_ERROR',
@@ -41,10 +48,6 @@ export class NetworkError extends OnePlatformError {
     });
     this.reason = options.reason;
     this.timeoutMs = options.timeoutMs;
-
-    // Preserve the original cause for debugging without surfacing it to the user
-    if (options.cause !== undefined) {
-      (this as { cause?: unknown }).cause = options.cause;
-    }
+    this.cause = options.cause;
   }
 }

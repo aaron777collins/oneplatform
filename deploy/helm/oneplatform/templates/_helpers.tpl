@@ -331,6 +331,21 @@ livenessProbe:
 {{- end }}
 
 {{/*
+Startup probe — generous threshold so slow-starting services (DB migrations,
+large model loads) have time to become ready before liveness kicks in.
+failureThreshold * periodSeconds = 300 s (5 min) maximum startup window.
+*/}}
+{{- define "oneplatform.startupProbe" -}}
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 3000
+  periodSeconds: 10
+  failureThreshold: 30
+  timeoutSeconds: 5
+{{- end }}
+
+{{/*
 Standard readiness probe — stricter than liveness to gate traffic.
 */}}
 {{- define "oneplatform.readinessProbe" -}}

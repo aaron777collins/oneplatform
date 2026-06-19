@@ -18,7 +18,7 @@ export const createConnectorRequest = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
   config: z.record(z.unknown()),
-  credentials: z.record(z.string()),
+  credentials: z.record(z.string()).optional(),
   syncMode: z.enum(["full", "incremental"]).default("incremental"),
   scheduleCron: cronExpressionSchema.optional(),
   isEnabled: z.boolean().default(true),

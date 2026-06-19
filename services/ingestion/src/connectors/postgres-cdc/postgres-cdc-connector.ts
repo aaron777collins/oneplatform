@@ -71,15 +71,45 @@ function tupleToRecord(
 /**
  * Validate and coerce the connector config record into a typed PostgresCdcConfig.
  * Throws with a human-readable message listing the first missing/invalid field.
+ *
+ * SECURITY NOTE (V5-025): The password is currently stored in the connector
+ * config record as a plain-text string rather than being fetched via the
+ * platform CredentialAccessor at runtime. This is a known limitation of the
+ * built-in CDC connector — it does not run inside the plugin sandbox and
+ * therefore cannot use the credential service transparently. A future iteration
+ * should migrate to CredentialAccessor.get("password") so that credential
+ * rotation and audit logging are handled by the platform.
  */
 function parseConfig(config: Record<string, unknown>): PostgresCdcConfig {
   const required = ["host", "database", "user", "password", "slotName", "publicationName"] as const;
+
+  // Sensitive fields that must never appear in logs or error messages.
+  const sensitiveFields = new Set(["password"]);
+
   for (const key of required) {
     if (typeof config[key] !== "string" || config[key] === "") {
+      // Never reveal which sensitive value was missing/invalid — only state
+      // that a "credential field" failed validation.
+      const safeKey = sensitiveFields.has(key) ? "<credential>" : key;
       throw new Error(
-        `PostgreSQL CDC connector: required config field "${key}" is missing or empty.`,
+        `PostgreSQL CDC connector: required config field "${safeKey}" is missing or empty.`,
       );
     }
+  }
+
+  // Input-validate the password: reject obviously invalid values and ensure
+  // the string cannot be trivially used for log injection (newlines, control chars).
+  const password = config["password"] as string;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f]/.test(password)) {
+    throw new Error(
+      "PostgreSQL CDC connector: credential field contains invalid control characters.",
+    );
+  }
+  if (password.length > 1024) {
+    throw new Error(
+      "PostgreSQL CDC connector: credential field exceeds maximum allowed length (1024).",
+    );
   }
 
   const port =
@@ -100,7 +130,7 @@ function parseConfig(config: Record<string, unknown>): PostgresCdcConfig {
     port,
     database: config["database"] as string,
     user: config["user"] as string,
-    password: config["password"] as string,
+    password,
     slotName: config["slotName"] as string,
     publicationName: config["publicationName"] as string,
     connectTimeoutMs:

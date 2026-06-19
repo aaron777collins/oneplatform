@@ -184,6 +184,7 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
                           <ComponentWrapper
                             componentId={col.component.id}
                             columnId={col.id}
+                            componentType={col.component.type}
                             mode={store.mode}
                             isSelected={store.selectedComponentId === col.component.id}
                             onSelect={() => store.selectComponent(col.component!.id)}

@@ -37,7 +37,7 @@ interface UpdateOpts {
   description?: string;
   scheduleCron?: string;
 }
-interface TriggerOpts { wait?: boolean; mode?: "full" | "incremental"; force?: boolean }
+interface TriggerOpts { wait?: boolean; mode?: "full" | "incremental"; force?: boolean; pollTimeout?: string }
 
 // Validates that a cron expression has exactly 5 space-separated fields.
 // Full semantic validation is performed server-side; this catches obvious typos
@@ -103,7 +103,7 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
 
 async function getAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const connector = await ctx.http.get<unknown>(`/api/v1/connectors/${encodeURIComponent(id)}`);
-  ctx.renderer.json(connector);
+  ctx.renderer.render(connector, CONNECTOR_COLUMNS);
 }
 
 async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): Promise<void> {
@@ -162,8 +162,16 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
 
   if (!opts.wait) return;
 
+  const pollTimeoutSec = parseInt(opts.pollTimeout ?? "600", 10);
+  const deadline = Date.now() + pollTimeoutSec * 1000;
   while (true) {
     await new Promise((r) => setTimeout(r, 2000));
+    if (Date.now() > deadline) {
+      throw new CliError(
+        `Poll timeout: connector run did not complete within ${pollTimeoutSec}s.`,
+        EXIT.GENERAL,
+      );
+    }
     const status = await ctx.http.get<{ status: string; progress?: number }>(
       `/api/v1/connectors/${encodeURIComponent(id)}/syncs/${resp.syncJobId}/progress`,
     );
@@ -243,5 +251,6 @@ export function registerConnector(program: Command): void {
     .option("--wait", "Poll until run completes")
     .option("--mode <mode>", "Sync mode override: full | incremental")
     .option("--force", "Force sync even if one is already running")
+    .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600)")
     .action(withContext<[string, TriggerOpts]>(triggerAction));
 }

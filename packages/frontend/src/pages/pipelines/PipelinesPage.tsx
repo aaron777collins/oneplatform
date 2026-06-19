@@ -65,7 +65,7 @@ export function PipelinesPage() {
         title="Pipelines"
         breadcrumbs={[{ label: "Platform" }, { label: "Pipelines" }]}
         actions={
-          <Button onClick={() => void navigate({ to: "/pipelines/$id/edit", params: { id: "new" } })}>
+          <Button onClick={() => void navigate({ to: "/pipelines/new" })}>
             <Plus className="h-4 w-4" aria-hidden />
             New pipeline
           </Button>
@@ -114,7 +114,7 @@ export function PipelinesPage() {
             {...(pipelines.length === 0
               ? {
                   actionLabel: "New pipeline",
-                  onAction: () => void navigate({ to: "/pipelines/$id/edit", params: { id: "new" } }),
+                  onAction: () => void navigate({ to: "/pipelines/new" }),
                 }
               : {})}
           />

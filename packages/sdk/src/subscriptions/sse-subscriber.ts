@@ -317,6 +317,16 @@ export function createSseSubscription(
       }
       return subscription;
     },
+
+    onStatus(handler: StatusHandler): Subscription {
+      statusHandlers.push(handler);
+      return subscription;
+    },
+
+    onError(handler: ErrorHandler): Subscription {
+      errorHandlers.push(handler);
+      return subscription;
+    },
   };
 
   return subscription;

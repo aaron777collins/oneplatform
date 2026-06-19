@@ -591,22 +591,11 @@ export function createDataResidencyService(deps: DataResidencyServiceDeps): Data
       return { compliant: true, assignedRegion: null, violations: [] };
     }
 
-    // Query the audit log to find any access from non-assigned regions
-    // that were not explicitly allowed.
-    const allLogs = await locationLogRepo.findByTenantId(tenantId, { limit: 10000 });
-    const violationMap = new Map<DataRegion, number>();
-
-    for (const log of allLogs) {
-      if (log.region !== policy.region) {
-        const current = violationMap.get(log.region) ?? 0;
-        violationMap.set(log.region, current + 1);
-      }
-    }
-
-    const violations = Array.from(violationMap.entries()).map(([region, count]) => ({
-      region,
-      count,
-    }));
+    // Aggregate violation counts directly in SQL instead of pulling all rows
+    // into memory (V5-127). The repository's countViolationsByRegion method
+    // issues a GROUP BY query that returns only the distinct region/count
+    // pairs, eliminating unbounded memory usage.
+    const violations = await locationLogRepo.countViolationsByRegion(tenantId, policy.region);
 
     return {
       compliant: violations.length === 0,

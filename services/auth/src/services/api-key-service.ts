@@ -61,7 +61,10 @@ export interface ApiKeyService {
     callerScopes: string[]
   ): Promise<{ apiKey: string; keyRecord: ApiKeyRecord }>;
   validate(key: string): Promise<UserContext | null>;
-  list(userId: string): Promise<ApiKeyRecord[]>;
+  list(
+    userId: string,
+    options?: { status?: "active" | "revoked" | "all"; limit?: number; offset?: number },
+  ): Promise<{ keys: ApiKeyRecord[]; total: number }>;
   revoke(keyId: string, revokedBy: string, tenantId: string): Promise<void>;
   rotate(
     keyId: string,
@@ -186,17 +189,30 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
       return null;
     }
 
-    // Step 2: Fast DB lookup by prefix
+    // Step 2: Fast DB lookup by prefix.
+    // LIMIT 5 caps sequential bcrypt comparisons to prevent a DoS attack
+    // where an adversary creates many keys sharing the same 8-char prefix
+    // and forces unbounded bcrypt work per validation call (V5-027).
     const result = await db.query<ApiKeyRow>(
       `SELECT * FROM auth.api_keys
        WHERE key_prefix = $1
          AND revoked_at IS NULL
-         AND (expires_at IS NULL OR expires_at > now())`,
+         AND (expires_at IS NULL OR expires_at > now())
+       LIMIT 5`,
       [keyPrefix]
     );
 
     if (result.rows.length === 0) {
       return null;
+    }
+
+    // If the query returned the full LIMIT, there may be more rows beyond
+    // the cap. Log a warning so operators can investigate prefix saturation.
+    if (result.rows.length >= 5) {
+      logger.warn("API key prefix collision at safety limit — some keys may be unreachable", {
+        keyPrefix,
+        matchCount: result.rows.length,
+      });
     }
 
     // Step 3: bcrypt comparison against all candidate rows (handles prefix collisions)
@@ -258,14 +274,38 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
   // List
   // -------------------------------------------------------------------------
 
-  async function list(userId: string): Promise<ApiKeyRecord[]> {
+  async function list(
+    userId: string,
+    options?: { status?: "active" | "revoked" | "all"; limit?: number; offset?: number },
+  ): Promise<{ keys: ApiKeyRecord[]; total: number }> {
+    const status = options?.status ?? "active";
+    const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
+    const offset = Math.max(options?.offset ?? 0, 0);
+
+    let statusClause = "";
+    if (status === "active") {
+      statusClause = " AND revoked_at IS NULL";
+    } else if (status === "revoked") {
+      statusClause = " AND revoked_at IS NOT NULL";
+    }
+    // status === "all" → no extra clause
+
+    const countResult = await db.query<{ count: string }>(
+      `SELECT count(*) AS count FROM auth.api_keys
+       WHERE user_id = $1${statusClause}`,
+      [userId],
+    );
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
     const result = await db.query<ApiKeyRow>(
       `SELECT * FROM auth.api_keys
-       WHERE user_id = $1
-       ORDER BY created_at DESC`,
-      [userId]
+       WHERE user_id = $1${statusClause}
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset],
     );
-    return result.rows.map(rowToRecord);
+
+    return { keys: result.rows.map(rowToRecord), total };
   }
 
   // -------------------------------------------------------------------------
