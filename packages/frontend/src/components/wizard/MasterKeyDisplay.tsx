@@ -13,7 +13,7 @@
  * - Acknowledgment checkbox is required before the parent can proceed.
  *
  * The caller is responsible for fetching the key from
- * GET /api/v1/auth/bootstrap/master-key and passing it as the `masterKey`
+ * GET /api/v1/bootstrap/master-key and passing it as the `masterKey`
  * prop. This separation keeps the component testable without mocking the API.
  */
 import * as React from "react";
@@ -31,7 +31,7 @@ const EXTEND_SECONDS = 120;
 const ANNOUNCE_AT_SECONDS = new Set([120, 60, 30, 10]);
 
 export interface MasterKeyDisplayProps {
-  /** The raw master key returned by GET /api/v1/auth/bootstrap/master-key. */
+  /** The raw master key returned by GET /api/v1/bootstrap/master-key. */
   masterKey: string;
   /** Whether the user has acknowledged saving the key. */
   acknowledged: boolean;

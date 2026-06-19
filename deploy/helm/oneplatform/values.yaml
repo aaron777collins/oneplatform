@@ -81,6 +81,18 @@ secrets:
   jwtPrivateKey: ""
   jwtPublicKey: ""
 
+  # Master encryption key used for envelope encryption of tenant secrets.
+  # Generate with: openssl rand -base64 32
+  masterKey: ""
+
+  # JWT signing secret (min 32 chars) used by services for token validation.
+  # Generate with: openssl rand -base64 32
+  jwtSecret: ""
+
+  # Cursor-based pagination HMAC secret (min 32 chars).
+  # Generate with: openssl rand -base64 32
+  cursorSecret: ""
+
   # PostgreSQL superuser password (only used when postgresql.enabled=true)
   postgresPassword: "change_me_postgres"
   # Application-level database password used by all services

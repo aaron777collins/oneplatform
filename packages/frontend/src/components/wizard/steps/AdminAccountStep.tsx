@@ -3,7 +3,7 @@
  *
  * Collects the initial admin email, password, and confirm password. On "Next"
  * the values are stored in the wizard Zustand store so the Review step can
- * display them and the POST /api/v1/auth/bootstrap can include them.
+ * display them and the POST /api/v1/bootstrap can include them.
  *
  * Password strength rules (§9.2): min 12 chars, mixed case, number.
  */

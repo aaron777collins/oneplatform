@@ -95,7 +95,7 @@ const indexRoute = createRoute({
   loader: async ({ context }): Promise<IndexLoaderData> => {
     const status = await context.apiClient.get<{
       data: { completed: boolean; bootstrapToken?: string };
-    }>("/v1/auth/bootstrap/status");
+    }>("/v1/bootstrap/status");
 
     // Once bootstrap is complete the user belongs inside the authenticated shell.
     // Redirecting here (in the loader, before render) avoids a flash of the

@@ -9,7 +9,7 @@
  *
  * The token is held in a React ref (not state) because it never needs to
  * trigger a re-render — it only needs to be available when ReviewStep fires
- * POST /api/v1/auth/bootstrap.
+ * POST /api/v1/bootstrap.
  */
 import React from "react";
 import { WizardShell } from "@/components/wizard/WizardShell.js";

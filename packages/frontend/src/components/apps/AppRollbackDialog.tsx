@@ -69,7 +69,7 @@ export function AppRollbackDialog({ appId, open, onOpenChange }: AppRollbackDial
 
   const rollbackMutation = useMutation({
     mutationFn: (buildId: string) =>
-      client.post(`/v1/apps/${appId}/rollback`, { targetBuildId: buildId }),
+      client.post(`/v1/apps/${appId}/rollback`, { buildId }),
     onSuccess: () => {
       toast({ title: "Rollback initiated", description: "The app will be restored to the selected build." });
       void queryClient.invalidateQueries({ queryKey: ["apps", appId] });

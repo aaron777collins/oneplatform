@@ -86,7 +86,7 @@ describe("useBootstrapStatus", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(mockClient.get).toHaveBeenCalledWith("/v1/auth/bootstrap/status");
+    expect(mockClient.get).toHaveBeenCalledWith("/v1/bootstrap/status");
   });
 
   it("exposes the response data on success", async () => {

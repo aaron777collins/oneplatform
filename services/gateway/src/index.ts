@@ -230,6 +230,12 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     "audit-events",
     "plugins",
     "roles",
+    "users",
+    "api-keys",
+    "tenants",
+    "bootstrap",
+    "data-residency",
+    "marketplace",
   ];
   const circuitBreakers = new Map(
     serviceNames.map((name) => [
@@ -252,6 +258,8 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     publicRoutes: [
       "/healthz",
       "/readyz",
+      "/api/v1/bootstrap",
+      "/api/v1/bootstrap/*",
     ],
     targetService: "gateway-service",
     servicePublicKeys,

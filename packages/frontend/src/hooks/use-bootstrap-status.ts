@@ -10,7 +10,7 @@ export interface BootstrapStatus {
   completed: boolean;
   /**
    * Present only when completed === false. The wizard reads this token and
-   * includes it in the POST /api/v1/auth/bootstrap body automatically —
+   * includes it in the POST /api/v1/bootstrap body automatically —
    * Sam never needs to copy it from Docker logs.
    */
   bootstrapToken?: string;
@@ -21,7 +21,7 @@ export interface BootstrapStatus {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetches bootstrap status from GET /api/v1/auth/bootstrap/status.
+ * Fetches bootstrap status from GET /api/v1/bootstrap/status.
  *
  * Used by the bootstrap gate in the root route to decide whether to render
  * the setup wizard or the authenticated dashboard.
@@ -39,7 +39,7 @@ export function useBootstrapStatus() {
   return useQuery({
     queryKey: ["bootstrap-status"],
     queryFn: (): Promise<ApiResponse<BootstrapStatus>> =>
-      client.get<ApiResponse<BootstrapStatus>>("/v1/auth/bootstrap/status"),
+      client.get<ApiResponse<BootstrapStatus>>("/v1/bootstrap/status"),
     staleTime: 60_000,
     // Do not retry on 4xx — if the endpoint is missing, retrying won't help
     retry: (failureCount: number, error: unknown): boolean => {

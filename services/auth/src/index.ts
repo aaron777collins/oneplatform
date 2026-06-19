@@ -246,6 +246,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
       "/healthz",
       "/readyz",
       "/api/v1/bootstrap/status",
+      "/api/v1/bootstrap/master-key",
       "/api/v1/bootstrap",
       "/api/v1/auth/register",
       "/api/v1/auth/login",

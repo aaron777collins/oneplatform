@@ -11,17 +11,57 @@ import { bootstrapRequest } from "../schemas/index.js";
 
 export interface BootstrapRouteDeps {
   bootstrapService: BootstrapService;
+  /** Returns the hex-encoded master key, or null if unavailable. */
+  getMasterKeyHex?: () => string | null;
 }
 
 export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { bootstrapService } = deps;
+  const { bootstrapService, getMasterKeyHex } = deps;
+
+  // Track whether the master key has already been served in this process
+  // lifetime. Once fetched, subsequent requests return 410 to prevent
+  // repeated exposure (defense in depth — the key is also in env, but the
+  // endpoint should not serve it indefinitely).
+  let masterKeyAlreadyServed = false;
 
   // GET /api/v1/bootstrap/status — public, no auth required
-  // Returns { completed: boolean } so the setup UI knows whether to show the wizard.
+  // Returns { completed: boolean; bootstrapToken?: string } so the setup UI
+  // knows whether to show the wizard and can pass the token to the completion call.
   routes.get("/api/v1/bootstrap/status", async (c) => {
     const status = await bootstrapService.getStatus();
     return c.json(status);
+  });
+
+  // GET /api/v1/bootstrap/master-key — public, no auth required
+  // Returns the platform master encryption key exactly once during bootstrap.
+  // After bootstrap is complete or after the key has already been served, returns 410 Gone.
+  routes.get("/api/v1/bootstrap/master-key", async (c) => {
+    const status = await bootstrapService.getStatus();
+    if (status.completed) {
+      return c.json(
+        { error: { code: "BOOTSTRAP_COMPLETED", message: "Bootstrap has already been completed." } },
+        410,
+      );
+    }
+
+    if (masterKeyAlreadyServed) {
+      return c.json(
+        { error: { code: "MASTER_KEY_ALREADY_SERVED", message: "The master key has already been displayed." } },
+        410,
+      );
+    }
+
+    const hex = getMasterKeyHex?.() ?? process.env["OP_MASTER_KEY"] ?? null;
+    if (hex === null) {
+      return c.json(
+        { error: { code: "MASTER_KEY_UNAVAILABLE", message: "Master key is not available." } },
+        503,
+      );
+    }
+
+    masterKeyAlreadyServed = true;
+    return c.json({ data: { masterKey: hex } });
   });
 
   // POST /api/v1/bootstrap — public, token-protected (not JWT auth)

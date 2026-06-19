@@ -7,7 +7,7 @@
  * steps have different validation requirements before they can advance.
  *
  * The bootstrapToken is threaded through to ReviewStep, which needs it for
- * the POST /api/v1/auth/bootstrap call (§9.4).
+ * the POST /api/v1/bootstrap call (§9.4).
  *
  * Accessibility (§9.5): progress list uses aria-current="step" on the active
  * item and role="list" on the <ol>.
@@ -43,7 +43,7 @@ const PROGRESS_STEPS = [0, 1, 2, 3, 4] as const;
 // ---------------------------------------------------------------------------
 
 export interface WizardShellProps {
-  /** Bootstrap token from GET /api/v1/auth/bootstrap/status (§9.4). */
+  /** Bootstrap token from GET /api/v1/bootstrap/status (§9.4). */
   bootstrapToken: string | undefined;
 }
 

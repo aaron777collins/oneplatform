@@ -1,7 +1,7 @@
 /**
  * SuccessStep — step 5 (final) of the setup wizard.
  *
- * Shown after POST /api/v1/auth/bootstrap succeeds. Displays a success
+ * Shown after POST /api/v1/bootstrap succeeds. Displays a success
  * confirmation and directs the new admin to the login page so they can
  * authenticate with the account they just created.
  *

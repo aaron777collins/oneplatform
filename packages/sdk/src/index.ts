@@ -99,6 +99,46 @@ export type {
   WriteFileRequest,
 } from './resources/apps.js';
 
+// gRPC-Web client — high-throughput data & ingestion operations
+export { createGrpcClient, GrpcClientError } from './grpc-client.js';
+export type {
+  GrpcClient,
+  GrpcClientOptions,
+  GrpcDataNamespace,
+  GrpcIngestionNamespace,
+} from './grpc-client.js';
+
+// gRPC message types (proto-generated) and service descriptors
+export type {
+  Entity,
+  GetEntityRequest,
+  ListEntitiesRequest,
+  ListEntitiesResponse,
+  CreateEntityRequest,
+  UpdateEntityRequest,
+  DeleteEntityRequest,
+  DeleteEntityResponse,
+  StreamEntitiesRequest,
+  IngestRecord,
+  BulkIngestResponse,
+  IngestError,
+  TriggerSyncRequest,
+  TriggerSyncResponse,
+  GetSyncStatusRequest,
+  SyncStatus,
+  SyncError,
+  StreamSyncEventsRequest,
+  SyncEvent,
+  RpcDescriptor,
+  ServiceDescriptor,
+  DataServiceImpl,
+  IngestionServiceImpl,
+} from './grpc-types/index.js';
+export {
+  DataServiceDescriptor,
+  IngestionServiceDescriptor,
+} from './grpc-types/index.js';
+
 // Platform resource types — stable shapes for server-returned data
 export type {
   WhoAmIResponse,

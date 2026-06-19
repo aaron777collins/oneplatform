@@ -1521,7 +1521,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
               input: run.input,
               steps: stepsCtx,
             });
-            skip = !condTrue;
+            skip = condTrue;
           } catch {
             skip = false; // On skipIf error, proceed with the step
           }

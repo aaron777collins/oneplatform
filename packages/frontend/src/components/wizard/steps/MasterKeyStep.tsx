@@ -1,7 +1,7 @@
 /**
  * MasterKeyStep — step 3 of the setup wizard (security-sensitive).
  *
- * Fetches the master key from GET /api/v1/auth/bootstrap/master-key and
+ * Fetches the master key from GET /api/v1/bootstrap/master-key and
  * delegates display+acknowledgment to MasterKeyDisplay. The key lives
  * ONLY in local component state — it is never written to the wizard store
  * or any persistent storage (§9.3).
@@ -53,7 +53,7 @@ export function MasterKeyStep({ onNext, onPrev }: MasterKeyStepProps) {
     void (async () => {
       try {
         const result = await client.get<ApiResponse<{ masterKey: string }>>(
-          "/v1/auth/bootstrap/master-key",
+          "/v1/bootstrap/master-key",
         );
         if (!cancelled) {
           setFetchState({ status: "success", key: result.data.masterKey });

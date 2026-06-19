@@ -5,8 +5,8 @@
  * org name). The master key is never shown here — only acknowledged in step 3.
  * The password is masked and never displayed.
  *
- * On "Confirm", calls POST /api/v1/auth/bootstrap. The bootstrapToken comes
- * from GET /api/v1/auth/bootstrap/status (captured by WizardPage and passed
+ * On "Confirm", calls POST /api/v1/bootstrap. The bootstrapToken comes
+ * from GET /api/v1/bootstrap/status (captured by WizardPage and passed
  * down) — it is never entered manually by the user (§9.4).
  *
  * After a successful bootstrap the wizard store is cleared and the caller
@@ -25,7 +25,7 @@ import { WizardStep } from "@/components/wizard/WizardStep.js";
 
 export interface ReviewStepProps {
   /**
-   * Bootstrap token from GET /api/v1/auth/bootstrap/status (held in WizardPage).
+   * Bootstrap token from GET /api/v1/bootstrap/status (held in WizardPage).
    * undefined means the server did not return a token — the confirm button is
    * disabled with an explanatory error so the user cannot submit an empty token.
    */
@@ -65,7 +65,7 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
     useWizardStore.getState().updateField("adminPassword", "");
 
     try {
-      await client.post("/v1/auth/bootstrap", {
+      await client.post("/v1/bootstrap", {
         adminEmail,
         adminPassword: passwordToSend,
         tenantName: orgName,

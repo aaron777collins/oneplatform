@@ -189,6 +189,28 @@ MinIO / S3 endpoint.
 {{- end }}
 
 {{/*
+PostgreSQL database user.
+*/}}
+{{- define "oneplatform.postgresqlUser" -}}
+{{- if .Values.postgresql.enabled }}
+{{- .Values.postgresql.auth.username | default "postgres" }}
+{{- else }}
+{{- .Values.externalPostgresql.username | default "postgres" }}
+{{- end }}
+{{- end }}
+
+{{/*
+PostgreSQL database name.
+*/}}
+{{- define "oneplatform.postgresqlDatabase" -}}
+{{- if .Values.postgresql.enabled }}
+{{- .Values.postgresql.auth.database | default "oneplatform" }}
+{{- else }}
+{{- .Values.externalPostgresql.database | default "oneplatform" }}
+{{- end }}
+{{- end }}
+
+{{/*
 Common environment variable block shared by all application services.
 Renders a YAML list of env entries; embed with toYaml in Deployment templates.
 */}}
@@ -213,6 +235,21 @@ Renders a YAML list of env entries; embed with toYaml in Deployment templates.
   value: {{ include "oneplatform.redisPort" . | quote }}
 - name: OP_MINIO_ENDPOINT
   value: {{ include "oneplatform.minioEndpoint" . | quote }}
+- name: OP_MASTER_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "oneplatform.secretName" . }}
+      key: masterKey
+- name: OP_JWT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "oneplatform.secretName" . }}
+      key: jwtSecret
+- name: OP_CURSOR_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "oneplatform.secretName" . }}
+      key: cursorSecret
 - name: OP_MINIO_USER
   valueFrom:
     secretKeyRef:
@@ -233,6 +270,10 @@ Renders a YAML list of env entries; embed with toYaml in Deployment templates.
     secretKeyRef:
       name: {{ include "oneplatform.secretName" . }}
       key: redisPassword
+- name: OP_DATABASE_URL
+  value: "postgresql://{{ include "oneplatform.postgresqlUser" . }}:$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/{{ include "oneplatform.postgresqlDatabase" . }}"
+- name: OP_REDIS_URL
+  value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
 - name: JWT_PRIVATE_KEY
   valueFrom:
     secretKeyRef:
