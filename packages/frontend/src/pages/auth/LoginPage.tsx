@@ -18,8 +18,8 @@ const REGISTRATION_ENABLED = false;
  * the list of configured providers; until we have that, we rely on a build-time
  * env var that defaults to true for the SaaS deployment.
  */
-const OAUTH_ENABLED = (typeof import.meta.env?.VITE_OAUTH_ENABLED === "string"
-  ? import.meta.env.VITE_OAUTH_ENABLED !== "false"
+const OAUTH_ENABLED = (typeof import.meta.env?.["VITE_OAUTH_ENABLED"] === "string"
+  ? import.meta.env["VITE_OAUTH_ENABLED"] !== "false"
   : true);
 import {
   Card,

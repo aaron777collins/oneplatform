@@ -395,6 +395,22 @@ export const updateRolePermissionsRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// 4.5a Branding
+// ---------------------------------------------------------------------------
+
+export const updateBrandingRequest = z.object({
+  logoUrl: z.string().url().optional(),
+  faviconUrl: z.string().url().optional(),
+  primaryColor: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Must be a valid hex colour").optional(),
+  accentColor: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Must be a valid hex colour").optional(),
+  appName: z.string().min(1).max(100).trim().optional(),
+  supportEmail: z.string().email().optional(),
+  customCss: z.string().max(10240).optional(),
+});
+
+export type UpdateBrandingRequest = z.infer<typeof updateBrandingRequest>;
+
+// ---------------------------------------------------------------------------
 // 4.5b Tenants
 // ---------------------------------------------------------------------------
 
