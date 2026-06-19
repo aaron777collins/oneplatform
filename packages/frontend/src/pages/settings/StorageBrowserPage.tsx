@@ -125,14 +125,9 @@ export function StorageBrowserPage() {
     queryKey: ["storage-objects", selectedBucket, currentPrefix],
     enabled: selectedBucket !== null,
     queryFn: ({ signal }) => {
-      const params = new URLSearchParams({
-        prefix: currentPrefix,
-        delimiter: "/",
-        maxKeys: "1000",
-      });
       return client.get<{ data: ListObjectsResult }>(
-        `/v1/storage/buckets/${encodeURIComponent(selectedBucket!)}/objects?${params.toString()}`,
-        undefined,
+        `/v1/storage/buckets/${encodeURIComponent(selectedBucket!)}/objects`,
+        { prefix: currentPrefix, delimiter: "/", maxKeys: 1000 },
         { signal },
       );
     },

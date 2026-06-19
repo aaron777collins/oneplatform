@@ -381,10 +381,10 @@ interface StyleTabProps {
 
 const SPACING_OPTIONS = ["0", "4px", "8px", "12px", "16px", "24px", "32px"];
 const ALIGN_OPTIONS = [
-  { label: "Start", value: "flex-start" },
+  { label: "Left", value: "flex-start" },
   { label: "Center", value: "center" },
-  { label: "End", value: "flex-end" },
-  { label: "Stretch", value: "stretch" },
+  { label: "Right", value: "flex-end" },
+  { label: "Fill", value: "stretch" },
 ];
 
 function StyleTab({ component, onUpdateStyles }: StyleTabProps) {
@@ -448,13 +448,13 @@ function StyleTab({ component, onUpdateStyles }: StyleTabProps) {
         </select>
       </div>
 
-      {/* Align self */}
+      {/* Alignment */}
       <div>
         <label
           htmlFor="style-align"
           className="block text-xs font-medium text-[var(--color-muted-foreground,#6b7280)] mb-1"
         >
-          Align self
+          Alignment
         </label>
         <select
           id="style-align"

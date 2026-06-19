@@ -85,6 +85,27 @@ _op_completion() {
       COMPREPLY=()
       ;;
   esac
+
+  # Flag completions for major commands (triggered when current word starts with '-')
+  if [[ "\${cur}" == -* ]]; then
+    local flags=""
+    case "\${words[1]}" in
+      data)        flags="--filter --sort --fields --limit --cursor --format --out" ;;
+      ontology)    flags="--file --format --out --wait --timeout --on-conflict --confirm" ;;
+      pipeline)    flags="--wait --timeout --limit --format" ;;
+      app)         flags="--file --env --format --prefer-local --prefer-remote" ;;
+      plugin)      flags="--file --format --confirm --force --scope" ;;
+      config)      flags="--file --format --out --include-credentials --passphrase --on-conflict --dry-run --kinds" ;;
+      connector)   flags="--file --format --confirm" ;;
+      logs)        flags="--service --level --from --to --limit --follow --format" ;;
+      dlq)         flags="--queue --limit --from --to --confirm" ;;
+      user)        flags="--role --email --limit --format" ;;
+    esac
+    if [ -n "\${flags}" ]; then
+      COMPREPLY=( \$(compgen -W "\${flags}" -- "\${cur}") )
+      return
+    fi
+  fi
 }
 
 complete -F _op_completion op
@@ -210,6 +231,20 @@ _op() {
       _describe 'completion subcommand' sub
       ;;
   esac
+
+  # Flag completions for major commands
+  case \${words[2]} in
+    data)        _arguments '*: :' '--filter[Filter expression]:' '--sort[Sort fields]:' '--fields[Select fields]:' '--limit[Max results]:' '--cursor[Pagination cursor]:' '--format[Output format]:' '--out[Output file]:' ;;
+    ontology)    _arguments '*: :' '--file[Schema file]:file:_files' '--format[Output format]:' '--out[Output file]:file:_files' '--wait[Wait for completion]' '--timeout[Max wait seconds]:' '--on-conflict[Conflict mode]:' '--confirm[Skip confirmation]' ;;
+    pipeline)    _arguments '*: :' '--wait[Wait for completion]' '--timeout[Max wait seconds]:' '--limit[Max results]:' '--format[Output format]:' ;;
+    app)         _arguments '*: :' '--file[File path]:file:_files' '--env[Environment]:' '--format[Output format]:' '--prefer-local[Prefer local on conflict]' '--prefer-remote[Prefer remote on conflict]' ;;
+    plugin)      _arguments '*: :' '--file[File path]:file:_files' '--format[Output format]:' '--confirm[Skip confirmation]' '--force[Force operation]' '--scope[Permission scope]:' ;;
+    config)      _arguments '*: :' '--file[Config file]:file:_files' '--format[Output format]:' '--out[Output file]:file:_files' '--include-credentials[Include encrypted credentials]' '--passphrase[Encryption passphrase]:' '--on-conflict[Conflict mode]:' '--dry-run[Validate only]' '--kinds[Resource kinds]:' ;;
+    connector)   _arguments '*: :' '--file[Config file]:file:_files' '--format[Output format]:' '--confirm[Skip confirmation]' ;;
+    logs)        _arguments '*: :' '--service[Service name]:' '--level[Log level]:' '--from[Start date]:' '--to[End date]:' '--limit[Max results]:' '--follow[Follow log output]' '--format[Output format]:' ;;
+    dlq)         _arguments '*: :' '--queue[Queue name]:' '--limit[Max results]:' '--from[Start date]:' '--to[End date]:' '--confirm[Skip confirmation]' ;;
+    user)        _arguments '*: :' '--role[User role]:' '--email[User email]:' '--limit[Max results]:' '--format[Output format]:' ;;
+  esac
 }
 
 _op "\$@"
@@ -291,6 +326,65 @@ complete -c op -s y -l yes -d 'Skip confirmations'
 complete -c op -s q -l quiet -d 'Suppress all output except errors'
 complete -c op -l no-color -d 'Disable ANSI colors'
 complete -c op -s v -l verbose -d 'Print stack traces and HTTP details'
+
+# Command-specific flag completions
+complete -c op -f -n '__fish_seen_subcommand_from data' -l filter -d 'Filter expression'
+complete -c op -f -n '__fish_seen_subcommand_from data' -l sort -d 'Sort fields'
+complete -c op -f -n '__fish_seen_subcommand_from data' -l fields -d 'Select fields'
+complete -c op -f -n '__fish_seen_subcommand_from data' -l limit -d 'Max results'
+complete -c op -f -n '__fish_seen_subcommand_from data' -l format -d 'Output format'
+complete -c op -f -n '__fish_seen_subcommand_from data' -l out -d 'Output file'
+
+complete -c op -f -n '__fish_seen_subcommand_from ontology' -l file -d 'Schema file'
+complete -c op -f -n '__fish_seen_subcommand_from ontology' -l format -d 'Output format'
+complete -c op -f -n '__fish_seen_subcommand_from ontology' -l out -d 'Output file'
+complete -c op -f -n '__fish_seen_subcommand_from ontology' -l wait -d 'Wait for completion'
+complete -c op -f -n '__fish_seen_subcommand_from ontology' -l timeout -d 'Max wait seconds'
+complete -c op -f -n '__fish_seen_subcommand_from ontology' -l on-conflict -d 'Conflict mode'
+
+complete -c op -f -n '__fish_seen_subcommand_from config' -l file -d 'Config file'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l format -d 'Output format'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l out -d 'Output file'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l include-credentials -d 'Include encrypted credentials'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l passphrase -d 'Encryption passphrase'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l on-conflict -d 'Conflict mode'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l dry-run -d 'Validate only'
+complete -c op -f -n '__fish_seen_subcommand_from config' -l kinds -d 'Resource kinds'
+
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l service -d 'Service name'
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l level -d 'Log level'
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l from -d 'Start date'
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l to -d 'End date'
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l limit -d 'Max results'
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l follow -d 'Follow log output'
+complete -c op -f -n '__fish_seen_subcommand_from logs' -l format -d 'Output format'
+
+complete -c op -f -n '__fish_seen_subcommand_from dlq' -l queue -d 'Queue name'
+complete -c op -f -n '__fish_seen_subcommand_from dlq' -l limit -d 'Max results'
+complete -c op -f -n '__fish_seen_subcommand_from dlq' -l from -d 'Start date'
+complete -c op -f -n '__fish_seen_subcommand_from dlq' -l to -d 'End date'
+
+complete -c op -f -n '__fish_seen_subcommand_from pipeline' -l wait -d 'Wait for completion'
+complete -c op -f -n '__fish_seen_subcommand_from pipeline' -l timeout -d 'Max wait seconds'
+complete -c op -f -n '__fish_seen_subcommand_from pipeline' -l limit -d 'Max results'
+complete -c op -f -n '__fish_seen_subcommand_from pipeline' -l format -d 'Output format'
+
+complete -c op -f -n '__fish_seen_subcommand_from app' -l file -d 'File path'
+complete -c op -f -n '__fish_seen_subcommand_from app' -l env -d 'Environment'
+complete -c op -f -n '__fish_seen_subcommand_from app' -l format -d 'Output format'
+complete -c op -f -n '__fish_seen_subcommand_from app' -l prefer-local -d 'Prefer local on conflict'
+complete -c op -f -n '__fish_seen_subcommand_from app' -l prefer-remote -d 'Prefer remote on conflict'
+
+complete -c op -f -n '__fish_seen_subcommand_from plugin' -l file -d 'File path'
+complete -c op -f -n '__fish_seen_subcommand_from plugin' -l format -d 'Output format'
+complete -c op -f -n '__fish_seen_subcommand_from plugin' -l confirm -d 'Skip confirmation'
+complete -c op -f -n '__fish_seen_subcommand_from plugin' -l force -d 'Force operation'
+complete -c op -f -n '__fish_seen_subcommand_from plugin' -l scope -d 'Permission scope'
+
+complete -c op -f -n '__fish_seen_subcommand_from user' -l role -d 'User role'
+complete -c op -f -n '__fish_seen_subcommand_from user' -l email -d 'User email'
+complete -c op -f -n '__fish_seen_subcommand_from user' -l limit -d 'Max results'
+complete -c op -f -n '__fish_seen_subcommand_from user' -l format -d 'Output format'
 `.trimStart();
 
 export function registerCompletion(program: Command): void {

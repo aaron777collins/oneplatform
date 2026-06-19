@@ -34,8 +34,33 @@ const REQUIRED_METHODS: Record<string, string[]> = {
 };
 
 /**
+ * Methods that are conditionally required based on feature flags in metadata().
+ * Each entry maps a feature flag key to the methods it requires.
+ */
+const CONDITIONAL_METHODS: Record<string, Record<string, string[]>> = {
+  connector: {
+    supportsIncremental: ["fetchIncremental"],
+    supportsWebhook: ["handleWebhook"],
+  },
+  transformer: {
+    supportsBatch: ["transformBatch"],
+  },
+  destination: {
+    supportsBatch: ["writeBatch"],
+    supportsDelete: ["delete"],
+  },
+  "auth-provider": {
+    supportsMfa: ["initiateMfa", "verifyMfa"],
+  },
+  widget: {
+    supportsResize: ["onResize"],
+  },
+};
+
+/**
  * Assert that a plugin object conforms to its declared interface.
  * Throws a descriptive error if required methods are missing or have wrong arity.
+ * Also checks metadata() feature flags and asserts conditionally required methods.
  * Use in tests to catch interface violations before pack time.
  */
 export function assertValidPlugin(
@@ -67,6 +92,18 @@ export function assertValidPlugin(
     throw new Error(
       `assertValidPlugin: metadata().type is "${String(meta["type"])}", expected "${expectedType}"`,
     );
+  }
+
+  // Check conditionally required methods based on feature flags in metadata
+  const conditionalMap = CONDITIONAL_METHODS[expectedType];
+  if (conditionalMap !== undefined) {
+    for (const [flag, methods] of Object.entries(conditionalMap)) {
+      if (meta[flag] === true) {
+        for (const method of methods) {
+          assertMethod(plugin, method, `${expectedType} plugin (required by ${flag})`);
+        }
+      }
+    }
   }
 }
 

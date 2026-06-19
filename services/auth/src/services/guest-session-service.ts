@@ -13,6 +13,12 @@ import type { GuestSessionResult, GuestSessionPayload } from "./types.js";
 // 24-hour TTL matches the guest-session Redis key pattern in L2 design §3
 const GUEST_SESSION_TTL_SECONDS = 86_400;
 
+// Per-IP rate limiting for guest session creation (defense-in-depth).
+// Even though the endpoint is internal-only, a compromised upstream service
+// could flood guest sessions. Window = 60 seconds, max 30 sessions per IP.
+const GUEST_RATE_LIMIT_WINDOW_SECONDS = 60;
+const GUEST_RATE_LIMIT_MAX_PER_WINDOW = 30;
+
 // ---------------------------------------------------------------------------
 // Service interface
 // ---------------------------------------------------------------------------
@@ -49,6 +55,22 @@ export function createGuestSessionService(
     }
     if (!appId) {
       throw new Error("appId is required to create a guest session.");
+    }
+
+    // Per-IP rate limiting (defense-in-depth for internal endpoint)
+    if (ipAddress) {
+      const rateLimitKey = `guest-session:rate:${ipAddress}`;
+      const currentCount = await redis.incr(rateLimitKey);
+      if (currentCount === 1) {
+        // First request in the window — set expiry
+        await redis.expire(rateLimitKey, GUEST_RATE_LIMIT_WINDOW_SECONDS);
+      }
+      if (currentCount > GUEST_RATE_LIMIT_MAX_PER_WINDOW) {
+        throw new Error(
+          `Rate limit exceeded: too many guest sessions from IP ${ipAddress}. ` +
+          `Max ${GUEST_RATE_LIMIT_MAX_PER_WINDOW} per ${GUEST_RATE_LIMIT_WINDOW_SECONDS}s window.`,
+        );
+      }
     }
 
     // 32 random bytes → 64 hex chars (L2 design §5)

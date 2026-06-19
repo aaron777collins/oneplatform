@@ -121,7 +121,10 @@ class FieldConditionBuilderImpl extends FilterBuilderImpl implements FieldCondit
   }
 
   in(values: Array<string | number>): FilterBuilder {
-    return this.addCondition('in', values.join(','));
+    // URL-encode commas within individual values so they are not confused with
+    // the comma delimiter when the server splits the parameter.
+    const encoded = values.map((v) => String(v).replace(/,/g, '%2C'));
+    return this.addCondition('in', encoded.join(','));
   }
 
   null(isNull: boolean): FilterBuilder {

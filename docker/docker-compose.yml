@@ -742,7 +742,7 @@ services:
     # Vector has no network access to the Docker daemon and cannot create containers.
     user: "65534:0"
     volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ${OP_DOCKER_DATA_ROOT:-/var/lib/docker/containers}:/var/lib/docker/containers:ro
       - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
       - log-data:/var/log/oneplatform
     networks:

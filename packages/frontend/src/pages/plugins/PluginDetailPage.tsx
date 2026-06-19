@@ -112,6 +112,33 @@ export function PluginDetailPage() {
     },
   });
 
+  if (query.isError) {
+    return (
+      <div className="flex-1 p-6">
+        <div className="rounded-lg border border-[var(--color-destructive)]/30 bg-[var(--color-destructive)]/5 p-6 text-center">
+          <p className="text-sm font-medium text-[var(--color-destructive)]">
+            {query.error instanceof ApiError && query.error.statusCode === 404
+              ? "Plugin not found"
+              : "Failed to load plugin"}
+          </p>
+          <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+            {query.error instanceof ApiError
+              ? query.error.message
+              : "An unexpected error occurred. Please try again."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() => void navigate({ to: "/plugins" })}
+          >
+            Back to plugins
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (query.isLoading || plugin === undefined) {
     return (
       <div className="flex-1 p-6">

@@ -12,7 +12,12 @@ import { connectorIdToTableName } from "../utils/data-envelope.js";
 export interface RetentionRawTableRepository {
   ensureTable(connectorId: string): Promise<void>;
   upsertBatch(tableName: string, envelopes: unknown[]): Promise<void>;
-  deleteOlderThan(tableName: string, olderThanDays: number): Promise<number>;
+  /**
+   * Delete rows older than the given cutoff.
+   * Accepts either a number of days (retention-service path) or a Date
+   * (sync-service path). The concrete repository handles both forms.
+   */
+  deleteOlderThan(tableName: string, olderThan: Date | number): Promise<number>;
   dropTable(tableName: string): Promise<void>;
   tableExists(tableName: string): Promise<boolean>;
 }

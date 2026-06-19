@@ -91,9 +91,11 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
     // Extract the caller's IP for rate limiting inside the service.
     // X-Forwarded-For is set by the reverse proxy; fall back to a placeholder
     // when the service is called directly (e.g. integration tests).
+    // Prefer X-Real-IP (set by the reverse proxy to the true client IP) over
+    // X-Forwarded-For (which can be spoofed by appending entries).
     const ipAddress =
-      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
       c.req.header("X-Real-IP") ??
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
       "0.0.0.0";
 
     const result = await bootstrapService.bootstrap({

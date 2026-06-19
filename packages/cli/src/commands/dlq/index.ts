@@ -61,12 +61,24 @@ async function replayAllAction(opts: ReplayAllOpts, ctx: CommandContext): Promis
   let replayed = 0;
   const errors: Array<{ id: string; error: string }> = [];
 
-  for (const job of jobs) {
-    try {
-      await ctx.http.post(`/api/v1/admin/dlq/${encodeURIComponent(job.id)}/replay`, {});
-      replayed++;
-    } catch (err) {
-      errors.push({ id: job.id, error: err instanceof Error ? err.message : String(err) });
+  // Replay in batches of 5 for bounded parallelism — avoids overwhelming the
+  // API while still being significantly faster than sequential execution.
+  const CONCURRENCY = 5;
+  for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+    const batch = jobs.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map((job) =>
+        ctx.http.post(`/api/v1/admin/dlq/${encodeURIComponent(job.id)}/replay`, {})
+          .then(() => ({ id: job.id, ok: true as const }))
+          .catch((err) => ({ id: job.id, ok: false as const, error: err instanceof Error ? err.message : String(err) })),
+      ),
+    );
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.ok) {
+        replayed++;
+      } else if (result.status === "fulfilled" && !result.value.ok) {
+        errors.push({ id: result.value.id, error: result.value.error });
+      }
     }
   }
 

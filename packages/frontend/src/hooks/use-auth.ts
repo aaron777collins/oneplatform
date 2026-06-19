@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useAuthStore } from "@/stores/auth.store.js";
 
 // ---------------------------------------------------------------------------
@@ -17,7 +18,7 @@ export interface SessionResult {
 }
 
 export function useSession(): SessionResult {
-  return useAuthStore((state) => ({
+  return useAuthStore(useShallow((state) => ({
     userId: state.userId,
     tenantId: state.tenantId,
     roles: state.roles,
@@ -25,7 +26,7 @@ export function useSession(): SessionResult {
     isGuest: state.isGuest,
     isAuthenticated: state.isAuthenticated,
     isLoading: state.isLoading,
-  }));
+  })));
 }
 
 // ---------------------------------------------------------------------------

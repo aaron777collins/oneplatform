@@ -231,19 +231,28 @@ export function createMockContext(options: MockContextOptions = {}): MockContext
   };
 
   // ── Cache ─────────────────────────────────────────────────────────────────
-  // An in-process Map. Each createMockContext() call creates a fresh map.
-  // TTL is tracked but not enforced — test contexts assume instant expiry checks
-  // are unnecessary since tests run to completion before any TTL would fire.
-  const cacheStore = new Map<string, unknown>();
+  // An in-process Map with TTL tracking. Each createMockContext() call creates
+  // a fresh map. TTL is checked on get() based on a virtual clock that tests
+  // can advance via advanceTime().
+  let virtualTimeOffsetMs = 0;
+  const cacheStore = new Map<string, { value: unknown; expiresAt: number | null }>();
 
-  const mockCache: CacheAccessor = {
+  const mockCache: CacheAccessor & { advanceTime(ms: number): void } = {
     async get<T>(key: string): Promise<T | null> {
-      const value = cacheStore.get(key);
-      return value === undefined ? null : (value as T);
+      const entry = cacheStore.get(key);
+      if (entry === undefined) return null;
+      if (entry.expiresAt !== null && Date.now() + virtualTimeOffsetMs >= entry.expiresAt) {
+        cacheStore.delete(key);
+        return null;
+      }
+      return entry.value as T;
     },
 
-    async set<T>(key: string, value: T, _ttlSeconds?: number): Promise<void> {
-      cacheStore.set(key, value);
+    async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
+      const expiresAt = ttlSeconds !== undefined
+        ? Date.now() + virtualTimeOffsetMs + ttlSeconds * 1000
+        : null;
+      cacheStore.set(key, { value, expiresAt });
     },
 
     async delete(key: string): Promise<void> {
@@ -258,6 +267,14 @@ export function createMockContext(options: MockContextOptions = {}): MockContext
         },
       };
       return handle;
+    },
+
+    /**
+     * Advance the virtual clock by the given number of milliseconds.
+     * Subsequent get() calls will treat entries whose TTL has elapsed as expired.
+     */
+    advanceTime(ms: number): void {
+      virtualTimeOffsetMs += ms;
     },
   };
 

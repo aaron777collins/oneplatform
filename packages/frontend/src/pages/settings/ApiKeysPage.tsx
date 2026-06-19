@@ -364,7 +364,7 @@ export function ApiKeysPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 rounded-md bg-[var(--color-muted)] px-3 py-2">
                 <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                  {showKey ? newKey : "op_" + "•".repeat(newKey.length - 3)}
+                  {showKey ? newKey : "•".repeat(40)}
                 </code>
                 <button
                   type="button"
@@ -509,7 +509,7 @@ export function ApiKeysPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 rounded-md bg-[var(--color-muted)] px-3 py-2">
                 <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                  {showRotatedKey ? rotatedKey : "op_" + "•".repeat(Math.max(0, rotatedKey.length - 3))}
+                  {showRotatedKey ? rotatedKey : "•".repeat(40)}
                 </code>
                 <button
                   type="button"

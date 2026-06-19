@@ -44,7 +44,7 @@ export function startLocalWatcher(opts: FileSyncOptions): () => void {
     const relativePath = relative(localDir, filePath).replace(/\\/g, "/");
     try {
       const content = readFileSync(filePath, "utf8");
-      await http.put(`/api/v1/apps/${slug}/files/${encodeURIComponent(relativePath)}`, {
+      await http.put(`/api/v1/apps/${encodeURIComponent(slug)}/files/${encodeURIComponent(relativePath)}`, {
         content,
       });
       onStatus(`Synced: ${relativePath}`);

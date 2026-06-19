@@ -561,7 +561,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
         filename: "oneplatform-sdk.d.ts",
         content: [
           `declare module "@oneplatform/app-sdk" {`,
-          `  export function useUser(): { id: string; email: string | null; displayName: string; tenantId: string; roles: string[]; isGuest: boolean };`,
+          `  export function useUser(): { id: string; email: string | null; displayName: string; tenantId: string; roles: string[]; isGuest: boolean; isLoaded: boolean };`,
           `  export function useQuery<T>(entity: string, options?: QueryOptions): QueryResult<T>;`,
           `  export function useMutation<T>(entity: string): MutationResult<T>;`,
           `  export function useSubscription<T>(entity: string, options?: SubscriptionOptions): SubscriptionResult<T>;`,

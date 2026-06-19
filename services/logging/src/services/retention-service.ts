@@ -59,6 +59,17 @@ export class RetentionService {
       const end = addMonths(start, 1);
       const name = formatPartitionName(start);
 
+      // Validate the partition name before interpolating it into DDL.
+      // The name is derived from formatPartitionName() which is trusted, but
+      // a corrupted date or unexpected locale must never produce arbitrary DDL.
+      // The expected format is events_YYYY_MM.
+      if (!/^events_\d{4}_\d{2}$/.test(name)) {
+        console.error("Skipping partition creation for unexpected partition name", {
+          partitionName: name,
+        });
+        continue;
+      }
+
       await this.db.query(
         `CREATE TABLE IF NOT EXISTS logging.${name}
          PARTITION OF logging.events

@@ -13,7 +13,7 @@ import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, HelpCircle } from "lucide-react";
 import {
   Form,
   FormControl,
@@ -50,6 +50,8 @@ export interface JsonSchemaProperty {
   maximum?: number;
   minLength?: number;
   maxLength?: number;
+  /** Example values shown as inline hints below the field. */
+  examples?: Array<string | number | boolean>;
 }
 
 export interface ConnectorConfigSchema {
@@ -122,6 +124,39 @@ function isPasswordField(key: string, prop: JsonSchemaProperty): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Field hint — tooltip icon + inline examples
+// ---------------------------------------------------------------------------
+
+function FieldHint({ prop }: { prop: JsonSchemaProperty }) {
+  const hasExamples = prop.examples !== undefined && prop.examples.length > 0;
+  if (!prop.description && !hasExamples) return null;
+
+  return (
+    <>
+      {prop.description !== undefined && (
+        <span
+          className="group relative ml-1 inline-flex cursor-help"
+          aria-label={prop.description}
+        >
+          <HelpCircle className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-popover)] px-2 py-1 text-xs text-[var(--color-popover-foreground)] opacity-0 shadow-md transition-opacity group-hover:opacity-100"
+          >
+            {prop.description}
+          </span>
+        </span>
+      )}
+      {hasExamples && (
+        <FormDescription>
+          e.g. {prop.examples!.map(String).join(", ")}
+        </FormDescription>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Individual field renderer
 // ---------------------------------------------------------------------------
 
@@ -155,10 +190,7 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
               />
             </FormControl>
             <div>
-              <FormLabel>{label}</FormLabel>
-              {prop.description !== undefined && (
-                <FormDescription>{prop.description}</FormDescription>
-              )}
+              <FormLabel>{label}<FieldHint prop={prop} /></FormLabel>
             </div>
           </FormItem>
         )}
@@ -176,6 +208,7 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
             <FormLabel>
               {label}
               {isRequired && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
+              <FieldHint prop={prop} />
             </FormLabel>
             <Select
               onValueChange={field.onChange}
@@ -194,9 +227,6 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
                 ))}
               </SelectContent>
             </Select>
-            {prop.description !== undefined && (
-              <FormDescription>{prop.description}</FormDescription>
-            )}
             <FormMessage />
           </FormItem>
         )}
@@ -214,19 +244,17 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
             <FormLabel>
               {label}
               {isRequired && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
+              <FieldHint prop={prop} />
             </FormLabel>
             <FormControl>
               <Input
                 type="number"
-                placeholder={prop.description ?? label}
+                placeholder={prop.examples !== undefined && prop.examples.length > 0 ? `e.g. ${String(prop.examples[0])}` : (prop.description ?? label)}
                 {...field}
                 onChange={(e) => field.onChange(parseFloat(e.target.value))}
                 value={typeof field.value === "number" ? field.value : ""}
               />
             </FormControl>
-            {prop.description !== undefined && (
-              <FormDescription>{prop.description}</FormDescription>
-            )}
             <FormMessage />
           </FormItem>
         )}
@@ -244,12 +272,13 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
           <FormLabel>
             {label}
             {isRequired && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
+            <FieldHint prop={prop} />
           </FormLabel>
           <FormControl>
             <div className="relative">
               <Input
                 type={isPassword && !showPassword ? "password" : "text"}
-                placeholder={prop.description ?? label}
+                placeholder={prop.examples !== undefined && prop.examples.length > 0 ? `e.g. ${String(prop.examples[0])}` : (prop.description ?? label)}
                 autoComplete={isPassword ? "new-password" : "off"}
                 {...field}
                 value={typeof field.value === "string" ? field.value : ""}
@@ -271,9 +300,6 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
               )}
             </div>
           </FormControl>
-          {prop.description !== undefined && (
-            <FormDescription>{prop.description}</FormDescription>
-          )}
           <FormMessage />
         </FormItem>
       )}

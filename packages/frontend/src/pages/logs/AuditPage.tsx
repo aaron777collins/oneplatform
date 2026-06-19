@@ -63,8 +63,14 @@ export function AuditPage() {
 
       <div className="mt-6">
         <AuditLogTable
-          {...(from !== "" ? { from: new Date(from).toISOString() } : {})}
-          {...(to !== "" ? { to: new Date(to + "T23:59:59").toISOString() } : {})}
+          {...(from !== "" ? (() => {
+            const d = new Date(from);
+            return Number.isNaN(d.getTime()) ? {} : { from: d.toISOString() };
+          })() : {})}
+          {...(to !== "" ? (() => {
+            const d = new Date(to + "T23:59:59");
+            return Number.isNaN(d.getTime()) ? {} : { to: d.toISOString() };
+          })() : {})}
         />
       </div>
     </div>

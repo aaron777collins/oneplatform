@@ -25,6 +25,7 @@ import {
   CheckSquare,
   Workflow,
   Webhook,
+  AlertTriangle,
   type LucideProps,
 } from "lucide-react";
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
@@ -159,6 +160,18 @@ export function PipelineNode({
   const outputPortX = node.position.x + NODE_WIDTH;
   const outputPortY = node.position.y + NODE_HEIGHT / 2;
 
+  // Confirmation dialog state for deletion
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+  function handleDeleteRequest() {
+    setConfirmDelete(true);
+  }
+
+  function handleDeleteConfirm() {
+    setConfirmDelete(false);
+    onDelete(node.id);
+  }
+
   // Keyboard-driven movement (arrow keys) and deletion
   function handleKeyDown(e: React.KeyboardEvent) {
     if (!selected) return;
@@ -183,7 +196,7 @@ export function PipelineNode({
       case "Delete":
       case "Backspace":
         e.preventDefault();
-        onDelete(node.id);
+        handleDeleteRequest();
         break;
     }
   }
@@ -274,6 +287,40 @@ export function PipelineNode({
           </div>
         </div>
       </foreignObject>
+
+      {/* Delete confirmation overlay */}
+      {confirmDelete && (
+        <foreignObject
+          x={node.position.x - 10}
+          y={node.position.y + NODE_HEIGHT + 4}
+          width={NODE_WIDTH + 20}
+          height={80}
+          style={{ overflow: "visible" }}
+        >
+          <div className="rounded-md border border-[var(--color-destructive)]/40 bg-[var(--color-card)] p-2 shadow-lg text-center">
+            <div className="flex items-center justify-center gap-1 mb-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-destructive)]" aria-hidden />
+              <span className="text-xs font-medium text-[var(--color-destructive)]">Delete this node?</span>
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+                className="rounded px-2 py-0.5 text-[10px] font-medium border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-muted)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleDeleteConfirm(); }}
+                className="rounded px-2 py-0.5 text-[10px] font-medium bg-[var(--color-destructive)] text-white hover:opacity-90 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </foreignObject>
+      )}
     </g>
   );
 }

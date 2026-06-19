@@ -26,7 +26,12 @@ export interface RawTableRepository {
   insertBatch(connectorId: string, envelopes: ReturnType<typeof normalizeToEnvelope>[]): Promise<void>;
   upsertBatch(tableName: string, envelopes: ReturnType<typeof normalizeToEnvelope>[]): Promise<void>;
   softDeleteNotInBatch(connectorId: string, currentBatchId: string): Promise<number>;
-  deleteOlderThan(connectorId: string, olderThan: Date): Promise<number>;
+  /**
+   * Delete rows older than the given cutoff.
+   * Accepts either a Date (sync-service path) or a number of days
+   * (retention-service path). The concrete repository handles both forms.
+   */
+  deleteOlderThan(connectorId: string, olderThan: Date | number): Promise<number>;
   dropTable(connectorId: string): Promise<void>;
   count(connectorId: string): Promise<number>;
 }

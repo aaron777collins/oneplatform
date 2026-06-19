@@ -29,7 +29,6 @@ import { toast } from "@/hooks/use-toast.js";
 
 const profileSchema = z.object({
   displayName: z.string().min(1, "Display name is required").max(64),
-  email: z.string().email("Enter a valid email address"),
 });
 
 const passwordSchema = z
@@ -62,9 +61,12 @@ export function ProfilePage() {
   const { userId } = useSession();
   const client = useApiClient();
 
+  // email is display-only (disabled field) and not part of the profile schema
+  const [email, setEmail] = React.useState("");
+
   const profileForm = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema),
-    defaultValues: { displayName: "", email: "" },
+    defaultValues: { displayName: "" },
   });
 
   const passwordForm = useForm<PasswordValues>({
@@ -83,8 +85,8 @@ export function ProfilePage() {
     if (meQuery.data) {
       profileForm.reset({
         displayName: meQuery.data.data.displayName,
-        email: meQuery.data.data.email,
       });
+      setEmail(meQuery.data.data.email);
     }
   }, [meQuery.data, profileForm]);
 
@@ -141,22 +143,20 @@ export function ProfilePage() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={profileForm.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email address</FormLabel>
-                    <FormControl>
-                      <Input type="email" autoComplete="email" {...field} disabled />
-                    </FormControl>
-                    <p className="text-xs text-[var(--color-muted-foreground)]">
-                      Email address cannot be changed.
-                    </p>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div>
+                <label htmlFor="profile-email" className="text-sm font-medium">Email address</label>
+                <Input
+                  id="profile-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  disabled
+                  className="mt-2"
+                />
+                <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+                  Email address cannot be changed.
+                </p>
+              </div>
               <Button
                 type="submit"
                 disabled={updateProfileMutation.isPending}

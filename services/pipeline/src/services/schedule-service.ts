@@ -145,6 +145,19 @@ function validateCronExpression(cronExpr: string): void {
   }
 }
 
+function validateTimezone(timezone: string): void {
+  // Validate against the IANA time zone database using the built-in Intl API.
+  // This prevents creation of schedules with typos like "US/Eastrn" that would
+  // silently fail at cron-tick time.
+  const supported = Intl.supportedValuesOf("timeZone");
+  if (!supported.includes(timezone)) {
+    throw new ScheduleInvalidCronError(
+      `Invalid timezone "${timezone}". Must be a valid IANA timezone, e.g. "America/New_York" or "UTC".`,
+      { timezone },
+    );
+  }
+}
+
 function computeNextRunAt(cronExpr: string, timezone: string): Date {
   const interval = parseExpression(cronExpr, {
     tz: timezone,
@@ -173,6 +186,9 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
   ): Promise<ScheduleRow> {
     // Validate cron expression before any I/O
     validateCronExpression(input.cronExpr);
+
+    // Validate timezone against the IANA time zone database
+    validateTimezone(input.timezone);
 
     // Verify the target pipeline exists and belongs to this tenant
     const pipeline = await pipelineRepo.findById(input.pipelineId);
@@ -255,6 +271,7 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
       updateData.cron_expr = input.cronExpr;
     }
     if (input.timezone !== undefined) {
+      validateTimezone(input.timezone);
       updateData.timezone = input.timezone;
     }
     if (input.enabled !== undefined) {

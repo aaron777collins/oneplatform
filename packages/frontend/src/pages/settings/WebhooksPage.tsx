@@ -108,7 +108,13 @@ const EVENT_LABEL_MAP: Record<string, string> = Object.fromEntries(
 );
 
 const webhookSchema = z.object({
-  url: z.string().url("Enter a valid HTTPS URL"),
+  url: z
+    .string()
+    .url("Enter a valid HTTPS URL")
+    .refine(
+      (val) => !val.startsWith("http://"),
+      "Webhook URLs must use HTTPS. Plain HTTP endpoints are insecure and may expose your signing secret.",
+    ),
   secret: z.string().optional(),
 });
 type WebhookValues = z.infer<typeof webhookSchema>;

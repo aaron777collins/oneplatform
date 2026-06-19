@@ -91,9 +91,13 @@ export async function loadPlugin(pluginDir: string): Promise<LoadedPlugin> {
 
   // Dynamic import is used so the bundle can be a standard ESM module.
   // The file:// prefix is required on all platforms for absolute paths.
+  // A cache-busting query parameter is appended so Node's module cache does not
+  // return a stale version when the developer rebuilds the bundle during a
+  // dev-server session.
   let bundleModule: unknown;
   try {
-    bundleModule = await import(`file://${bundlePath}`);
+    const cacheBuster = `?t=${Date.now()}`;
+    bundleModule = await import(`file://${bundlePath}${cacheBuster}`);
   } catch (err) {
     throw new PluginLoadError(
       `Failed to import plugin bundle at "${bundlePath}": ${String(err)}`,

@@ -120,6 +120,29 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
     },
     propSchema: [
       { key: "title", label: "Title", inputType: "text", defaultValue: "Details" },
+      {
+        key: "fields",
+        label: "Fields",
+        inputType: "json",
+        defaultValue: [],
+        description: "Array of field definitions. Each field has: label (display name), key (data field key), format (optional: 'date', 'number', 'currency', 'boolean', 'link').",
+        jsonSchema: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Display label for the field" },
+              key: { type: "string", description: "Data field key to display" },
+              format: {
+                type: "string",
+                description: "Optional display format",
+                enum: ["date", "number", "currency", "boolean", "link"],
+              },
+            },
+            required: ["label", "key"],
+          },
+        },
+      },
     ],
   },
 

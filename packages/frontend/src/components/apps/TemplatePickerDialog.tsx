@@ -159,20 +159,24 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
   const [hoveredId, setHoveredId] = React.useState<string | null>(null);
   const previewTemplate = templates.find((t) => t.id === (hoveredId ?? selectedId)) ?? null;
 
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
+
   const form = useForm<NewAppValues>({
     resolver: zodResolver(newAppSchema),
     defaultValues: { name: "", slug: "", accessMode: "platform-user" },
   });
 
-  // Auto-generate slug from name
+  // Auto-generate slug from name (only when user hasn't manually edited it)
+  const [slugManuallyEdited, setSlugManuallyEdited] = React.useState(false);
   const nameValue = form.watch("name");
   React.useEffect(() => {
+    if (slugManuallyEdited) return;
     const slug = nameValue
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
     form.setValue("slug", slug, { shouldValidate: false });
-  }, [nameValue, form]);
+  }, [nameValue, form, slugManuallyEdited]);
 
   // Mutation is invoked after the user fills in the configure step
   const createMutation = useMutation({
@@ -207,6 +211,8 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
   function handleBack(): void {
     setStep("pick");
     form.reset();
+    setSlugManuallyEdited(false);
+    setShowAdvanced(false);
   }
 
   const selectedTemplate = templates.find((t) => t.id === selectedId) ?? null;
@@ -340,22 +346,44 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="slug"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        URL slug{" "}
-                        <span className="text-[var(--color-destructive)]" aria-hidden>*</span>
-                      </FormLabel>
-                      <FormControl>
-                        <Input placeholder="my-internal-tool" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {/* Show auto-generated App URL as a preview; allow override in Advanced */}
+                {!showAdvanced && form.watch("slug") !== "" && (
+                  <div className="text-xs text-[var(--color-muted-foreground)]">
+                    App URL: <code className="font-mono text-[var(--color-foreground)]">{form.watch("slug")}</code>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvanced(true)}
+                      className="ml-2 text-[var(--color-primary)] hover:underline"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
+                {showAdvanced && (
+                  <FormField
+                    control={form.control}
+                    name="slug"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          App URL{" "}
+                          <span className="text-[var(--color-destructive)]" aria-hidden>*</span>
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="my-internal-tool"
+                            {...field}
+                            onChange={(e) => {
+                              setSlugManuallyEdited(true);
+                              field.onChange(e);
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
                   name="accessMode"

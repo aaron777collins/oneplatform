@@ -14,6 +14,7 @@ import {
   type ConfigDocument,
 } from "../../lib/config-document.js";
 import { writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 
 interface ExportOpts {
   format?: string; includeCredentials?: boolean; passphrase?: string;
@@ -21,6 +22,52 @@ interface ExportOpts {
 }
 interface ImportOpts {
   file: string; onConflict?: string; dryRun?: boolean; passphrase?: string
+}
+
+/**
+ * Prompts the user to enter a passphrase interactively (hidden input).
+ * Falls back to visible input on non-TTY stdin.
+ */
+function promptPassphrase(prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!process.stdin.isTTY) {
+      reject(new CliError("--passphrase is required in non-interactive mode.", EXIT.GENERAL));
+      return;
+    }
+
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    // Mute output so the passphrase is not echoed to the terminal
+    process.stderr.write(prompt);
+    const stdin = process.stdin;
+    const wasMuted = (stdin as NodeJS.ReadStream & { isMuted?: boolean }).isMuted;
+    if (stdin.setRawMode) {
+      stdin.setRawMode(true);
+    }
+
+    let passphrase = "";
+    const onData = (ch: Buffer): void => {
+      const char = ch.toString("utf8");
+      if (char === "\n" || char === "\r" || char === "") {
+        if (stdin.setRawMode) stdin.setRawMode(false);
+        stdin.removeListener("data", onData);
+        process.stderr.write("\n");
+        rl.close();
+        resolve(passphrase);
+      } else if (char === "") {
+        // Ctrl-C
+        if (stdin.setRawMode) stdin.setRawMode(false);
+        stdin.removeListener("data", onData);
+        rl.close();
+        reject(new CliError("Cancelled.", EXIT.GENERAL));
+      } else if (char === "" || char === "\b") {
+        // Backspace
+        passphrase = passphrase.slice(0, -1);
+      } else {
+        passphrase += char;
+      }
+    };
+    stdin.on("data", onData);
+  });
 }
 interface DiffOpts { file: string }
 interface ValidateOpts { file: string }
@@ -31,6 +78,10 @@ async function exportAction(opts: ExportOpts, ctx: CommandContext): Promise<void
   let data: unknown;
 
   if (opts.includeCredentials) {
+    if (!opts.passphrase) {
+      // Interactive fallback: prompt for passphrase if not provided as a flag
+      opts.passphrase = await promptPassphrase("Enter passphrase for credential encryption: ");
+    }
     if (!opts.passphrase) {
       throw new CliError("--passphrase is required when --include-credentials is set.", EXIT.GENERAL);
     }

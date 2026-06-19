@@ -42,14 +42,35 @@ import type { BffDataResponse } from "../types/api.js";
 // ─── Cache key builder ─────────────────────────────────────────────────────────
 
 /**
+ * Recursively sorts object keys so that JSON.stringify produces a stable
+ * string regardless of the property insertion order.
+ */
+function sortKeys(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[key] = sortKeys((value as Record<string, unknown>)[key]);
+  }
+  return sorted;
+}
+
+/**
  * Builds a stable cache key from the query identity fields.
  * cursor and staleTime are intentionally excluded: cursor is managed internally
  * by the hook's page list, and staleTime controls eviction policy, not identity.
+ *
+ * Filter keys are recursively sorted so that `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`
+ * produce the same cache key — making key computation order-independent.
  */
 function buildCacheKey(entity: string, options: QueryOptions): string {
   return JSON.stringify({
     entity,
-    filter: options.filter ?? null,
+    filter: sortKeys(options.filter) ?? null,
     sort: options.sort ?? null,
     fields: options.fields ?? null,
     limit: options.limit ?? 50,

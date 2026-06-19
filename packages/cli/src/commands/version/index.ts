@@ -2,11 +2,26 @@
  * version command — prints CLI and platform version information.
  * No scope or authentication required.
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolve, dirname } from "node:path";
 import type { Command } from "commander";
 import { withContext } from "../../lib/context.js";
 import type { CommandContext } from "../../lib/context.js";
 
-export const CLI_VERSION = "0.0.0";
+// Read version from package.json at startup so it stays in sync with the
+// published package version and never falls out of date.
+function readCliVersion(): string {
+  try {
+    const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+export const CLI_VERSION = readCliVersion();
 
 async function versionAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const platform = process.platform;

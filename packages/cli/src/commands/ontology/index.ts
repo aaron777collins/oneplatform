@@ -212,7 +212,7 @@ export function registerOntology(program: Command): void {
   ont.command("migrate").description("Trigger a schema migration")
     .argument("<entity-type>", "Entity type name")
     .option("--wait", "Poll until migration completes")
-    .option("--timeout <seconds>", "Max wait duration in seconds")
+    .option("--timeout <seconds>", "Max wait duration in seconds (default: 300s)")
     .action(withContext<[string, MigrateOpts]>(migrateAction));
 
   ont.command("migration-status").description("Get migration status")
