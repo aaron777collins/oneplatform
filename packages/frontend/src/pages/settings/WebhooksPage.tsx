@@ -209,6 +209,9 @@ export function WebhooksPage() {
                           }`}
                           aria-hidden="true"
                         />
+                        <span className="text-xs font-medium">
+                          {webhook.lastDeliveryStatus === "success" ? "OK" : "Failed"}
+                        </span>
                         <RelativeTime value={webhook.lastDeliveryAt} />
                       </span>
                     ) : (

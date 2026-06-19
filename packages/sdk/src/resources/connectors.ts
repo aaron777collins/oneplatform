@@ -45,11 +45,21 @@ export interface ConnectorNamespace {
   test(id: string): Promise<ConnectorTestResult>;
 
   /**
+   * Alias for {@link test}. Returns the connectivity health status of a connector.
+   */
+  getHealth(id: string): Promise<ConnectorTestResult>;
+
+  /**
    * Enqueues an immediate out-of-schedule sync for the connector.
    *
    * @returns The {@link PipelineRun} created for the triggered sync.
    */
   trigger(id: string): Promise<PipelineRun>;
+
+  /**
+   * Alias for {@link trigger}. Enqueues an immediate sync for the connector.
+   */
+  triggerSync(id: string): Promise<PipelineRun>;
 
   /** Lists sync jobs for a connector in reverse-chronological order. */
   listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob>;
@@ -110,11 +120,19 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
       });
     },
 
+    async getHealth(id: string): Promise<ConnectorTestResult> {
+      return this.test(id);
+    },
+
     async trigger(id: string): Promise<PipelineRun> {
       return transport.request<PipelineRun>({
         method: 'POST',
         path: `${BASE}/${encodeURIComponent(id)}/trigger`,
       });
+    },
+
+    async triggerSync(id: string): Promise<PipelineRun> {
+      return this.trigger(id);
     },
 
     listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob> {

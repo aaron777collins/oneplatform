@@ -10,6 +10,17 @@ import { LoginForm } from "@/components/auth/LoginForm.js";
 import { OAuthButton } from "@/components/auth/OAuthButton.js";
 
 const REGISTRATION_ENABLED = false;
+
+/**
+ * OAuth providers are only available when the server has been configured with
+ * the required client IDs. Self-hosted deployments that skip OAuth config would
+ * otherwise see broken buttons. The /api/v1/auth/providers endpoint returns
+ * the list of configured providers; until we have that, we rely on a build-time
+ * env var that defaults to true for the SaaS deployment.
+ */
+const OAUTH_ENABLED = (typeof import.meta.env?.VITE_OAUTH_ENABLED === "string"
+  ? import.meta.env.VITE_OAUTH_ENABLED !== "false"
+  : true);
 import {
   Card,
   CardHeader,
@@ -62,17 +73,21 @@ export function LoginPage() {
           <CardContent className="space-y-4">
             <LoginForm onSuccess={handleLoginSuccess} />
 
-            <div className="relative">
-              <Separator />
-              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-card)] px-2 text-xs text-[var(--color-muted-foreground)]">
-                or
-              </span>
-            </div>
+            {OAUTH_ENABLED && (
+              <>
+                <div className="relative">
+                  <Separator />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-card)] px-2 text-xs text-[var(--color-muted-foreground)]">
+                    or
+                  </span>
+                </div>
 
-            <div className="space-y-2">
-              <OAuthButton provider="github" />
-              <OAuthButton provider="google" />
-            </div>
+                <div className="space-y-2">
+                  <OAuthButton provider="github" />
+                  <OAuthButton provider="google" />
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 

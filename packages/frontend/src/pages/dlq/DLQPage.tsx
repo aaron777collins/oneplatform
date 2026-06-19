@@ -20,10 +20,48 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog.js";
 import { DLQTable } from "@/components/dlq/DLQTable.js";
 import { useApiClient, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
+import { usePermission } from "@/hooks/use-auth.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * Bulk DLQ actions -- only visible to users with the "operator" role.
+ */
+function DLQBulkActions({
+  bulkReplayMutation,
+  onDiscardAll,
+}: {
+  bulkReplayMutation: { mutate: () => void; isPending: boolean };
+  onDiscardAll: () => void;
+}): React.ReactElement | null {
+  const canManage = usePermission("operator");
+  if (!canManage) return null;
+  return (
+    <div className="flex gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => bulkReplayMutation.mutate()}
+        disabled={bulkReplayMutation.isPending}
+        aria-busy={bulkReplayMutation.isPending}
+      >
+        <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />
+        {bulkReplayMutation.isPending ? "Replaying…" : "Replay all"}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="border-[var(--color-destructive)]/30 text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+        onClick={onDiscardAll}
+      >
+        <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
+        Discard all
+      </Button>
+    </div>
+  );
+}
 
 interface QueueInfo {
   name: string;
@@ -91,27 +129,10 @@ export function DLQPage() {
         title="Dead Letter Queue"
         description="Failed jobs that could not be automatically retried."
         actions={
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => bulkReplayMutation.mutate()}
-              disabled={bulkReplayMutation.isPending}
-              aria-busy={bulkReplayMutation.isPending}
-            >
-              <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              {bulkReplayMutation.isPending ? "Replaying…" : "Replay all"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-[var(--color-destructive)]/30 text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
-              onClick={() => setBulkDiscardOpen(true)}
-            >
-              <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              Discard all
-            </Button>
-          </div>
+          <DLQBulkActions
+            bulkReplayMutation={bulkReplayMutation}
+            onDiscardAll={() => setBulkDiscardOpen(true)}
+          />
         }
       />
 

@@ -147,7 +147,11 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
                 </TableCell>
                 <TableCell className="max-w-[120px] truncate font-mono text-xs">
                   <span title={`${event.actorType}:${event.actorId}`}>
-                    {event.actorId}
+                    {event.actorType === "user"
+                      ? `User ${event.actorId.slice(0, 8)}...`
+                      : event.actorType === "api-key"
+                        ? `Key ${event.actorId.slice(0, 8)}...`
+                        : `${event.actorType}:${event.actorId.slice(0, 8)}...`}
                   </span>
                 </TableCell>
                 <TableCell className="text-sm">{event.action}</TableCell>

@@ -50,9 +50,10 @@ async function getAction(entityType: string, id: string, _opts: Record<string, n
   ctx.renderer.render(record);
 }
 
-async function createAction(entityType: string, opts: { file: string }, ctx: CommandContext): Promise<void> {
+async function createAction(entityType: string, opts: { file?: string }, ctx: CommandContext): Promise<void> {
   let data: unknown;
-  if (opts.file === "-") {
+  if (opts.file === undefined || opts.file === "-") {
+    // No --file provided or explicitly set to '-': read JSON from stdin.
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
@@ -158,8 +159,8 @@ export function registerData(program: Command): void {
   data.command("create")
     .description("Create a new record")
     .argument("<entity-type>", "Entity type name")
-    .requiredOption("--file <data.json>", "JSON file (use '-' for stdin)")
-    .action(withContext<[string, { file: string }]>(createAction));
+    .option("--file <data.json>", "JSON file with record data. Reads from stdin if omitted or set to '-'.")
+    .action(withContext<[string, { file?: string }]>(createAction));
 
   data.command("update")
     .description("Partially update a record")

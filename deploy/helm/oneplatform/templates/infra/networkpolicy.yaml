@@ -80,6 +80,11 @@ metadata:
   labels:
     {{- include "oneplatform.labels" . | nindent 4 }}
 spec:
+  # NOTE: The execution service runs sandboxes as sidecar containers within the
+  # same Pod (shared emptyDir volume for IPC), so there are no standalone
+  # "sandbox" pods to target. This NetworkPolicy is a defense-in-depth measure:
+  # if the deployment model changes to separate sandbox pods in the future,
+  # this policy will automatically restrict their network access.
   podSelector:
     matchLabels:
       app.kubernetes.io/component: sandbox

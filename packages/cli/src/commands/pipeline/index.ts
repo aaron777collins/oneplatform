@@ -177,8 +177,8 @@ export function registerPipeline(program: Command): void {
   pipeline.command("trigger").description("Manually trigger a pipeline run")
     .argument("<id>", "Pipeline ID")
     .option("--input <json>", "JSON string of runtime input parameters")
-    .option("--wait", "Poll until run completes (run ID still printed to stdout)")
-    .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600)")
+    .option("--wait", "Block until the run reaches a terminal state (completed/failed/cancelled). The run ID is printed to stdout immediately so it can be captured with RUN_ID=$(op pipeline trigger <id> --wait). Status updates stream to stderr. Combine with --poll-timeout to cap wait duration.")
+    .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600). If the run has not finished by this deadline the command exits with an error.")
     .action(withContext<[string, TriggerOpts]>(triggerAction));
 
   pipeline.command("runs").description("List runs for a pipeline")

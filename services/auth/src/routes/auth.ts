@@ -114,16 +114,18 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
       c.res = new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
       });
-      // httpOnly prevents JavaScript from reading the cookie; SameSite=Strict
-      // blocks cross-site requests from including it (CSRF mitigation).
+      // httpOnly prevents JavaScript from reading the cookie; SameSite=Lax
+      // allows top-level navigations (e.g. OAuth redirects) while still
+      // blocking cross-site sub-requests (CSRF mitigation). Strict breaks
+      // legitimate OAuth/SAML redirect flows that arrive as top-level GETs.
       c.header(
         "Set-Cookie",
-        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/${isSecure ? "; Secure" : ""}`,
+        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Lax; Path=/${isSecure ? "; Secure" : ""}`,
       );
       if (result.refreshToken !== undefined) {
         c.header(
           "Set-Cookie",
-          `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+          `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
         );
       }
       return c.res;

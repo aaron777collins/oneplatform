@@ -19,9 +19,14 @@ const LOADING_SENTINEL: UserContext = {
   tenantId: "",
   roles: [],
   isGuest: false,
+  isLoaded: false,
 } as const;
 
 export function useUser(): UserContext {
   const { user } = useAppContext();
-  return user ?? LOADING_SENTINEL;
+  if (user === null || user === undefined) {
+    return LOADING_SENTINEL;
+  }
+  // Ensure isLoaded is true for a real user context
+  return { ...user, isLoaded: true };
 }

@@ -57,7 +57,7 @@ export function AppsPage() {
     <div className="flex-1 p-6">
       <PageHeader
         title="Apps"
-        description="Monaco-built internal tools and data views."
+        description="Custom dashboards and internal applications."
         actions={
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" aria-hidden="true" />

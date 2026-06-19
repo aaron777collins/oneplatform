@@ -747,7 +747,7 @@ For a faster workflow, install the CLI globally:
 \`\`\`bash
 npm install -g @oneplatform/cli
 op plugin pack
-op plugin install ./dist/${opts.id}.oppkg --dev
+op plugin install ./${opts.id}-0.1.0.oppkg --dev
 \`\`\`
 
 The \`--dev\` flag installs in development mode — only requires \`plugins:manage\` scope,

@@ -14,7 +14,18 @@ import { z } from "zod";
 const JSONSchemaZ = z.record(z.unknown());
 
 const HookDeclarationZ = z.object({
-  stage: z.string().min(1),
+  stage: z.enum([
+    "pre-ingest",
+    "post-ingest",
+    "pre-transform",
+    "post-transform",
+    "pre-validate",
+    "post-validate",
+    "pre-execute",
+    "post-execute",
+    "pre-publish",
+    "post-publish",
+  ]),
   criticality: z.enum(["critical", "advisory"]),
   priority: z.number().int().min(0).max(999).optional(),
   timeout: z.number().int().min(1).max(300).optional(),

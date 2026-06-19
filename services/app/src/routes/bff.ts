@@ -131,7 +131,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       data: {
         id:          user.userId,
         email:       null,
-        displayName: user.userId,
+        displayName: "User",
         tenantId:    user.tenantId,
         appId,
         // User's roles within the app — the SDK uses this for permission checks

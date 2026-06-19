@@ -98,16 +98,16 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       ? isActiveParam === "true"
       : undefined;
 
-    const { users, nextCursor } = await userRepository.listByTenant(
-      user.tenantId,
-      cursor,
-      limit,
-      {
-        ...(emailFilter !== undefined && { email: emailFilter }),
-        ...(roleFilter !== undefined && { role: roleFilter }),
-        ...(isActiveFilter !== undefined && { isActive: isActiveFilter }),
-      },
-    );
+    const filters = {
+      ...(emailFilter !== undefined && { email: emailFilter }),
+      ...(roleFilter !== undefined && { role: roleFilter }),
+      ...(isActiveFilter !== undefined && { isActive: isActiveFilter }),
+    };
+
+    const [{ users, nextCursor }, total] = await Promise.all([
+      userRepository.listByTenant(user.tenantId, cursor, limit, filters),
+      userRepository.countByTenant(user.tenantId, filters),
+    ]);
 
     const data = users.map((u) => ({
       id: u.id,
@@ -122,7 +122,7 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
 
     return c.json({
       data,
-      pagination: { nextCursor, total: null },
+      pagination: { nextCursor, total },
     });
   });
 

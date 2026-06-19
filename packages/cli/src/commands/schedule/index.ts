@@ -30,6 +30,7 @@ function validateCron(expr: string): void {
 
 interface ListOpts { pipeline?: string; status?: string }
 interface CreateOpts { pipeline: string; cron: string; name?: string; timezone?: string; inputTemplate?: string; disabled?: boolean }
+interface UpdateOpts { name?: string; cron?: string; timezone?: string; inputTemplate?: string; enabled?: string }
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -61,6 +62,35 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
   ctx.renderer.success(`Schedule '${resp.name}' created (ID: ${resp.id}).`);
 }
 
+async function getAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
+  const schedule = await ctx.http.get<unknown>(`/api/v1/schedules/${encodeURIComponent(id)}`);
+  ctx.renderer.json(schedule);
+}
+
+async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (opts.name !== undefined) body["name"] = opts.name;
+  if (opts.cron !== undefined) {
+    validateCron(opts.cron);
+    body["cronExpr"] = opts.cron;
+  }
+  if (opts.timezone !== undefined) body["timezone"] = opts.timezone;
+  if (opts.inputTemplate !== undefined) {
+    try {
+      body["inputTemplate"] = JSON.parse(opts.inputTemplate) as unknown;
+    } catch {
+      throw new CliError("--input-template must be valid JSON.", EXIT.GENERAL);
+    }
+  }
+  if (opts.enabled !== undefined) body["enabled"] = opts.enabled === "true";
+
+  const resp = await ctx.http.patch<{ id: string; name: string }>(
+    `/api/v1/schedules/${encodeURIComponent(id)}`,
+    body,
+  );
+  ctx.renderer.success(`Schedule '${resp.name}' updated (ID: ${resp.id}).`);
+}
+
 async function pauseAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   await ctx.http.patch(`/api/v1/schedules/${encodeURIComponent(id)}`, { enabled: false });
   ctx.renderer.success(`Schedule ${id} paused.`);
@@ -84,6 +114,19 @@ export function registerSchedule(program: Command): void {
     .option("--pipeline <id>", "Filter by pipeline ID")
     .option("--status <status>", "Filter by status: active|paused")
     .action(withContext<[ListOpts]>(listAction));
+
+  schedule.command("get").description("Get details of a schedule")
+    .argument("<id>", "Schedule ID")
+    .action(withContext<[string, Record<string, never>]>(getAction));
+
+  schedule.command("update").description("Update an existing schedule")
+    .argument("<id>", "Schedule ID")
+    .option("--name <name>", "New display name")
+    .option("--cron <expr>", "New cron expression")
+    .option("--timezone <tz>", "New IANA timezone string")
+    .option("--input-template <json>", "New JSON input template")
+    .option("--enabled <bool>", "Set enabled state: true|false")
+    .action(withContext<[string, UpdateOpts]>(updateAction));
 
   schedule.command("create").description("Create a cron schedule for a pipeline")
     .requiredOption("--pipeline <id>", "Pipeline ID")

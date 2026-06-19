@@ -84,7 +84,7 @@ groups:
             tagged error=true. This likely indicates 5xx responses reaching
             clients. Check the Jaeger UI for the specific traces and review
             gateway-service logs for the root cause.
-          runbook_url: "https://docs.oneplatform.internal/runbooks/high-error-rate"
+          runbook_url: "../../OPERATIONS.md#high-error-rate"
 
   # ── Service availability ──────────────────────────────────────────────────
   - orgId: 1
@@ -142,7 +142,7 @@ groups:
             Verify the container is running with `docker compose ps`, check
             `/healthz` via `docker compose exec gateway-service wget -qO- http://localhost:3000/healthz`,
             and confirm OTEL_EXPORTER_OTLP_ENDPOINT is reachable from within the container.
-          runbook_url: "https://docs.oneplatform.internal/runbooks/service-down"
+          runbook_url: "../../OPERATIONS.md#service-down"
 
       - uid: op-alert-auth-service-down
         title: Auth Service Down (no traces for >2 minutes)
@@ -186,7 +186,7 @@ groups:
             No spans received from auth-service in the last 2 minutes.
             An auth-service outage prevents all authenticated API requests.
             Check `docker compose ps auth-service` and `/healthz` immediately.
-          runbook_url: "https://docs.oneplatform.internal/runbooks/service-down"
+          runbook_url: "../../OPERATIONS.md#service-down"
 
   # ── Ingestion failures ────────────────────────────────────────────────────
   - orgId: 1
@@ -244,4 +244,4 @@ groups:
             a network partition to the source system, or a schema mismatch.
             Open the Ingestion dashboard to identify which connector is failing,
             then inspect the full trace in the Jaeger UI for the root cause.
-          runbook_url: "https://docs.oneplatform.internal/runbooks/sync-failure"
+          runbook_url: "../../OPERATIONS.md#sync-failure"

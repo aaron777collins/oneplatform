@@ -72,7 +72,7 @@ See [DEVELOPMENT-PROCESS.md](./DEVELOPMENT-PROCESS.md) for the full development 
 
 - Node.js 22+
 - pnpm 9+
-- Docker & Docker Compose
+- Docker Engine 20.10+ & Docker Compose V2 (`docker compose version` -- V1 `docker-compose` is unsupported)
 
 ### Development Setup
 

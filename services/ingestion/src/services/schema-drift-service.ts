@@ -136,6 +136,13 @@ export function compareSchemasForDrift(
  * inspection of nested objects would make the snapshot storage and comparison
  * logic significantly more complex for marginal gain — callers can opt into
  * that by expanding the type system in a future iteration.
+ *
+ * TODO(schema-drift): Add recursive mode for nested object/array inspection.
+ * When `inferredType === "object"`, recurse into the value and produce a
+ * nested FieldSchema[]. For arrays, inspect element types and flag
+ * heterogeneous arrays. This will require changes to FieldSchema (adding
+ * a `children?: FieldSchema[]` field) and to the snapshot comparison logic
+ * in `detectDrift`. Track in backlog as G-180.
  */
 export function inferSchema(records: Array<Record<string, unknown>>): FieldSchema[] {
   if (records.length === 0) return [];

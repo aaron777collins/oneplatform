@@ -253,4 +253,37 @@ export class UserRepository {
 
     return { users, nextCursor };
   }
+
+  /**
+   * Returns the total number of users in a tenant, applying the same optional
+   * filters as {@link listByTenant} so the count is consistent with pagination.
+   */
+  async countByTenant(
+    tenantId: string,
+    filters?: { email?: string; role?: string; isActive?: boolean },
+  ): Promise<number> {
+    const conditions: string[] = ["tenant_id = $1"];
+    const values: unknown[] = [tenantId];
+    let paramIdx = 2;
+
+    if (filters?.email !== undefined) {
+      conditions.push(`email ILIKE $${paramIdx++}`);
+      values.push(`%${filters.email}%`);
+    }
+    if (filters?.role !== undefined) {
+      conditions.push(`$${paramIdx++} = ANY(roles)`);
+      values.push(filters.role);
+    }
+    if (filters?.isActive !== undefined) {
+      conditions.push(`is_active = $${paramIdx++}`);
+      values.push(filters.isActive);
+    }
+
+    const result = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM auth.users WHERE ${conditions.join(" AND ")}`,
+      values,
+    );
+
+    return parseInt(result.rows[0]?.count ?? "0", 10);
+  }
 }

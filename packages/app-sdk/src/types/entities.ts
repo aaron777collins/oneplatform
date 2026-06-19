@@ -131,6 +131,12 @@ export interface UserContext {
   tenantId: string;
   roles: string[];
   isGuest: boolean;
+  /**
+   * true once the BFF /me response has been received and the user context
+   * has been populated. When false, other fields contain sentinel/default
+   * values and should not be used for business logic.
+   */
+  isLoaded: boolean;
 }
 
 // ─── Permission types ─────────────────────────────────────────────────────────

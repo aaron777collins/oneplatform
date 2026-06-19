@@ -5,7 +5,7 @@
 import type { NetworkError } from '../errors/network-error.js';
 import type { AuthError } from '../errors/client-errors.js';
 
-export interface PlatformEvent {
+export interface PlatformEvent<TPayload = unknown> {
   /** Unique event ID. Used as Last-Event-ID for stream resumption. */
   readonly id: string;
 
@@ -18,8 +18,8 @@ export interface PlatformEvent {
   /** ISO 8601 timestamp when the event occurred on the server. */
   readonly occurredAt: string;
 
-  /** Event-specific payload. Type varies by event type. */
-  readonly payload: unknown;
+  /** Event-specific payload. Narrow with the generic parameter for type safety. */
+  readonly payload: TPayload;
 }
 
 export interface SubscriptionOptions {
