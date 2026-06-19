@@ -150,7 +150,7 @@ function validateTimezone(timezone: string): void {
   // This prevents creation of schedules with typos like "US/Eastrn" that would
   // silently fail at cron-tick time.
   const supported = Intl.supportedValuesOf("timeZone");
-  if (!supported.includes(timezone)) {
+  if (timezone !== "UTC" && !supported.includes(timezone)) {
     throw new ScheduleInvalidCronError(
       `Invalid timezone "${timezone}". Must be a valid IANA timezone, e.g. "America/New_York" or "UTC".`,
       { timezone },
