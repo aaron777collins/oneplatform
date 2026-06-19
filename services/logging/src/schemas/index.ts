@@ -47,6 +47,9 @@ export const exportQuerySchema = logQuerySchema
     from: z.string().datetime(),
     to: z.string().datetime(),
     format: z.enum(["jsonl", "csv"]).default("jsonl"),
+    // Optional tenant scoping — non-admin callers are always scoped server-side,
+    // but admin callers may filter exports to a specific tenant.
+    tenantId: z.string().max(255).optional(),
   })
   .omit({ cursor: true });
 

@@ -194,6 +194,7 @@ function makeDeps(
     executionServiceUrl: "http://execution-service",
     masterKey:          Buffer.alloc(32),
     logger:             overrides?.logger ?? makeLogger(),
+    serviceTokenSigner: { sign: async () => "mock-service-token" },
   };
 }
 

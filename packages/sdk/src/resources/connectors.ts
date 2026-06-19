@@ -13,12 +13,24 @@ import type {
   CreateConnectorRequest,
   UpdateConnectorRequest,
   ConnectorTestResult,
-  PipelineRun,
   SyncJob,
   SyncProgress,
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 import { serializeListQuery } from './list-query.js';
+
+/**
+ * Result returned when triggering a connector sync.
+ * Unlike a PipelineRun, this is specific to connector sync operations and
+ * contains the sync job ID along with the connector and initial status.
+ */
+export interface TriggerSyncResult {
+  readonly syncJobId: string;
+  readonly connectorId: string;
+  readonly status: 'queued' | 'running';
+  readonly startedAt: string | null;
+  readonly message: string;
+}
 
 /**
  * Namespace for connector management operations.
@@ -52,14 +64,14 @@ export interface ConnectorNamespace {
   /**
    * Enqueues an immediate out-of-schedule sync for the connector.
    *
-   * @returns The {@link PipelineRun} created for the triggered sync.
+   * @returns The {@link TriggerSyncResult} describing the queued sync job.
    */
-  trigger(id: string): Promise<PipelineRun>;
+  trigger(id: string): Promise<TriggerSyncResult>;
 
   /**
    * Alias for {@link trigger}. Enqueues an immediate sync for the connector.
    */
-  triggerSync(id: string): Promise<PipelineRun>;
+  triggerSync(id: string): Promise<TriggerSyncResult>;
 
   /** Lists sync jobs for a connector in reverse-chronological order. */
   listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob>;
@@ -124,14 +136,14 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
       return this.test(id);
     },
 
-    async trigger(id: string): Promise<PipelineRun> {
-      return transport.request<PipelineRun>({
+    async trigger(id: string): Promise<TriggerSyncResult> {
+      return transport.request<TriggerSyncResult>({
         method: 'POST',
         path: `${BASE}/${encodeURIComponent(id)}/trigger`,
       });
     },
 
-    async triggerSync(id: string): Promise<PipelineRun> {
+    async triggerSync(id: string): Promise<TriggerSyncResult> {
       return this.trigger(id);
     },
 

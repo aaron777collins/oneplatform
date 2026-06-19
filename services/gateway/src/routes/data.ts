@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { UnauthorizedError, NotFoundError } from "@oneplatform/core";
+import { UnauthorizedError, NotFoundError, ForbiddenError } from "@oneplatform/core";
 import type { OntologyCache } from "../services/ontology-cache.js";
 import type { ProxyService } from "../services/proxy-service.js";
 import type { CircuitBreaker } from "../utils/circuit-breaker.js";
@@ -31,6 +31,18 @@ async function handleDataRoute(
   const user = c.var.user;
   if (!user?.tenantId) {
     throw new UnauthorizedError("Authentication required.");
+  }
+
+  // Scope enforcement: GET requires data:read, mutating methods require data:write
+  const method = c.req.method.toUpperCase();
+  if (method === "GET" || method === "HEAD") {
+    if (!user.scopes.includes("data:read") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'data:read' required.");
+    }
+  } else {
+    if (!user.scopes.includes("data:write") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'data:write' required.");
+    }
   }
 
   const entityType = c.req.param("entityType");

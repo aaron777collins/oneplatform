@@ -52,6 +52,10 @@ export class Paginator<T> implements PaginatedIterable<T> {
     do {
       const page = await this.fetchPage(cursor, this.pageSize);
       yield page;
+      // Stop when there are no more items, even if the server returns a non-null
+      // cursor. Some backends return a cursor with an empty final page; without
+      // this guard the loop would fetch empty pages indefinitely.
+      if (page.items.length === 0) break;
       cursor = page.nextCursor;
     } while (cursor !== null);
   }

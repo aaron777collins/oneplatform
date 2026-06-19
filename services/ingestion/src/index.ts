@@ -10,6 +10,7 @@ import {
   createApp,
   loadMasterKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -121,6 +122,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     serviceName: "ingestion-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   // Repositories
   const connectorRepo = new ConnectorRepository(db);

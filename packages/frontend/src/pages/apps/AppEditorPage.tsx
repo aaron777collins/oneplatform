@@ -34,7 +34,7 @@ interface AppMeta {
 export function AppEditorPage() {
   const { id } = useParams({ from: "/authenticated/apps/$id/edit" });
   const client = useApiClient();
-  const editorStore = useEditorStore();
+  const setAppId = useEditorStore((s) => s.setAppId);
 
   // Fetch app name and slug for the toolbar
   const query = useQuery({
@@ -45,11 +45,11 @@ export function AppEditorPage() {
 
   // Initialize editor store for this app on mount; clean up on unmount
   React.useEffect(() => {
-    editorStore.setAppId(id);
+    setAppId(id);
     return () => {
       // Don't reset on unmount — preserve open files if user navigates back quickly
     };
-  // editorStore is stable (Zustand reference doesn't change)
+  // setAppId is a stable Zustand action reference
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

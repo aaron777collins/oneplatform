@@ -74,7 +74,7 @@ export const bootstrapRequest = z.object({
     .regex(/[a-z]/, "Must contain lowercase")
     .regex(/[0-9]/, "Must contain a digit")
     .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
-  tenantName: z.string().min(1).max(100).trim(),
+  tenantName: z.string().min(3, "Tenant name must be at least 3 characters").max(100).trim(),
   // 32 bytes hex-encoded = exactly 64 hex characters
   bootstrapToken: z.string().length(64).regex(/^[0-9a-f]{64}$/i, "Bootstrap token must be 64 hex characters"),
 });

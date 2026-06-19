@@ -45,6 +45,7 @@ spec:
             - name: http
               containerPort: {{ .Values.logging.service.port }}
               protocol: TCP
+          {{- include "oneplatform.startupProbe" . | nindent 10 }}
           {{- include "oneplatform.livenessProbe" . | nindent 10 }}
           {{- include "oneplatform.readinessProbe" . | nindent 10 }}
           resources:

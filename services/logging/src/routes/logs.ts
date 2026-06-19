@@ -138,6 +138,10 @@ export function createLogRoutes(
       10
     );
 
+    // Tenant isolation: non-admin callers are always scoped to their own tenant.
+    // Admin callers may optionally filter by tenant_id via query param.
+    const tenantId = isAdmin ? params.tenantId : user.tenantId;
+
     const exportOpts = {
       from: params.from,
       to: params.to,
@@ -146,7 +150,7 @@ export function createLogRoutes(
       ...(params.level !== undefined ? { level: params.level } : {}),
       ...(params.traceId !== undefined ? { traceId: params.traceId } : {}),
       ...(params.search !== undefined ? { search: params.search } : {}),
-      ...(!isAdmin ? { tenantId: user.tenantId } : {}),
+      ...(tenantId !== undefined ? { tenantId } : {}),
     };
 
     const stream = new ReadableStream({

@@ -99,7 +99,7 @@ export interface BootstrapServiceDeps {
 }
 
 export interface BootstrapService {
-  getStatus(): Promise<{ completed: boolean; bootstrapToken?: string }>;
+  getStatus(): Promise<{ completed: boolean }>;
   bootstrap(data: BootstrapInput): Promise<BootstrapResult>;
 }
 
@@ -116,19 +116,19 @@ export function createBootstrapService(
     clearInMemoryToken,
   } = deps;
 
-  async function getStatus(): Promise<{ completed: boolean; bootstrapToken?: string }> {
+  async function getStatus(): Promise<{ completed: boolean }> {
     const result = await db.query<{ bootstrap_completed: boolean }>(
       "SELECT bootstrap_completed FROM auth.bootstrap_state WHERE id = 1"
     );
     const completed = result.rows[0]?.bootstrap_completed ?? false;
 
-    // When bootstrap is not yet complete, include the bootstrap token so the
-    // frontend wizard can pass it along with the completion request without
-    // requiring the user to enter it manually (§9.4).
+    // V6-020: Bootstrap token is no longer included in the API response to
+    // avoid leaking secrets over the network. It is logged to console on
+    // startup so operators can retrieve it from server logs.
     if (!completed) {
       const token = getInMemoryToken();
       if (token !== null) {
-        return { completed, bootstrapToken: token };
+        logger.info("Bootstrap not yet completed. Bootstrap token is available (check server startup logs).");
       }
     }
 

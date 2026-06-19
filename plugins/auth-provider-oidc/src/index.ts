@@ -305,6 +305,18 @@ const CLIENT_SECRET_CACHE_KEY = "oidc:clientSecret";
 // no access to FetchProxy) can build a correct URL after the first discovery.
 const AUTH_ENDPOINT_CACHE_KEY = "oidc:authEndpoint";
 
+/**
+ * Cache key prefix for storing redirect_uri per OAuth state parameter.
+ * getAuthorizationUrl() caches the redirect_uri under this key so handleCallback()
+ * can retrieve the exact URI used during the authorization request. Without this,
+ * handleCallback() has no reliable way to reconstruct the redirect_uri (it was
+ * previously read from tenant config, which may differ from what the Auth Service
+ * passed in AuthOptions).
+ *
+ * TTL of 600 seconds (10 minutes) is generous for the typical auth flow round-trip.
+ */
+const REDIRECT_URI_CACHE_PREFIX = "oidc:redirectUri:";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Main provider class
 // ────────────────────────────────────────────────────────────────────────────
@@ -330,6 +342,20 @@ class OidcAuthProvider implements AuthProvider {
    * this field allows it to return a correct URL without async discovery.
    */
   private authorizationEndpoint: string | null = null;
+
+  /**
+   * In-memory map of OAuth state → redirect_uri.
+   *
+   * getAuthorizationUrl() is synchronous and cannot use the async cache, so
+   * we store the redirect_uri here keyed by the state parameter. handleCallback()
+   * retrieves it by looking up the state that the Auth Service verified.
+   *
+   * Entries are evicted after 10 minutes to prevent unbounded growth. In production
+   * there is one OidcAuthProvider instance per plugin instance, so the map stays
+   * small (one entry per concurrent auth flow for that instance).
+   */
+  private readonly redirectUriByState = new Map<string, { uri: string; expiresAt: number }>();
+  private static readonly REDIRECT_URI_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
   metadata(): AuthProviderMetadata {
     return {
@@ -452,6 +478,15 @@ class OidcAuthProvider implements AuthProvider {
       }
     }
 
+    // Cache the redirect_uri keyed by state so handleCallback() can retrieve the
+    // exact URI that was used in this authorization request. This avoids the
+    // fragile pattern of reading redirect_uri from tenant config during callback.
+    this.redirectUriByState.set(state, {
+      uri: options.redirectUri,
+      expiresAt: Date.now() + OidcAuthProvider.REDIRECT_URI_TTL_MS,
+    });
+    this.evictExpiredRedirectUris();
+
     return `${authEndpoint}?${params.toString()}`;
   }
 
@@ -499,6 +534,30 @@ class OidcAuthProvider implements AuthProvider {
       );
     }
 
+    // Retrieve the redirect_uri cached during getAuthorizationUrl() using the
+    // state parameter as the lookup key. This ensures the token exchange uses the
+    // exact same redirect_uri that was sent to the IdP, avoiding mismatches that
+    // cause "redirect_uri_mismatch" errors from the provider.
+    let redirectUri: string;
+    if (params.state !== undefined) {
+      const cached = this.redirectUriByState.get(params.state);
+      if (cached !== undefined && cached.expiresAt > Date.now()) {
+        redirectUri = cached.uri;
+        // Clean up after use — each state is single-use.
+        this.redirectUriByState.delete(params.state);
+      } else {
+        // State expired or was not found. Fall back to tenant config.
+        context.logger.warn(
+          "redirect_uri not found in state cache — falling back to tenant config",
+          { state: params.state },
+        );
+        redirectUri = (context.tenant.config["redirectUri"] as string) ?? "";
+      }
+    } else {
+      // No state param passed (legacy callers). Fall back to tenant config.
+      redirectUri = (context.tenant.config["redirectUri"] as string) ?? "";
+    }
+
     context.logger.info("Exchanging OIDC authorization code for tokens");
 
     const tokenResponse = await postTokenEndpoint(
@@ -506,7 +565,7 @@ class OidcAuthProvider implements AuthProvider {
       {
         grant_type: "authorization_code",
         code: params.code,
-        redirect_uri: context.tenant.config["redirectUri"] as string ?? "",
+        redirect_uri: redirectUri,
         client_id: cfg.clientId,
         client_secret: clientSecret,
       },
@@ -765,6 +824,20 @@ class OidcAuthProvider implements AuthProvider {
     const base = issuerUrl.endsWith("/") ? issuerUrl.slice(0, -1) : issuerUrl;
     return `${base}/authorize`;
   }
+
+  /**
+   * Evict expired entries from the in-memory redirect_uri cache.
+   * Called on each getAuthorizationUrl() invocation to bound memory usage.
+   * In practice the map stays very small (one entry per concurrent auth flow).
+   */
+  private evictExpiredRedirectUris(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.redirectUriByState) {
+      if (entry.expiresAt <= now) {
+        this.redirectUriByState.delete(key);
+      }
+    }
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -772,11 +845,9 @@ class OidcAuthProvider implements AuthProvider {
 //
 // The manifest declares `"entrypoint": "authProvider"` so the Execution Service
 // looks for a named export called `authProvider` on the bundle's module namespace.
-// We extend the export type with `initialize` since it is a lifecycle method the
-// platform calls but the AuthProvider interface does not formally declare (it is
-// injected by the platform runtime, not called by plugin code).
+// The AuthProvider interface declares initialize?() as an optional lifecycle
+// method. The platform calls it after loading the bundle with the full
+// PluginContext when the method is present.
 // ────────────────────────────────────────────────────────────────────────────
 
-export const authProvider: AuthProvider & {
-  initialize(config: Record<string, unknown>, context: PluginContext): Promise<void>;
-} = new OidcAuthProvider();
+export const authProvider: AuthProvider = new OidcAuthProvider();

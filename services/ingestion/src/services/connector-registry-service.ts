@@ -448,7 +448,7 @@ export const BUILTIN_CONNECTOR_MANIFESTS: RegisterConnectorInput[] = [
     icon: "Database",
     configSchema: {
       type: "object",
-      required: ["host", "database", "user", "password"],
+      required: ["host", "database", "user", "password", "table", "incrementalColumn"],
       properties: {
         host: { type: "string", description: "PostgreSQL hostname or IP" },
         port: { type: "integer", default: 5432, description: "PostgreSQL port" },
@@ -458,6 +458,7 @@ export const BUILTIN_CONNECTOR_MANIFESTS: RegisterConnectorInput[] = [
         schema: { type: "string", default: "public", description: "Schema name" },
         table: { type: "string", description: "Table or view to sync" },
         incrementalColumn: { type: "string", description: "Column to use for incremental sync (e.g. updated_at)" },
+        proxyUrl: { type: "string", description: "HTTP(S) proxy URL for outbound connections" },
         connectTimeoutMs: { type: "integer", default: 10000, description: "Connection timeout in milliseconds" },
         ssl: { type: "boolean", default: false, description: "Enable SSL/TLS" },
       },

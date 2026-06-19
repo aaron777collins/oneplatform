@@ -235,27 +235,16 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
     };
   }
 
-  // Check for authorization code callback on construction.
-  // Strip the params from the URL immediately to avoid re-processing on next
-  // render, but do NOT initiate the code exchange here — that is caller's
-  // responsibility via handleCallback(). This keeps the constructor side-effect
-  // free and avoids triggering redirects in server-side rendering contexts.
+  // Strip authorization code callback params from the URL on construction to
+  // prevent re-processing on navigation or React strict-mode double-invocations.
+  // State validation is deferred to handleCallback() so that createClient()
+  // never throws — callers can safely construct the client and then decide
+  // whether/when to process the callback.
   const urlParams = new URLSearchParams(window.location.search);
   const callbackCode = urlParams.get('code');
   const callbackState = urlParams.get('state');
 
   if (callbackCode !== null && callbackState !== null) {
-    // Validate state immediately to fail fast on CSRF before any async work
-    const expectedState = window.sessionStorage.getItem(storageKey(prefix, 'state'));
-    if (callbackState !== expectedState) {
-      throw new AuthError({
-        code: 'UNAUTHORIZED',
-        message: 'PKCE state mismatch. Possible CSRF attack. Aborting authentication.',
-        statusCode: 401,
-        retryable: false,
-      });
-    }
-
     // Strip the query params from the URL so back/forward navigation and
     // React strict-mode double invocations do not reuse the code.
     const cleanUrl = window.location.pathname + window.location.hash;

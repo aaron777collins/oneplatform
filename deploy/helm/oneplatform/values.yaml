@@ -113,6 +113,11 @@ secrets:
   smtpFrom: ""
   smtpSecure: "true"
 
+  # Service-to-service token secret used by internal endpoints (plugin, execution,
+  # app services) to authenticate inter-service calls.
+  # Generate with: openssl rand -base64 32
+  serviceTokenSecret: ""
+
 # ---------------------------------------------------------------------------
 # Ingress (Caddy acts as reverse proxy inside the cluster)
 # ---------------------------------------------------------------------------
@@ -125,6 +130,11 @@ ingress:
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    # Long-lived connections for SSE/WebSocket streaming and large sync uploads.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Disable response buffering so SSE events reach clients immediately.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
   hostname: "oneplatform.example.com"
   tls:
     enabled: true

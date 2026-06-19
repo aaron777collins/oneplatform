@@ -10,6 +10,7 @@ import {
   loadMasterKey,
   createEventPublisher,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -199,6 +200,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     serviceName: "plugin-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   // Step 6: Create bundle service and (optionally) verify MinIO.
   const bundleService = createBundleService({

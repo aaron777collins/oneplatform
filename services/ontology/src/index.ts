@@ -12,6 +12,7 @@ import {
   createServiceTokenSigner,
   loadServicePrivateKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -116,6 +117,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     serviceName: "ontology-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   const events = createEventPublisher({ redis });
 

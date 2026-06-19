@@ -575,21 +575,71 @@ function WaitFields({
   config: StepConfig;
   onConfigChange: (k: string, v: unknown) => void;
 }) {
-  const ms = (config["durationMs"] as number | undefined) ?? 0;
+  const totalMs = (config["durationMs"] as number | undefined) ?? 0;
+
+  // Decompose ms into hours, minutes, seconds
+  const hours = Math.floor(totalMs / 3_600_000);
+  const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+  const seconds = Math.floor((totalMs % 60_000) / 1_000);
+
+  function handleDurationChange(h: number, m: number, s: number) {
+    const ms = Math.min(
+      Math.max(0, h * 3_600_000 + m * 60_000 + s * 1_000),
+      86_400_000,
+    );
+    onConfigChange("durationMs", ms);
+  }
 
   return (
-    <FormField label="Duration (ms)" htmlFor="cfg-wait-ms">
-      <Input
-        id="cfg-wait-ms"
-        type="number"
-        min={1000}
-        max={86_400_000}
-        value={ms}
-        onChange={(e) => onConfigChange("durationMs", Number(e.target.value))}
-        placeholder="e.g. 60000"
-      />
+    <FormField label="Duration" htmlFor="cfg-wait-hours">
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1">
+          <Label htmlFor="cfg-wait-hours" className="text-[10px] text-[var(--color-muted-foreground)] block mb-0.5">
+            Hours
+          </Label>
+          <Input
+            id="cfg-wait-hours"
+            type="number"
+            min={0}
+            max={24}
+            value={hours}
+            onChange={(e) => handleDurationChange(Number(e.target.value) || 0, minutes, seconds)}
+            className="h-8 text-xs"
+          />
+        </div>
+        <span className="mt-4 text-xs text-[var(--color-muted-foreground)]">:</span>
+        <div className="flex-1">
+          <Label htmlFor="cfg-wait-minutes" className="text-[10px] text-[var(--color-muted-foreground)] block mb-0.5">
+            Minutes
+          </Label>
+          <Input
+            id="cfg-wait-minutes"
+            type="number"
+            min={0}
+            max={59}
+            value={minutes}
+            onChange={(e) => handleDurationChange(hours, Number(e.target.value) || 0, seconds)}
+            className="h-8 text-xs"
+          />
+        </div>
+        <span className="mt-4 text-xs text-[var(--color-muted-foreground)]">:</span>
+        <div className="flex-1">
+          <Label htmlFor="cfg-wait-seconds" className="text-[10px] text-[var(--color-muted-foreground)] block mb-0.5">
+            Seconds
+          </Label>
+          <Input
+            id="cfg-wait-seconds"
+            type="number"
+            min={0}
+            max={59}
+            value={seconds}
+            onChange={(e) => handleDurationChange(hours, minutes, Number(e.target.value) || 0)}
+            className="h-8 text-xs"
+          />
+        </div>
+      </div>
       <p className="text-[10px] text-[var(--color-muted-foreground)] mt-1">
-        Max 24 hours (86,400,000 ms)
+        Max 24 hours. Current: {totalMs.toLocaleString()} ms
       </p>
     </FormField>
   );
@@ -686,6 +736,11 @@ function WebhookFields({
 // Sub-workflow step fields
 // ---------------------------------------------------------------------------
 
+interface PipelineSummary {
+  id: string;
+  name: string;
+}
+
 function SubWorkflowFields({
   config,
   onConfigChange,
@@ -693,14 +748,71 @@ function SubWorkflowFields({
   config: StepConfig;
   onConfigChange: (k: string, v: unknown) => void;
 }) {
+  const client = useApiClient();
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const { data: pipelineListData, isLoading: pipelinesLoading } = useQuery({
+    queryKey: ["pipelines", "sub-workflow-picker"],
+    queryFn: () => client.get<{ data: PipelineSummary[] }>("/v1/pipelines"),
+    staleTime: 60_000,
+  });
+
+  const pipelines: PipelineSummary[] = pipelineListData?.data ?? [];
+  const filteredPipelines = searchTerm
+    ? pipelines.filter((p) => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+    : pipelines;
+
+  const selectedId = (config["pipelineId"] as string | undefined) ?? "";
+  const selectedName = pipelines.find((p) => p.id === selectedId)?.name;
+
   return (
-    <FormField label="Pipeline ID" htmlFor="cfg-sub-pid">
-      <Input
-        id="cfg-sub-pid"
-        placeholder="UUID of child pipeline"
-        value={(config["pipelineId"] as string | undefined) ?? ""}
-        onChange={(e) => onConfigChange("pipelineId", e.target.value)}
-      />
+    <FormField label="Sub-workflow pipeline" htmlFor="cfg-sub-pid">
+      {pipelinesLoading ? (
+        <Input id="cfg-sub-pid" disabled placeholder="Loading pipelines..." />
+      ) : pipelines.length === 0 ? (
+        <>
+          <Input
+            id="cfg-sub-pid"
+            placeholder="Pipeline UUID (no pipelines found)"
+            value={selectedId}
+            onChange={(e) => onConfigChange("pipelineId", e.target.value)}
+          />
+          <p className="mt-1 text-[10px] text-[var(--color-muted-foreground)]">
+            No pipelines available. Create a pipeline first or enter an ID manually.
+          </p>
+        </>
+      ) : (
+        <>
+          <Input
+            id="cfg-sub-pid-search"
+            placeholder="Search pipelines..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="mb-1.5 h-7 text-xs"
+          />
+          <Select
+            value={selectedId}
+            onValueChange={(v) => onConfigChange("pipelineId", v)}
+          >
+            <SelectTrigger id="cfg-sub-pid">
+              <SelectValue placeholder="Select a pipeline...">
+                {selectedName ?? "Select a pipeline..."}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {filteredPipelines.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+              {filteredPipelines.length === 0 && (
+                <div className="px-2 py-1.5 text-xs text-[var(--color-muted-foreground)]">
+                  No matching pipelines
+                </div>
+              )}
+            </SelectContent>
+          </Select>
+        </>
+      )}
     </FormField>
   );
 }
@@ -786,6 +898,12 @@ function ConnectorFields({
 // Transformer step fields
 // ---------------------------------------------------------------------------
 
+interface TransformerPlugin {
+  id: string;
+  name: string;
+  type?: string;
+}
+
 function TransformerFields({
   config,
   onConfigChange,
@@ -793,14 +911,49 @@ function TransformerFields({
   config: StepConfig;
   onConfigChange: (k: string, v: unknown) => void;
 }) {
+  const client = useApiClient();
+  const { data: pluginListData, isLoading: pluginsLoading } = useQuery({
+    queryKey: ["plugins", "transformers"],
+    queryFn: () => client.get<{ data: TransformerPlugin[] }>("/v1/plugins", { type: "transformer" }),
+    staleTime: 60_000,
+  });
+
+  const plugins: TransformerPlugin[] = pluginListData?.data ?? [];
+  const selectedId = (config["transformerId"] as string | undefined) ?? "";
+
   return (
-    <FormField label="Transformer ID" htmlFor="cfg-transformer-id">
-      <Input
-        id="cfg-transformer-id"
-        placeholder="Registered transformer plugin ID"
-        value={(config["transformerId"] as string | undefined) ?? ""}
-        onChange={(e) => onConfigChange("transformerId", e.target.value)}
-      />
+    <FormField label="Transformer plugin" htmlFor="cfg-transformer-id">
+      {pluginsLoading ? (
+        <Input id="cfg-transformer-id" disabled placeholder="Loading transformer plugins..." />
+      ) : plugins.length === 0 ? (
+        <>
+          <Input
+            id="cfg-transformer-id"
+            placeholder="Transformer plugin ID (none found)"
+            value={selectedId}
+            onChange={(e) => onConfigChange("transformerId", e.target.value)}
+          />
+          <p className="mt-1 text-[10px] text-[var(--color-muted-foreground)]">
+            No transformer plugins available. Install a plugin first or enter an ID manually.
+          </p>
+        </>
+      ) : (
+        <Select
+          value={selectedId}
+          onValueChange={(v) => onConfigChange("transformerId", v)}
+        >
+          <SelectTrigger id="cfg-transformer-id">
+            <SelectValue placeholder="Select a transformer..." />
+          </SelectTrigger>
+          <SelectContent>
+            {plugins.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </FormField>
   );
 }

@@ -29,6 +29,10 @@ export interface LogNamespace {
    *
    * Unlike `query()`, `tail()` starts from the newest entries rather than the
    * oldest; pagination moves backwards in time.
+   *
+   * @deprecated The `/api/v1/logs/tail` endpoint is not implemented on the server.
+   * Use `query()` with a descending sort and recent time window instead.
+   * This method will be removed in the next major version.
    */
   tail(options?: TailOptions): PaginatedIterable<LogEntry>;
 
@@ -75,7 +79,12 @@ export function createLogNamespace(transport: Transport): LogNamespace {
       }, pageSize);
     },
 
+    /** @deprecated The `/api/v1/logs/tail` endpoint is not implemented. Use query() instead. */
     tail(options?: TailOptions): PaginatedIterable<LogEntry> {
+      console.warn(
+        '[OnePlatform SDK] logs.tail() is deprecated: the /api/v1/logs/tail endpoint does not exist. ' +
+          'Use logs.query() with a descending sort and recent time window instead.',
+      );
       const baseQuery = options !== undefined ? buildLogQuery(options) : {};
       return new Paginator<LogEntry>(async (cursor, limit) => {
         const result = await transport.request<{

@@ -431,7 +431,7 @@ export function QueryBuilderPage() {
     enabled: selectedEntityType !== "",
   });
 
-  const entityList = entityListData?.data.items ?? (entityListData as { data?: { items: EntitySummary[] } } | undefined)?.data?.items ?? [];
+  const entityList = entityListData?.data ?? [];
   const entityDetail = entityDetailData?.data;
 
   const fieldOptions: Array<{ slug: string; name: string }> = entityDetail
@@ -612,11 +612,15 @@ export function QueryBuilderPage() {
                 <SelectValue placeholder="Select an entity…" />
               </SelectTrigger>
               <SelectContent>
-                {entityList.map((e) => (
-                  <SelectItem key={e.slug ?? e.name} value={e.slug ?? e.name.toLowerCase().replace(/\s+/g, "_")}>
-                    {e.name}
-                  </SelectItem>
-                ))}
+                {entityList.map((e) => {
+                  const entity = e as EntitySummary & { slug?: string };
+                  const value = entity.slug ?? entity.name.toLowerCase().replace(/\s+/g, "_");
+                  return (
+                    <SelectItem key={value} value={value}>
+                      {entity.name}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           )}

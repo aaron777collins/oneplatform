@@ -9,7 +9,7 @@
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { UnauthorizedError, ValidationError } from "@oneplatform/core";
+import { UnauthorizedError, ValidationError, ForbiddenError } from "@oneplatform/core";
 import type { LineageService, LineageNodeType } from "../services/lineage-service.js";
 
 const VALID_NODE_TYPES = new Set<string>([
@@ -43,6 +43,9 @@ export function createLineageRoutes(
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
+    if (!user.scopes.includes("lineage:read") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'lineage:read' required.");
+    }
 
     const graph = await lineageService.buildLineageGraph(user.tenantId);
 
@@ -66,6 +69,9 @@ export function createLineageRoutes(
     const user = c.var.user;
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
+    }
+    if (!user.scopes.includes("lineage:read") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'lineage:read' required.");
     }
 
     const rawEntityType = c.req.query("entityType");

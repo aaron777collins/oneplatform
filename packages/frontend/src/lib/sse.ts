@@ -28,6 +28,8 @@ const MAX_DELAY_MS = 30_000;
 export class SSEConnection {
   private es: EventSource | null = null;
   private lastEventId: string | null = null;
+  /** Event types for which we have registered addEventListener listeners. */
+  private registeredEventTypes = new Set<string>();
   private reconnectDelay = BASE_DELAY_MS;
   private reconnectCount = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -94,21 +96,14 @@ export class SSEConnection {
     };
 
     // The server sends typed events (e.g. "log", "complete", "pipeline.run.started").
-    // We listen to every event type by intercepting the raw 'message' flow above
-    // AND any named events the caller needs to handle. Since we cannot enumerate
-    // event types ahead of time, we intercept at the EventSource level by
-    // overriding the dispatchEvent behavior. The caller receives eventType in
-    // the onMessage callback.
-    const originalDispatchEvent = es.dispatchEvent.bind(es);
-    es.dispatchEvent = (event: Event): boolean => {
-      if (event instanceof MessageEvent && event.type !== "message" && event.type !== "open" && event.type !== "error") {
-        if (event.lastEventId) {
-          this.lastEventId = event.lastEventId;
-        }
-        this.handlers?.onMessage(event.type, event.data as string, event.lastEventId || null);
-      }
-      return originalDispatchEvent(event);
-    };
+    // Named SSE events don't fire the generic onmessage handler. We register
+    // addEventListener for each known event type. New event types are registered
+    // dynamically via addEventTypeListener when callers need them.
+    //
+    // Re-register previously known event types on reconnect.
+    for (const eventType of this.registeredEventTypes) {
+      this.addEventListenerForType(es, eventType);
+    }
 
     es.onerror = (event) => {
       this.handlers?.onError?.(event);
@@ -149,5 +144,28 @@ export class SSEConnection {
       clearTimeout(this.healthTimer);
       this.healthTimer = null;
     }
+  }
+
+  /**
+   * Register a listener for a named SSE event type (e.g. "log", "pipeline.run.started").
+   * Named events are not delivered to the generic onmessage handler — they
+   * require an explicit addEventListener call. This method is idempotent:
+   * calling it multiple times with the same eventType is safe.
+   */
+  addEventTypeListener(eventType: string): void {
+    if (this.registeredEventTypes.has(eventType)) return;
+    this.registeredEventTypes.add(eventType);
+    if (this.es !== null) {
+      this.addEventListenerForType(this.es, eventType);
+    }
+  }
+
+  private addEventListenerForType(es: EventSource, eventType: string): void {
+    es.addEventListener(eventType, ((event: MessageEvent) => {
+      if (event.lastEventId) {
+        this.lastEventId = event.lastEventId;
+      }
+      this.handlers?.onMessage(eventType, event.data as string, event.lastEventId || null);
+    }) as EventListener);
   }
 }

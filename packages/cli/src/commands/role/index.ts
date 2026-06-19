@@ -30,18 +30,25 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
 }
 
 async function assignAction(roleName: string, opts: AssignOpts, ctx: CommandContext): Promise<void> {
-  await ctx.http.post(
-    `/api/v1/roles/${encodeURIComponent(roleName)}/members`,
-    { userId: opts.user },
-  );
+  // Fetch user, add role to their roles array, and PUT back
+  const user = await ctx.http.get<Record<string, unknown>>(`/api/v1/users/${encodeURIComponent(opts.user)}`);
+  const rawRoles = user["roles"];
+  const currentRoles: string[] = Array.isArray(rawRoles) ? (rawRoles as string[]) : [];
+  if (!currentRoles.includes(roleName)) {
+    currentRoles.push(roleName);
+  }
+  await ctx.http.put(`/api/v1/users/${encodeURIComponent(opts.user)}`, { ...user, roles: currentRoles });
   ctx.renderer.success(`Role '${roleName}' assigned to user ${opts.user}.`);
 }
 
 async function removeAction(roleName: string, opts: AssignOpts, ctx: CommandContext): Promise<void> {
   await confirmDestructive(`Remove role '${roleName}' from user '${opts.user}'?`, ctx.yes);
-  await ctx.http.delete(
-    `/api/v1/roles/${encodeURIComponent(roleName)}/members/${encodeURIComponent(opts.user)}`,
-  );
+  // Fetch user, remove role from their roles array, and PUT back
+  const user = await ctx.http.get<Record<string, unknown>>(`/api/v1/users/${encodeURIComponent(opts.user)}`);
+  const rawRoles = user["roles"];
+  const currentRoles: string[] = Array.isArray(rawRoles) ? (rawRoles as string[]) : [];
+  const updatedRoles = currentRoles.filter((r) => r !== roleName);
+  await ctx.http.put(`/api/v1/users/${encodeURIComponent(opts.user)}`, { ...user, roles: updatedRoles });
   ctx.renderer.success(`Role '${roleName}' removed from user ${opts.user}.`);
 }
 

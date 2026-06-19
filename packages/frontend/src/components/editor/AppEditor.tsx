@@ -116,8 +116,9 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
     () =>
       debounce(async (path: string, content: string, fileVersion: number) => {
         try {
+          const encodedPath = path.split("/").map(encodeURIComponent).join("/");
           const result = await client.put<{ data: { fileVersion: number } }>(
-            `/v1/apps/${appId}/files/${encodeURIComponent(path)}`,
+            `/v1/apps/${appId}/files/${encodedPath}`,
             { content, fileVersion },
           );
           editorStore.markSaved(path, result.data.fileVersion);
@@ -150,8 +151,9 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
     if (activeFilePath === null || activeFile === undefined) return;
     void (async () => {
       try {
+        const encodedPath = activeFilePath.split("/").map(encodeURIComponent).join("/");
         const result = await client.put<{ data: { fileVersion: number } }>(
-          `/v1/apps/${appId}/files/${encodeURIComponent(activeFilePath)}`,
+          `/v1/apps/${appId}/files/${encodedPath}`,
           { content: activeFile.content, fileVersion: activeFile.fileVersion },
         );
         editorStore.markSaved(activeFilePath, result.data.fileVersion);

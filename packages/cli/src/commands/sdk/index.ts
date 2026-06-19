@@ -17,16 +17,15 @@ async function generateTypesAction(opts: GenerateTypesOpts, ctx: CommandContext)
   ctx.renderer.info("Fetching entity schemas from platform...");
 
   // The transport unwraps { data: T } envelopes automatically.
-  // The list endpoint returns { data: { items, nextCursor, total } }, so after
-  // unwrapping we get { items, nextCursor, total }. Fetch all pages so the
-  // generated file covers every entity type, not just the first page.
-  const result = await ctx.http.get<{
-    items: OntologyEntitySchema[];
-    nextCursor: string | null;
-    total: number | null;
-  }>("/api/v1/ontology", { limit: 200 });
+  // The list endpoint may return { items, nextCursor, total } (paginated) or
+  // a flat array depending on the ontology service version. Handle both shapes
+  // so the CLI works regardless.
+  const result = await ctx.http.get<
+    | { items: OntologyEntitySchema[]; nextCursor?: string | null; total?: number | null }
+    | OntologyEntitySchema[]
+  >("/api/v1/ontology", { limit: 200 });
 
-  const entities = result.items;
+  const entities: OntologyEntitySchema[] = Array.isArray(result) ? result : (result.items ?? []);
 
   if (entities.length === 0) {
     ctx.renderer.info("No entity schemas found. Create entities with `op ontology create` first.");

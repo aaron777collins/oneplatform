@@ -36,8 +36,11 @@ echo "[postgres-init] Applying generated service role passwords..."
 
 for SERVICE in auth gateway ingestion ontology pipeline execution app logging plugin; do
   PW=$(read_password "$INIT_DIR/db_password_${SERVICE}.txt")
+  # Use psql variable binding to prevent SQL injection from password contents.
+  # The :'-quoted_var' syntax causes psql to properly quote/escape the value.
   psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-    -c "ALTER ROLE ${SERVICE}_service_role WITH PASSWORD '$PW';"
+    -v "safe_pw=$PW" \
+    -c "ALTER ROLE ${SERVICE}_service_role WITH PASSWORD :'safe_pw';"
   echo "[postgres-init] Password set for ${SERVICE}_service_role"
 done
 
@@ -51,8 +54,10 @@ for PGBUSER in pgbouncer_admin pgbouncer_stats; do
     -c "SELECT 1 FROM pg_roles WHERE rolname = '${PGBUSER}';" | tr -d '[:space:]')
   if [ "$ROLE_EXISTS" = "1" ]; then
     PW=$(read_password "$INIT_DIR/db_password_${PGBUSER}.txt")
+    # Use psql variable binding to prevent SQL injection from password contents.
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-      -c "ALTER ROLE ${PGBUSER} WITH PASSWORD '$PW';"
+      -v "safe_pw=$PW" \
+      -c "ALTER ROLE ${PGBUSER} WITH PASSWORD :'safe_pw';"
     echo "[postgres-init] Password set for ${PGBUSER}"
   else
     echo "[postgres-init] Role ${PGBUSER} does not exist, skipping password set"

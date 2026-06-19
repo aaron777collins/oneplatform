@@ -8,6 +8,7 @@ import {
   createApp,
   loadMasterKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -145,6 +146,7 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
     serviceName: "execution-service",
     redis: noopRedis,
   });
+  setupProcessErrorHandlers(logger);
 
   // Step 4: Instantiate repositories
   const executionRepo = new ExecutionRepository(db);

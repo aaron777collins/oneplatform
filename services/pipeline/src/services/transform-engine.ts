@@ -413,7 +413,8 @@ export function sort(records: DataRecord[], fields: SortField[]): DataRecord[] {
       const av = a[field];
       const bv = b[field];
 
-      // Sort nulls/undefineds to the end
+      // Sort nulls/undefineds to the end; when both are null/undefined they are equal
+      if ((av === null || av === undefined) && (bv === null || bv === undefined)) continue;
       if (av === null || av === undefined) return 1;
       if (bv === null || bv === undefined) return -1;
 

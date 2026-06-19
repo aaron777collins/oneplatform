@@ -5,7 +5,7 @@
  * Rendered inline below the selected table row or in a side panel.
  */
 import * as React from "react";
-import { AlertCircle, Clock, RefreshCw } from "lucide-react";
+import { AlertCircle, Clock, RefreshCw, ChevronDown } from "lucide-react";
 import { RelativeTime } from "@/components/shared/RelativeTime.js";
 import { CopyButton } from "@/components/shared/CopyButton.js";
 import type { DLQJob } from "./DLQTable.js";
@@ -15,7 +15,17 @@ export interface DLQJobDetailProps {
   className?: string;
 }
 
+/** Extract a user-friendly summary from an error message (first sentence / line). */
+function summarizeError(message: string): string {
+  // Take the first line / sentence, up to 200 chars
+  const firstLine = (message.split("\n")[0] ?? message).trim();
+  const firstSentence = firstLine.split(/(?<=\.)\s/)[0] ?? firstLine;
+  const summary = firstSentence.length < firstLine.length ? firstSentence : firstLine;
+  return summary.length > 200 ? summary.slice(0, 197) + "..." : summary;
+}
+
 export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
+  const [showStack, setShowStack] = React.useState(false);
   const payloadString = React.useMemo(() => {
     try {
       return JSON.stringify(job.payload, null, 2);
@@ -23,6 +33,9 @@ export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
       return String(job.payload);
     }
   }, [job.payload]);
+
+  const errorSummary = summarizeError(job.errorMessage);
+  const hasFullMessage = errorSummary !== job.errorMessage;
 
   return (
     <div className={className}>
@@ -33,14 +46,39 @@ export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
             <AlertCircle className="h-4 w-4 text-[var(--color-destructive)]" aria-hidden="true" />
             <h3 className="text-sm font-semibold">Error</h3>
           </div>
-          <div className="rounded-md bg-red-50 dark:bg-red-950/20 p-3 text-xs font-mono text-red-800 dark:text-red-300">
-            <p className="font-semibold">{job.errorMessage}</p>
-            {job.errorStack !== undefined && (
-              <pre className="mt-2 whitespace-pre-wrap text-red-700/80 dark:text-red-400/80">
-                {job.errorStack}
-              </pre>
+
+          {/* User-friendly summary */}
+          <div className="rounded-md bg-red-50 dark:bg-red-950/20 p-3 text-sm text-red-800 dark:text-red-300">
+            <p className="font-medium">{errorSummary}</p>
+            {hasFullMessage && (
+              <p className="mt-1 text-xs text-red-700/80 dark:text-red-400/80">
+                {job.errorMessage}
+              </p>
             )}
           </div>
+
+          {/* Stack trace — hidden by default behind a toggle */}
+          {job.errorStack !== undefined && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setShowStack((v) => !v)}
+                className="flex items-center gap-1 text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors"
+                aria-expanded={showStack}
+              >
+                <ChevronDown
+                  className={`h-3 w-3 transition-transform ${showStack ? "rotate-180" : ""}`}
+                  aria-hidden="true"
+                />
+                {showStack ? "Hide" : "Show"} stack trace
+              </button>
+              {showStack && (
+                <pre className="mt-1 rounded-md bg-red-50 dark:bg-red-950/20 p-3 text-xs font-mono text-red-700/80 dark:text-red-400/80 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                  {job.errorStack}
+                </pre>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Metadata */}

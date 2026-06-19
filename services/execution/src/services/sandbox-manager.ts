@@ -252,6 +252,11 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
         "Sandbox is starting up or reconnecting — no healthy instance available.",
       );
     }
+    if (primary.state === "DRAINING_OLD") {
+      throw new ExecutionSandboxUnavailableError(
+        "Sandbox is draining for recycle — no healthy instance available. Retry shortly.",
+      );
+    }
     return primary;
   }
 

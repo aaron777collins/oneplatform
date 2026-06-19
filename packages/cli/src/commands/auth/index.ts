@@ -54,12 +54,24 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
     const email = await promptText("Email:");
     const pass = await promptPassword("Password:");
     // Auth service login returns { accessToken, user: { email } } — not apiKey.
-    const resp = await ctx.http.post<{ accessToken: string; user: { email: string } }>(
+    // Some gateway configurations may also return { token } or { access_token },
+    // so we defensively extract the token from whichever field is present.
+    const resp = await ctx.http.post<Record<string, unknown>>(
       "/api/v1/auth/login",
       { email, password: pass },
     );
-    apiKey = resp.accessToken;
-    ctx.renderer.success(`Logged in as ${resp.user.email} on ${platformUrl}`);
+    const token = (resp["accessToken"] ?? resp["token"] ?? resp["access_token"]) as string | undefined;
+    if (!token || typeof token !== "string") {
+      throw new CliError(
+        "Login succeeded but the response did not contain an access token. " +
+        "The gateway may need its publicRoutes configured to allow /api/v1/auth/login.",
+        EXIT.SERVER,
+      );
+    }
+    apiKey = token;
+    const user = resp["user"] as { email?: string } | undefined;
+    const displayEmail = user?.email ?? email;
+    ctx.renderer.success(`Logged in as ${displayEmail} on ${platformUrl}`);
   }
 
   // Persist the profile and encrypted credential.
@@ -73,11 +85,9 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
 
 async function logoutAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const platformUrl = ctx.config.platformUrl;
-  // Derive the active profile name from context rather than hardcoding "default",
-  // so multi-profile users always log out of the profile they actually ran the command against.
-  const { getActiveProfileName } = await import("../../lib/profiles.js");
-  const profileName = getActiveProfileName();
-  deleteCredentials(profileName);
+  // Use the profile name resolved from --profile / OP_PROFILE / active profile
+  // so multi-profile users always log out of the profile they actually specified.
+  deleteCredentials(ctx.profileName);
   ctx.renderer.success(`Logged out of ${platformUrl}`);
 }
 

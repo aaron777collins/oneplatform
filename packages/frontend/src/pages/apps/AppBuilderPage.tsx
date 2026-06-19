@@ -38,7 +38,7 @@ export function AppBuilderPage() {
   const navigate = useNavigate();
   const client = useApiClient();
   const queryClient = useQueryClient();
-  const builderStore = useBuilderStore();
+  const resetLayout = useBuilderStore((s) => s.resetLayout);
 
   const query = useQuery({
     queryKey: ["apps", id, "meta"],
@@ -48,8 +48,8 @@ export function AppBuilderPage() {
 
   // Reset builder state when the app id changes so stale layouts are not shown
   React.useEffect(() => {
-    builderStore.resetLayout();
-  // builderStore is a stable Zustand reference
+    resetLayout();
+  // resetLayout is a stable Zustand action reference
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

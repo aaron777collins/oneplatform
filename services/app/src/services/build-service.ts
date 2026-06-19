@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import { decrypt } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type pg from "pg";
@@ -215,6 +215,7 @@ export interface BuildServiceDeps {
   executionServiceUrl:   string;
   masterKey:             Buffer;
   logger:                Logger;
+  serviceTokenSigner:    ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +235,7 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
   const {
     pool, appRepo, fileRepo, buildRepo, permRepo,
     redis, executionServiceUrl, masterKey, logger,
+    serviceTokenSigner,
   } = deps;
 
   // MinIO credentials — read once at service creation, not on every call (W10)
@@ -242,9 +244,6 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
   const minioSecretKey = process.env["MINIO_SECRET_KEY"] ?? "minioadmin";
   const minioRegion    = process.env["MINIO_REGION"]     ?? "us-east-1";
   const minioBucket    = "op-app-artifacts";
-
-  // Service token for inter-service calls (W3)
-  const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
 
   // Acquire a Postgres transaction-scoped advisory lock keyed to the app ID.
   // This serialises concurrent build triggers for the same app without
@@ -457,11 +456,12 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
 
       let response: Response;
       try {
+        const signedToken = await serviceTokenSigner.sign();
         response = await fetch(`${executionServiceUrl}/internal/execution/execute`, {
           method:  "POST",
           headers: {
             "Content-Type":    "application/json",
-            "X-Service-Token": serviceToken,
+            "X-Service-Token": signedToken,
           },
           body:   JSON.stringify(payload),
           signal: abortController.signal,

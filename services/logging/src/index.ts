@@ -35,6 +35,7 @@ import {
   createApp,
   loadMasterKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -148,6 +149,7 @@ export async function createServiceApp(config: LoggingConfig): Promise<ServiceAp
     serviceName: "logging-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   const events = createEventPublisher({ redis });
   void events; // Logging Service is a pure consumer; events are unused here

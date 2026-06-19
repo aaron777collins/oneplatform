@@ -11,6 +11,7 @@ import {
   createApp,
   loadMasterKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import { WebhookRepository } from "./repositories/webhook-repository.js";
@@ -153,6 +154,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     serviceName: "gateway-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   // Step 5: Repositories
   const webhookRepo = new WebhookRepository(db);

@@ -15,6 +15,8 @@ import type {
   CacheAccessor,
   FetchProxy,
   CredentialAccessor,
+  TracingContext,
+  PluginContext,
 } from "./context.js";
 import type { AuthProviderMetadata } from "./metadata.js";
 
@@ -35,6 +37,13 @@ export interface CallbackParams {
    * For SAML flows, this is the decoded assertion value after base64 decoding.
    */
   code: string;
+
+  /**
+   * The state parameter from the OAuth callback, already verified by the Auth Service.
+   * Plugins can use this to correlate the callback with the original authorization
+   * request (e.g., to retrieve the redirect_uri cached during getAuthorizationUrl).
+   */
+  state?: string;
 
   /** Set if the provider returned an error in the callback. */
   error?: string;
@@ -68,6 +77,12 @@ export interface AuthContext {
    * Never log or cache credential values — the platform manages rotation.
    */
   credentials: CredentialAccessor;
+
+  /**
+   * Distributed tracing context for creating child spans and propagating
+   * trace headers into outbound HTTP requests during the auth flow.
+   */
+  tracing: TracingContext;
 }
 
 export interface AuthResult {
@@ -102,6 +117,21 @@ export interface TokenPair {
 
 export interface AuthProvider {
   metadata(): AuthProviderMetadata;
+
+  /**
+   * Optional lifecycle hook called once by the platform after loading the plugin
+   * bundle with the full PluginContext. Use this to perform one-time setup such as:
+   *   - Parsing and validating configuration
+   *   - Fetching and caching OIDC discovery documents
+   *   - Pre-resolving credentials for use by AuthContext-scoped methods
+   *
+   * If not implemented, the platform skips initialization and calls
+   * getAuthorizationUrl / handleCallback directly.
+   *
+   * @param config Tenant-admin configuration values (validated against configSchema).
+   * @param context Full plugin context with credentials, fetch, cache, tracing, etc.
+   */
+  initialize?(config: Record<string, unknown>, context: PluginContext): Promise<void>;
 
   /**
    * Build the authorization URL that the browser navigates to.

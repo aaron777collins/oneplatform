@@ -72,7 +72,7 @@ export interface PipelineDefinition {
 export interface PipelineStep {
   readonly id: string;
   readonly name: string;
-  readonly type: 'code' | 'connector' | 'transformer' | 'conditional' | 'parallel' | 'webhook';
+  readonly type: 'code' | 'connector' | 'transformer' | 'conditional' | 'parallel' | 'webhook' | 'transform' | 'wait' | 'approval' | 'sub_workflow';
   readonly inputs?: Record<string, PipelineInputSource>;
   readonly onError?: 'fail' | 'skip';
   readonly condition?: string;
@@ -107,6 +107,10 @@ export interface ConnectorInstance {
   readonly name: string;
   readonly pluginId: string;
   readonly status: 'healthy' | 'error' | 'unchecked';
+  readonly syncMode: 'full' | 'incremental';
+  readonly scheduleCron: string | null;
+  readonly isEnabled: boolean;
+  readonly config: Record<string, unknown>;
   readonly lastSyncAt: string | null;
   readonly createdAt: string;
 }
@@ -115,6 +119,10 @@ export interface CreateConnectorRequest {
   readonly name: string;
   readonly pluginId: string;
   readonly config: Record<string, unknown>;
+  readonly credentials?: Record<string, unknown>;
+  readonly syncMode?: 'full' | 'incremental';
+  readonly isEnabled?: boolean;
+  readonly scheduleCron?: string;
 }
 
 export interface UpdateConnectorRequest {

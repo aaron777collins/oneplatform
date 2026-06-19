@@ -31,6 +31,7 @@ import {
   createApp,
   loadMasterKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -171,6 +172,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
     serviceName: "auth-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   const events = createEventPublisher({ redis });
 
@@ -308,6 +310,12 @@ async function main(): Promise<void> {
   // Step 3: Read bootstrap token into memory (null if already completed).
   const bootstrapToken = await readBootstrapToken();
 
+  // V6-020: Log token to console so operators can retrieve it from server logs
+  // instead of exposing it via the /status API endpoint.
+  if (bootstrapToken !== null) {
+    console.info("Bootstrap token (use this to complete setup):", bootstrapToken);
+  }
+
   const { app, cleanup } = await createServiceApp({
     databaseUrl: config.OP_DATABASE_URL,
     redisUrl: config.OP_REDIS_URL,
@@ -376,6 +384,15 @@ async function main(): Promise<void> {
   });
 
   process.on("SIGTERM", () => {
+    // V6-053: Force-exit after 30 seconds if graceful shutdown stalls (e.g.
+    // long-running requests or stuck DB connections). The timer is unref'd so
+    // it does not keep the event loop alive when shutdown completes normally.
+    const forceExitTimer = setTimeout(() => {
+      console.error("Graceful shutdown timed out after 30s — forcing exit.");
+      process.exit(1);
+    }, 30_000);
+    forceExitTimer.unref();
+
     server.close(() => {
       void cleanup().then(() => process.exit(0));
     });

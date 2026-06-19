@@ -178,15 +178,15 @@ export function ApiKeysPage() {
       } else {
         expiresAt = expiryPresetToDate(expiryPreset);
       }
-      return client.post<{ data: ApiKey }>("/v1/api-keys", {
+      return client.post<ApiKey>("/v1/api-keys", {
         ...values,
         scopes: selectedScopes,
         ...(expiresAt !== undefined ? { expiresAt } : {}),
       });
     },
     onSuccess: (response) => {
-      if (response.data.key !== undefined) {
-        setNewKey(response.data.key);
+      if (response.key !== undefined) {
+        setNewKey(response.key);
       }
       void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
       form.reset();
@@ -214,12 +214,12 @@ export function ApiKeysPage() {
 
   const rotateMutation = useMutation({
     mutationFn: (keyId: string) =>
-      client.post<{ data: { id: string; key: string; keyPrefix: string; scopes: string[]; createdAt: string } }>(
+      client.post<{ id: string; key: string; keyPrefix: string; scopes: string[]; createdAt: string }>(
         `/v1/api-keys/${keyId}/rotate`,
       ),
     onSuccess: (response) => {
       setRotateTarget(null);
-      setRotatedKey(response.data.key);
+      setRotatedKey(response.key);
       void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
     },
     onError: (error) => {

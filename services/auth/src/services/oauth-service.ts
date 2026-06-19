@@ -129,6 +129,12 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
     return `${getBaseUrl()}/auth/callback`;
   }
 
+  function getAllowedOrigins(): string[] {
+    const raw = process.env["OP_ALLOWED_ORIGINS"];
+    if (!raw) return [];
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+
   // PKCE: SHA-256 of the verifier, base64url-encoded
   function generateCodeChallenge(verifier: string): string {
     return createHash("sha256")
@@ -140,6 +146,32 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
   // -------------------------------------------------------------------------
   // Get authorization URL (step 1 of OAuth flow)
   // -------------------------------------------------------------------------
+
+  /**
+   * V6-061: Validate that a redirect URI is safe by checking it against
+   * allowed origins. Open redirects would let an attacker steal auth codes.
+   */
+  function validateRedirectUri(uri: string): void {
+    const allowedOrigins = getAllowedOrigins();
+    // Always allow the platform's own base URL origin
+    const baseOrigin = new URL(getBaseUrl()).origin;
+    const allAllowed = new Set([baseOrigin, ...allowedOrigins]);
+
+    let parsedUri: URL;
+    try {
+      parsedUri = new URL(uri);
+    } catch {
+      throw new OAuthProviderDisabledError(
+        `Invalid redirect URI: "${uri}" is not a valid URL.`
+      );
+    }
+
+    if (!allAllowed.has(parsedUri.origin)) {
+      throw new OAuthProviderDisabledError(
+        `Redirect URI origin "${parsedUri.origin}" is not in the allowed origins list.`
+      );
+    }
+  }
 
   async function getAuthorizationUrl(
     providerName: string,
@@ -160,7 +192,12 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
     // State: 16 random bytes as hex (32 hex chars)
     const state = randomBytes(16).toString("hex");
 
+    // V6-061: Default to platform callback URL if not specified, and validate
+    // any explicitly provided redirect URI against allowed origins.
     const resolvedRedirectUri = redirectUri ?? getDefaultRedirectUri();
+    if (redirectUri !== undefined) {
+      validateRedirectUri(resolvedRedirectUri);
+    }
 
     const statePayload: OAuthStatePayload = {
       provider: providerName,

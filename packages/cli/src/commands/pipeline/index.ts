@@ -41,8 +41,8 @@ async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
 }
 
 async function getAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  const pipeline = await ctx.http.get<unknown>(`/api/v1/pipelines/${encodeURIComponent(id)}`);
-  ctx.renderer.json(pipeline);
+  const pipeline = await ctx.http.get<Record<string, unknown>>(`/api/v1/pipelines/${encodeURIComponent(id)}`);
+  ctx.renderer.render([pipeline], PIPELINE_COLUMNS);
 }
 
 async function createAction(opts: { file: string }, ctx: CommandContext): Promise<void> {
@@ -114,8 +114,8 @@ async function runsAction(id: string, opts: RunsOpts, ctx: CommandContext): Prom
 }
 
 async function runStatusAction(runId: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  const status = await ctx.http.get<unknown>(`/api/v1/pipeline-runs/${encodeURIComponent(runId)}`);
-  ctx.renderer.json(status);
+  const status = await ctx.http.get<Record<string, unknown>>(`/api/v1/pipeline-runs/${encodeURIComponent(runId)}`);
+  ctx.renderer.render([status], RUN_COLUMNS);
 }
 
 async function runCancelAction(runId: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
@@ -146,8 +146,15 @@ async function runLogsAction(runId: string, opts: RunLogsOpts, ctx: CommandConte
   const query: Record<string, unknown> = {};
   if (opts.step) query["stepId"] = opts.step;
   if (opts.level) query["level"] = opts.level;
+  const LOG_COLUMNS = [
+    { header: "Timestamp", key: "timestamp" },
+    { header: "Level", key: "level" },
+    { header: "Step", key: "stepId" },
+    { header: "Message", key: "message" },
+  ];
   const logs = await ctx.http.get<unknown>(`/api/v1/pipeline-runs/${encodeURIComponent(runId)}/logs`, query);
-  ctx.renderer.json(logs);
+  const logArray = Array.isArray(logs) ? logs : [logs];
+  ctx.renderer.render(logArray, LOG_COLUMNS);
 }
 
 export function registerPipeline(program: Command): void {

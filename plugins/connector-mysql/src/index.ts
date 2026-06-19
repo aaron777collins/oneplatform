@@ -74,7 +74,6 @@ interface HandleMetadata {
   proxyUrl: string;
   /** Primary key column name discovered at connect() time. Null for custom queries. */
   primaryKeyColumn: string | null;
-  connectionString: string; // forwarded to the proxy per-request; never logged
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -582,9 +581,10 @@ class MySqlConnector implements Connector {
     try {
       const parsed = parseConfig(config);
 
-      // Retrieve the connection string from the secrets vault.
-      // The proxy receives it per-request — we store it in handle metadata so
-      // fetchBatch can forward it without hitting credentials again.
+      // Retrieve the connection string from the secrets vault for use during
+      // connect-time discovery. Not stored in handle metadata — fetchBatch
+      // retrieves it fresh from the credential store on each call to avoid
+      // caching secrets in serializable state.
       const connectionString = await context.credentials.get("connectionString");
 
       // Discover the primary key once upfront and cache it in the handle so
@@ -612,7 +612,6 @@ class MySqlConnector implements Connector {
         customQuery: parsed.customQuery,
         proxyUrl: parsed.proxyUrl,
         primaryKeyColumn,
-        connectionString,
       };
 
       const connectionId = `mysql:${parsed.database}.${parsed.table}:${Date.now()}`;
@@ -632,6 +631,11 @@ class MySqlConnector implements Connector {
     const span = context.tracing.startSpan("MySqlConnector.fetchBatch");
 
     try {
+      // Retrieve the connection string fresh from the credential store on each
+      // batch instead of reading it from handle metadata. This avoids caching
+      // secrets in serializable state and picks up credential rotations.
+      const connectionString = await context.credentials.get("connectionString");
+
       // Decode the opaque cursor or start from offset 0 with no incremental filter.
       const decoded: CursorPayload =
         cursor !== null ? decodeCursor(cursor) : { offset: 0, since: null };
@@ -657,7 +661,7 @@ class MySqlConnector implements Connector {
 
       const proxyResponse = await runProxyQuery(
         meta.proxyUrl,
-        { connectionString: meta.connectionString, query, params },
+        { connectionString, query, params },
         context,
       );
 

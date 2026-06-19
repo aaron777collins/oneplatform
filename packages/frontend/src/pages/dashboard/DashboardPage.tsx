@@ -12,7 +12,7 @@
  * Real-time: usePlatformEvents invalidates pipeline and ingestion queries on events,
  * so the pipeline panel updates without polling.
  */
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -24,6 +24,9 @@ import {
   LayoutGrid,
   X,
   ArrowRight,
+  GripVertical,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import {
   Card,
@@ -235,6 +238,38 @@ const LEVEL_CLASSES: Record<ActivityEvent["level"], string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Widget ordering — persisted in localStorage
+// ---------------------------------------------------------------------------
+
+type WidgetId = "pipelines" | "activity" | "health";
+const DEFAULT_WIDGET_ORDER: WidgetId[] = ["pipelines", "activity", "health"];
+const WIDGET_ORDER_KEY = "oneplatform.dashboard.widget-order";
+
+function loadWidgetOrder(): WidgetId[] {
+  try {
+    const raw = localStorage.getItem(WIDGET_ORDER_KEY);
+    if (raw === null) return DEFAULT_WIDGET_ORDER;
+    const parsed = JSON.parse(raw) as WidgetId[];
+    // Validate: must contain exactly the known widget IDs
+    if (!Array.isArray(parsed) || parsed.length !== DEFAULT_WIDGET_ORDER.length) return DEFAULT_WIDGET_ORDER;
+    for (const id of DEFAULT_WIDGET_ORDER) {
+      if (!parsed.includes(id)) return DEFAULT_WIDGET_ORDER;
+    }
+    return parsed;
+  } catch {
+    return DEFAULT_WIDGET_ORDER;
+  }
+}
+
+function saveWidgetOrder(order: WidgetId[]): void {
+  try {
+    localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    // localStorage unavailable — non-fatal
+  }
+}
+
+// ---------------------------------------------------------------------------
 // DashboardPage component
 // ---------------------------------------------------------------------------
 
@@ -360,6 +395,160 @@ export default function DashboardPage() {
   const pipelines = pipelinesListData?.data ?? [];
   const activities = activityData?.data ?? [];
 
+  // Widget ordering state — persisted across reloads
+  const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(loadWidgetOrder);
+
+  const moveWidget = useCallback((index: number, direction: -1 | 1) => {
+    setWidgetOrder((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev] as WidgetId[];
+      const a = next[index] as WidgetId;
+      const b = next[target] as WidgetId;
+      next[index] = b;
+      next[target] = a;
+      saveWidgetOrder(next);
+      return next;
+    });
+  }, []);
+
+  // Widget render map — keyed by widget ID
+  const widgetRenderers: Record<WidgetId, (index: number) => React.ReactNode> = {
+    pipelines: (index) => (
+      <WidgetCard key="pipelines" widgetId="pipelines" label="Active Pipelines" index={index} total={widgetOrder.length} onMove={moveWidget}>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-base">Active Pipelines</CardTitle>
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/pipelines" className="text-xs">
+              View all
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {pipelinesListLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-5 w-16" />
+                </div>
+              ))}
+            </div>
+          ) : pipelines.length === 0 ? (
+            <p className="text-sm text-[var(--color-muted-foreground)]">
+              No pipelines yet.{" "}
+              <Link
+                to="/pipelines"
+                className="text-[var(--color-primary)] hover:underline"
+              >
+                Create one
+              </Link>
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-border)]" role="list">
+              {pipelines.slice(0, 8).map((pipeline) => (
+                <li
+                  key={pipeline.id}
+                  className="flex items-center justify-between py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      to="/pipelines/$id"
+                      params={{ id: pipeline.id }}
+                      className="text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      {pipeline.name}
+                    </Link>
+                    {pipeline.lastRunAt !== undefined && (
+                      <RelativeTime
+                        value={pipeline.lastRunAt}
+                        className="block text-xs text-[var(--color-muted-foreground)]"
+                      />
+                    )}
+                  </div>
+                  {pipeline.lastRunStatus !== undefined && (
+                    <RunStatusBadge status={pipeline.lastRunStatus} />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </WidgetCard>
+    ),
+    activity: (index) => (
+      <WidgetCard key="activity" widgetId="activity" label="Recent Activity" index={index} total={widgetOrder.length} onMove={moveWidget}>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-base">Recent Activity</CardTitle>
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/logs" className="text-xs">
+              View all
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {activityLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <Skeleton className="h-4 w-12 shrink-0" />
+                  <Skeleton className="h-4 w-full" />
+                </div>
+              ))}
+            </div>
+          ) : activities.length === 0 ? (
+            <p className="text-sm text-[var(--color-muted-foreground)]">
+              No recent activity.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-border)]" role="list">
+              {activities.map((event) => (
+                <li key={event.id} className="flex items-start gap-2 py-2">
+                  <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+                    <Badge className={LEVEL_CLASSES[event.level]}>
+                      {event.level}
+                    </Badge>
+                    <span className="text-xs text-[var(--color-muted-foreground)]">
+                      {event.service}
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm" title={event.message}>
+                      {truncate(event.message, 120)}
+                    </p>
+                    <RelativeTime
+                      value={event.createdAt}
+                      className="text-xs text-[var(--color-muted-foreground)]"
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </WidgetCard>
+    ),
+    health: (index) => (
+      <WidgetCard key="health" widgetId="health" label="Service Health" index={index} total={widgetOrder.length} onMove={moveWidget} fullWidth>
+        <CardHeader>
+          <CardTitle className="text-base">Service Health</CardTitle>
+          <CardDescription>
+            Status of all platform services. Refreshes every 30 seconds.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ServiceHealthGrid />
+        </CardContent>
+      </WidgetCard>
+    ),
+  };
+
+  // Separate grid-paired widgets from full-width ones for layout
+  const gridWidgets = widgetOrder.filter((id) => id !== "health");
+  const fullWidthWidgets = widgetOrder.filter((id) => id === "health");
+
   return (
     <div className="flex-1 overflow-y-auto">
       <header className="border-b border-[var(--color-border)] bg-[var(--color-background)] px-6 py-4">
@@ -379,136 +568,57 @@ export default function DashboardPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Active Pipelines */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-base">Active Pipelines</CardTitle>
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/pipelines" className="text-xs">
-                  View all
-                  <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-                </Link>
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {pipelinesListLoading ? (
-                <div className="space-y-3">
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="flex items-center justify-between">
-                      <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-5 w-16" />
-                    </div>
-                  ))}
-                </div>
-              ) : pipelines.length === 0 ? (
-                <p className="text-sm text-[var(--color-muted-foreground)]">
-                  No pipelines yet.{" "}
-                  <Link
-                    to="/pipelines"
-                    className="text-[var(--color-primary)] hover:underline"
-                  >
-                    Create one
-                  </Link>
-                </p>
-              ) : (
-                <ul className="divide-y divide-[var(--color-border)]" role="list">
-                  {pipelines.slice(0, 8).map((pipeline) => (
-                    <li
-                      key={pipeline.id}
-                      className="flex items-center justify-between py-2.5"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          to="/pipelines/$id"
-                          params={{ id: pipeline.id }}
-                          className="text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-ring)]"
-                        >
-                          {pipeline.name}
-                        </Link>
-                        {pipeline.lastRunAt !== undefined && (
-                          <RelativeTime
-                            value={pipeline.lastRunAt}
-                            className="block text-xs text-[var(--color-muted-foreground)]"
-                          />
-                        )}
-                      </div>
-                      {pipeline.lastRunStatus !== undefined && (
-                        <RunStatusBadge status={pipeline.lastRunStatus} />
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Recent Activity */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-base">Recent Activity</CardTitle>
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/logs" className="text-xs">
-                  View all
-                  <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-                </Link>
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {activityLoading ? (
-                <div className="space-y-3">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <Skeleton className="h-4 w-12 shrink-0" />
-                      <Skeleton className="h-4 w-full" />
-                    </div>
-                  ))}
-                </div>
-              ) : activities.length === 0 ? (
-                <p className="text-sm text-[var(--color-muted-foreground)]">
-                  No recent activity.
-                </p>
-              ) : (
-                <ul className="divide-y divide-[var(--color-border)]" role="list">
-                  {activities.map((event) => (
-                    <li key={event.id} className="flex items-start gap-2 py-2">
-                      <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
-                        <Badge className={LEVEL_CLASSES[event.level]}>
-                          {event.level}
-                        </Badge>
-                        <span className="text-xs text-[var(--color-muted-foreground)]">
-                          {event.service}
-                        </span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm" title={event.message}>
-                          {truncate(event.message, 120)}
-                        </p>
-                        <RelativeTime
-                          value={event.createdAt}
-                          className="text-xs text-[var(--color-muted-foreground)]"
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+          {gridWidgets.map((id) => widgetRenderers[id](widgetOrder.indexOf(id)))}
         </div>
 
-        {/* Service Health */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Service Health</CardTitle>
-            <CardDescription>
-              Status of all platform services. Refreshes every 30 seconds.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ServiceHealthGrid />
-          </CardContent>
-        </Card>
+        {fullWidthWidgets.map((id) => widgetRenderers[id](widgetOrder.indexOf(id)))}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WidgetCard — wrapper that adds reorder controls to each dashboard widget
+// ---------------------------------------------------------------------------
+
+interface WidgetCardProps {
+  widgetId: WidgetId;
+  label: string;
+  index: number;
+  total: number;
+  onMove: (index: number, direction: -1 | 1) => void;
+  fullWidth?: boolean;
+  children: React.ReactNode;
+}
+
+function WidgetCard({ widgetId, label, index, total, onMove, fullWidth, children }: WidgetCardProps) {
+  return (
+    <Card className={`group/widget relative ${fullWidth ? "lg:col-span-2" : ""}`}>
+      {/* Reorder controls — visible on hover */}
+      <div className="absolute -left-1 top-2 z-10 flex flex-col items-center gap-0.5 opacity-0 group-hover/widget:opacity-100 transition-opacity">
+        <GripVertical className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={() => onMove(index, -1)}
+          disabled={index === 0}
+          className="rounded p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          aria-label={`Move ${label} up`}
+          title="Move up"
+        >
+          <ChevronUp className="h-3 w-3" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onMove(index, 1)}
+          disabled={index === total - 1}
+          className="rounded p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          aria-label={`Move ${label} down`}
+          title="Move down"
+        >
+          <ChevronDown className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+      {children}
+    </Card>
   );
 }

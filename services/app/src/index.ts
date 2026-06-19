@@ -13,6 +13,7 @@ import {
   createServiceTokenSigner,
   loadServicePrivateKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -254,6 +255,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
   // Step 3: Create logger
   const logger = createLogger({ serviceName: "app-service", redis });
+  setupProcessErrorHandlers(logger);
 
   // Redis error handling — degraded mode, not fatal
   redis.on("error", (err: Error) => {
@@ -272,6 +274,9 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   // Step 5: Create services
   const appService = createAppService({ appRepo, fileRepo, logger });
 
+  const privateKeyPem = await loadServicePrivateKey("app-service", serviceKeysDir);
+  const serviceTokenSigner = await createServiceTokenSigner("app-service", privateKeyPem);
+
   const buildService = createBuildService({
     pool: db,
     appRepo,
@@ -282,10 +287,8 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     executionServiceUrl,
     masterKey,
     logger,
+    serviceTokenSigner,
   });
-
-  const privateKeyPem = await loadServicePrivateKey("app-service", serviceKeysDir);
-  const serviceTokenSigner = await createServiceTokenSigner("app-service", privateKeyPem);
 
   const deployService = createDeployService({
     appRepo,

@@ -13,6 +13,7 @@
 //   - Embed tokens are signed with a dedicated secret (embedSecret), distinct
 //     from the user auth JWT secret, so they cannot be confused with sessions.
 
+import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, UnauthorizedError, NotFoundError } from "@oneplatform/core";
@@ -262,6 +263,10 @@ export function createEmbedServeRoutes(
 
     const appUrl = `${baseUrl}/apps/${payload.appId}`;
 
+    // Generate a per-request nonce so inline scripts can execute under a
+    // strict CSP without resorting to 'unsafe-inline'.
+    const nonce = randomBytes(16).toString("base64");
+
     const html = [
       `<!DOCTYPE html>`,
       `<html lang="en">`,
@@ -272,7 +277,7 @@ export function createEmbedServeRoutes(
       `</head>`,
       `<body>`,
       `  <div id="app"></div>`,
-      `  <script>`,
+      `  <script nonce="${nonce}">`,
       `    window.__OP_APP_CONFIG__ = ${configJson};`,
       `    window.__OP_EMBED_TOKEN__ = ${JSON.stringify(rawToken)};`,
       `  </script>`,
@@ -288,7 +293,7 @@ export function createEmbedServeRoutes(
         "Cache-Control":           "no-store",
         "Content-Security-Policy": [
           `default-src 'self'`,
-          `script-src 'self'`,
+          `script-src 'self' 'nonce-${nonce}'`,
           `connect-src 'self'`,
           `style-src 'self' 'unsafe-inline'`,
           `frame-ancestors ${frameAncestors}`,
@@ -307,10 +312,14 @@ export function createEmbedServeRoutes(
 // ---------------------------------------------------------------------------
 
 function buildFrameAncestors(allowedOrigins: string[]): string {
-  if (allowedOrigins.length === 0) return "'none'";
-  if (allowedOrigins.includes("*")) return "*";
+  if (allowedOrigins.length === 0) return "'self'";
 
-  const origins = allowedOrigins.map((o) =>
+  // Filter out wildcard entries — '*' in frame-ancestors is too permissive
+  // and enables clickjacking. Default to 'self' when only wildcards remain.
+  const safe = allowedOrigins.filter((o) => o !== "*");
+  if (safe.length === 0) return "'self'";
+
+  const origins = safe.map((o) =>
     o.startsWith("*.") ? `https://${o.slice(2)}` : `https://${o}`
   );
   return `'self' ${origins.join(" ")}`;

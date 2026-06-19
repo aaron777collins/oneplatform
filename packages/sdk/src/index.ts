@@ -99,6 +99,9 @@ export type {
   WriteFileRequest,
 } from './resources/apps.js';
 
+// Connector sync result type
+export type { TriggerSyncResult } from './resources/connectors.js';
+
 // gRPC-Web client — high-throughput data & ingestion operations
 export { createGrpcClient, GrpcClientError } from './grpc-client.js';
 export type {

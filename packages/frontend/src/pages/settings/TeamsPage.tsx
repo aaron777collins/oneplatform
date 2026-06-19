@@ -9,13 +9,7 @@ import { z } from "zod";
 import { Trash2, Info } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { Button } from "@/components/ui/button.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select.js";
+// Select components no longer used — roles now use toggle buttons for multi-role support
 import {
   Table,
   TableBody,
@@ -43,9 +37,20 @@ interface Member {
   createdAt: string;
 }
 
+const ALL_ROLES = ["viewer", "editor", "developer", "tenant-admin", "admin"] as const;
+type Role = (typeof ALL_ROLES)[number];
+
+const ROLE_LABELS: Record<Role, string> = {
+  viewer: "Viewer",
+  editor: "Editor",
+  developer: "Developer",
+  "tenant-admin": "Tenant Admin",
+  admin: "Admin",
+};
+
 const inviteSchema = z.object({
   email: z.string().email("Enter a valid email address"),
-  role: z.enum(["viewer", "editor", "admin"]),
+  role: z.enum(ALL_ROLES),
 });
 type InviteValues = z.infer<typeof inviteSchema>;
 
@@ -68,8 +73,8 @@ export function TeamsPage() {
   const members = membersQuery.data?.data ?? [];
 
   const updateRoleMutation = useMutation({
-    mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
-      client.put(`/v1/users/${memberId}`, { roles: [role] }),
+    mutationFn: ({ memberId, roles }: { memberId: string; roles: string[] }) =>
+      client.put(`/v1/users/${memberId}`, { roles }),
     onSuccess: () => {
       toast({ title: "Role updated" });
       void queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -146,19 +151,34 @@ export function TeamsPage() {
                   )}
                 </TableCell>
                 <TableCell>
-                  <Select
-                    value={member.roles[0]}
-                    onValueChange={(role) => updateRoleMutation.mutate({ memberId: member.id, role })}
-                  >
-                    <SelectTrigger className="w-28 h-7 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="viewer">Viewer</SelectItem>
-                      <SelectItem value="editor">Editor</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex flex-wrap gap-1">
+                    {ALL_ROLES.map((role) => {
+                      const active = member.roles.includes(role);
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border ${
+                            active
+                              ? "bg-[var(--color-primary,#6366f1)] text-white border-[var(--color-primary,#6366f1)]"
+                              : "bg-transparent text-[var(--color-muted-foreground,#6b7280)] border-[var(--color-border,#e5e7eb)] hover:border-[var(--color-primary,#6366f1)]/50"
+                          }`}
+                          onClick={() => {
+                            const next = active
+                              ? member.roles.filter((r) => r !== role)
+                              : [...member.roles, role];
+                            // Ensure at least one role remains
+                            if (next.length === 0) return;
+                            updateRoleMutation.mutate({ memberId: member.id, roles: next });
+                          }}
+                          aria-pressed={active}
+                          aria-label={`${active ? "Remove" : "Add"} ${ROLE_LABELS[role]} role`}
+                        >
+                          {ROLE_LABELS[role]}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </TableCell>
                 <TableCell className="text-sm">
                   <RelativeTime value={member.createdAt} />

@@ -37,6 +37,11 @@ spec:
             {{- include "oneplatform.commonEnv" . | nindent 12 }}
             - name: SERVICE_NAME
               value: "plugin-service"
+            - name: OP_SERVICE_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oneplatform.secretName" . }}
+                  key: serviceTokenSecret
             {{- range $k, $v := .Values.plugin.env }}
             - name: {{ $k }}
               value: {{ $v | quote }}
@@ -45,6 +50,7 @@ spec:
             - name: http
               containerPort: {{ .Values.plugin.service.port }}
               protocol: TCP
+          {{- include "oneplatform.startupProbe" . | nindent 10 }}
           {{- include "oneplatform.livenessProbe" . | nindent 10 }}
           {{- include "oneplatform.readinessProbe" . | nindent 10 }}
           resources:

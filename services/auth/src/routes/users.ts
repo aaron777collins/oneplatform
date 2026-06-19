@@ -213,6 +213,34 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
     if (parsed.data.isActive === true) {
       await userRepository.activate(id);
     } else if (parsed.data.isActive === false) {
+      // V6-039: Guard — prevent a user from deactivating themselves if they are
+      // the last active tenant-admin (or platform-admin). Losing the last admin
+      // would lock the tenant out of user management permanently.
+      if (isSelf) {
+        const adminRoles = ["platform-admin", "tenant-admin"];
+        const userAdminRoles = existing.roles.filter((r: string) => adminRoles.includes(r));
+        if (userAdminRoles.length > 0) {
+          // Check if there is at least one OTHER active user with an admin role
+          const otherAdminsResult = await db.query<{ count: string }>(
+            `SELECT count(*) AS count FROM auth.users
+             WHERE tenant_id = $1
+               AND is_active = true
+               AND id != $2
+               AND (
+                 'platform-admin' = ANY(roles)
+                 OR 'tenant-admin' = ANY(roles)
+               )`,
+            [user.tenantId, id],
+          );
+          const otherAdminCount = parseInt(otherAdminsResult.rows[0]?.count ?? "0", 10);
+          if (otherAdminCount === 0) {
+            throw new ForbiddenError(
+              "Cannot deactivate yourself — you are the last active admin for this tenant."
+            );
+          }
+        }
+      }
+
       // Guard: prevent deactivating the last platform admin. If the target user
       // holds the platform-admin role, verify at least one other active admin
       // exists before proceeding.

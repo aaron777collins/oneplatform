@@ -507,14 +507,19 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
     const expr = jsonata(expression);
     // Race against a 100ms timeout; jsonata itself does not have a native timeout
-    const result = await Promise.race([
-      expr.evaluate(context),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("JSONata evaluation timed out (100ms)")), 100),
-      ),
-    ]);
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        expr.evaluate(context),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error("JSONata evaluation timed out (100ms)")), 100);
+        }),
+      ]);
 
-    return Boolean(result);
+      return Boolean(result);
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    }
   }
 
   // -------------------------------------------------------------------------

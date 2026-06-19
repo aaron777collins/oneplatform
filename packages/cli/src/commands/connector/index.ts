@@ -58,8 +58,11 @@ async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
   if (opts.plugin) query["filter[pluginId][eq]"] = opts.plugin;
   if (opts.status) query["filter[status][eq]"] = opts.status;
-  const connectors = await ctx.http.get<unknown[]>("/api/v1/connectors", query);
-  ctx.renderer.render(connectors, CONNECTOR_COLUMNS);
+  const resp = await ctx.http.get<{ items: unknown[]; nextCursor?: string; total?: number }>(
+    "/api/v1/connectors",
+    query,
+  );
+  ctx.renderer.render(resp.items, CONNECTOR_COLUMNS);
 }
 
 async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void> {
@@ -102,8 +105,8 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
 }
 
 async function getAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  const connector = await ctx.http.get<unknown>(`/api/v1/connectors/${encodeURIComponent(id)}`);
-  ctx.renderer.render(connector, CONNECTOR_COLUMNS);
+  const connector = await ctx.http.get<Record<string, unknown>>(`/api/v1/connectors/${encodeURIComponent(id)}`);
+  ctx.renderer.render([connector], CONNECTOR_COLUMNS);
 }
 
 async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): Promise<void> {

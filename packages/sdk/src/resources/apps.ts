@@ -62,10 +62,10 @@ export interface AppBuild {
   readonly id: string;
   readonly appId: string;
   readonly status: 'pending' | 'building' | 'success' | 'failed';
-  readonly version: string | null;
+  readonly versionNumber: number | null;
   readonly createdAt: string;
-  readonly completedAt: string | null;
-  readonly error: string | null;
+  readonly builtAt: string | null;
+  readonly errorMessage: string | null;
 }
 
 export interface TriggerBuildRequest {
@@ -190,11 +190,11 @@ export function createAppNamespace(transport: Transport): AppNamespace {
       const pageSize = options?.limit ?? 50;
       const baseQuery = serializeListQuery(options);
       return new Paginator<App>(async (cursor, limit) => {
-        // The server returns { data: App[], pagination: { nextCursor, total } }.
-        // Transport unwraps the { data } envelope, so we receive App[] directly.
-        // Pagination metadata is lost in the unwrap. We infer hasMore from
-        // whether the returned page is full (length === limit).
-        const items = await transport.request<App[]>({
+        const result = await transport.request<{
+          items: App[];
+          nextCursor: string | null;
+          total: number | null;
+        }>({
           method: 'GET',
           path: BASE,
           query: {
@@ -203,11 +203,7 @@ export function createAppNamespace(transport: Transport): AppNamespace {
             ...(cursor !== null ? { cursor } : {}),
           },
         });
-        // When the server returns exactly `limit` items, there are likely more pages.
-        // Use the last item's id as the cursor for the next page.
-        const hasMore = items.length === limit;
-        const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.id : null;
-        return { items, nextCursor, total: null, hasMore };
+        return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);
     },
 
@@ -252,9 +248,11 @@ export function createAppNamespace(transport: Transport): AppNamespace {
       const pageSize = options?.limit ?? 20;
       const baseQuery = serializeListQuery(options);
       return new Paginator<AppBuild>(async (cursor, limit) => {
-        // Same pattern as list(): Transport unwraps { data } envelope,
-        // so we receive AppBuild[] directly and infer pagination from array length.
-        const items = await transport.request<AppBuild[]>({
+        const result = await transport.request<{
+          items: AppBuild[];
+          nextCursor: string | null;
+          total: number | null;
+        }>({
           method: 'GET',
           path: `${BASE}/${encodeURIComponent(id)}/builds`,
           query: {
@@ -263,9 +261,7 @@ export function createAppNamespace(transport: Transport): AppNamespace {
             ...(cursor !== null ? { cursor } : {}),
           },
         });
-        const hasMore = items.length === limit;
-        const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.id : null;
-        return { items, nextCursor, total: null, hasMore };
+        return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);
     },
 

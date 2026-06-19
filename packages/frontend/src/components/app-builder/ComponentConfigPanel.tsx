@@ -11,6 +11,8 @@
  */
 
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useApiClient } from "@/lib/api-client.js";
 import type { PlacedComponent, DataBinding, PropDescriptor } from "./types.js";
 import { getPaletteEntry } from "./palette-registry.js";
 
@@ -262,17 +264,24 @@ interface DataBindingTabProps {
   onUpdateDataBinding: (binding: DataBinding | undefined) => void;
 }
 
-// Known ontology entity types — in a real app this would come from the API
-const KNOWN_ENTITY_TYPES = [
-  "orders",
-  "customers",
-  "products",
-  "shipments",
-  "invoices",
-  "users",
-];
+interface OntologyEntitySummary {
+  name: string;
+  slug?: string;
+}
 
 function DataBindingTab({ component, propSchema, onUpdateDataBinding }: DataBindingTabProps) {
+  const client = useApiClient();
+  const { data: ontologyData, isLoading: entitiesLoading } = useQuery({
+    queryKey: ["ontology", "entity-types"],
+    queryFn: () => client.get<OntologyEntitySummary[]>("/v1/ontology"),
+    staleTime: 60_000,
+  });
+
+  const entityTypes: string[] = React.useMemo(() => {
+    if (!ontologyData) return [];
+    const items = Array.isArray(ontologyData) ? ontologyData : (ontologyData as unknown as { data: OntologyEntitySummary[] }).data ?? [];
+    return items.map((e) => e.slug ?? e.name.toLowerCase().replace(/\s+/g, "_"));
+  }, [ontologyData]);
   const binding = component.dataBinding;
   const [entityType, setEntityType] = React.useState(binding?.entityType ?? "");
   const [fieldMap, setFieldMap] = React.useState<Record<string, string>>(
@@ -316,16 +325,19 @@ function DataBindingTab({ component, propSchema, onUpdateDataBinding }: DataBind
           value={entityType}
           onChange={(e) => setEntityType(e.target.value)}
           className={inputClass}
+          disabled={entitiesLoading}
         >
-          <option value="">None (static props)</option>
-          {KNOWN_ENTITY_TYPES.map((t) => (
+          <option value="">{entitiesLoading ? "Loading entities..." : "None (static props)"}</option>
+          {entityTypes.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>
           ))}
         </select>
         <p className="mt-1 text-[10px] text-[var(--color-muted-foreground,#6b7280)]">
-          Select an ontology entity to populate component props from live data.
+          {entityTypes.length === 0 && !entitiesLoading
+            ? "No entity types found. Create one in the Ontology section first."
+            : "Select an ontology entity to populate component props from live data."}
         </p>
       </div>
 

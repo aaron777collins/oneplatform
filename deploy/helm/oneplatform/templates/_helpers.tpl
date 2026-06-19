@@ -369,11 +369,13 @@ startupProbe:
 
 {{/*
 Standard readiness probe — stricter than liveness to gate traffic.
+Uses /readyz (not /healthz) so that readiness can check downstream
+dependencies (DB, Redis) while liveness only checks process health.
 */}}
 {{- define "oneplatform.readinessProbe" -}}
 readinessProbe:
   httpGet:
-    path: /healthz
+    path: /readyz
     port: 3000
   initialDelaySeconds: 10
   periodSeconds: 5

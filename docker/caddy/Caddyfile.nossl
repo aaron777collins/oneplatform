@@ -19,6 +19,22 @@
 		-Server
 	}
 
+	# Health/readiness probes — forwarded to the gateway service so that
+	# external load balancers and orchestrators can probe Caddy directly.
+	handle /healthz {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+
+	handle /readyz {
+		reverse_proxy gateway-service:3000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+
 	handle /api/* {
 		reverse_proxy gateway-service:3000 {
 			header_up X-Forwarded-Proto {scheme}

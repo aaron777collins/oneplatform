@@ -5,7 +5,7 @@
  * the values are stored in the wizard Zustand store so the Review step can
  * display them and the POST /api/v1/bootstrap can include them.
  *
- * Password strength rules (§9.2): min 12 chars, mixed case, number.
+ * Password strength rules (§9.2): min 12 chars, mixed case, number, special char.
  */
 import * as React from "react";
 import { useForm } from "react-hook-form";
@@ -36,7 +36,8 @@ const adminAccountSchema = z
       .min(12, "Password must be at least 12 characters")
       .regex(/[A-Z]/, "Password must contain an uppercase letter")
       .regex(/[a-z]/, "Password must contain a lowercase letter")
-      .regex(/[0-9]/, "Password must contain a number"),
+      .regex(/[0-9]/, "Password must contain a number")
+      .regex(/[^A-Za-z0-9]/, "Password must contain a special character"),
     confirmPassword: z.string(),
   })
   .refine((data) => data.adminPassword === data.confirmPassword, {

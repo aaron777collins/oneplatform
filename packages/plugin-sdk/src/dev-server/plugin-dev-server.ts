@@ -190,15 +190,15 @@ function buildNonConnectorSummary(manifest: PluginManifest): ConnectorRunSummary
   const typeGuidance: Record<string, string> = {
     transformer:
       `  Transformer plugins can be tested with:\n` +
-      `    op plugin simulate-hook before:pipeline.transform --input data.json\n` +
+      `    op plugin simulate-hook before:pipeline.step --input data.json\n` +
       `  Or run your test suite: npm test\n`,
     destination:
       `  Destination plugins can be tested with:\n` +
-      `    op plugin simulate-hook before:destination.write --input records.json\n` +
+      `    op plugin simulate-hook before:ingestion.stage --input records.json\n` +
       `  Or run your test suite: npm test\n`,
     "auth-provider":
       `  Auth provider plugins can be tested with:\n` +
-      `    op plugin simulate-hook before:auth.callback --input params.json\n` +
+      `    op plugin simulate-hook before:auth.login --input params.json\n` +
       `  Or run your test suite: npm test\n`,
     widget:
       `  Widget plugins can be tested by running your test suite: npm test\n` +

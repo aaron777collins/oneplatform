@@ -22,7 +22,14 @@ import {
   assertValidMetadata,
 } from "@oneplatform/plugin-sdk/testing";
 import { PluginConfigError, PluginAuthError } from "@oneplatform/plugin-sdk";
-import { authProvider } from "../index.js";
+import { authProvider as _authProvider } from "../index.js";
+
+// The exported authProvider is typed as AuthProvider (where initialize is optional).
+// The OIDC implementation always provides initialize, so we narrow the type here
+// to avoid non-null assertions on every test call.
+const authProvider = _authProvider as typeof _authProvider & {
+  initialize: NonNullable<typeof _authProvider.initialize>;
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Fixtures

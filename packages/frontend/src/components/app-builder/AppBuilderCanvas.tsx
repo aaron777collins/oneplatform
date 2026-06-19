@@ -129,15 +129,16 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
           </ModeButton>
         </div>
 
-        {/* Open in editor */}
+        {/* Open in editor — secondary action, de-emphasised */}
         <ToolbarButton
           onClick={handleOpenInEditor}
           disabled={onOpenInEditor === undefined}
           aria-label="Open in Monaco editor"
           title="Open generated code in editor"
+          className="opacity-60 hover:opacity-100 text-[10px]"
         >
-          <Code2 className="mr-1 h-4 w-4" aria-hidden="true" />
-          <span className="text-xs">Open in editor</span>
+          <Code2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+          <span className="text-[10px]">Editor</span>
         </ToolbarButton>
       </div>
 

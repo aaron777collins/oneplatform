@@ -13,16 +13,29 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono<{ Variables: App
   const routes = new Hono<{ Variables: AppVariables }>();
   const { pool, redis, serviceStartedAt } = deps;
 
-  routes.get("/healthz", async (c) => {
+  // Liveness probe — returns 200 unconditionally as long as the process is
+  // alive.  Dependency checks belong in /readyz so that a transient DB or
+  // Redis outage does not cause the orchestrator to restart the pod.
+  routes.get("/healthz", (c) => {
+    return c.json({
+      status: "alive",
+      service: "gateway",
+      uptime: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
+    }, 200);
+  });
+
+  // Readiness probe — verifies that the service can handle traffic by
+  // checking connectivity to Postgres and Redis.
+  routes.get("/readyz", async (c) => {
     const checks: Record<string, string> = {};
-    let healthy = true;
+    let ready = true;
 
     try {
       await pool.query("SELECT 1");
       checks["postgres"] = "ok";
     } catch {
       checks["postgres"] = "error";
-      healthy = false;
+      ready = false;
     }
 
     try {
@@ -30,25 +43,11 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono<{ Variables: App
       checks["redis"] = "ok";
     } catch {
       checks["redis"] = "error";
-      healthy = false;
+      ready = false;
     }
 
-    const status = healthy ? "healthy" : "degraded";
-    return c.json({
-      status,
-      service: "gateway",
-      uptime: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
-      checks,
-    }, healthy ? 200 : 503);
-  });
-
-  routes.get("/readyz", async (c) => {
-    try {
-      await pool.query("SELECT 1");
-      return c.json({ status: "ready" });
-    } catch {
-      return c.json({ status: "not_ready" }, 503);
-    }
+    const status = ready ? "ready" : "not_ready";
+    return c.json({ status, checks }, ready ? 200 : 503);
   });
 
   return routes;

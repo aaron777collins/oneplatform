@@ -13,6 +13,7 @@ import {
   createServiceTokenSigner,
   loadServicePrivateKey,
   readPackageVersion,
+  setupProcessErrorHandlers,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -137,6 +138,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     serviceName: "pipeline-service",
     redis,
   });
+  setupProcessErrorHandlers(logger);
 
   // Verify advisory lock capability — confirms session-mode PgBouncer is active.
   // If this throws, the service must not start (session mode is required for
