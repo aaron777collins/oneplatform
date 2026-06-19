@@ -60,7 +60,7 @@ function makeApiKeyService(overrides: Partial<ApiKeyService> = {}): ApiKeyServic
       keyRecord: makeKeyRecord(),
     }),
     validate: vi.fn().mockResolvedValue(null),
-    list: vi.fn().mockResolvedValue([]),
+    list: vi.fn().mockResolvedValue({ keys: [], total: 0 }),
     revoke: vi.fn().mockResolvedValue(undefined),
     rotate: vi.fn().mockResolvedValue({
       apiKey: "op_live_" + "B".repeat(43),
@@ -152,10 +152,13 @@ describe("POST /api/v1/api-keys", () => {
 
 describe("GET /api/v1/api-keys", () => {
   it("returns 200 with paginated key list", async () => {
-    const listSpy = vi.fn().mockResolvedValue([
-      makeKeyRecord({ id: "k1", name: "Key 1" }),
-      makeKeyRecord({ id: "k2", name: "Key 2" }),
-    ]);
+    const listSpy = vi.fn().mockResolvedValue({
+      keys: [
+        makeKeyRecord({ id: "k1", name: "Key 1" }),
+        makeKeyRecord({ id: "k2", name: "Key 2" }),
+      ],
+      total: 2,
+    });
     const app = buildApp(makeApiKeyService({ list: listSpy }));
     const res = await app.request("/api/v1/api-keys");
     expect(res.status).toBe(200);
@@ -166,7 +169,7 @@ describe("GET /api/v1/api-keys", () => {
   });
 
   it("returns 200 with empty data array when user has no keys", async () => {
-    const app = buildApp(makeApiKeyService({ list: vi.fn().mockResolvedValue([]) }));
+    const app = buildApp(makeApiKeyService({ list: vi.fn().mockResolvedValue({ keys: [], total: 0 }) }));
     const res = await app.request("/api/v1/api-keys");
     expect(res.status).toBe(200);
     const body = await res.json() as { data: unknown[] };
@@ -174,10 +177,10 @@ describe("GET /api/v1/api-keys", () => {
   });
 
   it("queries with the authenticated user's userId", async () => {
-    const listSpy = vi.fn().mockResolvedValue([]);
+    const listSpy = vi.fn().mockResolvedValue({ keys: [], total: 0 });
     const app = buildApp(makeApiKeyService({ list: listSpy }), MOCK_USER);
     await app.request("/api/v1/api-keys");
-    expect(listSpy).toHaveBeenCalledWith("user-1");
+    expect(listSpy).toHaveBeenCalledWith("user-1", { status: "active", limit: 50, offset: 0 });
   });
 });
 
