@@ -234,3 +234,33 @@ export const createRelationshipRequest = z.object({
 export const listDraftsQuery = z.object({
   connectorId: z.string().uuid().optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Structured query endpoints
+// ---------------------------------------------------------------------------
+
+const whereOperatorSchema = z.enum([
+  "eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "not_in", "is_null", "is_not_null",
+]);
+
+const whereClauseSchema = z.object({
+  field: z.string().min(1),
+  operator: whereOperatorSchema,
+  value: z.unknown().optional(),
+});
+
+const orderBySchema = z.object({
+  field: z.string().min(1),
+  direction: z.enum(["asc", "desc"]),
+});
+
+export const structuredQuerySchema = z.object({
+  entityType: z.string().min(1),
+  select: z.array(z.string().min(1)).min(1),
+  where: z.array(whereClauseSchema).optional(),
+  orderBy: z.array(orderBySchema).optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+  offset: z.number().int().min(0).optional(),
+  groupBy: z.array(z.string().min(1)).optional(),
+  having: z.array(whereClauseSchema).optional(),
+});

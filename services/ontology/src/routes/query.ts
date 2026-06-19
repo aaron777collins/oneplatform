@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, ForbiddenError } from "@oneplatform/core";
-import type { QueryService } from "../services/query-service.js";
+import type { QueryService, StructuredQuery } from "../services/query-service.js";
 import { structuredQuerySchema } from "../schemas/index.js";
 
 export interface QueryRouteDeps {
@@ -27,7 +27,7 @@ export function createQueryRoutes(deps: QueryRouteDeps): Hono<{ Variables: AppVa
       throw new ValidationError("Invalid query request", parsed.error.issues);
     }
 
-    const result = await queryService.executeQuery(user.tenantId, parsed.data);
+    const result = await queryService.executeQuery(user.tenantId, parsed.data as StructuredQuery);
     return c.json({ data: result });
   });
 
@@ -45,7 +45,7 @@ export function createQueryRoutes(deps: QueryRouteDeps): Hono<{ Variables: AppVa
       throw new ValidationError("Invalid query request", parsed.error.issues);
     }
 
-    const result = await queryService.validateQuery(user.tenantId, parsed.data);
+    const result = await queryService.validateQuery(user.tenantId, parsed.data as StructuredQuery);
     return c.json({ data: result });
   });
 

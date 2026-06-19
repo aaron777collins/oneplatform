@@ -34,7 +34,7 @@ describe("createHttpClient — trailing slash normalisation", () => {
     const client = createHttpClient(makeCfg("https://api.example.com/"));
     await client.get("/api/v1/data");
 
-    const calledUrl: string = fetchSpy.mock.calls[0][0] as string;
+    const calledUrl: string = fetchSpy.mock.calls[0]![0] as string;
     expect(calledUrl).not.toContain("//api/");
     expect(calledUrl).toMatch(/^https:\/\/api\.example\.com\/api\/v1\/data/);
   });
@@ -50,7 +50,7 @@ describe("createHttpClient — trailing slash normalisation", () => {
     const client = createHttpClient(makeCfg("https://api.example.com///"));
     await client.get("/api/v1/data");
 
-    const calledUrl: string = fetchSpy.mock.calls[0][0] as string;
+    const calledUrl: string = fetchSpy.mock.calls[0]![0] as string;
     expect(calledUrl).toMatch(/^https:\/\/api\.example\.com\/api\/v1\/data/);
   });
 
@@ -65,7 +65,7 @@ describe("createHttpClient — trailing slash normalisation", () => {
     const client = createHttpClient(makeCfg("https://api.example.com"));
     await client.get("/api/v1/data");
 
-    const calledUrl: string = fetchSpy.mock.calls[0][0] as string;
+    const calledUrl: string = fetchSpy.mock.calls[0]![0] as string;
     expect(calledUrl).toMatch(/^https:\/\/api\.example\.com\/api\/v1\/data/);
   });
 });

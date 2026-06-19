@@ -88,9 +88,13 @@ const entityRepo: EntityRepository = {
 
 const fieldRepo: FieldRepository = {
   create: vi.fn(),
+  createMany: vi.fn(),
   findByEntityId: vi.fn(),
   findByEntityIds: vi.fn(),
+  findBySlug: vi.fn(),
+  findById: vi.fn(),
   update: vi.fn(),
+  softDelete: vi.fn(),
   softDeleteByEntityId: vi.fn(),
   hardDeleteByEntityId: vi.fn(),
 };

@@ -84,3 +84,13 @@ export class FieldInUseError extends AppError {
   readonly code = "ONTOLOGY_FIELD_IN_USE" as const;
   readonly statusCode = 409;
 }
+
+export class QueryValidationError extends AppError {
+  readonly code = "ONTOLOGY_QUERY_VALIDATION" as const;
+  readonly statusCode = 422;
+}
+
+export class QueryTimeoutError extends AppError {
+  readonly code = "ONTOLOGY_QUERY_TIMEOUT" as const;
+  readonly statusCode = 504;
+}
