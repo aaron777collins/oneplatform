@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.js";
@@ -36,6 +36,19 @@ import type { ConnectorConfigSchema } from "@/components/connectors/ConnectorFor
 // API types
 // ---------------------------------------------------------------------------
 
+interface SchemaFieldChange {
+  field: string;
+  changeType: "added" | "removed" | "type_changed";
+  previousType?: string;
+  currentType?: string;
+}
+
+interface SchemaDrift {
+  detected: boolean;
+  detectedAt?: string;
+  changes: SchemaFieldChange[];
+}
+
 interface ConnectorDetail {
   id: string;
   name: string;
@@ -46,6 +59,7 @@ interface ConnectorDetail {
   activeSyncEta?: string;
   configSchema: ConnectorConfigSchema;
   config: ConnectorFormValues;
+  schemaDrift?: SchemaDrift;
 }
 
 interface SyncRecord {
@@ -171,6 +185,12 @@ export function ConnectorDetailPage() {
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="history">Sync History</TabsTrigger>
+              <TabsTrigger value="schema" className="relative">
+                Schema
+                {connector.schemaDrift?.detected === true && (
+                  <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-[var(--color-status-warning)]" aria-label="Schema drift detected" />
+                )}
+              </TabsTrigger>
               <TabsTrigger value="settings">Settings</TabsTrigger>
             </TabsList>
 
@@ -274,6 +294,97 @@ export function ConnectorDetailPage() {
                     )}
                   </TableBody>
                 </Table>
+              )}
+            </TabsContent>
+
+            {/* Schema tab */}
+            <TabsContent value="schema" className="mt-4 space-y-4">
+              {connector.schemaDrift?.detected === true ? (
+                <>
+                  <div
+                    role="alert"
+                    className="flex items-start gap-3 rounded-md border border-[var(--color-status-warning)]/40 bg-[var(--color-status-warning)]/10 p-4"
+                  >
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-status-warning)]" aria-hidden />
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--color-foreground)]">
+                        Schema drift detected
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+                        The source schema has changed since the last sync.
+                        {connector.schemaDrift.detectedAt !== undefined && (
+                          <>
+                            {" "}Detected <RelativeTime value={connector.schemaDrift.detectedAt} className="text-sm" />.
+                          </>
+                        )}
+                        {" "}Review the changes below and re-sync to apply updates.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Field Changes</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Field</TableHead>
+                            <TableHead>Change</TableHead>
+                            <TableHead>Previous Type</TableHead>
+                            <TableHead>Current Type</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {connector.schemaDrift.changes.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                className="py-8 text-center text-sm text-[var(--color-muted-foreground)]"
+                              >
+                                Drift detected but no field-level details available.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            connector.schemaDrift.changes.map((change) => (
+                              <TableRow key={`${change.field}-${change.changeType}`}>
+                                <TableCell className="font-mono text-sm">{change.field}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={
+                                      change.changeType === "added"
+                                        ? "bg-[var(--color-status-success)]/20 text-[var(--color-status-success)]"
+                                        : change.changeType === "removed"
+                                        ? "bg-[var(--color-destructive)]/20 text-[var(--color-destructive)]"
+                                        : "bg-[var(--color-status-warning)]/20 text-[var(--color-status-warning)]"
+                                    }
+                                  >
+                                    {change.changeType === "type_changed" ? "type changed" : change.changeType}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-sm text-[var(--color-muted-foreground)]">
+                                  {change.previousType ?? "—"}
+                                </TableCell>
+                                <TableCell className="text-sm text-[var(--color-muted-foreground)]">
+                                  {change.currentType ?? "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <p className="text-sm text-[var(--color-muted-foreground)]">
+                      No schema changes detected. The source schema matches the last synced schema.
+                    </p>
+                  </CardContent>
+                </Card>
               )}
             </TabsContent>
 

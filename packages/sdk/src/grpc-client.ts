@@ -35,6 +35,7 @@ import type { AuthHandler } from "./auth/api-key.js";
 import { createApiKeyHandler } from "./auth/api-key.js";
 import { createAccessTokenHandler } from "./auth/access-token.js";
 import { ConfigurationError } from "./errors/client-errors.js";
+import { OnePlatformError } from "./errors/base.js";
 import { NetworkError } from "./errors/network-error.js";
 import type {
   Entity,
@@ -131,13 +132,46 @@ function decodeAllDataFrames(buffer: ArrayBuffer): unknown[] {
 // Error type
 // ---------------------------------------------------------------------------
 
+/**
+ * Maps gRPC status codes to OnePlatformError-compatible error codes and
+ * approximate HTTP status codes for unified error handling.
+ */
+const GRPC_STATUS_MAP: Record<number, { code: string; statusCode: number; retryable: boolean }> = {
+  0:  { code: 'OK',                    statusCode: 200, retryable: false },
+  1:  { code: 'GRPC_CANCELLED',        statusCode: 499, retryable: false },
+  2:  { code: 'GRPC_UNKNOWN',          statusCode: 500, retryable: true  },
+  3:  { code: 'GRPC_INVALID_ARGUMENT', statusCode: 400, retryable: false },
+  4:  { code: 'GRPC_DEADLINE_EXCEEDED',statusCode: 504, retryable: true  },
+  5:  { code: 'GRPC_NOT_FOUND',        statusCode: 404, retryable: false },
+  6:  { code: 'GRPC_ALREADY_EXISTS',   statusCode: 409, retryable: false },
+  7:  { code: 'GRPC_PERMISSION_DENIED',statusCode: 403, retryable: false },
+  8:  { code: 'GRPC_RESOURCE_EXHAUSTED',statusCode: 429, retryable: true },
+  9:  { code: 'GRPC_FAILED_PRECONDITION',statusCode: 400, retryable: false },
+  10: { code: 'GRPC_ABORTED',          statusCode: 409, retryable: true  },
+  11: { code: 'GRPC_OUT_OF_RANGE',     statusCode: 400, retryable: false },
+  12: { code: 'GRPC_UNIMPLEMENTED',    statusCode: 501, retryable: false },
+  13: { code: 'GRPC_INTERNAL',         statusCode: 500, retryable: true  },
+  14: { code: 'GRPC_UNAVAILABLE',      statusCode: 503, retryable: true  },
+  15: { code: 'GRPC_DATA_LOSS',        statusCode: 500, retryable: false },
+  16: { code: 'GRPC_UNAUTHENTICATED',  statusCode: 401, retryable: false },
+};
+
 /** Thrown when the server returns a non-zero gRPC status code. */
-export class GrpcClientError extends Error {
-  override readonly name = "GrpcClientError";
+export class GrpcClientError extends OnePlatformError {
   readonly grpcStatus: number;
 
   constructor(grpcStatus: number, message: string) {
-    super(message);
+    const mapped = GRPC_STATUS_MAP[grpcStatus] ?? {
+      code: `GRPC_STATUS_${grpcStatus}`,
+      statusCode: 500,
+      retryable: false,
+    };
+    super({
+      code: mapped.code,
+      message,
+      statusCode: mapped.statusCode,
+      retryable: mapped.retryable,
+    });
     this.grpcStatus = grpcStatus;
   }
 }

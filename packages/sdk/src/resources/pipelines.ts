@@ -16,6 +16,7 @@ import type {
   LogEntry,
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { serializeListQuery } from './list-query.js';
 
 /**
  * Namespace for pipeline management operations.
@@ -65,6 +66,7 @@ export function createPipelineNamespace(transport: Transport): PipelineNamespace
   return {
     list(options?: ListOptions): PaginatedIterable<Pipeline> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<Pipeline>(async (cursor, limit) => {
         const result = await transport.request<{
           items: Pipeline[];
@@ -74,11 +76,9 @@ export function createPipelineNamespace(transport: Transport): PipelineNamespace
           method: 'GET',
           path: BASE,
           query: {
+            ...baseQuery,
             limit,
             ...(cursor !== null ? { cursor } : {}),
-            ...(options?.sort !== undefined
-              ? { sort: Array.isArray(options.sort) ? options.sort.join(',') : options.sort }
-              : {}),
           },
         });
         return { ...result, hasMore: result.nextCursor !== null };
@@ -122,6 +122,7 @@ export function createPipelineNamespace(transport: Transport): PipelineNamespace
 
     listRuns(pipelineId: string, options?: ListOptions): PaginatedIterable<PipelineRun> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<PipelineRun>(async (cursor, limit) => {
         const result = await transport.request<{
           items: PipelineRun[];
@@ -130,7 +131,11 @@ export function createPipelineNamespace(transport: Transport): PipelineNamespace
         }>({
           method: 'GET',
           path: `${BASE}/${encodeURIComponent(pipelineId)}/runs`,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);

@@ -27,6 +27,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- include "oneplatform.podScheduling" (dict "service" "gateway" "root" .) | nindent 6 }}
       containers:
         - name: gateway
           image: {{ include "oneplatform.image" (dict "svc" .Values.gateway "root" .) | quote }}

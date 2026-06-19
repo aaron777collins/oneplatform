@@ -9,7 +9,13 @@
  * before calling handleCallback. The plugin never receives the raw state value.
  */
 
-import type { TenantContext, PluginLogger, CacheAccessor } from "./context.js";
+import type {
+  TenantContext,
+  PluginLogger,
+  CacheAccessor,
+  FetchProxy,
+  CredentialAccessor,
+} from "./context.js";
 import type { AuthProviderMetadata } from "./metadata.js";
 
 export interface AuthOptions {
@@ -47,6 +53,21 @@ export interface AuthContext {
    * Use TTLs of 300 seconds (5 minutes) for these values.
    */
   cache: CacheAccessor;
+
+  /**
+   * Proxied HTTP fetch for making outbound requests during the auth flow
+   * (e.g., exchanging an authorization code for tokens at the provider's
+   * token endpoint). Only URLs declared in the plugin manifest's
+   * requiredExternalUrls are permitted.
+   */
+  fetch: FetchProxy;
+
+  /**
+   * Access to the plugin instance's bound credentials (client secrets,
+   * API keys, etc.) needed for OAuth code exchange and token operations.
+   * Never log or cache credential values — the platform manages rotation.
+   */
+  credentials: CredentialAccessor;
 }
 
 export interface AuthResult {

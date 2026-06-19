@@ -35,7 +35,18 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
       throw new UnauthorizedError("Authentication required.");
     }
 
-    const buckets = await storageService.listBuckets();
+    const allBuckets = await storageService.listBuckets();
+    // Tenant isolation: only return buckets belonging to the authenticated
+    // user's tenant. Bucket names are expected to be prefixed with the tenant
+    // ID (e.g. "tenant-abc123-uploads"). Buckets without a tenant prefix are
+    // excluded — they are system-internal and must not be exposed to users.
+    const tenantPrefix = `${user.tenantId}-`;
+    const buckets = allBuckets.filter(
+      (b: { name?: string; Name?: string }) => {
+        const name = b.name ?? b.Name ?? "";
+        return name.startsWith(tenantPrefix);
+      },
+    );
     return c.json({ data: buckets });
   });
 

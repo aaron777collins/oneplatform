@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { errorHandlerMiddleware } from "@oneplatform/core";
 import type { TokenService } from "../../services/token-service.js";
+import type { ApiKeyService } from "../../services/api-key-service.js";
 import type { GuestSessionService } from "../../services/index.js";
 import { createInternalRoutes } from "../../routes/internal.js";
 import type { OAuthClientRepository } from "../../repositories/oauth-client-repository.js";
@@ -71,6 +72,17 @@ function makeGuestSessionService(overrides: Partial<GuestSessionService> = {}): 
   };
 }
 
+function makeApiKeyService(overrides: Partial<ApiKeyService> = {}): ApiKeyService {
+  return {
+    create: vi.fn().mockResolvedValue({ apiKey: "op_live_test", keyRecord: {} }),
+    validate: vi.fn().mockResolvedValue(null),
+    list: vi.fn().mockResolvedValue([]),
+    revoke: vi.fn().mockResolvedValue(undefined),
+    rotate: vi.fn().mockResolvedValue({ apiKey: "op_live_rotated", keyRecord: {} }),
+    ...overrides,
+  };
+}
+
 function makeOAuthClientRepo(overrides: Partial<OAuthClientRepository> = {}): OAuthClientRepository {
   const now = new Date();
   const baseClient: OAuthClient = {
@@ -97,11 +109,13 @@ function buildApp(
   tokenService: TokenService,
   guestSessionService: GuestSessionService,
   oauthClientRepository: OAuthClientRepository,
+  apiKeyService?: ApiKeyService,
 ): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   app.onError(errorHandlerMiddleware());
   const routes = createInternalRoutes({
     tokenService,
+    apiKeyService: apiKeyService ?? makeApiKeyService(),
     guestSessionService,
     oauthClientRepository,
     servicePublicKeys: { "gateway-service": publicKeyPem },

@@ -11,6 +11,7 @@ import type { PaginatedIterable } from '../pagination/paginator.js';
 import type { ListOptions } from '../types/resources.js';
 import type { App, CreateAppRequest, UpdateAppRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { serializeListQuery } from './list-query.js';
 
 // ---------------------------------------------------------------------------
 // Deployment types
@@ -187,6 +188,7 @@ export function createAppNamespace(transport: Transport): AppNamespace {
 
     list(options?: ListOptions): PaginatedIterable<App> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<App>(async (cursor, limit) => {
         // The server returns { data: App[], pagination: { nextCursor, total } }.
         // Transport unwraps the { data } envelope, so we receive App[] directly.
@@ -195,7 +197,11 @@ export function createAppNamespace(transport: Transport): AppNamespace {
         const items = await transport.request<App[]>({
           method: 'GET',
           path: BASE,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         // When the server returns exactly `limit` items, there are likely more pages.
         // Use the last item's id as the cursor for the next page.
@@ -244,13 +250,18 @@ export function createAppNamespace(transport: Transport): AppNamespace {
 
     listBuilds(id: string, options?: ListOptions): PaginatedIterable<AppBuild> {
       const pageSize = options?.limit ?? 20;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<AppBuild>(async (cursor, limit) => {
         // Same pattern as list(): Transport unwraps { data } envelope,
         // so we receive AppBuild[] directly and infer pagination from array length.
         const items = await transport.request<AppBuild[]>({
           method: 'GET',
           path: `${BASE}/${encodeURIComponent(id)}/builds`,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         const hasMore = items.length === limit;
         const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.id : null;

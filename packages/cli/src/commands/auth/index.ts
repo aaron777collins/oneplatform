@@ -62,10 +62,9 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
     ctx.renderer.success(`Logged in as ${resp.user.email} on ${platformUrl}`);
   }
 
-  // Persist the profile and encrypted credential
-  const profileName = ctx.credentials.source === "env"
-    ? "default"
-    : (loadProfile("default")?.name ?? "default");
+  // Persist the profile and encrypted credential.
+  // Use the resolved profile name from context (respects --profile flag and OP_PROFILE env).
+  const profileName = ctx.profileName;
 
   await saveCredentials(profileName, platformUrl, apiKey);
   const profile = loadProfile(profileName) ?? { name: profileName, platformUrl };

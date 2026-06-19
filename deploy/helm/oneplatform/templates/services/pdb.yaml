@@ -1,0 +1,32 @@
+{{/*
+PodDisruptionBudget — generated per application service when replicaCount > 1.
+
+Ensures at least one pod of each service remains available during voluntary
+disruptions (node drains, cluster upgrades, spot reclamation). The budget
+uses maxUnavailable: 1, which allows one pod at a time to be evicted while
+guaranteeing (replicaCount - 1) pods stay running.
+
+Services with replicaCount <= 1 are excluded because a PDB with
+maxUnavailable: 1 on a single-replica Deployment would block all drains.
+*/}}
+
+{{- $services := list "gateway" "auth" "ingestion" "ontology" "pipeline" "execution" "app" "logging" "plugin" "frontend" -}}
+
+{{- range $svc := $services }}
+{{- $cfg := index $.Values $svc }}
+{{- if gt (int $cfg.replicaCount) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ printf "%s-%s" (include "oneplatform.fullname" $) $svc }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "oneplatform.serviceLabels" (dict "service" $svc "root" $) | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "oneplatform.serviceSelectorLabels" (dict "service" $svc "root" $) | nindent 6 }}
+{{- end }}
+{{- end }}

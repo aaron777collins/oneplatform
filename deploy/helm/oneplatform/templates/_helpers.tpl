@@ -287,6 +287,35 @@ Renders a YAML list of env entries; embed with toYaml in Deployment templates.
 {{- end }}
 
 {{/*
+Pod anti-affinity and topology spread constraints for a service.
+Ensures pods of the same service prefer to land on different nodes (soft
+anti-affinity) and are evenly distributed across zones (topology spread).
+
+Usage: {{ include "oneplatform.podScheduling" (dict "service" "gateway" "root" .) | nindent 6 }}
+
+Anti-affinity uses preferredDuringSchedulingIgnoredDuringExecution so that
+single-node dev clusters still work.  Production clusters benefit automatically.
+*/}}
+{{- define "oneplatform.podScheduling" -}}
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              {{- include "oneplatform.serviceSelectorLabels" (dict "service" .service "root" .root) | nindent 14 }}
+          topologyKey: kubernetes.io/hostname
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        {{- include "oneplatform.serviceSelectorLabels" (dict "service" .service "root" .root) | nindent 8 }}
+{{- end }}
+
+{{/*
 Standard liveness probe for HTTP services using /healthz.
 Mirrors the healthcheck in docker-compose.yml.
 */}}

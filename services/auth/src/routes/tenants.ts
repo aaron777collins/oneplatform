@@ -20,7 +20,7 @@ import {
 import type pg from "pg";
 import type { TenantRepository } from "../repositories/index.js";
 import { TenantHasActiveUsersError } from "../services/errors.js";
-import { updateTenantRequest } from "../schemas/index.js";
+import { createTenantRequest, updateTenantRequest } from "../schemas/index.js";
 
 export interface TenantRouteDeps {
   tenantRepository: TenantRepository;
@@ -89,6 +89,42 @@ export function createTenantRoutes(
       data: tenants.map(formatTenant),
       pagination: { total, limit, offset },
     });
+  });
+
+  // POST /api/v1/tenants — create a new tenant (platform-admin only)
+  //
+  // Body: { name: string; slug: string; settings?: Record<string, unknown> }
+  //
+  // Slug must be unique across all non-deleted tenants. It is immutable after
+  // creation because external systems (DNS, OAuth redirect URIs) depend on it.
+  routes.post("/api/v1/tenants", async (c) => {
+    requirePlatformAdmin(c.var.user.scopes);
+
+    const body = await c.req.json();
+    const parsed = createTenantRequest.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid tenant creation request", parsed.error.issues);
+    }
+
+    // Validate slug uniqueness — two tenants with the same slug would break
+    // subdomain routing and OAuth redirect URI resolution.
+    const existingBySlug = await tenantRepository.findBySlug(parsed.data.slug);
+    if (existingBySlug) {
+      throw new ValidationError(
+        `Slug "${parsed.data.slug}" is already in use by another tenant.`,
+        [],
+      );
+    }
+
+    const tenant = await tenantRepository.create({
+      name: parsed.data.name,
+      slug: parsed.data.slug,
+      ...(parsed.data.settings !== undefined
+        ? { settings: parsed.data.settings as Record<string, unknown> }
+        : {}),
+    });
+
+    return c.json(formatTenant(tenant), 201);
   });
 
   // GET /api/v1/tenants/:id — fetch a single tenant by ID (platform-admin only)

@@ -18,6 +18,7 @@ import type {
   SyncProgress,
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { serializeListQuery } from './list-query.js';
 
 /**
  * Namespace for connector management operations.
@@ -63,6 +64,7 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
   return {
     list(options?: ListOptions): PaginatedIterable<ConnectorInstance> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<ConnectorInstance>(async (cursor, limit) => {
         const result = await transport.request<{
           items: ConnectorInstance[];
@@ -71,7 +73,11 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
         }>({
           method: 'GET',
           path: BASE,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);
@@ -113,6 +119,7 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
 
     listSyncs(connectorId: string, options?: ListOptions): PaginatedIterable<SyncJob> {
       const pageSize = options?.limit ?? 20;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<SyncJob>(async (cursor, limit) => {
         const result = await transport.request<{
           items: SyncJob[];
@@ -121,7 +128,11 @@ export function createConnectorNamespace(transport: Transport): ConnectorNamespa
         }>({
           method: 'GET',
           path: `${BASE}/${encodeURIComponent(connectorId)}/syncs`,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);

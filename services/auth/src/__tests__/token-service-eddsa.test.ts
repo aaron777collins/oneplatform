@@ -214,6 +214,7 @@ describe("verifyAccessToken() — mixed-mode algorithm detection", () => {
     process.env["OP_JWT_PUBLIC_KEY"] = PUBLIC_KEY_B64;
 
     // Issue an HS256 token directly (simulating a token issued before migration)
+    const expectedIssuer = process.env["OP_SERVICE_URL"] || "oneplatform";
     const legacyToken = await new SignJWT({
       sub: "legacy-user",
       tid: "t1",
@@ -226,6 +227,8 @@ describe("verifyAccessToken() — mixed-mode algorithm detection", () => {
       .setIssuedAt()
       .setExpirationTime("15m")
       .setJti("legacy-jti-123")
+      .setIssuer(expectedIssuer)
+      .setAudience("oneplatform")
       .sign(secretBytes);
 
     const { createTokenService } = await import("../services/token-service.js");

@@ -10,6 +10,7 @@ import type { PaginatedIterable } from '../pagination/paginator.js';
 import type { ListOptions } from '../types/resources.js';
 import type { User, CreateUserRequest, UpdateUserRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { serializeListQuery } from './list-query.js';
 
 /**
  * Namespace for user account management (admin-only).
@@ -35,6 +36,7 @@ export function createUserNamespace(transport: Transport): UserNamespace {
   return {
     list(options?: ListOptions): PaginatedIterable<User> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<User>(async (cursor, limit) => {
         const result = await transport.request<{
           items: User[];
@@ -43,7 +45,11 @@ export function createUserNamespace(transport: Transport): UserNamespace {
         }>({
           method: 'GET',
           path: BASE,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);

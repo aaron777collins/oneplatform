@@ -174,10 +174,10 @@ services:
       # POST=1: required for container creation (docker create / docker start).
       # The execution service creates ephemeral sandbox containers at runtime.
       POST: 1
-      # DELETE=0: prevent container deletion via the proxy for safety.
-      # Sandbox containers are short-lived and removed by the execution service
-      # using stop + auto-remove (--rm) rather than explicit DELETE calls.
-      DELETE: 0
+      # DELETE=1: the execution service issues DELETE calls to clean up sandbox
+      # containers after execution completes, and to force-remove timed-out
+      # containers. AutoRemove is also set in HostConfig as a safety net.
+      DELETE: 1
       LOG: 1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -235,7 +235,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: gateway
-    container_name: gateway-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -285,7 +284,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: auth
-    container_name: auth-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -331,7 +329,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: ingestion
-    container_name: ingestion-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -370,7 +367,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: ontology
-    container_name: ontology-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -409,7 +405,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: pipeline
-    container_name: pipeline-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -448,7 +443,6 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.sandbox
-    container_name: op-sandbox-vm
     # Network isolation: sandbox can only reach the execution service via the
     # shared Unix socket (sandbox-socket volume). It has no TCP routes to any
     # internal service and no routes to the public network.
@@ -498,7 +492,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: execution
-    container_name: execution-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -555,7 +548,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: app
-    container_name: app-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -594,7 +586,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: logging
-    container_name: logging-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -631,7 +622,6 @@ services:
       dockerfile: docker/Dockerfile.service
       args:
         SERVICE: plugin
-    container_name: plugin-service
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
     environment:
       <<: *otel-env
@@ -761,7 +751,6 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
-    container_name: frontend
     depends_on:
       gateway-service:
         condition: service_healthy

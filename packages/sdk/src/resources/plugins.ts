@@ -10,6 +10,7 @@ import type { PaginatedIterable } from '../pagination/paginator.js';
 import type { ListOptions } from '../types/resources.js';
 import type { Plugin, CreatePluginRequest, UpdatePluginRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { serializeListQuery } from './list-query.js';
 
 /**
  * Namespace for plugin management operations.
@@ -35,6 +36,7 @@ export function createPluginNamespace(transport: Transport): PluginNamespace {
   return {
     list(options?: ListOptions): PaginatedIterable<Plugin> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<Plugin>(async (cursor, limit) => {
         const result = await transport.request<{
           items: Plugin[];
@@ -43,7 +45,11 @@ export function createPluginNamespace(transport: Transport): PluginNamespace {
         }>({
           method: 'GET',
           path: BASE,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);

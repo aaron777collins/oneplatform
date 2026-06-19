@@ -140,7 +140,7 @@ groups:
           description: >
             No spans received from gateway-service in the last 2 minutes.
             Verify the container is running with `docker compose ps`, check
-            `/healthz` via `docker exec gateway-service wget -qO- http://localhost:3000/healthz`,
+            `/healthz` via `docker compose exec gateway-service wget -qO- http://localhost:3000/healthz`,
             and confirm OTEL_EXPORTER_OTLP_ENDPOINT is reachable from within the container.
           runbook_url: "https://docs.oneplatform.internal/runbooks/service-down"
 

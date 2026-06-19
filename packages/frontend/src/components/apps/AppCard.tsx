@@ -27,7 +27,8 @@ export interface AppCardData {
   name: string;
   slug: string;
   accessMode: AppAccessMode;
-  buildStatus: BuildStatus;
+  /** Build lifecycle state. Undefined when the server has no build info yet. */
+  buildStatus?: BuildStatus;
   /** ISO string of the most recent deploy, undefined if never deployed */
   lastDeployedAt?: string;
 }
@@ -83,7 +84,13 @@ export function AppCard({ app, onClick, onEdit, className }: AppCardProps) {
               /{slug}
             </p>
           </div>
-          <BuildStatusBadge status={buildStatus} />
+          {buildStatus !== undefined ? (
+            <BuildStatusBadge status={buildStatus} />
+          ) : (
+            <span className="rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-foreground)]">
+              Not deployed
+            </span>
+          )}
         </div>
       </CardHeader>
 

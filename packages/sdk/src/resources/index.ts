@@ -1,3 +1,5 @@
+export { serializeListQuery } from './list-query.js';
+
 export type { EntityResource, DataNamespace } from './data.js';
 export { createDataNamespace } from './data.js';
 

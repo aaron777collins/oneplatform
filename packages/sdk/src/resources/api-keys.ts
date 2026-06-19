@@ -10,6 +10,7 @@ import type { PaginatedIterable } from '../pagination/paginator.js';
 import type { ListOptions } from '../types/resources.js';
 import type { ApiKey, CreatedApiKey, CreateApiKeyRequest } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
+import { serializeListQuery } from './list-query.js';
 
 /**
  * Namespace for API key lifecycle management.
@@ -51,6 +52,7 @@ export function createApiKeyNamespace(transport: Transport): ApiKeyNamespace {
   return {
     list(options?: ListOptions): PaginatedIterable<ApiKey> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<ApiKey>(async (cursor, limit) => {
         const result = await transport.request<{
           items: ApiKey[];
@@ -59,7 +61,11 @@ export function createApiKeyNamespace(transport: Transport): ApiKeyNamespace {
         }>({
           method: 'GET',
           path: BASE,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);

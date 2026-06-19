@@ -353,6 +353,19 @@ export const updateRolePermissionsRequest = z.object({
 // 4.5b Tenants
 // ---------------------------------------------------------------------------
 
+export const createTenantRequest = z.object({
+  name: z.string().min(1).max(100).trim(),
+  slug: z
+    .string()
+    .min(1)
+    .max(63)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Slug must be lowercase alphanumeric with hyphens, e.g. 'my-org'",
+    ),
+  settings: z.record(z.unknown()).optional(),
+});
+
 export const updateTenantRequest = z.object({
   name: z.string().min(1).max(100).trim().optional(),
   settings: z.record(z.unknown()).optional(),
@@ -525,6 +538,7 @@ export type UpdateRolePermissionsRequest = z.infer<
   typeof updateRolePermissionsRequest
 >;
 
+export type CreateTenantRequest = z.infer<typeof createTenantRequest>;
 export type UpdateTenantRequest = z.infer<typeof updateTenantRequest>;
 export type TenantResponse = z.infer<typeof tenantResponse>;
 export type TenantListResponse = z.infer<typeof tenantListResponse>;

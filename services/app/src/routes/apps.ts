@@ -565,7 +565,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
           `  export function useQuery<T>(entity: string, options?: QueryOptions): QueryResult<T>;`,
           `  export function useMutation<T>(entity: string): MutationResult<T>;`,
           `  export function useSubscription<T>(entity: string, options?: SubscriptionOptions): SubscriptionResult<T>;`,
-          `  export function usePermission(entity: string, action: string): boolean;`,
+          `  export function usePermission(action: string, resource: string): boolean;`,
           `  /** Returns [value, setValue]. Value persists per-user per-app in platform storage. */`,
           `  export function useAppStorage<T = unknown>(key: string): [T | null, (value: T) => Promise<void>];`,
           `  export function AppProvider(props: { children: React.ReactNode }): JSX.Element;`,

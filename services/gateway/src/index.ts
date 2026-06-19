@@ -43,6 +43,9 @@ import { createMeteringService } from "./services/metering-service.js";
 import { UsageEventRepository, UsageSummaryRepository, BillingWebhookConfigRepository } from "./repositories/usage-event-repository.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { createBillingRoutes } from "./routes/billing.js";
+import { createDataResidencyRoutes } from "./routes/data-residency.js";
+import { createDataResidencyService } from "./services/data-residency-service.js";
+import { DataResidencyPolicyRepository, DataTransferRuleRepository, DataLocationLogRepository } from "./repositories/data-residency-repository.js";
 
 async function loadServicePublicKeys(dir: string): Promise<Record<string, string>> {
   try {
@@ -199,6 +202,17 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     logger,
   });
 
+  // Data residency repositories & service
+  const dataResidencyPolicyRepo = new DataResidencyPolicyRepository(db);
+  const dataTransferRuleRepo = new DataTransferRuleRepository(db);
+  const dataLocationLogRepo = new DataLocationLogRepository(db);
+  const dataResidencyService = createDataResidencyService({
+    policyRepo: dataResidencyPolicyRepo,
+    transferRuleRepo: dataTransferRuleRepo,
+    locationLogRepo: dataLocationLogRepo,
+    logger,
+  });
+
   // Tenant IP allowlist service — queries auth.tenants.ip_allowlist with
   // short-lived cache to avoid DB hits on every request.
   const tenantAllowlistService = createTenantAllowlistService({ db, logger });
@@ -248,12 +262,81 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const servicePublicKeys = await loadServicePublicKeys(serviceKeysDir);
 
   // Step 10: Create Hono app
+  //
+  // API key validation delegates to the auth service's internal endpoint
+  // (/internal/auth/validate-api-key) rather than performing a no-op stub.
+  // This mirrors the auth service's own apiKeyService.validate() flow —
+  // prefix lookup, bcrypt comparison, Redis revocation check — without
+  // requiring the gateway to have direct database access.
+  const authServiceUrl =
+    config.authServiceUrl ??
+    process.env["AUTH_SERVICE_URL"] ??
+    "http://auth-service:3000";
+
+  const validateApiKey = async (
+    apiKey: string,
+  ): Promise<{
+    userId: string;
+    tenantId: string;
+    roles: string[];
+    scopes: string[];
+    isGuest: boolean;
+    isService: boolean;
+    emailVerified: boolean;
+  } | null> => {
+    try {
+      const res = await fetch(`${authServiceUrl}/internal/auth/validate-api-key`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(config.serviceToken !== undefined
+            ? { Authorization: `Bearer ${config.serviceToken}` }
+            : {}),
+        },
+        body: JSON.stringify({ apiKey }),
+      });
+
+      if (!res.ok) {
+        return null;
+      }
+
+      const body = (await res.json()) as {
+        valid: boolean;
+        userId?: string;
+        tenantId?: string;
+        roles?: string[];
+        scopes?: string[];
+        emailVerified?: boolean;
+        isGuest?: boolean;
+        isService?: boolean;
+        reason?: string;
+      };
+
+      if (!body.valid) {
+        return null;
+      }
+
+      return {
+        userId: body.userId!,
+        tenantId: body.tenantId!,
+        roles: body.roles ?? [],
+        scopes: body.scopes ?? [],
+        isGuest: body.isGuest ?? false,
+        isService: body.isService ?? false,
+        emailVerified: body.emailVerified ?? true,
+      };
+    } catch {
+      // Network error or auth service unavailable — fail closed.
+      return null;
+    }
+  };
+
   const app = createApp({
     serviceName: "gateway-service",
     version,
     jwtSecret: config.jwtSecret,
     redis,
-    validateApiKey: async () => null,
+    validateApiKey,
     allowedOrigins: config.allowedOrigins,
     publicRoutes: [
       "/healthz",
@@ -379,6 +462,9 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
 
   const lineageRoutes = createLineageRoutes({ lineageService });
   app.route("/api/v1/lineage", lineageRoutes);
+
+  const dataResidencyRoutes = createDataResidencyRoutes({ dataResidencyService });
+  app.route("/api/v1/data-residency", dataResidencyRoutes);
 
   // Storage browser routes — serve MinIO/S3 bucket and object APIs.
   // Must be registered before the catch-all proxy so that /api/v1/storage/*

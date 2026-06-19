@@ -429,11 +429,11 @@ const webhooksRoute = createRoute({
 const adminRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/admin",
-  // Guard: only platform-admin users may access the admin page.
+  // Guard: only tenant-admin (or higher) users may access the admin page.
   // The server enforces this too — this check prevents non-admins from seeing
   // the page content while the server request is in flight.
   beforeLoad: () => {
-    const hasPermission = useAuthStore.getState().hasPermission("platform-admin");
+    const hasPermission = useAuthStore.getState().hasPermission("tenant-admin");
     if (!hasPermission) {
       throw redirect({ to: "/settings/profile" });
     }

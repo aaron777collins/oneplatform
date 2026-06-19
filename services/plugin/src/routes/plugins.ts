@@ -25,6 +25,7 @@ function formatPlugin(plugin: PluginRow, instanceCount: number) {
     status: plugin.status,
     description: plugin.manifest.description,
     author: plugin.manifest.author,
+    configSchema: plugin.manifest.configSchema,
     installedAt: plugin.installed_at.toISOString(),
     instanceCount,
   };

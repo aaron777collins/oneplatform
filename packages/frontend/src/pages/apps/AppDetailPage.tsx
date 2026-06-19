@@ -178,7 +178,13 @@ export function AppDetailPage() {
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-4 space-y-3">
               <h3 className="text-sm font-semibold">Current Build</h3>
               <div className="flex items-center gap-3">
-                <BuildStatusBadge status={app.buildStatus} />
+                {app.buildStatus !== undefined ? (
+                  <BuildStatusBadge status={app.buildStatus} />
+                ) : (
+                  <span className="rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-foreground)]">
+                    Not deployed
+                  </span>
+                )}
                 {app.lastDeployedAt !== undefined && (
                   <span className="text-sm text-[var(--color-muted-foreground)]">
                     Deployed <RelativeTime value={app.lastDeployedAt} />

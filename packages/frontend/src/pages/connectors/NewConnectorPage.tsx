@@ -111,9 +111,9 @@ export function NewConnectorPage() {
   const { data: typesData, isLoading: typesLoading } = useQuery({
     queryKey: ["connector-plugins"],
     queryFn: async () => {
-      const result = await client.get<{ data: PluginEntry[] }>("/v1/plugins", { type: "connector" });
+      const result = await client.get<{ items: PluginEntry[]; nextCursor: string | null; total: number }>("/v1/plugins", { type: "connector" });
       // Map plugin entries to ConnectorTypeOption shape
-      const options: ConnectorTypeOption[] = (result.data ?? []).map((p) => ({
+      const options: ConnectorTypeOption[] = (result.items ?? []).map((p) => ({
         id: p.id,
         name: p.name,
         description: p.description,

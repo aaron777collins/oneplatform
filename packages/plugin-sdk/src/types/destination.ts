@@ -12,6 +12,7 @@ import type {
   TenantContext,
   PluginLogger,
   CacheAccessor,
+  CredentialAccessor,
   FetchProxy,
   TracingContext,
 } from "./context.js";
@@ -36,6 +37,14 @@ export interface DestinationContext {
   tenant: TenantContext;
   logger: PluginLogger;
   cache: CacheAccessor;
+
+  /**
+   * Access to the plugin instance's bound credentials (API keys, tokens, etc.)
+   * needed for authenticating with the destination system.
+   * Never log or cache credential values — the platform manages rotation.
+   */
+  credentials: CredentialAccessor;
+
   fetch: FetchProxy;
   tracing: TracingContext;
 }

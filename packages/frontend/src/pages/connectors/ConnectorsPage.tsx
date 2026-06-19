@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton.js";
 import { EmptyState } from "@/components/shared/EmptyState.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { ConnectorCard, type ConnectorCardData } from "@/components/connectors/ConnectorCard.js";
-import { useApiClient, type PaginatedResponse } from "@/lib/api-client.js";
+import { useApiClient } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { ConnectorStatus } from "@/components/connectors/ConnectorStatusBadge.js";
 
@@ -23,25 +23,63 @@ import type { ConnectorStatus } from "@/components/connectors/ConnectorStatusBad
 // API types
 // ---------------------------------------------------------------------------
 
-interface ConnectorApiRecord {
+/** Shape of a single connector row from the DB (snake_case). */
+interface ConnectorRowApi {
   id: string;
+  plugin_id: string;
   name: string;
-  typeName: string;
-  status: ConnectorStatus;
-  lastSyncAt?: string;
-  activeSyncPercent?: number;
-  activeSyncEta?: string;
+  description: string | null;
+  config: Record<string, unknown>;
+  sync_mode: "full" | "incremental";
+  schedule_cron: string | null;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
-function toCardData(record: ConnectorApiRecord): ConnectorCardData {
+/** Shape of the sync-state row joined onto each connector. */
+interface SyncStateRowApi {
+  status: "never_run" | "running" | "success" | "failed" | "cancelled";
+  last_sync_at: string | null;
+  last_sync_job_id: string | null;
+  rows_last_sync: string;
+  rows_total: string;
+}
+
+/** Each item in the list endpoint is `{ connector, syncState }`. */
+interface ConnectorWithSyncStateApi {
+  connector: ConnectorRowApi;
+  syncState: SyncStateRowApi;
+}
+
+/** The list endpoint returns `{ items/data, nextCursor, total }`. */
+interface ConnectorListResponse {
+  items: ConnectorWithSyncStateApi[];
+  data: ConnectorWithSyncStateApi[];
+  nextCursor: string | null;
+  total: number;
+}
+
+/** Map sync-state status to the badge-level ConnectorStatus. */
+function syncStatusToConnectorStatus(s: SyncStateRowApi["status"]): ConnectorStatus {
+  switch (s) {
+    case "running": return "syncing";
+    case "success": return "active";
+    case "failed": return "error";
+    case "cancelled": return "disabled";
+    case "never_run":
+    default: return "disabled";
+  }
+}
+
+function toCardData(record: ConnectorWithSyncStateApi): ConnectorCardData {
+  const { connector, syncState } = record;
   return {
-    id: record.id,
-    name: record.name,
-    typeName: record.typeName,
-    status: record.status,
-    ...(record.lastSyncAt !== undefined ? { lastSyncAt: record.lastSyncAt } : {}),
-    ...(record.activeSyncPercent !== undefined ? { activeSyncPercent: record.activeSyncPercent } : {}),
-    ...(record.activeSyncEta !== undefined ? { activeSyncEta: record.activeSyncEta } : {}),
+    id: connector.id,
+    name: connector.name,
+    typeName: connector.plugin_id,
+    status: syncStatusToConnectorStatus(syncState.status),
+    ...(syncState.last_sync_at !== null ? { lastSyncAt: syncState.last_sync_at } : {}),
   };
 }
 
@@ -57,7 +95,7 @@ export function ConnectorsPage() {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["connectors"],
-    queryFn: () => client.get<PaginatedResponse<ConnectorApiRecord>>("/v1/connectors"),
+    queryFn: () => client.get<ConnectorListResponse>("/v1/connectors"),
   });
 
   const triggerSync = useMutation({
@@ -76,13 +114,13 @@ export function ConnectorsPage() {
     },
   });
 
-  const connectors = data?.data ?? [];
+  const connectors = data?.items ?? [];
 
   const filtered = search.trim().length === 0
     ? connectors
     : connectors.filter((c) =>
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.typeName.toLowerCase().includes(search.toLowerCase()),
+        c.connector.name.toLowerCase().includes(search.toLowerCase()) ||
+        c.connector.plugin_id.toLowerCase().includes(search.toLowerCase()),
       );
 
   return (
@@ -149,14 +187,14 @@ export function ConnectorsPage() {
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((connector) => (
+            {filtered.map((item) => (
               <ConnectorCard
-                key={connector.id}
-                connector={toCardData(connector)}
+                key={item.connector.id}
+                connector={toCardData(item)}
                 onSync={(id) => triggerSync.mutate(id)}
                 isSyncing={
                   triggerSync.isPending &&
-                  triggerSync.variables === connector.id
+                  triggerSync.variables === item.connector.id
                 }
                 onClick={(id) => void navigate({ to: "/connectors/$id", params: { id } })}
               />

@@ -96,8 +96,8 @@ export function PluginInstallDialog({ open, onOpenChange, onInstalled }: PluginI
       }
       // File upload via FormData
       const formData = new FormData();
-      formData.append("file", params.file);
-      return fetch("/api/v1/plugins/upload", {
+      formData.append("bundle", params.file);
+      return fetch("/api/v1/plugins", {
         method: "POST",
         credentials: "include",
         body: formData,
@@ -141,7 +141,7 @@ export function PluginInstallDialog({ open, onOpenChange, onInstalled }: PluginI
         <DialogHeader>
           <DialogTitle>Install Plugin</DialogTitle>
           <DialogDescription>
-            Install a plugin from a URL or by uploading a plugin archive (.zip or .tgz).
+            Install a plugin from a URL or by uploading .oppkg plugin archives.
           </DialogDescription>
         </DialogHeader>
 
@@ -168,7 +168,7 @@ export function PluginInstallDialog({ open, onOpenChange, onInstalled }: PluginI
                       <FormLabel>Plugin URL</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="https://plugins.example.com/my-plugin.zip"
+                          placeholder="https://plugins.example.com/my-plugin.oppkg"
                           {...field}
                         />
                       </FormControl>
@@ -209,12 +209,12 @@ export function PluginInstallDialog({ open, onOpenChange, onInstalled }: PluginI
                 Click to select or drag & drop a plugin archive
               </p>
               <p className="text-xs text-[var(--color-muted-foreground)]">
-                .zip or .tgz files
+                .oppkg or .tar.gz files
               </p>
               <input
                 id="plugin-file-upload"
                 type="file"
-                accept=".zip,.tgz,.tar.gz"
+                accept=".oppkg,.tar.gz"
                 className="sr-only"
                 onChange={handleFileChange}
                 aria-label="Upload plugin file"

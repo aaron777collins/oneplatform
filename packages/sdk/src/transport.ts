@@ -107,8 +107,39 @@ async function mapResponseToError(response: Response): Promise<OnePlatformError>
       return new ConflictError(base);
     case 410:
       return new CursorExpiredError(base);
-    case 422:
-      return new ValidationError(base);
+    case 422: {
+      // Extract Zod-style issues from server response details and map them
+      // to the typed ValidationFieldError / ValidationConstraintViolation
+      // arrays so callers get populated `fields` and `constraints`.
+      const detailsObj = details as Record<string, unknown> | undefined;
+      const zodIssues = Array.isArray(detailsObj?.['issues'])
+        ? (detailsObj!['issues'] as Array<{ path?: (string | number)[]; message?: string; code?: string }>)
+        : [];
+
+      const fields: Array<{ field: string; message: string }> = [];
+      const constraints: Array<{ constraint: string; message: string }> = [];
+
+      for (const issue of zodIssues) {
+        const msg = issue.message ?? 'Validation failed';
+        if (issue.path && issue.path.length > 0) {
+          fields.push({
+            field: issue.path.join('.'),
+            message: msg,
+          });
+        } else {
+          constraints.push({
+            constraint: issue.code ?? 'unknown',
+            message: msg,
+          });
+        }
+      }
+
+      return new ValidationError({
+        ...base,
+        ...(fields.length > 0 ? { fields } : {}),
+        ...(constraints.length > 0 ? { constraints } : {}),
+      });
+    }
     case 429:
       return new RateLimitError({
         ...base,

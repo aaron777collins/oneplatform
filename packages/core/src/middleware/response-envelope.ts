@@ -32,6 +32,14 @@ export function responseEnvelopeMiddleware() {
       return;
     }
 
+    // Do not wrap responses that are already enveloped — i.e. the route (or an
+    // upstream service proxied through the Gateway) already returned { data: T }.
+    // Without this check, the middleware would produce { data: { data: T } },
+    // which breaks frontend consumers that expect a single envelope layer.
+    if (body !== null && typeof body === "object" && "data" in (body as object)) {
+      return;
+    }
+
     // StatusCode cast is safe: we already checked the status starts with "2"
     // and excluded 204, so it must be a valid JSON-bearing 2xx ContentfulStatusCode.
     const status = c.res.status as 200 | 201 | 202 | 203;

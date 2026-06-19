@@ -30,6 +30,11 @@ interface UpgradeOpts { tenant?: string; yes?: boolean }
 interface RollbackOpts { yes?: boolean }
 interface PluginTenantOpts { tenant?: string }
 interface PackOpts { out?: string; sign?: string }
+interface PublishOpts {
+  category?: string;
+  tags?: string;
+  dryRun?: boolean;
+}
 interface SimulateOpts {
   /** Plugin bundle path (local) or Plugin ID (remote). */
   plugin: string;
@@ -320,6 +325,94 @@ async function packAction(opts: PackOpts, _ctx: CommandContext): Promise<void> {
   });
 }
 
+const MARKETPLACE_CATEGORIES = [
+  "data-source",
+  "data-destination",
+  "transformation",
+  "authentication",
+  "analytics",
+  "monitoring",
+  "communication",
+  "developer-tools",
+  "other",
+];
+
+async function publishAction(opts: PublishOpts, ctx: CommandContext): Promise<void> {
+  // Read plugin.manifest.json from the current working directory.
+  const manifestPath = join(process.cwd(), "plugin.manifest.json");
+  let manifest: { id?: string; name?: string; version?: string };
+  try {
+    const raw = readFileSync(manifestPath, "utf-8");
+    manifest = JSON.parse(raw) as { id?: string; name?: string; version?: string };
+  } catch {
+    throw new CliError(
+      `Could not read plugin.manifest.json in ${process.cwd()}. ` +
+        "Run this command from a plugin project root, or run 'op plugin create' first.",
+      EXIT.GENERAL,
+    );
+  }
+
+  if (!manifest.id || !manifest.name || !manifest.version) {
+    throw new CliError(
+      "plugin.manifest.json is missing required fields (id, name, version).",
+      EXIT.GENERAL,
+    );
+  }
+
+  // Resolve category — from flag or interactive prompt.
+  const category = opts.category ?? await promptSelect("Marketplace category:", MARKETPLACE_CATEGORIES);
+
+  // Resolve tags — from flag (comma-separated) or interactive prompt (optional).
+  let tags: string[] = [];
+  if (opts.tags !== undefined) {
+    tags = opts.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  } else {
+    const tagInput = await promptText("Tags (comma-separated, optional):", "");
+    if (tagInput.length > 0) {
+      tags = tagInput.split(",").map((t) => t.trim()).filter(Boolean);
+    }
+  }
+
+  ctx.renderer.info(`Plugin:   ${manifest.name} (${manifest.id})`);
+  ctx.renderer.info(`Version:  ${manifest.version}`);
+  ctx.renderer.info(`Category: ${category}`);
+  if (tags.length > 0) {
+    ctx.renderer.info(`Tags:     ${tags.join(", ")}`);
+  }
+
+  if (opts.dryRun) {
+    ctx.renderer.warn("Dry-run mode — nothing will be published.");
+    ctx.renderer.success("Dry-run validation passed. Remove --dry-run to publish.");
+    return;
+  }
+
+  if (!ctx.yes) {
+    await confirmDestructive(`Publish '${manifest.name}' v${manifest.version} to the marketplace?`, false);
+  }
+
+  // Pack the plugin bundle (reuses the same packPlugin flow).
+  const defaultBundlePath = join(process.cwd(), `${manifest.id}-${manifest.version}.oppkg`);
+  await packPlugin({});
+
+  // Read the built bundle and POST it to the marketplace.
+  const bundleContent = readFileSync(defaultBundlePath);
+  const form = new FormData();
+  form.append("bundle", new Blob([bundleContent]), "plugin.oppkg");
+  form.append("category", category);
+  if (tags.length > 0) {
+    form.append("tags", JSON.stringify(tags));
+  }
+
+  const resp = await ctx.http.postMultipart<{
+    id: string; name: string; version: string; marketplaceUrl: string;
+  }>("/api/v1/marketplace/plugins", form);
+
+  ctx.renderer.success(
+    `Plugin '${resp.name}' v${resp.version} published to the marketplace (ID: ${resp.id}).`,
+  );
+  ctx.renderer.info(`Marketplace URL: ${resp.marketplaceUrl}`);
+}
+
 async function validateAction(path: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const content = readFileSync(path);
   const form = new FormData();
@@ -533,6 +626,12 @@ export function registerPlugin(program: Command): void {
   plugin.command("validate").description("Validate a .oppkg file")
     .argument("<path-to.oppkg>", "Path to the .oppkg file")
     .action(withContext<[string, Record<string, never>]>(validateAction));
+
+  plugin.command("publish").description("Publish the current plugin project to the marketplace")
+    .option("--category <category>", "Marketplace category (e.g. data-source, transformation, analytics)")
+    .option("--tags <tags>", "Comma-separated list of tags")
+    .option("--dry-run", "Validate and preview without actually publishing")
+    .action(withContext<[PublishOpts]>(publishAction));
 
   plugin.command("simulate-hook")
     .description("Test a plugin hook locally (no server required) or against a running instance with --remote")

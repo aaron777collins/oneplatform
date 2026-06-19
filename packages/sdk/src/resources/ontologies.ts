@@ -21,6 +21,7 @@ import type {
 } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 import { ConfigurationError } from '../errors/client-errors.js';
+import { serializeListQuery } from './list-query.js';
 
 /**
  * Namespace for ontology schema management.
@@ -78,6 +79,7 @@ export function createOntologyNamespace(transport: Transport): OntologyNamespace
   return {
     list(options?: ListOptions): PaginatedIterable<OntologySchema> {
       const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<OntologySchema>(async (cursor, limit) => {
         // The transport unwraps the top-level { data: T } envelope automatically.
         // The service returns { data: { items, nextCursor, total, hasMore } } so
@@ -91,7 +93,11 @@ export function createOntologyNamespace(transport: Transport): OntologyNamespace
         }>({
           method: 'GET',
           path: BASE,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: {
+            ...baseQuery,
+            limit,
+            ...(cursor !== null ? { cursor } : {}),
+          },
         });
         return result;
       }, pageSize);

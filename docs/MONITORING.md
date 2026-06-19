@@ -256,7 +256,7 @@ Docker's json-file driver captures them unmodified.
 
 Warn and error go to **stderr** deliberately — container runtimes and Docker
 log drivers treat stderr as a higher-severity stream, making it easy to filter
-for problems with `docker logs gateway-service 2>&1 1>/dev/null`.
+for problems with `docker compose logs gateway-service 2>&1 1>/dev/null`.
 
 ### Configuring log level per service
 
@@ -560,7 +560,7 @@ from within the internal network. Key metrics:
 
 ```bash
 # Verify the endpoint is reachable
-docker exec gateway-service wget -qO- http://minio:9000/minio/v2/metrics/cluster | grep minio_cluster
+docker compose exec gateway-service wget -qO- http://minio:9000/minio/v2/metrics/cluster | grep minio_cluster
 
 # Key metrics to watch
 # minio_cluster_capacity_usable_total_bytes  — usable storage capacity
@@ -813,7 +813,7 @@ The platform standard retry policy (from `packages/core/src/queue.ts`):
 The pipeline service `/readyz` exposes live queue counts:
 
 ```bash
-docker exec gateway-service wget -qO- http://pipeline-service:3000/readyz | jq .queues
+docker compose exec gateway-service wget -qO- http://pipeline-service:3000/readyz | jq .queues
 ```
 
 Output:
@@ -1491,4 +1491,4 @@ For a DevOps engineer setting up monitoring from scratch:
 - [ ] Verify `OP_LOG_LEVEL=debug` on one service, tail its logs, and confirm JSON format
 - [ ] Verify Redis memory headroom: `redis-cli INFO memory | grep used_memory_human`
 - [ ] Verify PgBouncer pool health: `psql .../pgbouncer -c "SHOW POOLS;"`
-- [ ] Verify MinIO metrics (internal only): `docker exec gateway-service wget -qO- http://minio:9000/minio/v2/metrics/cluster | grep minio_cluster`
+- [ ] Verify MinIO metrics (internal only): `docker compose exec gateway-service wget -qO- http://minio:9000/minio/v2/metrics/cluster | grep minio_cluster`

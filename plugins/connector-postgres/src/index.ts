@@ -124,6 +124,55 @@ const QUERY_PATH = "/query";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Returns true when the URL uses HTTP and targets a localhost or RFC-1918
+ * private network address. This allows local development without an HTTPS
+ * proxy while keeping the HTTPS requirement for public endpoints.
+ *
+ * Recognised private ranges:
+ *   - 127.x.x.x  (loopback)
+ *   - 10.x.x.x   (Class A private)
+ *   - 172.16-31.x.x (Class B private)
+ *   - 192.168.x.x (Class C private)
+ *   - localhost / [::1] (IPv4/IPv6 loopback names)
+ */
+function isPrivateNetworkHttp(urlString: string): boolean {
+  if (!urlString.startsWith("http://")) {
+    return false;
+  }
+
+  let hostname: string;
+  try {
+    hostname = new URL(urlString).hostname;
+  } catch {
+    return false;
+  }
+
+  // Strip IPv6 brackets if present (URL constructor already does this, but be safe)
+  hostname = hostname.replace(/^\[|\]$/g, "");
+
+  // Loopback names
+  if (hostname === "localhost" || hostname === "::1") {
+    return true;
+  }
+
+  // IPv4 private ranges
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+    // 127.x.x.x — loopback
+    if (a === 127) return true;
+    // 10.x.x.x — Class A private
+    if (a === 10) return true;
+    // 172.16.0.0 – 172.31.255.255 — Class B private
+    if (a === 172 && b! >= 16 && b! <= 31) return true;
+    // 192.168.x.x — Class C private
+    if (a === 192 && b === 168) return true;
+  }
+
+  return false;
+}
+
 function parseConfig(raw: Record<string, unknown>): PostgresConfig {
   const proxyUrl = raw["proxyUrl"];
   if (typeof proxyUrl !== "string" || proxyUrl.trim() === "") {
@@ -132,9 +181,9 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
       "proxyUrl",
     );
   }
-  if (!proxyUrl.startsWith("https://")) {
+  if (!proxyUrl.startsWith("https://") && !isPrivateNetworkHttp(proxyUrl)) {
     throw new PluginConfigError(
-      "proxyUrl must use HTTPS — plain HTTP connections to database proxies are not permitted",
+      "proxyUrl must use HTTPS for public endpoints — plain HTTP is only permitted for localhost and private network addresses (10.x, 172.16-31.x, 192.168.x, 127.x)",
       "proxyUrl",
     );
   }

@@ -30,6 +30,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- include "oneplatform.podScheduling" (dict "service" "ontology" "root" .) | nindent 6 }}
       containers:
         - name: ontology
           image: {{ include "oneplatform.image" (dict "svc" .Values.ontology "root" .) | quote }}

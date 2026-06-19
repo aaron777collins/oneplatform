@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables, ServiceTokenSigner } from "@oneplatform/core";
-import { decrypt, ValidationError, UnauthorizedError } from "@oneplatform/core";
+import { decrypt, ValidationError, UnauthorizedError, ForbiddenError } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type { Logger } from "@oneplatform/core";
 import type { AppRepository } from "../repositories/app-repository.js";
@@ -41,6 +41,55 @@ export interface BffRouteDeps {
 export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { appRepo, permRepo, permService, authServiceUrl, masterKey, redis, logger, serviceTokenSigner } = deps;
+
+  // ---------------------------------------------------------------------------
+  // V5-017 — Entity-level RBAC enforcement for data proxy routes
+  //
+  // Before forwarding any data request to the Execution Service, verify that the
+  // authenticated user holds at least one app role whose permissions include the
+  // required action on the target entity.  Users with the "admin" action on an
+  // entity are implicitly allowed all operations on that entity.
+  // ---------------------------------------------------------------------------
+
+  type EntityAction = "create" | "read" | "update" | "delete";
+
+  async function assertEntityPermission(
+    appId: string,
+    userRoles: string[],
+    entity: string,
+    requiredAction: EntityAction
+  ): Promise<void> {
+    // Resolve the user's app-level roles and their permission grants.
+    const allAppRoles = await permRepo.listRolesByApp(appId);
+    const userRoleNames = new Set(userRoles);
+    const matchedRoles = allAppRoles.filter((r) => userRoleNames.has(r.name));
+
+    // Check if any matched role grants the required action (or "admin") on the entity.
+    for (const role of matchedRoles) {
+      const perms = role.permissions as Array<{ entity: string; actions: string[] }>;
+      for (const perm of perms) {
+        // Match the entity name (case-insensitive to tolerate casing mismatches
+        // between URL path segments and role definitions) or the wildcard "*".
+        if (
+          perm.entity === "*" ||
+          perm.entity.toLowerCase() === entity.toLowerCase()
+        ) {
+          if (
+            perm.actions.includes(requiredAction) ||
+            perm.actions.includes("admin")
+          ) {
+            return; // Permitted
+          }
+        }
+      }
+    }
+
+    // No matching permission found — deny access.
+    throw new ForbiddenError(
+      `Permission denied: action "${requiredAction}" on entity "${entity}" is not allowed.`,
+      { appId, entity, requiredAction }
+    );
+  }
 
   // -------------------------------------------------------------------------
   // GET /bff/me
@@ -165,6 +214,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
 
+    // V5-017: enforce entity-level RBAC before forwarding to execution service
+    await assertEntityPermission(appId, user.roles, entity, "read");
+
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
 
     const queryParams = new URLSearchParams(c.req.query()).toString();
@@ -209,6 +261,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     if (!accessible) {
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
+
+    // V5-017: enforce entity-level RBAC before forwarding to execution service
+    await assertEntityPermission(appId, user.roles, entity, "create");
 
     const body = await c.req.json().catch(() => null);
 
@@ -268,6 +323,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
 
+    // V5-017: enforce entity-level RBAC before forwarding to execution service
+    await assertEntityPermission(appId, user.roles, entity, "update");
+
     const body = await c.req.json().catch(() => null);
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
@@ -313,6 +371,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     if (!accessible) {
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
+
+    // V5-017: enforce entity-level RBAC before forwarding to execution service
+    await assertEntityPermission(appId, user.roles, entity, "update");
 
     const body = await c.req.json().catch(() => null);
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
@@ -360,6 +421,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
 
+    // V5-017: enforce entity-level RBAC before forwarding to execution service
+    await assertEntityPermission(appId, user.roles, entity, "delete");
+
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
 
@@ -401,6 +465,9 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     if (!accessible) {
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId, tenantId: user.tenantId });
     }
+
+    // V5-017: enforce entity-level RBAC before forwarding to execution service
+    await assertEntityPermission(appId, user.roles, entity, "create");
 
     const body = await c.req.json().catch(() => null);
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";

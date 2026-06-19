@@ -74,16 +74,16 @@ export function BootstrapErrorPage() {
           <li className="flex gap-2">
             <span className="shrink-0 font-mono text-xs font-semibold text-[var(--color-foreground)]">2.</span>
             <span>
-              <strong className="text-[var(--color-foreground)]">Check the gateway port.</strong>{" "}
-              The API gateway should be reachable at port 3000 by default.
-              Try <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">curl http://localhost:3000/healthz</code>.
+              <strong className="text-[var(--color-foreground)]">Check the gateway.</strong>{" "}
+              The API is served through Caddy on HTTPS (port 443).
+              Try <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">curl -k https://localhost/api/v1/healthz</code>.
             </span>
           </li>
           <li className="flex gap-2">
             <span className="shrink-0 font-mono text-xs font-semibold text-[var(--color-foreground)]">3.</span>
             <span>
               <strong className="text-[var(--color-foreground)]">Check service logs.</strong>{" "}
-              Run <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">docker compose logs gateway auth</code>{" "}
+              Run <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">docker compose logs gateway-service auth-service caddy</code>{" "}
               to look for startup errors.
             </span>
           </li>
@@ -91,8 +91,8 @@ export function BootstrapErrorPage() {
             <span className="shrink-0 font-mono text-xs font-semibold text-[var(--color-foreground)]">4.</span>
             <span>
               <strong className="text-[var(--color-foreground)]">Check your .env file.</strong>{" "}
-              Ensure the API gateway is running on port 3000
-              and database connection strings are set correctly.
+              Ensure <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">OP_DOMAIN</code> and
+              database connection strings are set correctly.
             </span>
           </li>
         </ol>

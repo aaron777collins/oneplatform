@@ -281,6 +281,9 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // predefined mapping for standard role names.
     const scopes = resolveScopes(user.roles);
 
+    const issuer = process.env["OP_SERVICE_URL"] || "oneplatform";
+    const audience = "oneplatform";
+
     const builder = new SignJWT({
       sub: user.id,
       tid: user.tenantId,
@@ -294,7 +297,9 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     } satisfies Omit<JwtClaims, "iat" | "exp">)
       .setProtectedHeader({ alg: algorithm })
       .setIssuedAt(now)
-      .setExpirationTime(now + expirySeconds);
+      .setExpirationTime(now + expirySeconds)
+      .setIssuer(issuer)
+      .setAudience(audience);
 
     if (algorithm === "EdDSA") {
       const privateKey = await loadEdDsaPrivateKey();
@@ -366,12 +371,23 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
         return null;
       }
 
+      const expectedIssuer = process.env["OP_SERVICE_URL"] || "oneplatform";
+      const expectedAudience = "oneplatform";
+
       let payload: JWTPayload;
       if (tokenAlgorithm === "EdDSA") {
         const publicKey = await loadEdDsaPublicKey();
-        ({ payload } = await jwtVerify(token, publicKey, { algorithms: ["EdDSA"] }));
+        ({ payload } = await jwtVerify(token, publicKey, {
+          algorithms: ["EdDSA"],
+          issuer: expectedIssuer,
+          audience: expectedAudience,
+        }));
       } else {
-        ({ payload } = await jwtVerify(token, getJwtSecret(), { algorithms: ["HS256"] }));
+        ({ payload } = await jwtVerify(token, getJwtSecret(), {
+          algorithms: ["HS256"],
+          issuer: expectedIssuer,
+          audience: expectedAudience,
+        }));
       }
 
       const claims = payload as JWTPayload & Partial<JwtClaims>;

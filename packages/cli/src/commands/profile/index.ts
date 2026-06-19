@@ -26,10 +26,20 @@ async function addAction(name: string, opts: AddOpts, ctx: CommandContext): Prom
     throw new CliError("--platform is required.", EXIT.GENERAL);
   }
 
-  // Validate the key against the API if provided
+  // Validate the key against the API if provided.
+  // Build a temporary HTTP client with the NEW key and platform URL for validation,
+  // rather than using ctx.http which carries the OLD profile's credentials.
   if (opts.key) {
     try {
-      await ctx.http.get("/api/v1/auth/me");
+      const { createHttpClient } = await import("../../lib/http-client.js");
+      const tempClient = createHttpClient({
+        platformUrl: opts.platform,
+        apiKey: opts.key,
+        timeout: ctx.config.timeout,
+        insecureTls: ctx.config.insecureTls,
+        verbose: ctx.config.verbose,
+      });
+      await tempClient.get("/api/v1/auth/me");
     } catch {
       throw new CliError(
         `API key validation failed. Check the key and platform URL.`,

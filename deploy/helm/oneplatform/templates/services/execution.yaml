@@ -40,6 +40,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- include "oneplatform.podScheduling" (dict "service" "execution" "root" .) | nindent 6 }}
       # Sandbox init: the sandbox sidecar must be ready before the execution
       # service starts accepting requests.  Use initContainers or rely on the
       # readiness probe — the execution service's /healthz checks the socket.

@@ -171,7 +171,7 @@ async function createDockerContainer(
       NetworkMode: "oneplatform-sandbox",
       ReadonlyRootfs: true,
       CapDrop: ["ALL"],
-      AutoRemove: false,
+      AutoRemove: true,
     },
     Env: [
       `OP_EXECUTION_ID=${executionId}`,

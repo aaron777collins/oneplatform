@@ -24,18 +24,16 @@ describe("responseEnvelopeMiddleware", () => {
   });
 
   it("does not double-wrap if data key is already present at top level", async () => {
-    // Routes should return raw objects; the middleware wraps them.
-    // This test ensures a route returning { data: [...] } (pagination) is wrapped
-    // to { data: { data: [...] } } — the pagination shape belongs inside data.
-    // (Routes producing PaginatedResponse should return the full pagination object
-    // and the middleware will wrap it.)
+    // Routes that already return { data: T } (e.g. paginated list endpoints or
+    // proxied upstream responses) must not be wrapped again. The middleware skips
+    // wrapping when the top-level body already contains a "data" key.
     const app = new Hono();
     app.use("*", responseEnvelopeMiddleware());
     app.get("/list", (c) => c.json({ data: [1, 2], pagination: { nextCursor: null, total: 2 } }));
     const res = await app.request("/list");
     const body = await res.json();
-    // The middleware wraps the whole object
-    expect(body.data).toMatchObject({ data: [1, 2], pagination: { nextCursor: null, total: 2 } });
+    // The middleware must NOT wrap — the response already has { data: ... }
+    expect(body).toMatchObject({ data: [1, 2], pagination: { nextCursor: null, total: 2 } });
   });
 
   it("passes through non-JSON responses unchanged (e.g. 204 No Content)", async () => {

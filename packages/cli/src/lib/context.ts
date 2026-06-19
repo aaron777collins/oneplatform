@@ -32,6 +32,8 @@ export interface ResolvedConfig {
 export interface CommandContext {
   config: ResolvedConfig;
   credentials: ResolvedCredentials;
+  /** The resolved profile name (from --profile, OP_PROFILE, or active profile). */
+  profileName: string;
   output: OutputFormat;
   renderer: OutputRenderer;
   quiet: boolean;
@@ -147,6 +149,7 @@ export async function globalPreActionHook(
   const ctx: CommandContext = {
     config: { platformUrl, timeout, insecureTls, verbose },
     credentials,
+    profileName,
     output: outputFormat,
     renderer,
     quiet,

@@ -10,6 +10,7 @@ import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, NotFoundError, serviceAuthMiddleware } from "@oneplatform/core";
 import type { TokenService } from "../services/token-service.js";
+import type { ApiKeyService } from "../services/api-key-service.js";
 import type { GuestSessionService } from "../services/index.js";
 import type { OAuthClientRepository } from "../repositories/index.js";
 import {
@@ -19,6 +20,7 @@ import {
 
 export interface InternalRouteDeps {
   tokenService: TokenService;
+  apiKeyService: ApiKeyService;
   guestSessionService: GuestSessionService;
   oauthClientRepository: OAuthClientRepository;
   servicePublicKeys: Record<string, string>;
@@ -26,7 +28,7 @@ export interface InternalRouteDeps {
 
 export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { tokenService, guestSessionService, oauthClientRepository, servicePublicKeys } = deps;
+  const { tokenService, apiKeyService, guestSessionService, oauthClientRepository, servicePublicKeys } = deps;
 
   // All /internal/* routes require service-to-service Ed25519 JWT auth
   routes.use("*", serviceAuthMiddleware({
@@ -67,6 +69,37 @@ export function createInternalRoutes(deps: InternalRouteDeps): Hono<{ Variables:
       emailVerified: claims.ev,
       isGuest: false,
       sessionId: claims.jti,
+    });
+  });
+
+  // POST /internal/auth/validate-api-key — API key introspection
+  // Called by the Gateway service to validate X-API-Key headers.
+  // Returns the resolved UserContext when the key is valid, or { valid: false }
+  // when the key is missing, malformed, expired, or revoked.
+  routes.post("/internal/auth/validate-api-key", async (c) => {
+    const body = await c.req.json();
+    const apiKey = typeof body === "object" && body !== null && "apiKey" in body
+      ? String(body["apiKey"])
+      : null;
+    if (!apiKey) {
+      throw new ValidationError("Missing 'apiKey' field in request body");
+    }
+
+    const user = await apiKeyService.validate(apiKey);
+
+    if (user === null) {
+      return c.json({ valid: false, reason: "API_KEY_INVALID" });
+    }
+
+    return c.json({
+      valid: true,
+      userId: user.userId,
+      tenantId: user.tenantId,
+      roles: user.roles,
+      scopes: user.scopes,
+      emailVerified: user.emailVerified,
+      isGuest: user.isGuest,
+      isService: user.isService,
     });
   });
 

@@ -100,6 +100,9 @@ if [ -z "${OP_MINIO_PASSWORD:-}" ] || [ "${OP_MINIO_PASSWORD:-}" = "CHANGE_ME_mi
   echo "[service-entrypoint] Set a strong password in .env before running docker compose up." >&2
   exit 1
 fi
+# Note: "oneplatform_minio_dev_2024" is the .env.example development default
+# and is intentionally allowed here so first `docker compose up` works without
+# manual edits. docker-compose.prod.yml rejects it via a separate guard.
 
 echo "[service-entrypoint] Secrets loaded for ${SERVICE_NAME}. Starting node..."
 

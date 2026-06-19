@@ -8,41 +8,12 @@
 import type { Transport } from '../transport.js';
 import type { PaginatedIterable } from '../pagination/paginator.js';
 import type { ListOptions, GetOptions, MutationOptions } from '../types/resources.js';
-import type { FilterBuilder } from '../filter-builder/filter-builder.js';
 import type { BulkOperation, BulkResult } from './platform-types.js';
 import { Paginator } from '../pagination/paginator.js';
 // ValidationError is the correct type for SDK-side input validation failures;
 // plain Error would bypass the OnePlatformError hierarchy and break instanceof checks.
 import { ValidationError } from '../errors/client-errors.js';
-
-function serializeListQuery(
-  options?: ListOptions,
-): Record<string, string | string[] | number | boolean | undefined> {
-  if (options === undefined) return {};
-
-  const query: Record<string, string | string[] | number | boolean | undefined> = {};
-
-  if (options.limit !== undefined) query['limit'] = options.limit;
-  if (options.cursor !== undefined) query['cursor'] = options.cursor;
-  if (options.sort !== undefined) {
-    query['sort'] = Array.isArray(options.sort) ? options.sort.join(',') : options.sort;
-  }
-  if (options.fields !== undefined) {
-    query['fields'] = options.fields.join(',');
-  }
-
-  let filterParams: Record<string, string> = {};
-  if (options.filter !== undefined) {
-    // Discriminate FilterBuilder (has toParams method) from raw Record<string, string>
-    if (typeof options.filter === 'object' && typeof (options.filter as FilterBuilder).toParams === 'function') {
-      filterParams = (options.filter as FilterBuilder).toParams();
-    } else {
-      filterParams = options.filter as Record<string, string>;
-    }
-  }
-
-  return { ...query, ...filterParams } as Record<string, string | string[] | number | boolean | undefined>;
-}
+import { serializeListQuery } from './list-query.js';
 
 /**
  * CRUD operations for a single ontology-typed entity.

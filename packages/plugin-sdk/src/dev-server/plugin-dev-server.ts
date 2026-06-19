@@ -90,10 +90,13 @@ export class PluginDevServer {
 
     printWatching(pluginDir);
 
-    // We watch the src/ directory specifically (not dist/) because dist/ changes
-    // are a consequence of src/ changes. Watching the plugin root would fire on
-    // dist/ writes and cause double-triggers.
-    const watchDir = path.join(pluginDir, "src");
+    // We watch the dist/ directory because loadPlugin() loads the compiled
+    // dist/bundle.js — not the TypeScript sources. Watching src/ would trigger
+    // reloads before the build tool has written fresh output to dist/, causing
+    // the dev server to load stale artifacts. The developer's own build tool
+    // (esbuild --watch, tsc --watch, etc.) is responsible for rebuilding dist/
+    // when src/ changes; the dev server then picks up the new bundle.
+    const watchDir = path.join(pluginDir, "dist");
     const watchTarget = fs.existsSync(watchDir) ? watchDir : pluginDir;
 
     this.watcher = fs.watch(watchTarget, { recursive: true }, (event, filename) => {

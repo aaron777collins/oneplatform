@@ -50,8 +50,8 @@ interface Member {
   id: string;
   email: string;
   displayName?: string;
-  role: string;
-  joinedAt: string;
+  roles: string[];
+  createdAt: string;
 }
 
 const inviteSchema = z.object({
@@ -94,7 +94,7 @@ export function TeamsPage() {
 
   const updateRoleMutation = useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
-      client.patch(`/v1/users/${memberId}`, { role }),
+      client.put(`/v1/users/${memberId}`, { roles: [role] }),
     onSuccess: () => {
       toast({ title: "Role updated" });
       void queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -107,15 +107,15 @@ export function TeamsPage() {
 
   const removeMutation = useMutation({
     mutationFn: (memberId: string) =>
-      client.delete(`/v1/users/${memberId}`),
+      client.put(`/v1/users/${memberId}`, { isActive: false }),
     onSuccess: () => {
-      toast({ title: "Member removed" });
+      toast({ title: "Member deactivated" });
       setRemoveTarget(null);
       void queryClient.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (error) => {
-      const message = error instanceof ApiError ? error.message : "Remove failed.";
-      toast({ title: "Remove failed", description: message, variant: "destructive" });
+      const message = error instanceof ApiError ? error.message : "Deactivation failed.";
+      toast({ title: "Deactivation failed", description: message, variant: "destructive" });
     },
   });
 
@@ -221,7 +221,7 @@ export function TeamsPage() {
                 </TableCell>
                 <TableCell>
                   <Select
-                    value={member.role}
+                    value={member.roles[0]}
                     onValueChange={(role) => updateRoleMutation.mutate({ memberId: member.id, role })}
                   >
                     <SelectTrigger className="w-28 h-7 text-xs">
@@ -235,7 +235,7 @@ export function TeamsPage() {
                   </Select>
                 </TableCell>
                 <TableCell className="text-sm">
-                  <RelativeTime value={member.joinedAt} />
+                  <RelativeTime value={member.createdAt} />
                 </TableCell>
                 <TableCell>
                   <Button
@@ -243,7 +243,7 @@ export function TeamsPage() {
                     size="icon"
                     className="h-7 w-7 text-[var(--color-destructive)]"
                     onClick={() => setRemoveTarget(member)}
-                    aria-label={`Remove ${member.email}`}
+                    aria-label={`Deactivate ${member.email}`}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </Button>
@@ -257,9 +257,9 @@ export function TeamsPage() {
       <ConfirmDialog
         open={removeTarget !== null}
         onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}
-        title="Remove member"
-        description={`Remove ${removeTarget?.email ?? "this member"} from the team? They will lose access immediately.`}
-        confirmLabel="Remove"
+        title="Deactivate member"
+        description={`Deactivate ${removeTarget?.email ?? "this member"}? They will lose access immediately.`}
+        confirmLabel="Deactivate"
         onConfirm={() => {
           if (removeTarget !== null) removeMutation.mutate(removeTarget.id);
         }}
