@@ -380,7 +380,7 @@ export default function DashboardPage() {
   const { data: activityData, isLoading: activityLoading } = useQuery({
     queryKey: ["activity-feed"],
     queryFn: () =>
-      client.get<PaginatedResponse<ActivityEvent>>("/v1/logs", { limit: 20 }),
+      client.get<PaginatedResponse<ActivityEvent>>("/v1/logs", { limit: 20, sort: "-createdAt" }),
     staleTime: 10_000,
   });
 

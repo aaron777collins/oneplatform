@@ -39,25 +39,36 @@ function promptPassphrase(prompt: string): Promise<string> {
     // Mute output so the passphrase is not echoed to the terminal
     process.stderr.write(prompt);
     const stdin = process.stdin;
-    const wasMuted = (stdin as NodeJS.ReadStream & { isMuted?: boolean }).isMuted;
     if (stdin.setRawMode) {
       stdin.setRawMode(true);
     }
+
+    // Restore terminal state and clean up listeners before exiting
+    const cleanup = (): void => {
+      if (stdin.setRawMode) stdin.setRawMode(false);
+      stdin.removeListener("data", onData);
+      rl.close();
+    };
+
+    const onSigint = (): void => {
+      cleanup();
+      process.stderr.write("\n");
+      process.exit(EXIT.GENERAL);
+    };
+    process.once("SIGINT", onSigint);
 
     let passphrase = "";
     const onData = (ch: Buffer): void => {
       const char = ch.toString("utf8");
       if (char === "\n" || char === "\r" || char === "") {
-        if (stdin.setRawMode) stdin.setRawMode(false);
-        stdin.removeListener("data", onData);
+        process.removeListener("SIGINT", onSigint);
+        cleanup();
         process.stderr.write("\n");
-        rl.close();
         resolve(passphrase);
       } else if (char === "") {
         // Ctrl-C
-        if (stdin.setRawMode) stdin.setRawMode(false);
-        stdin.removeListener("data", onData);
-        rl.close();
+        process.removeListener("SIGINT", onSigint);
+        cleanup();
         reject(new CliError("Cancelled.", EXIT.GENERAL));
       } else if (char === "" || char === "\b") {
         // Backspace
@@ -81,9 +92,6 @@ async function exportAction(opts: ExportOpts, ctx: CommandContext): Promise<void
     if (!opts.passphrase) {
       // Interactive fallback: prompt for passphrase if not provided as a flag
       opts.passphrase = await promptPassphrase("Enter passphrase for credential encryption: ");
-    }
-    if (!opts.passphrase) {
-      throw new CliError("--passphrase is required when --include-credentials is set.", EXIT.GENERAL);
     }
     // POST is required here because the passphrase must travel in the request body,
     // not in the URL query string where it would be visible in server/proxy access logs.

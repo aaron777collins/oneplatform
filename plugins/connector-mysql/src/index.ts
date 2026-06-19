@@ -163,7 +163,7 @@ function isPrivateNetworkHttp(urlString: string): boolean {
     // 10.x.x.x — Class A private
     if (a === 10) return true;
     // 172.16.0.0 – 172.31.255.255 — Class B private
-    if (a === 172 && b! >= 16 && b! <= 31) return true;
+    if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
     // 192.168.x.x — Class C private
     if (a === 192 && b === 168) return true;
   }

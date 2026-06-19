@@ -37,6 +37,7 @@ const PLATFORM_ADMIN_SCOPE = "admin";
  */
 function requireBrandingAccess(
   scopes: string[],
+  roles: string[],
   callerTenantId: string,
   targetTenantId: string,
 ): void {
@@ -44,7 +45,7 @@ function requireBrandingAccess(
   if (scopes.includes(PLATFORM_ADMIN_SCOPE)) return;
 
   // Tenant-admin can manage branding for their own tenant only.
-  if (scopes.includes("users:manage") && callerTenantId === targetTenantId) return;
+  if (roles.includes("tenant-admin") && callerTenantId === targetTenantId) return;
 
   throw new ForbiddenError(
     "admin scope or tenant-admin role for this tenant is required for branding management operations."
@@ -61,7 +62,7 @@ export function createBrandingRoutes(
   // Returns the resolved branding config (defaults filled in for unset fields).
   routes.get("/api/v1/tenants/:id/branding", async (c) => {
     const id = c.req.param("id");
-    requireBrandingAccess(c.var.user.scopes, c.var.user.tenantId, id);
+    requireBrandingAccess(c.var.user.scopes, c.var.user.roles, c.var.user.tenantId, id);
 
     // Verify the tenant exists before proxying to the service — gives a clear
     // 404 rather than silently returning defaults for a non-existent tenant.
@@ -78,7 +79,7 @@ export function createBrandingRoutes(
   // Partial update — only the fields present in the body are changed.
   routes.patch("/api/v1/tenants/:id/branding", async (c) => {
     const id = c.req.param("id");
-    requireBrandingAccess(c.var.user.scopes, c.var.user.tenantId, id);
+    requireBrandingAccess(c.var.user.scopes, c.var.user.roles, c.var.user.tenantId, id);
     const body = await c.req.json();
     const parsed = updateBrandingRequest.safeParse(body);
     if (!parsed.success) {
@@ -113,7 +114,7 @@ export function createBrandingRoutes(
   // Removes all custom branding — UI reverts to platform defaults.
   routes.delete("/api/v1/tenants/:id/branding", async (c) => {
     const id = c.req.param("id");
-    requireBrandingAccess(c.var.user.scopes, c.var.user.tenantId, id);
+    requireBrandingAccess(c.var.user.scopes, c.var.user.roles, c.var.user.tenantId, id);
 
     const tenant = await tenantRepository.findById(id);
     if (!tenant) {

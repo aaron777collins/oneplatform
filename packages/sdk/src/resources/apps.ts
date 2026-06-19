@@ -335,7 +335,7 @@ export function createAppNamespace(transport: Transport): AppNamespace {
 
       return transport.requestMultipart<Deployment>({
         method: 'POST',
-        path: `${BASE}/${encodeURIComponent(id)}/deploy/upload`,
+        path: `${BASE}/${encodeURIComponent(id)}/deploy`,
         body: form,
       });
     },

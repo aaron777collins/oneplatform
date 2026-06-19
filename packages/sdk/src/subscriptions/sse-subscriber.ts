@@ -254,7 +254,9 @@ export function createSseSubscription(
       // Stream ended without error — server closed the connection; reconnect.
       // Only reset the attempt counter if the connection was stable (alive > threshold).
       if (!destroyed) {
-        const wasStable = Date.now() - connectedAt >= STABLE_CONNECTION_THRESHOLD_MS;
+        const wasStable =
+          connectedAt !== null &&
+          Date.now() - connectedAt >= STABLE_CONNECTION_THRESHOLD_MS;
         await scheduleReconnect(wasStable ? 0 : reconnectAttempt + 1);
       }
     } catch (err) {

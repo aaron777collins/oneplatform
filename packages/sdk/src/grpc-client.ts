@@ -69,6 +69,20 @@ const GRPC_WEB_TRAILER_FRAME_FLAG = 0x80;
 const GRPC_WEB_CONTENT_TYPE = "application/grpc-web+json";
 
 // ---------------------------------------------------------------------------
+// Safety helper — decodeURIComponent on untrusted gRPC message headers can
+// throw a URIError if the value contains malformed percent-encoding. Fall
+// back to the raw string rather than crashing the entire call.
+// ---------------------------------------------------------------------------
+
+function safeDecodeGrpcMessage(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Framing helpers — encode / decode gRPC-Web frames on the client side.
 // ---------------------------------------------------------------------------
 
@@ -105,7 +119,7 @@ function decodeAllDataFrames(buffer: ArrayBuffer): unknown[] {
       const status = statusMatch ? parseInt(statusMatch[1] ?? "0", 10) : 0;
       if (status !== 0) {
         const msg = messageMatch
-          ? decodeURIComponent(messageMatch[1] ?? "")
+          ? safeDecodeGrpcMessage(messageMatch[1] ?? "")
           : `gRPC error status ${status}`;
         throw new GrpcClientError(status, msg);
       }
@@ -271,7 +285,7 @@ function decodeFramesIncremental(buffer: Uint8Array): { messages: unknown[]; con
       const status = statusMatch ? parseInt(statusMatch[1] ?? "0", 10) : 0;
       if (status !== 0) {
         const msg = messageMatch
-          ? decodeURIComponent(messageMatch[1] ?? "")
+          ? safeDecodeGrpcMessage(messageMatch[1] ?? "")
           : `gRPC error status ${status}`;
         throw new GrpcClientError(status, msg);
       }

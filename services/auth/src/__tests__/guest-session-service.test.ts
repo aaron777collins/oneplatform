@@ -11,6 +11,7 @@ function makeRedis(overrides: Partial<Redis> = {}): Redis {
     del: vi.fn().mockResolvedValue(1),
     incr: vi.fn().mockResolvedValue(1),
     expire: vi.fn().mockResolvedValue(1),
+    eval: vi.fn().mockResolvedValue(1),
     ...overrides,
   } as unknown as Redis;
 }

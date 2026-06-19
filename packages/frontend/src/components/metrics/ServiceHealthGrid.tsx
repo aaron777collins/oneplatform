@@ -118,10 +118,15 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
           }),
         };
       } catch (err) {
+        // Distinguish network errors (service truly down) from auth/other errors
+        const isNetworkError =
+          err instanceof TypeError || // fetch network failure
+          (err instanceof ApiError && err.statusCode >= 500);
+        const status: ServiceStatus = isNetworkError ? "down" : "unknown";
         return {
           data: ALL_SERVICES.map((serviceName) => ({
             name: serviceName,
-            status: "down" as ServiceStatus,
+            status,
             latencyMs: Date.now() - start,
           })),
         };

@@ -57,14 +57,22 @@ export function createGuestSessionService(
       throw new Error("appId is required to create a guest session.");
     }
 
-    // Per-IP rate limiting (defense-in-depth for internal endpoint)
+    // Per-IP rate limiting (defense-in-depth for internal endpoint).
+    // Uses a Lua script to make INCR + EXPIRE atomic, avoiding a TOCTOU race
+    // where the key could be incremented but never expire if the process crashes
+    // between INCR and EXPIRE.
     if (ipAddress) {
       const rateLimitKey = `guest-session:rate:${ipAddress}`;
-      const currentCount = await redis.incr(rateLimitKey);
-      if (currentCount === 1) {
-        // First request in the window — set expiry
-        await redis.expire(rateLimitKey, GUEST_RATE_LIMIT_WINDOW_SECONDS);
-      }
+      const currentCount = await redis.eval(
+        `local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count`,
+        1,
+        rateLimitKey,
+        GUEST_RATE_LIMIT_WINDOW_SECONDS,
+      ) as number;
       if (currentCount > GUEST_RATE_LIMIT_MAX_PER_WINDOW) {
         throw new Error(
           `Rate limit exceeded: too many guest sessions from IP ${ipAddress}. ` +
