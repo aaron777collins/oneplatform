@@ -128,11 +128,8 @@ function tokenize(src: string): Token[] {
     }
 
     // Numbers
-    if (/[0-9]/.test(src[i]!) || (src[i] === "-" && /[0-9]/.test(src[i + 1] ?? ""))) {
-      // Negative number literals only at start or after operator/paren
-      // (minus as binary op is handled by the parser)
+    if (/[0-9]/.test(src[i]!)) {
       let num = "";
-      // Don't consume leading '-' here — let the parser handle unary minus
       while (i < src.length && /[0-9.]/.test(src[i]!)) {
         num += src[i++];
       }

@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     isolate: true,
     environment: "node",
-    exclude: ["integration/**", "node_modules/**"],
+    exclude: ["dist/**", "integration/**", "node_modules/**"],
     coverage: {
       reporter: ["text", "json"],
       exclude: ["src/__tests__/**"],

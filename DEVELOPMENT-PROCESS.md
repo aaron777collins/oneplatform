@@ -321,6 +321,13 @@ Design review checks:
 
 3. **Run all tests** — Every test must pass. No exceptions. No skipping.
 
+4. **Cross-package build and test verification (MANDATORY):**
+   Every developer agent MUST run `pnpm turbo build test` for all affected packages after making changes. This is a hard rule, not a suggestion. Specifically:
+   - After completing changes, run `pnpm turbo build test` from the repository root. This verifies that the build and tests pass across every package that depends on the changed code, not just the package being edited.
+   - Type-checking a single file or running tests in a single package is NOT sufficient. Changes to shared packages (`@oneplatform/core`, SDKs, etc.) can break downstream consumers. The full build+test must pass.
+   - If any build or test failure occurs in ANY affected package, the developer agent MUST fix the failure before reporting completion. "Done" means the cross-package build and test suite is green — not that the changed files look correct in isolation.
+   - Agent prompts for developer work MUST include this verification step explicitly in the task description and quality criteria. Never assume the agent will do it unprompted.
+
 ### 4.5 Phase 5: Code Review
 
 The Code Reviewer agent checks:
