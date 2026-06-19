@@ -104,6 +104,7 @@ function makeDeps(overrides: {
   const locationLogRepo = {
     create: vi.fn().mockResolvedValue(makeLocationLogRow()),
     findByTenantId: vi.fn().mockResolvedValue([makeLocationLogRow()]),
+    countViolationsByRegion: vi.fn().mockResolvedValue([]),
     ...overrides.locationLogRepo,
   };
 
@@ -689,6 +690,7 @@ describe("DataResidencyService.checkCompliance()", () => {
           makeLocationLogRow({ region: "US_EAST" }),
           makeLocationLogRow({ region: "US_EAST" }),
         ]),
+        countViolationsByRegion: vi.fn().mockResolvedValue([]),
       },
     });
     const svc = createDataResidencyService(deps);
@@ -710,6 +712,10 @@ describe("DataResidencyService.checkCompliance()", () => {
           makeLocationLogRow({ region: "EU_WEST" }),
           makeLocationLogRow({ region: "EU_WEST" }),
           makeLocationLogRow({ region: "AP_SOUTHEAST" }),
+        ]),
+        countViolationsByRegion: vi.fn().mockResolvedValue([
+          { region: "EU_WEST", count: 2 },
+          { region: "AP_SOUTHEAST", count: 1 },
         ]),
       },
     });
@@ -1121,6 +1127,7 @@ describe("GET /compliance/:tenantId", () => {
         findByTenantId: vi.fn().mockResolvedValue([
           makeLocationLogRow({ region: "US_EAST" }),
         ]),
+        countViolationsByRegion: vi.fn().mockResolvedValue([]),
       },
     });
     const app = makeTestApp(deps);

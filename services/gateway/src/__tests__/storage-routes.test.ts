@@ -58,8 +58,8 @@ function makeApp(storageService: StorageService) {
 function makeStorageService(overrides: Partial<StorageService> = {}): StorageService {
   return {
     listBuckets: vi.fn().mockResolvedValue([
-      { name: "file-uploads", createdAt: "2024-01-15T10:00:00.000Z" },
-      { name: "datasets", createdAt: "2024-02-20T08:30:00.000Z" },
+      { name: "tenant-abc-file-uploads", createdAt: "2024-01-15T10:00:00.000Z" },
+      { name: "tenant-abc-datasets", createdAt: "2024-02-20T08:30:00.000Z" },
     ]),
     listObjects: vi.fn().mockResolvedValue({
       objects: [
@@ -78,7 +78,7 @@ function makeStorageService(overrides: Partial<StorageService> = {}): StorageSer
     }),
     deleteObject: vi.fn().mockResolvedValue(undefined),
     generatePresignedDownloadUrl: vi.fn().mockResolvedValue({
-      url: "http://minio:9000/file-uploads/report.csv?X-Amz-Signature=fake",
+      url: "http://minio:9000/tenant-abc-file-uploads/report.csv?X-Amz-Signature=fake",
       expiresAt: "2024-03-01T13:00:00.000Z",
     }),
     ...overrides,
@@ -97,7 +97,7 @@ describe("GET /api/v1/storage/buckets", () => {
 
     const body = await res.json() as { data: Array<{ name: string }> };
     expect(body.data).toHaveLength(2);
-    expect(body.data[0]?.name).toBe("file-uploads");
+    expect(body.data[0]?.name).toBe("tenant-abc-file-uploads");
   });
 
   it("returns 401 when user context is missing", async () => {
@@ -119,7 +119,7 @@ describe("GET /api/v1/storage/buckets/:bucket/objects", () => {
   it("returns 200 with object list including folders", async () => {
     const app = makeApp(makeStorageService());
     const res = await app.fetch(
-      new Request("http://localhost/api/v1/storage/buckets/file-uploads/objects"),
+      new Request("http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects"),
     );
     expect(res.status).toBe(200);
 
@@ -133,12 +133,12 @@ describe("GET /api/v1/storage/buckets/:bucket/objects", () => {
     const app = makeApp(service);
     await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/file-uploads/objects?prefix=logs%2F&delimiter=%2F",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects?prefix=logs%2F&delimiter=%2F",
       ),
     );
 
     expect(service.listObjects).toHaveBeenCalledWith(
-      "file-uploads",
+      "tenant-abc-file-uploads",
       expect.objectContaining({ prefix: "logs/", delimiter: "/" }),
     );
   });
@@ -158,7 +158,7 @@ describe("GET /api/v1/storage/buckets/:bucket/objects", () => {
     const app = makeApp(makeStorageService());
     const res = await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/file-uploads/objects?maxKeys=9999",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects?maxKeys=9999",
       ),
     );
     // ValidationError from @oneplatform/core has statusCode 422.
@@ -174,7 +174,7 @@ describe("GET /api/v1/storage/buckets/:bucket/objects/* — metadata", () => {
   it("returns 200 with object metadata", async () => {
     const app = makeApp(makeStorageService());
     const res = await app.fetch(
-      new Request("http://localhost/api/v1/storage/buckets/file-uploads/objects/report.csv"),
+      new Request("http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects/report.csv"),
     );
     expect(res.status).toBe(200);
 
@@ -186,12 +186,12 @@ describe("GET /api/v1/storage/buckets/:bucket/objects/* — metadata", () => {
   it("returns 404 when the object does not exist", async () => {
     const service = makeStorageService({
       getObjectMetadata: vi.fn().mockRejectedValue(
-        new StorageObjectNotFoundError('Object "missing.csv" not found.', "file-uploads", "missing.csv"),
+        new StorageObjectNotFoundError('Object "missing.csv" not found.', "tenant-abc-file-uploads", "missing.csv"),
       ),
     });
     const app = makeApp(service);
     const res = await app.fetch(
-      new Request("http://localhost/api/v1/storage/buckets/file-uploads/objects/missing.csv"),
+      new Request("http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects/missing.csv"),
     );
     expect(res.status).toBe(404);
   });
@@ -204,7 +204,7 @@ describe("GET /api/v1/storage/buckets/:bucket/objects/* — metadata", () => {
     });
     const app = makeApp(service);
     const res = await app.fetch(
-      new Request("http://localhost/api/v1/storage/buckets/file-uploads/objects/report.csv"),
+      new Request("http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects/report.csv"),
     );
     expect(res.status).toBeGreaterThanOrEqual(500);
   });
@@ -219,7 +219,7 @@ describe("DELETE /api/v1/storage/buckets/:bucket/objects/*", () => {
     const app = makeApp(makeStorageService());
     const res = await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/file-uploads/objects/report.csv",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/objects/report.csv",
         { method: "DELETE" },
       ),
     );
@@ -235,12 +235,12 @@ describe("DELETE /api/v1/storage/buckets/:bucket/objects/*", () => {
     const app = makeApp(service);
     await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/my-bucket/objects/2024/march/data.json",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-my-bucket/objects/2024/march/data.json",
         { method: "DELETE" },
       ),
     );
 
-    expect(service.deleteObject).toHaveBeenCalledWith("my-bucket", "2024/march/data.json");
+    expect(service.deleteObject).toHaveBeenCalledWith("tenant-abc-my-bucket", "2024/march/data.json");
   });
 });
 
@@ -253,7 +253,7 @@ describe("GET /api/v1/storage/buckets/:bucket/download/*", () => {
     const app = makeApp(makeStorageService());
     const res = await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/file-uploads/download/report.csv",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/download/report.csv",
       ),
     );
     expect(res.status).toBe(200);
@@ -267,7 +267,7 @@ describe("GET /api/v1/storage/buckets/:bucket/download/*", () => {
     const app = makeApp(makeStorageService());
     const res = await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/file-uploads/download/report.csv?expires=0",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/download/report.csv?expires=0",
       ),
     );
     // ValidationError from @oneplatform/core has statusCode 422.
@@ -279,12 +279,12 @@ describe("GET /api/v1/storage/buckets/:bucket/download/*", () => {
     const app = makeApp(service);
     await app.fetch(
       new Request(
-        "http://localhost/api/v1/storage/buckets/file-uploads/download/report.csv?expires=300",
+        "http://localhost/api/v1/storage/buckets/tenant-abc-file-uploads/download/report.csv?expires=300",
       ),
     );
 
     expect(service.generatePresignedDownloadUrl).toHaveBeenCalledWith(
-      "file-uploads",
+      "tenant-abc-file-uploads",
       "report.csv",
       300,
     );
