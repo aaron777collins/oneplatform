@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 15 — V5 Friction Point Analysis & Fixes (COMPLETE)
+## Current Phase: Phase 16 — V6 Friction Point Analysis & Fixes (COMPLETE)
 
 ### Completed Phases
 
@@ -284,10 +284,34 @@ This document tracks the current state of development. Read this FIRST when resu
   - SSRF hardening for IPv6 mapped addresses and redirect following
 - [x] 6 commits: V5 analysis doc (`1a34056`), CRITICAL fixes (`14a93e3`), HIGH fixes (`3ce96da`), MEDIUM fixes (`eb28cd8`), LOW fixes (`5b57713`), code review fixes (`4eb4c1a`)
 
+#### Phase 16: V6 Friction Point Analysis & Fixes (COMPLETE)
+- [x] User story analysis v6 — 213 findings from 11 personas (added Low-Code/Drag-and-Drop UI User) using 206+ agent workflow
+  - 25 CRITICAL, 69 HIGH, 85 MEDIUM, 34 LOW
+- [x] All 25 CRITICAL fixes (visual pipeline editor default, schedule builder, tag inputs, error classification, timezone validation, gRPC streaming, Redis atomic rate limiting, Trivy scanning, and more)
+- [x] All 69 HIGH fixes across frontend, backend, SDK, CLI, ops
+- [x] All 85 MEDIUM fixes across all categories
+- [x] All 34 LOW fixes — final batch
+- [x] Code review fixes — 4 RED blockers + 7 YELLOW warnings resolved
+- [x] Build/test fixes — auth service, frontend, CLI, ontology service, gateway tests updated for V6 changes
+- [x] Key changes:
+  - Visual pipeline editor set as default view
+  - Schedule builder UI for cron expressions
+  - Tag input components for user-friendly list entry
+  - Error classification and categorization improvements
+  - UTC timezone validation fix (not in Intl.supportedValuesOf)
+  - gRPC streaming types added to SDK
+  - Redis atomic rate limiting implementation
+  - Trivy container scanning integration
+  - Vitest dist/ exclusion across all services
+  - Expression evaluator infinite loop fix
+  - Webhook connector supportsIncremental flag corrected
+  - Storage tenant isolation and data residency in gateway
+- [x] 15 commits: V6 analysis doc (`91aee42`), CRITICAL fixes (`7330964`), HIGH fixes (`07a64cc`), MEDIUM fixes (`978d3dc`), build fixes (`51dd50e`, `11b235d`), LOW fixes (`1fae0a0`), SDK gRPC export (`9f23c48`), webhook fix (`4b13025`), test updates (`6e9adba`, `8a96ee5`, `84b0917`), UTC timezone fix (`46a3a54`), vitest dist exclusion (`56ac95c`), code review fixes (`24d2a8e`)
+
 ### Pending
 - No known gaps remaining from GAP-ANALYSIS.md
-- No open friction points from V5 analysis
-- Future work: Phase 16+ planning, production hardening, full integration testing with Docker Compose, security audit
+- No open friction points from V6 analysis
+- Future work: Phase 17+ planning, production hardening, full integration testing with Docker Compose, security audit, beta release
 
 ## Test Totals
 
@@ -306,6 +330,8 @@ This document tracks the current state of development. Read this FIRST when resu
 | Phase 15 (V5 fixes) | 2 (skipIf conditional tests) |
 | **Total** | **~9,608** |
 
+All 48 turbo tasks pass. 7,194+ tests verified in latest run.
+
 ## Key References
 
 | File | Purpose |
@@ -316,6 +342,7 @@ This document tracks the current state of development. Read this FIRST when resu
 | `docs/USER-STORIES-ANALYSIS-V3.md` | Friction point analysis v3 (53 net-new findings) |
 | `docs/USER-STORIES-ANALYSIS-V4.md` | Friction point analysis v4 (148 net-new findings) |
 | `docs/USER-STORIES-ANALYSIS-V5.md` | Friction point analysis v5 (135 findings, 62-agent workflow) |
+| `docs/USER-STORIES-ANALYSIS-V6.md` | Friction point analysis v6 (213 findings, 206+ agent workflow, 11 personas) |
 | `docs/GAP-ANALYSIS.md` | Gap analysis (127 gaps across 9 categories) |
 | `docs/OPERATIONS.md` | Day-to-day platform operations |
 | `docs/MONITORING.md` | Observability and alerting setup |
