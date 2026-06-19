@@ -106,8 +106,8 @@ describe("metadata()", () => {
     expect(webhookConnector.metadata().category).toBe("api");
   });
 
-  it("reports supportsIncremental true", () => {
-    expect(webhookConnector.metadata().supportsIncremental).toBe(true);
+  it("reports supportsIncremental false", () => {
+    expect(webhookConnector.metadata().supportsIncremental).toBe(false);
   });
 
   it("reports supportsRealtime false — webhook delivery is batch-processed", () => {

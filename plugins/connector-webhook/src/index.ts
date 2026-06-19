@@ -410,7 +410,7 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
     },
     additionalProperties: true,
   },
-  supportsIncremental: true,
+  supportsIncremental: false,
   supportsRealtime: false,
   tags: ["webhook", "api", "events", "ingestion", "http"],
 };
