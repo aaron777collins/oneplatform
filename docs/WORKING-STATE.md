@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 14 — P2-P4 Gap Implementation (COMPLETE)
+## Current Phase: Phase 15 — V5 Friction Point Analysis & Fixes (COMPLETE)
 
 ### Completed Phases
 
@@ -269,9 +269,25 @@ This document tracks the current state of development. Read this FIRST when resu
 - [x] G-124: Multi-region deployment guide + Terraform skeleton
 - [x] G-133: Auto-generated docs pipeline
 
+#### Phase 15: V5 Friction Point Analysis & Fixes (COMPLETE)
+- [x] User story analysis v5 — 135 findings from 10 personas using 62-agent workflow
+  - 9 CRITICAL, 35 HIGH, 69 MEDIUM, 22 LOW
+- [x] All 9 CRITICAL fixes (JWT claims email/displayName, BFF RBAC enforcement, master key Redis persistence, SSRF IPv6/redirect hardening, and more)
+- [x] All 35 HIGH fixes (frontend, backend, SDK, CLI, ops categories)
+- [x] All 69 MEDIUM fixes across all categories
+- [x] All 22 LOW fixes — final batch
+- [x] Code review fixes — 2 RED blockers + 7 YELLOW warnings resolved
+- [x] Key architectural changes:
+  - JWT claims updated to include email and displayName
+  - BFF RBAC middleware enforces role-based access control
+  - Master key persistence via Redis (survives restarts)
+  - SSRF hardening for IPv6 mapped addresses and redirect following
+- [x] 6 commits: V5 analysis doc (`1a34056`), CRITICAL fixes (`14a93e3`), HIGH fixes (`3ce96da`), MEDIUM fixes (`eb28cd8`), LOW fixes (`5b57713`), code review fixes (`4eb4c1a`)
+
 ### Pending
 - No known gaps remaining from GAP-ANALYSIS.md
-- Future work: Phase 15+ planning, production hardening, full integration testing
+- No open friction points from V5 analysis
+- Future work: Phase 16+ planning, production hardening, full integration testing with Docker Compose, security audit
 
 ## Test Totals
 
@@ -287,7 +303,8 @@ This document tracks the current state of development. Read this FIRST when resu
 | Integration L2 | ~50 |
 | Integration L3 (E2E) | ~28 |
 | Phase 14 (P2-P4 gaps) | ~2,950 |
-| **Total** | **~9,606** |
+| Phase 15 (V5 fixes) | 2 (skipIf conditional tests) |
+| **Total** | **~9,608** |
 
 ## Key References
 
@@ -298,6 +315,7 @@ This document tracks the current state of development. Read this FIRST when resu
 | `docs/USER-STORIES-ANALYSIS-V2.md` | Friction point analysis v2 (85 findings) |
 | `docs/USER-STORIES-ANALYSIS-V3.md` | Friction point analysis v3 (53 net-new findings) |
 | `docs/USER-STORIES-ANALYSIS-V4.md` | Friction point analysis v4 (148 net-new findings) |
+| `docs/USER-STORIES-ANALYSIS-V5.md` | Friction point analysis v5 (135 findings, 62-agent workflow) |
 | `docs/GAP-ANALYSIS.md` | Gap analysis (127 gaps across 9 categories) |
 | `docs/OPERATIONS.md` | Day-to-day platform operations |
 | `docs/MONITORING.md` | Observability and alerting setup |

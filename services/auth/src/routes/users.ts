@@ -61,7 +61,7 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
     const created = await userRepository.create({
       tenant_id: user.tenantId,
       email: parsed.data.email,
-      display_name: parsed.data.displayName,
+      display_name: parsed.data.displayName ?? "",
       roles: parsed.data.roles,
       email_verified: false,
     });
