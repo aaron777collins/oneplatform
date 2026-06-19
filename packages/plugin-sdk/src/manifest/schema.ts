@@ -14,24 +14,14 @@ import { z } from "zod";
 const JSONSchemaZ = z.record(z.unknown());
 
 const HookDeclarationZ = z.object({
-  stage: z.enum([
-    "pre-ingest",
-    "post-ingest",
-    "pre-transform",
-    "post-transform",
-    "pre-validate",
-    "post-validate",
-    "pre-execute",
-    "post-execute",
-    "pre-publish",
-    "post-publish",
-  ]),
+  stage: z.string().regex(
+    /^(before|after):\w[\w.]*(?::\w+)?$/,
+    "Stage must be 'before:{name}' or 'after:{name}', e.g. 'before:ingestion.receive'",
+  ),
   criticality: z.enum(["critical", "advisory"]),
-  priority: z.number().int().min(0).max(999).optional(),
+  priority: z.number().int().min(0).max(999).default(100),
   timeout: z.number().int().min(1).max(300).optional(),
-  entrypoint: z.string().regex(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/, {
-    message: "entrypoint must be a valid JavaScript identifier",
-  }),
+  entrypoint: z.string().min(1),
 });
 
 const RequiredCredentialZ = z.object({

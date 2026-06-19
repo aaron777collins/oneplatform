@@ -147,7 +147,7 @@ services:
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${OP_MINIO_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      MINIO_ROOT_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - minio-data:/data
     networks:
@@ -256,7 +256,7 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_GLOBAL_RATE_LIMIT: ${OP_GLOBAL_RATE_LIMIT:-10000}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
       OP_WEBHOOK_ALLOW_HTTP: ${OP_WEBHOOK_ALLOW_HTTP:-false}
     volumes:
       - init-data:/data/init:ro
@@ -294,7 +294,7 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_REQUIRE_EMAIL_VERIFICATION: ${OP_REQUIRE_EMAIL_VERIFICATION:-false}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
       OP_SMTP_HOST: ${OP_SMTP_HOST:-}
       OP_SMTP_PORT: ${OP_SMTP_PORT:-}
       OP_SMTP_USER: ${OP_SMTP_USER:-}
@@ -340,7 +340,7 @@ services:
       OP_INGESTION_BATCH_SIZE: ${OP_INGESTION_BATCH_SIZE:-1000}
       OP_LARGE_SYNC_CONCURRENCY: ${OP_LARGE_SYNC_CONCURRENCY:-3}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -378,7 +378,7 @@ services:
       OP_MIGRATION_TIMEOUT: ${OP_MIGRATION_TIMEOUT:-3600}
       OP_ONTOLOGY_POLL_INTERVAL: ${OP_ONTOLOGY_POLL_INTERVAL:-15}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -414,7 +414,7 @@ services:
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -503,7 +503,7 @@ services:
       OP_SANDBOX_POOL_SIZE: ${OP_SANDBOX_POOL_SIZE:-5}
       OP_CONNECTOR_TIMEOUT_SECONDS: ${OP_CONNECTOR_TIMEOUT_SECONDS:-300}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
       # Execution service connects to docker-socket-proxy for sandbox management
       DOCKER_HOST: tcp://docker-socket-proxy:2375
     # x-service-common provides pgbouncer + redis deps, but YAML merge does not
@@ -558,7 +558,7 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_WILDCARD_DOMAIN: ${OP_WILDCARD_DOMAIN:-}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -595,7 +595,7 @@ services:
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -631,7 +631,7 @@ services:
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-dev_minio_password_change_me}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro

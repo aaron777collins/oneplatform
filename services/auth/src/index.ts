@@ -252,6 +252,10 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
       "/api/v1/auth/login",
       "/api/v1/auth/forgot-password",
       "/api/v1/auth/refresh",
+      // Password reset and email verification use token-in-URL auth, not JWT.
+      // Users clicking email links are not logged in — these must be public.
+      "/api/v1/auth/reset-password/*",
+      "/api/v1/auth/verify-email/*",
     ],
     targetService: "auth-service",
     servicePublicKeys,

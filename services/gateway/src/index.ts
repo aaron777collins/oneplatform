@@ -38,6 +38,15 @@ import { createStorageRoutes } from "./routes/storage.js";
 import { createStorageService } from "./services/storage-service.js";
 import { createTenantAllowlistService } from "./services/tenant-allowlist-service.js";
 import { parseIpFromRequest, isIpInAllowlist, meteringMiddleware } from "@oneplatform/core";
+import { createGrpcRoutes } from "./routes/grpc.js";
+import {
+  createGrpcWebHandler,
+  createServiceRegistry,
+  createDataService,
+  createIngestionService,
+  DataServiceDescriptor,
+  IngestionServiceDescriptor,
+} from "./grpc/index.js";
 import { createGraphQLRoutes } from "./routes/graphql.js";
 import { createMeteringService } from "./services/metering-service.js";
 import { UsageEventRepository, UsageSummaryRepository, BillingWebhookConfigRepository } from "./repositories/usage-event-repository.js";
@@ -343,6 +352,14 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
       "/readyz",
       "/api/v1/bootstrap",
       "/api/v1/bootstrap/*",
+      // Auth endpoints must be public at the gateway level — the auth service
+      // has its own auth middleware and decides which sub-routes need tokens.
+      "/api/v1/auth/register",
+      "/api/v1/auth/login",
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/forgot-password",
+      "/api/v1/auth/reset-password/*",
+      "/api/v1/auth/verify-email/*",
     ],
     targetService: "gateway-service",
     servicePublicKeys,
@@ -473,7 +490,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     endpoint: process.env["OP_MINIO_ENDPOINT"] ?? "http://minio:9000",
     region: process.env["OP_MINIO_REGION"] ?? "us-east-1",
     accessKeyId: process.env["OP_MINIO_ACCESS_KEY"] ?? (process.env["OP_MINIO_USER"] ?? "minioadmin"),
-    secretAccessKey: process.env["OP_MINIO_SECRET_KEY"] ?? (process.env["OP_MINIO_PASSWORD"] ?? "dev_minio_password_change_me"),
+    secretAccessKey: process.env["OP_MINIO_SECRET_KEY"] ?? (process.env["OP_MINIO_PASSWORD"] ?? "oneplatform_minio_dev_2024"),
   });
   const storageRoutes = createStorageRoutes({ storageService });
   app.route("/api/v1/storage", storageRoutes);
@@ -487,6 +504,32 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
   });
   app.route("/api/v1/graphql", graphqlRoutes);
+
+  // gRPC-Web endpoint — registered before the catch-all proxy so that
+  // /grpc/* is handled directly by the Gateway's gRPC-Web dispatcher.
+  // SDK clients using createGrpcClient() send to /grpc/{package}.{Service}/{Method}.
+  const grpcServiceRegistry = createServiceRegistry();
+  const grpcDataService = createDataService({
+    ingestionServiceUrl: config.ingestionServiceUrl,
+    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+  });
+  const grpcIngestionService = createIngestionService({
+    ingestionServiceUrl: config.ingestionServiceUrl,
+    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+  });
+  grpcServiceRegistry.register(
+    DataServiceDescriptor,
+    "oneplatform.v1",
+    grpcDataService as unknown as Record<string, import("./grpc/service-registry.js").RpcHandler>,
+  );
+  grpcServiceRegistry.register(
+    IngestionServiceDescriptor,
+    "oneplatform.v1",
+    grpcIngestionService as unknown as Record<string, import("./grpc/service-registry.js").RpcHandler>,
+  );
+  const grpcWebHandler = createGrpcWebHandler(grpcServiceRegistry);
+  const grpcRoutes = createGrpcRoutes({ grpcWebHandler });
+  app.route("/grpc", grpcRoutes);
 
   // OpenAPI spec endpoints must be registered before the catch-all proxy routes
   // so that /api/v1/openapi.json is never intercepted by the proxy.

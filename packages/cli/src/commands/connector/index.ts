@@ -176,14 +176,14 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
       `/api/v1/connectors/${encodeURIComponent(id)}/syncs/${resp.syncJobId}/progress`,
     );
     ctx.renderer.info(`Status: ${status.status}${status.progress !== undefined ? ` (${status.progress}%)` : ""}`);
-    if (status.status === "completed") {
+    if (status.status === "success") {
       ctx.renderer.success("Connector run completed.");
       return;
     }
     if (status.status === "failed") {
       throw new CliError("Connector run failed.", EXIT.SERVER);
     }
-    if (status.status === "cancelled" || status.status === "timeout") {
+    if (status.status === "cancelled") {
       throw new CliError(`Connector run ${status.status}.`, EXIT.GENERAL);
     }
   }

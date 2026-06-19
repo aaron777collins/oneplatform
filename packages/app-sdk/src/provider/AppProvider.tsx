@@ -93,7 +93,14 @@ function readAppConfig(overrides?: { appId?: string; tenantId?: string }): OPApp
   // never assign `string | undefined` to a `string` field.
   const resolvedAppId: string = overrides?.appId ?? config["appId"];
   const resolvedTenantId: string = overrides?.tenantId ?? config["tenantId"];
-  return { appId: resolvedAppId, tenantId: resolvedTenantId };
+
+  // appSlug is optional — present in non-embed mode, absent in embed mode.
+  const result: OPAppConfig = { appId: resolvedAppId, tenantId: resolvedTenantId };
+  const rawSlug = config["appSlug"];
+  if (typeof rawSlug === "string" && rawSlug !== "") {
+    result.appSlug = rawSlug;
+  }
+  return result;
 }
 
 // ─── Debounce helper ──────────────────────────────────────────────────────────
@@ -208,8 +215,11 @@ export function AppProvider({
         const meData = (meResult as { data?: UserContext }).data ?? (meResult as UserContext);
         setUser(meData);
 
-        // Step 4: open the WebSocket connection
-        wsManager.connect(config.appId);
+        // Step 4: open the WebSocket connection.
+        // WebSocketManager builds /apps/{slug}/ws — pass the app slug, not the UUID appId.
+        // Falls back to appId when slug is unavailable (e.g. embed mode) so the WS
+        // connection at least attempts to connect rather than silently doing nothing.
+        wsManager.connect(config.appSlug ?? config.appId);
 
         setInitState({ status: "ready" });
       } catch (err) {

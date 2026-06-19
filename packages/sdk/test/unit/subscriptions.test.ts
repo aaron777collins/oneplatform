@@ -35,7 +35,7 @@ describe('SSE event pattern validation', () => {
   it('accepts valid patterns', () => {
     expect(() =>
       createSseSubscription(
-        'http://localhost/api/v1/events/subscribe',
+        'http://localhost/api/v1/events',
         { events: ['pipeline.run.completed'] },
         noopAuthHandler,
         () => undefined,
@@ -48,7 +48,7 @@ describe('SSE event pattern validation', () => {
   it('accepts wildcard patterns', () => {
     expect(() =>
       createSseSubscription(
-        'http://localhost/api/v1/events/subscribe',
+        'http://localhost/api/v1/events',
         { events: ['pipeline.*', '*'] },
         noopAuthHandler,
         () => undefined,
@@ -61,7 +61,7 @@ describe('SSE event pattern validation', () => {
   it('rejects patterns with invalid characters', () => {
     expect(() =>
       createSseSubscription(
-        'http://localhost/api/v1/events/subscribe',
+        'http://localhost/api/v1/events',
         { events: ['pipeline..bad'] },
         noopAuthHandler,
         () => undefined,
@@ -74,7 +74,7 @@ describe('SSE event pattern validation', () => {
   it('rejects middle wildcards', () => {
     expect(() =>
       createSseSubscription(
-        'http://localhost/api/v1/events/subscribe',
+        'http://localhost/api/v1/events',
         { events: ['pipeline.*.completed'] },
         noopAuthHandler,
         () => undefined,
@@ -88,7 +88,7 @@ describe('SSE event pattern validation', () => {
 describe('Subscription object', () => {
   it('starts in connecting status', () => {
     const sub = createSseSubscription(
-      'http://localhost/api/v1/events/subscribe',
+      'http://localhost/api/v1/events',
       { events: ['test'] },
       noopAuthHandler,
       () => undefined,
@@ -101,7 +101,7 @@ describe('Subscription object', () => {
 
   it('moves to closed status after unsubscribe', () => {
     const sub = createSseSubscription(
-      'http://localhost/api/v1/events/subscribe',
+      'http://localhost/api/v1/events',
       { events: ['test'] },
       noopAuthHandler,
       () => undefined,
@@ -114,7 +114,7 @@ describe('Subscription object', () => {
 
   it('supports status event listener chaining', () => {
     const sub = createSseSubscription(
-      'http://localhost/api/v1/events/subscribe',
+      'http://localhost/api/v1/events',
       { events: ['test'] },
       noopAuthHandler,
       () => undefined,
@@ -128,7 +128,7 @@ describe('Subscription object', () => {
 
   it('lastEventId is null initially', () => {
     const sub = createSseSubscription(
-      'http://localhost/api/v1/events/subscribe',
+      'http://localhost/api/v1/events',
       { events: ['test'] },
       noopAuthHandler,
       () => undefined,
@@ -143,7 +143,7 @@ describe('Subscription object', () => {
     // fromEventId is stored as the initial lastEventId, not on sub.lastEventId
     // (lastEventId updates only on received events)
     const sub = createSseSubscription(
-      'http://localhost/api/v1/events/subscribe',
+      'http://localhost/api/v1/events',
       { events: ['test'], fromEventId: 'evt_123' },
       noopAuthHandler,
       () => undefined,

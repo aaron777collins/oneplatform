@@ -9,6 +9,8 @@ import type React from "react";
 export interface OPAppConfig {
   appId: string;
   tenantId: string;
+  /** URL-safe slug used for WebSocket and asset URLs. Falls back to appId when absent (e.g. embed mode). */
+  appSlug?: string;
 }
 
 // ─── AppProvider props ────────────────────────────────────────────────────────

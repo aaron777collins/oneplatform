@@ -9,7 +9,7 @@
  * change so the canvas can immediately reflect label edits.
  */
 import * as React from "react";
-import { X } from "lucide-react";
+import { X, Check, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { Label } from "@/components/ui/label.js";
@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.js";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.js";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils.js";
 import { useApiClient } from "@/lib/api-client.js";
@@ -57,6 +58,8 @@ const MonacoEditor = React.lazy(() =>
 
 export interface NodeConfigPanelProps {
   node: GraphNode;
+  /** All nodes in the graph — used by conditional step to list available targets */
+  allNodes?: GraphNode[] | undefined;
   onUpdate: (nodeId: string, label: string, config: StepConfig) => void;
   onClose: () => void;
   className?: string;
@@ -68,6 +71,7 @@ export interface NodeConfigPanelProps {
 
 export function NodeConfigPanel({
   node,
+  allNodes,
   onUpdate,
   onClose,
   className,
@@ -129,6 +133,7 @@ export function NodeConfigPanel({
         {/* Type-specific fields */}
         <StepTypeFields
           node={node}
+          allNodes={allNodes}
           config={config}
           onConfigChange={handleConfigChange}
         />
@@ -143,16 +148,17 @@ export function NodeConfigPanel({
 
 interface StepTypeFieldsProps {
   node: GraphNode;
+  allNodes?: GraphNode[] | undefined;
   config: StepConfig;
   onConfigChange: (key: string, value: unknown) => void;
 }
 
-function StepTypeFields({ node, config, onConfigChange }: StepTypeFieldsProps) {
+function StepTypeFields({ node, allNodes, config, onConfigChange }: StepTypeFieldsProps) {
   switch (node.type) {
     case "code":
       return <CodeFields config={config} onConfigChange={onConfigChange} />;
     case "conditional":
-      return <ConditionalFields config={config} onConfigChange={onConfigChange} />;
+      return <ConditionalFields config={config} onConfigChange={onConfigChange} currentNodeId={node.id} allNodes={allNodes} />;
     case "wait":
       return <WaitFields config={config} onConfigChange={onConfigChange} />;
     case "approval":
@@ -180,6 +186,106 @@ function StepTypeFields({ node, config, onConfigChange }: StepTypeFieldsProps) {
 // Code step fields
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Code step templates
+// ---------------------------------------------------------------------------
+
+interface CodeTemplate {
+  id: string;
+  title: string;
+  description: string;
+  language: string;
+  /** Template code with {{placeholder}} markers */
+  code: string;
+  /** Parameters the user can fill in via form inputs */
+  params: { key: string; label: string; placeholder: string }[];
+}
+
+const CODE_TEMPLATES: CodeTemplate[] = [
+  {
+    id: "filter-records",
+    title: "Filter records",
+    description: "Keep only records matching a field condition",
+    language: "typescript",
+    code: `// Filter records where {{field}} {{operator}} {{value}}
+export default function transform(records: any[]) {
+  return records.filter((r) => {
+    const val = r["{{field}}"];
+    const target = "{{value}}";
+    switch ("{{operator}}") {
+      case "equals": return String(val) === target;
+      case "contains": return String(val).includes(target);
+      case "greater_than": return Number(val) > Number(target);
+      case "less_than": return Number(val) < Number(target);
+      default: return true;
+    }
+  });
+}`,
+    params: [
+      { key: "field", label: "Field name", placeholder: "e.g. status" },
+      { key: "operator", label: "Operator", placeholder: "equals" },
+      { key: "value", label: "Value", placeholder: "e.g. active" },
+    ],
+  },
+  {
+    id: "map-fields",
+    title: "Map fields",
+    description: "Rename or transform field values in each record",
+    language: "typescript",
+    code: `// Map: rename "{{sourceField}}" to "{{targetField}}"
+export default function transform(records: any[]) {
+  return records.map((r) => {
+    const { ["{{sourceField}}"]: value, ...rest } = r;
+    return { ...rest, ["{{targetField}}"]: value };
+  });
+}`,
+    params: [
+      { key: "sourceField", label: "Source field", placeholder: "e.g. first_name" },
+      { key: "targetField", label: "Target field", placeholder: "e.g. firstName" },
+    ],
+  },
+  {
+    id: "aggregate-data",
+    title: "Aggregate data",
+    description: "Group records and calculate summary values",
+    language: "typescript",
+    code: `// Aggregate: {{function}} grouped by "{{groupByField}}"
+export default function transform(records: any[]) {
+  const groups: Record<string, any[]> = {};
+  for (const r of records) {
+    const key = String(r["{{groupByField}}"] ?? "unknown");
+    (groups[key] ??= []).push(r);
+  }
+  return Object.entries(groups).map(([key, items]) => ({
+    ["{{groupByField}}"]: key,
+    count: items.length,
+    // Add more aggregations as needed
+  }));
+}`,
+    params: [
+      { key: "groupByField", label: "Group by field", placeholder: "e.g. category" },
+      { key: "function", label: "Function", placeholder: "count" },
+    ],
+  },
+  {
+    id: "enrich-data",
+    title: "Enrich data",
+    description: "Add computed fields to each record",
+    language: "typescript",
+    code: `// Enrich: add "{{newField}}" computed from "{{sourceField}}"
+export default function transform(records: any[]) {
+  return records.map((r) => ({
+    ...r,
+    ["{{newField}}"]: String(r["{{sourceField}}"] ?? "").toUpperCase(),
+  }));
+}`,
+    params: [
+      { key: "sourceField", label: "Source field", placeholder: "e.g. name" },
+      { key: "newField", label: "New field name", placeholder: "e.g. name_upper" },
+    ],
+  },
+];
+
 function CodeFields({
   config,
   onConfigChange,
@@ -188,6 +294,21 @@ function CodeFields({
   onConfigChange: (k: string, v: unknown) => void;
 }) {
   const language = (config["language"] as string | undefined) ?? "typescript";
+  const code = (config["code"] as string | undefined) ?? "";
+  const [activeTab, setActiveTab] = React.useState<string>(code ? "custom" : "templates");
+  const [selectedTemplate, setSelectedTemplate] = React.useState<string | null>(null);
+  const [templateParams, setTemplateParams] = React.useState<Record<string, string>>({});
+
+  function applyTemplate(tmpl: CodeTemplate) {
+    let generated = tmpl.code;
+    for (const p of tmpl.params) {
+      const val = templateParams[p.key] ?? p.placeholder;
+      generated = generated.replaceAll(`{{${p.key}}}`, val);
+    }
+    onConfigChange("language", tmpl.language);
+    onConfigChange("code", generated);
+    setActiveTab("custom");
+  }
 
   return (
     <>
@@ -208,31 +329,97 @@ function CodeFields({
         </Select>
       </FormField>
 
-      <FormField label="Code" htmlFor="cfg-code">
-        <div className="h-48 w-full overflow-hidden rounded-md border border-[var(--color-border)]">
-          <React.Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-xs text-[var(--color-muted-foreground)]">
-                Loading editor…
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="w-full">
+          <TabsTrigger value="templates" className="flex-1 text-xs">Templates</TabsTrigger>
+          <TabsTrigger value="custom" className="flex-1 text-xs">Custom code</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="templates">
+          <div className="space-y-2">
+            {CODE_TEMPLATES.map((tmpl) => (
+              <button
+                key={tmpl.id}
+                type="button"
+                className={cn(
+                  "w-full rounded-md border p-2.5 text-left transition-colors",
+                  selectedTemplate === tmpl.id
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)]/5"
+                    : "border-[var(--color-border)] hover:border-[var(--color-primary)]/50",
+                )}
+                onClick={() => {
+                  setSelectedTemplate(tmpl.id);
+                  setTemplateParams({});
+                }}
+              >
+                <p className="text-xs font-medium">{tmpl.title}</p>
+                <p className="text-[10px] text-[var(--color-muted-foreground)] mt-0.5">
+                  {tmpl.description}
+                </p>
+              </button>
+            ))}
+          </div>
+
+          {/* Parameter form for selected template */}
+          {selectedTemplate !== null && (() => {
+            const tmpl = CODE_TEMPLATES.find((t) => t.id === selectedTemplate);
+            if (!tmpl) return null;
+            return (
+              <div className="mt-3 space-y-2 rounded-md border border-[var(--color-border)] p-3">
+                <p className="text-xs font-medium mb-2">Configure: {tmpl.title}</p>
+                {tmpl.params.map((p) => (
+                  <div key={p.key} className="space-y-1">
+                    <Label htmlFor={`tmpl-${p.key}`} className="text-[11px]">{p.label}</Label>
+                    <Input
+                      id={`tmpl-${p.key}`}
+                      className="h-8 text-xs"
+                      placeholder={p.placeholder}
+                      value={templateParams[p.key] ?? ""}
+                      onChange={(e) =>
+                        setTemplateParams((prev) => ({ ...prev, [p.key]: e.target.value }))
+                      }
+                    />
+                  </div>
+                ))}
+                <Button
+                  size="sm"
+                  className="w-full mt-2 h-8 text-xs"
+                  onClick={() => applyTemplate(tmpl)}
+                >
+                  <Check className="h-3 w-3 mr-1" aria-hidden />
+                  Use template
+                </Button>
               </div>
-            }
-          >
-            <MonacoEditor
-              height="100%"
-              language={language}
-              value={(config["code"] as string | undefined) ?? ""}
-              onChange={(v) => onConfigChange("code", v ?? "")}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 12,
-                lineNumbers: "on",
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-              }}
-            />
-          </React.Suspense>
-        </div>
-      </FormField>
+            );
+          })()}
+        </TabsContent>
+
+        <TabsContent value="custom">
+          <div className="h-48 w-full overflow-hidden rounded-md border border-[var(--color-border)]">
+            <React.Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-xs text-[var(--color-muted-foreground)]">
+                  Loading editor...
+                </div>
+              }
+            >
+              <MonacoEditor
+                height="100%"
+                language={language}
+                value={code}
+                onChange={(v) => onConfigChange("code", v ?? "")}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 12,
+                  lineNumbers: "on",
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                }}
+              />
+            </React.Suspense>
+          </div>
+        </TabsContent>
+      </Tabs>
     </>
   );
 }
@@ -241,12 +428,34 @@ function CodeFields({
 // Conditional step fields
 // ---------------------------------------------------------------------------
 
+// Human-readable operator labels for condition fields
+const OPERATOR_LABELS: Record<string, string> = {
+  eq: "equals",
+  neq: "does not equal",
+  gt: "greater than",
+  gte: "at least",
+  lt: "less than",
+  lte: "at most",
+  contains: "contains",
+  not_contains: "does not contain",
+  exists: "exists",
+  not_exists: "does not exist",
+  matches: "matches pattern",
+  startsWith: "starts with",
+};
+
+const OPERATOR_VALUES = Object.keys(OPERATOR_LABELS);
+
 function ConditionalFields({
   config,
   onConfigChange,
+  currentNodeId,
+  allNodes,
 }: {
   config: StepConfig;
   onConfigChange: (k: string, v: unknown) => void;
+  currentNodeId: string;
+  allNodes?: GraphNode[] | undefined;
 }) {
   const condition = (config["condition"] as Record<string, unknown> | undefined) ?? {};
 
@@ -254,15 +463,22 @@ function ConditionalFields({
     onConfigChange("condition", { ...condition, [key]: value });
   }
 
+  // Filter out the current node from the target step list
+  const availableNodes = (allNodes ?? []).filter((n) => n.id !== currentNodeId);
+  const hasAvailableNodes = availableNodes.length > 0;
+
   return (
     <>
       <FormField label="Field path" htmlFor="cfg-cond-field">
         <Input
           id="cfg-cond-field"
-          placeholder="e.g. data.status"
+          placeholder="e.g. data.status or output.count"
           value={(condition["field"] as string | undefined) ?? ""}
           onChange={(e) => handleConditionField("field", e.target.value)}
         />
+        <p className="text-[10px] text-[var(--color-muted-foreground)] mt-1">
+          Dot-notation path to the field to check (e.g. data.user.role)
+        </p>
       </FormField>
 
       <FormField label="Operator" htmlFor="cfg-cond-op">
@@ -274,8 +490,8 @@ function ConditionalFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {["eq", "neq", "gt", "gte", "lt", "lte", "contains", "not_contains", "exists", "not_exists", "matches"].map((op) => (
-              <SelectItem key={op} value={op}>{op}</SelectItem>
+            {OPERATOR_VALUES.map((op) => (
+              <SelectItem key={op} value={op}>{OPERATOR_LABELS[op]}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -290,22 +506,59 @@ function ConditionalFields({
         />
       </FormField>
 
-      <FormField label="Then step ID" htmlFor="cfg-then">
-        <Input
-          id="cfg-then"
-          placeholder="Step ID to run on true"
-          value={(config["thenStepId"] as string | undefined) ?? ""}
-          onChange={(e) => onConfigChange("thenStepId", e.target.value)}
-        />
+      <FormField label="If true, go to" htmlFor="cfg-then">
+        {hasAvailableNodes ? (
+          <Select
+            value={(config["thenStepId"] as string | undefined) ?? ""}
+            onValueChange={(v) => onConfigChange("thenStepId", v)}
+          >
+            <SelectTrigger id="cfg-then">
+              <SelectValue placeholder="Select a step..." />
+            </SelectTrigger>
+            <SelectContent>
+              {availableNodes.map((n) => (
+                <SelectItem key={n.id} value={n.id}>
+                  {n.label || `${n.type} (${n.id.slice(0, 8)})`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            id="cfg-then"
+            placeholder="Step ID (add more steps first)"
+            value={(config["thenStepId"] as string | undefined) ?? ""}
+            onChange={(e) => onConfigChange("thenStepId", e.target.value)}
+          />
+        )}
       </FormField>
 
-      <FormField label="Else step ID (optional)" htmlFor="cfg-else">
-        <Input
-          id="cfg-else"
-          placeholder="Step ID to run on false"
-          value={(config["elseStepId"] as string | undefined) ?? ""}
-          onChange={(e) => onConfigChange("elseStepId", e.target.value)}
-        />
+      <FormField label="If false, go to (optional)" htmlFor="cfg-else">
+        {hasAvailableNodes ? (
+          <Select
+            value={(config["elseStepId"] as string | undefined) ?? "__none__"}
+            onValueChange={(v) => onConfigChange("elseStepId", v === "__none__" ? "" : v)}
+          >
+            <SelectTrigger id="cfg-else">
+              <SelectValue placeholder="None (skip)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">None (skip)</SelectItem>
+              {availableNodes.map((n) => (
+                <SelectItem key={n.id} value={n.id}>
+                  {n.label || `${n.type} (${n.id.slice(0, 8)})`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            id="cfg-else"
+            placeholder="Step ID (optional)"
+            value={(config["elseStepId"] as string | undefined) ?? ""}
+            onChange={(e) => onConfigChange("elseStepId", e.target.value)}
+          />
+        )}
       </FormField>
     </>
   );
@@ -556,6 +809,200 @@ function TransformerFields({
 // Transform (declarative) step fields
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Visual form builders for common transform operations
+// ---------------------------------------------------------------------------
+
+const FILTER_OPERATORS = [
+  { value: "equals", label: "equals" },
+  { value: "not_equals", label: "does not equal" },
+  { value: "contains", label: "contains" },
+  { value: "not_contains", label: "does not contain" },
+  { value: "gt", label: "greater than" },
+  { value: "gte", label: "at least" },
+  { value: "lt", label: "less than" },
+  { value: "lte", label: "at most" },
+  { value: "exists", label: "exists" },
+  { value: "starts_with", label: "starts with" },
+  { value: "ends_with", label: "ends with" },
+];
+
+const AGGREGATE_FUNCTIONS = [
+  { value: "count", label: "Count" },
+  { value: "sum", label: "Sum" },
+  { value: "avg", label: "Average" },
+  { value: "min", label: "Minimum" },
+  { value: "max", label: "Maximum" },
+];
+
+function FilterForm({
+  params,
+  onChange,
+}: {
+  params: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+}) {
+  return (
+    <>
+      <FormField label="Field" htmlFor="cfg-tf-filter-field">
+        <Input
+          id="cfg-tf-filter-field"
+          placeholder="e.g. status"
+          value={(params["field"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, field: e.target.value })}
+        />
+      </FormField>
+      <FormField label="Condition" htmlFor="cfg-tf-filter-op">
+        <Select
+          value={(params["operator"] as string) ?? "equals"}
+          onValueChange={(v) => onChange({ ...params, operator: v })}
+        >
+          <SelectTrigger id="cfg-tf-filter-op">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FILTER_OPERATORS.map((op) => (
+              <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
+      <FormField label="Value" htmlFor="cfg-tf-filter-val">
+        <Input
+          id="cfg-tf-filter-val"
+          placeholder="e.g. active"
+          value={(params["value"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, value: e.target.value })}
+        />
+      </FormField>
+    </>
+  );
+}
+
+function SortForm({
+  params,
+  onChange,
+}: {
+  params: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+}) {
+  return (
+    <>
+      <FormField label="Sort by field" htmlFor="cfg-tf-sort-field">
+        <Input
+          id="cfg-tf-sort-field"
+          placeholder="e.g. created_at"
+          value={(params["field"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, field: e.target.value })}
+        />
+      </FormField>
+      <FormField label="Direction" htmlFor="cfg-tf-sort-dir">
+        <Select
+          value={(params["direction"] as string) ?? "asc"}
+          onValueChange={(v) => onChange({ ...params, direction: v })}
+        >
+          <SelectTrigger id="cfg-tf-sort-dir">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="asc">Ascending (A to Z, 0 to 9)</SelectItem>
+            <SelectItem value="desc">Descending (Z to A, 9 to 0)</SelectItem>
+          </SelectContent>
+        </Select>
+      </FormField>
+    </>
+  );
+}
+
+function AggregateForm({
+  params,
+  onChange,
+}: {
+  params: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+}) {
+  return (
+    <>
+      <FormField label="Group by field" htmlFor="cfg-tf-agg-group">
+        <Input
+          id="cfg-tf-agg-group"
+          placeholder="e.g. category"
+          value={(params["groupBy"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, groupBy: e.target.value })}
+        />
+      </FormField>
+      <FormField label="Function" htmlFor="cfg-tf-agg-fn">
+        <Select
+          value={(params["function"] as string) ?? "count"}
+          onValueChange={(v) => onChange({ ...params, function: v })}
+        >
+          <SelectTrigger id="cfg-tf-agg-fn">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AGGREGATE_FUNCTIONS.map((fn) => (
+              <SelectItem key={fn.value} value={fn.value}>{fn.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
+      <FormField label="Value field (for sum/avg/min/max)" htmlFor="cfg-tf-agg-val">
+        <Input
+          id="cfg-tf-agg-val"
+          placeholder="e.g. amount"
+          value={(params["valueField"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, valueField: e.target.value })}
+        />
+      </FormField>
+    </>
+  );
+}
+
+function RenameForm({
+  params,
+  onChange,
+}: {
+  params: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+}) {
+  return (
+    <>
+      <FormField label="Source field" htmlFor="cfg-tf-rename-src">
+        <Input
+          id="cfg-tf-rename-src"
+          placeholder="e.g. first_name"
+          value={(params["sourceField"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, sourceField: e.target.value })}
+        />
+      </FormField>
+      <FormField label="New name" htmlFor="cfg-tf-rename-tgt">
+        <Input
+          id="cfg-tf-rename-tgt"
+          placeholder="e.g. firstName"
+          value={(params["targetField"] as string) ?? ""}
+          onChange={(e) => onChange({ ...params, targetField: e.target.value })}
+        />
+      </FormField>
+    </>
+  );
+}
+
+/** Operations that have a dedicated visual form */
+const VISUAL_OPERATIONS = new Set(["filter", "sort", "aggregate", "rename", "map"]);
+
+const OPERATION_LABELS: Record<string, string> = {
+  dedup: "Remove duplicates",
+  filter: "Filter",
+  map: "Map / Rename",
+  aggregate: "Aggregate",
+  pivot: "Pivot",
+  unpivot: "Unpivot",
+  join: "Join",
+  sort: "Sort",
+  limit: "Limit",
+  rename: "Rename fields",
+};
+
 function TransformFields({
   config,
   onConfigChange,
@@ -568,23 +1015,44 @@ function TransformFields({
 
   // Extract params (everything except "operation") for the JSON textarea.
   const { operation: _op, ...params } = transform;
+
+  const [showRawJson, setShowRawJson] = React.useState(false);
   const [paramsText, setParamsText] = React.useState(() =>
     Object.keys(params).length > 0 ? JSON.stringify(params, null, 2) : "",
   );
   const [parseError, setParseError] = React.useState<string | null>(null);
 
+  // Sync paramsText when params change from visual form
+  const paramsRef = React.useRef(params);
+  React.useEffect(() => {
+    if (JSON.stringify(paramsRef.current) !== JSON.stringify(params)) {
+      paramsRef.current = params;
+      if (!showRawJson) {
+        setParamsText(Object.keys(params).length > 0 ? JSON.stringify(params, null, 2) : "");
+      }
+    }
+  }, [params, showRawJson]);
+
   const handleOperationChange = React.useCallback(
     (v: string) => {
-      // Merge new operation with existing params.
-      try {
-        const parsed = paramsText.trim() ? JSON.parse(paramsText) : {};
-        onConfigChange("transform", { ...parsed, operation: v });
-      } catch {
+      // Reset params when switching operations unless in raw JSON mode
+      if (showRawJson) {
+        try {
+          const parsed = paramsText.trim() ? JSON.parse(paramsText) : {};
+          onConfigChange("transform", { ...parsed, operation: v });
+        } catch {
+          onConfigChange("transform", { operation: v });
+        }
+      } else {
         onConfigChange("transform", { operation: v });
       }
     },
-    [paramsText, onConfigChange],
+    [paramsText, showRawJson, onConfigChange],
   );
+
+  function handleVisualParamChange(newParams: Record<string, unknown>) {
+    onConfigChange("transform", { ...newParams, operation });
+  }
 
   const handleParamsBlur = React.useCallback(() => {
     const trimmed = paramsText.trim();
@@ -602,6 +1070,8 @@ function TransformFields({
     }
   }, [paramsText, operation, onConfigChange]);
 
+  const hasVisualForm = VISUAL_OPERATIONS.has(operation);
+
   return (
     <>
       <FormField label="Operation" htmlFor="cfg-transform-op">
@@ -613,34 +1083,78 @@ function TransformFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {["dedup", "filter", "map", "aggregate", "pivot", "unpivot", "join", "sort", "limit", "rename"].map((op) => (
-              <SelectItem key={op} value={op}>{op}</SelectItem>
+            {Object.entries(OPERATION_LABELS).map(([op, lbl]) => (
+              <SelectItem key={op} value={op}>{lbl}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </FormField>
 
-      <FormField label="Parameters (JSON)" htmlFor="cfg-transform-params">
-        <Textarea
-          id="cfg-transform-params"
-          className="font-mono text-xs"
-          rows={6}
-          placeholder={'{\n  "field": "status",\n  "equals": "active"\n}'}
-          value={paramsText}
-          onChange={(e) => {
-            setParamsText(e.target.value);
-            if (parseError) setParseError(null);
-          }}
-          onBlur={handleParamsBlur}
-        />
-        {parseError !== null && (
-          <p className="mt-1 text-[11px] text-[var(--color-destructive)]">{parseError}</p>
-        )}
-      </FormField>
+      {/* Visual form for common operations */}
+      {hasVisualForm && !showRawJson && (
+        <div className="space-y-3">
+          {(operation === "filter") && (
+            <FilterForm params={params} onChange={handleVisualParamChange} />
+          )}
+          {(operation === "sort") && (
+            <SortForm params={params} onChange={handleVisualParamChange} />
+          )}
+          {(operation === "aggregate") && (
+            <AggregateForm params={params} onChange={handleVisualParamChange} />
+          )}
+          {(operation === "rename" || operation === "map") && (
+            <RenameForm params={params} onChange={handleVisualParamChange} />
+          )}
+        </div>
+      )}
 
-      <p className="text-[10px] text-[var(--color-muted-foreground)]">
-        Enter operation-specific parameters as a JSON object. Changes apply on blur.
-      </p>
+      {/* Raw JSON fallback — always shown for non-visual operations, toggle for visual ones */}
+      {(showRawJson || !hasVisualForm) && (
+        <FormField label="Parameters (JSON)" htmlFor="cfg-transform-params">
+          <Textarea
+            id="cfg-transform-params"
+            className="font-mono text-xs"
+            rows={6}
+            placeholder={'{\n  "field": "status",\n  "equals": "active"\n}'}
+            value={paramsText}
+            onChange={(e) => {
+              setParamsText(e.target.value);
+              if (parseError) setParseError(null);
+            }}
+            onBlur={handleParamsBlur}
+          />
+          {parseError !== null && (
+            <p className="mt-1 text-[11px] text-[var(--color-destructive)]">{parseError}</p>
+          )}
+        </FormField>
+      )}
+
+      {/* Advanced toggle — only for operations that have a visual form */}
+      {hasVisualForm && (
+        <button
+          type="button"
+          className="flex items-center gap-1 text-[11px] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors"
+          onClick={() => {
+            if (!showRawJson) {
+              // Sync current params to text when opening raw JSON
+              setParamsText(Object.keys(params).length > 0 ? JSON.stringify(params, null, 2) : "");
+            }
+            setShowRawJson(!showRawJson);
+          }}
+        >
+          <ChevronDown
+            className={cn("h-3 w-3 transition-transform", showRawJson && "rotate-180")}
+            aria-hidden
+          />
+          {showRawJson ? "Use visual editor" : "Advanced: Raw JSON"}
+        </button>
+      )}
+
+      {!hasVisualForm && (
+        <p className="text-[10px] text-[var(--color-muted-foreground)]">
+          Enter operation-specific parameters as a JSON object. Changes apply on blur.
+        </p>
+      )}
     </>
   );
 }

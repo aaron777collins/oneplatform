@@ -7,7 +7,7 @@
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { UnauthorizedError, ValidationError, NotFoundError } from "@oneplatform/core";
+import { UnauthorizedError, ValidationError, NotFoundError, ForbiddenError } from "@oneplatform/core";
 import type { StorageService } from "../services/storage-service.js";
 import {
   StorageObjectNotFoundError,
@@ -20,6 +20,20 @@ export interface StorageRouteDeps {
 
 // Bucket name validation mirrors S3 naming rules (simplified).
 const BUCKET_NAME_RE = /^[a-zA-Z0-9._-]{1,63}$/;
+
+/**
+ * Verify that a bucket name belongs to the authenticated user's tenant.
+ * Bucket names must be prefixed with `{tenantId}-`. Throws ForbiddenError
+ * when the prefix does not match, preventing cross-tenant data access.
+ */
+function assertBucketBelongsToTenant(bucket: string, tenantId: string): void {
+  const tenantPrefix = `${tenantId}-`;
+  if (!bucket.startsWith(tenantPrefix)) {
+    throw new ForbiddenError(
+      "Access denied: bucket does not belong to your tenant."
+    );
+  }
+}
 
 export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
@@ -77,6 +91,8 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
       ]);
     }
 
+    assertBucketBelongsToTenant(bucket, user.tenantId);
+
     const rawMaxKeys = c.req.query("maxKeys") ?? "1000";
     const maxKeys = parseInt(rawMaxKeys, 10);
     if (isNaN(maxKeys) || maxKeys < 1 || maxKeys > 1000) {
@@ -132,6 +148,8 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
       ]);
     }
 
+    assertBucketBelongsToTenant(bucket, user.tenantId);
+
     const objectKey = extractKeyFromPath(c.req.path, bucket, "download");
     if (!objectKey) {
       throw new ValidationError("Object key is required.", [
@@ -184,6 +202,8 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
       ]);
     }
 
+    assertBucketBelongsToTenant(bucket, user.tenantId);
+
     const objectKey = extractKeyFromPath(c.req.path, bucket, "objects");
     if (!objectKey) {
       throw new ValidationError("Object key is required.", [
@@ -219,6 +239,8 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
         },
       ]);
     }
+
+    assertBucketBelongsToTenant(bucket, user.tenantId);
 
     const objectKey = extractKeyFromPath(c.req.path, bucket, "objects");
     if (!objectKey) {

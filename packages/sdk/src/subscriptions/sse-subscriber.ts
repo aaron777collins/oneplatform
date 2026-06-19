@@ -138,9 +138,7 @@ export function createSseSubscription(
 
   function buildSseUrl(): string {
     const subscribeUrl = new URL(url);
-    for (const event of options.events) {
-      subscribeUrl.searchParams.append('events', event);
-    }
+    subscribeUrl.searchParams.set('events', options.events.join(','));
     if (options.filter?.entityType !== undefined) {
       subscribeUrl.searchParams.set('filter[entityType]', options.filter.entityType);
     }

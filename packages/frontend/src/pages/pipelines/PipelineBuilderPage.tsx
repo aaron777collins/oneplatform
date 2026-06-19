@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select.js";
 import { PipelineBuilder } from "@/components/pipelines/PipelineBuilder.js";
+import { ScheduleBuilder } from "@/components/pipelines/ScheduleBuilder.js";
 import { useApiClient, type ApiResponse, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { PipelineStep } from "@/components/pipelines/PipelineStepNode.js";
@@ -176,14 +177,10 @@ export function PipelineBuilderPage() {
               </div>
 
               {triggerType === "cron" && (
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="cron-expression">Cron expression</Label>
-                  <Input
-                    id="cron-expression"
-                    placeholder="e.g. 0 2 * * * (every day at 2am)"
+                <div className="sm:col-span-2">
+                  <ScheduleBuilder
                     value={cronExpression}
-                    onChange={(e) => setCronExpression(e.target.value)}
-                    className="font-mono"
+                    onChange={setCronExpression}
                   />
                 </div>
               )}

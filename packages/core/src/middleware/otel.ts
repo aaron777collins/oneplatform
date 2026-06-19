@@ -1,6 +1,8 @@
 import { createMiddleware } from "hono/factory";
 import type { MiddlewareHandler } from "hono";
 import { randomBytes } from "node:crypto";
+import { request as httpsRequest } from "node:https";
+import { request as httpRequest } from "node:http";
 
 export interface OtelMiddlewareOptions {
   serviceName: string;
@@ -49,6 +51,104 @@ function parseTraceparent(
     return null;
 
   return { traceId, parentSpanId };
+}
+
+/**
+ * Convert a span record into the OTLP/HTTP JSON format (v1) and POST it to the
+ * configured OTEL_EXPORTER_OTLP_ENDPOINT.  The request is fire-and-forget —
+ * failures are silently swallowed so that tracing never breaks request handling.
+ *
+ * OTLP/HTTP JSON spec:
+ *   https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
+ *
+ * The endpoint receives ExportTraceServiceRequest at /v1/traces.
+ */
+function exportSpanToOtlp(
+  span: Record<string, unknown>,
+  endpoint: string
+): void {
+  // Convert ISO timestamps to OTLP nanosecond epoch format.
+  const startNano = BigInt(new Date(span["startTime"] as string).getTime()) * 1_000_000n;
+  const endNano = BigInt(new Date(span["endTime"] as string).getTime()) * 1_000_000n;
+
+  // Map our status label to the OTLP StatusCode enum (OK=1, ERROR=2).
+  const otlpStatusCode = span["status"] === "ERROR" ? 2 : 1;
+
+  // Build OTLP attributes from our flat attributes object.
+  const attrs = span["attributes"] as Record<string, unknown> | undefined;
+  const otlpAttrs = attrs
+    ? Object.entries(attrs).map(([key, value]) => ({
+        key,
+        value:
+          typeof value === "number"
+            ? { intValue: String(value) }
+            : { stringValue: String(value) },
+      }))
+    : [];
+
+  const payload = {
+    resourceSpans: [
+      {
+        resource: {
+          attributes: [
+            {
+              key: "service.name",
+              value: { stringValue: span["service"] as string },
+            },
+          ],
+        },
+        scopeSpans: [
+          {
+            scope: { name: "oneplatform.otel-middleware", version: "1.0.0" },
+            spans: [
+              {
+                traceId: span["traceId"],
+                spanId: span["spanId"],
+                ...(span["parentSpanId"]
+                  ? { parentSpanId: span["parentSpanId"] }
+                  : {}),
+                name: span["name"],
+                kind: 2, // SPAN_KIND_SERVER
+                startTimeUnixNano: startNano.toString(),
+                endTimeUnixNano: endNano.toString(),
+                attributes: otlpAttrs,
+                status: { code: otlpStatusCode },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const body = JSON.stringify(payload);
+
+  // Build the full URL — OTLP/HTTP traces endpoint.
+  const url = new URL("/v1/traces", endpoint);
+  const isHttps = url.protocol === "https:";
+  const doRequest = isHttps ? httpsRequest : httpRequest;
+
+  const req = doRequest(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: 5_000,
+    },
+    (res) => {
+      // Drain the response body so the socket can be reused.
+      res.resume();
+    }
+  );
+
+  req.on("error", () => {
+    // Silently ignore export failures — tracing must never break requests.
+  });
+
+  req.end(body);
 }
 
 /**
@@ -134,6 +234,14 @@ export function otelMiddleware(
     }
 
     process.stdout.write(JSON.stringify(span) + "\n");
+
+    // When OTEL_EXPORTER_OTLP_ENDPOINT is set, also POST the span to the
+    // collector's OTLP/HTTP endpoint.  This is fire-and-forget; failures are
+    // silently swallowed so tracing never degrades request handling.
+    const otlpEndpoint = process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
+    if (otlpEndpoint) {
+      exportSpanToOtlp(span, otlpEndpoint);
+    }
 
     // W3C Trace Context response header — downstream services and browsers use
     // this to continue the trace without needing to contact the collector.

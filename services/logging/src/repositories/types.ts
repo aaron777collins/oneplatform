@@ -139,6 +139,7 @@ export interface CreateAuditEventData {
 // ---------------------------------------------------------------------------
 
 export interface LogQueryParams {
+  tenantId?: string;
   service?: string;
   level?: "debug" | "info" | "warn" | "error";
   traceId?: string;

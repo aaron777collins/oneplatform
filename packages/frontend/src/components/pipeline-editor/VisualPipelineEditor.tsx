@@ -147,6 +147,7 @@ export function VisualPipelineEditor({
       {selectedNode !== undefined && (
         <NodeConfigPanel
           node={selectedNode}
+          allNodes={graph.nodes}
           onUpdate={handleNodeUpdate}
           onClose={() => setConfigPanelOpen(false)}
         />

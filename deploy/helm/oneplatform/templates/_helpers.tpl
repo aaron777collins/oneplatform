@@ -284,6 +284,28 @@ Renders a YAML list of env entries; embed with toYaml in Deployment templates.
     secretKeyRef:
       name: {{ include "oneplatform.secretName" . }}
       key: jwtPublicKey
+{{- /* Cross-service URL env vars — services use these to call each other.
+       Without them, services fall back to hard-coded defaults that use wrong
+       service names / ports in Kubernetes. Uses the serviceURL helper which
+       produces: http://<release>-oneplatform-<service>:3000 */ -}}
+- name: AUTH_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "auth" "root" .) | quote }}
+- name: INGESTION_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "ingestion" "root" .) | quote }}
+- name: ONTOLOGY_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "ontology" "root" .) | quote }}
+- name: PIPELINE_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "pipeline" "root" .) | quote }}
+- name: EXECUTION_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "execution" "root" .) | quote }}
+- name: PLUGIN_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "plugin" "root" .) | quote }}
+- name: APP_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "app" "root" .) | quote }}
+- name: LOGGING_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "logging" "root" .) | quote }}
+- name: GATEWAY_SERVICE_URL
+  value: {{ include "oneplatform.serviceURL" (dict "service" "gateway" "root" .) | quote }}
 {{- end }}
 
 {{/*

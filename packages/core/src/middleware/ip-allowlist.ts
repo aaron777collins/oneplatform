@@ -284,11 +284,12 @@ export function createIpAllowlistMiddleware(options: IpAllowlistOptions) {
 
     if (!isIpInAllowlist(clientIp, options.allowlist)) {
       const requestId: string = c.var["requestId"] ?? "";
+      const ctx = options.context ?? "IP";
       return c.json(
         {
           error: {
             code: "FORBIDDEN",
-            message: "Access denied: your IP address is not in the allowlist.",
+            message: `Access denied: ${clientIp} is not in the ${ctx} allowlist.`,
             requestId,
           },
         },

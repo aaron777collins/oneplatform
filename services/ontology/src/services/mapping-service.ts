@@ -143,12 +143,16 @@ export function createMappingService(deps: MappingServiceDeps): MappingService {
                     },
                     body: JSON.stringify({
                       tenantId,
+                      type: "expression",
                       code: `(function(value, context) { return (${rule.transform}); })(value, context)`,
-                      language: "javascript",
-                      context: { value: sourceValue, record: record.data },
-                      timeoutMs: 5000,
-                      memoryLimitMb: 32,
-                      noIo: true,
+                      language: "js",
+                      timeout: 5000,
+                      context: {
+                        value: sourceValue,
+                        record: record.data,
+                        traceId: batchId,
+                        tenantId,
+                      },
                     }),
                   });
                   if (response.ok) {

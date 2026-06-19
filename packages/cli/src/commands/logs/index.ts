@@ -66,7 +66,7 @@ async function auditAction(opts: AuditOpts, ctx: CommandContext): Promise<void> 
   if (opts.actor) query["actorId"] = opts.actor;
   if (opts.action) query["action"] = opts.action;
   if (opts.resource) query["resourceType"] = opts.resource;
-  const entries = await ctx.http.get<unknown[]>("/api/v1/logs/audit", query);
+  const entries = await ctx.http.get<unknown[]>("/api/v1/audit-events", query);
   ctx.renderer.render(entries, AUDIT_COLUMNS);
 }
 

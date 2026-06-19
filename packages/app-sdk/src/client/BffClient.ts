@@ -213,6 +213,12 @@ export class BffClient {
       throw await parseBffError(response);
     }
 
+    // 204 No Content (e.g. DELETE responses) has no body — calling
+    // response.json() would throw a SyntaxError. Return undefined instead.
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     return response.json() as Promise<T>;
   }
 }

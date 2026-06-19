@@ -449,7 +449,13 @@ describe("fetchBatch() — incremental sync", () => {
     const result = await connector.fetchBatch(handle, null, ctx);
 
     expect(result.hasMore).toBe(false);
-    expect(result.nextCursor).toBeNull();
+    // Incremental sync always persists the cursor even on partial batches
+    // so that restarting the sync resumes from the last processed row
+    // rather than re-fetching already-ingested data (V5-116).
+    expect(result.nextCursor).not.toBeNull();
+    const cursor = JSON.parse(result.nextCursor!);
+    expect(cursor.mode).toBe("incremental");
+    expect(cursor.lastValue).toBe("2024-01-01T00:00:00Z");
   });
 
   it("throws PluginDataError when incrementalColumn is missing from rows", async () => {

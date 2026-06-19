@@ -50,6 +50,15 @@ export class WebSocketManager {
 
   private static readonly BASE_RECONNECT_MS = 1_000;
   private static readonly MAX_RECONNECT_MS = 30_000;
+  /**
+   * Maximum number of consecutive reconnect attempts before giving up.
+   * Prevents infinite retry loops when no WS endpoint exists (e.g. 404).
+   * After reaching this limit, reconnection is disabled until a manual
+   * call to connect() or a full remount of AppProvider.
+   */
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  /** When true, reconnection has been permanently disabled due to exhausted retries. */
+  private reconnectDisabled = false;
 
   // ─── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -61,7 +70,20 @@ export class WebSocketManager {
     if (this.destroyed) return;
 
     this.appSlug = slug;
+    // A manual connect() call resets retry state so the manager gets a fresh
+    // budget of reconnect attempts.
+    this.reconnectDisabled = false;
+    this.reconnectAttempts = 0;
 
+    this.openSocket(slug);
+  }
+
+  /**
+   * Opens the raw WebSocket to the given slug.
+   * Shared between initial connect() and reconnect timer so that reconnect
+   * can re-open without resetting the attempt counter.
+   */
+  private openSocket(slug: string): void {
     // Remove listeners from any previous socket before creating the new one so
     // stale close/error events from the old socket don't trigger a second reconnect.
     if (this.socket !== null) {
@@ -205,8 +227,23 @@ export class WebSocketManager {
    * attempt 0 → 1s, 1 → 2s, 2 → 4s, 3 → 8s, 4 → 16s, 5+ → 30s (capped)
    */
   private scheduleReconnect(): void {
-    // Do not schedule a reconnect if destroy() has already been called.
-    if (this.destroyed) return;
+    // Do not schedule a reconnect if destroy() has already been called or
+    // reconnection has been permanently disabled (max attempts exhausted).
+    if (this.destroyed || this.reconnectDisabled) return;
+
+    // Check if we have exceeded the maximum number of reconnect attempts.
+    // This prevents infinite retry loops when the WS endpoint does not exist
+    // (e.g. App Service has no WebSocket route, returns 404).
+    if (this.reconnectAttempts >= WebSocketManager.MAX_RECONNECT_ATTEMPTS) {
+      this.reconnectDisabled = true;
+      console.warn(
+        `[app-sdk] WebSocket reconnection disabled after ${this.reconnectAttempts} failed attempts. ` +
+          "The WebSocket endpoint may not be available. " +
+          "Real-time updates will not function until the app is reloaded.",
+      );
+      this.notifyStatusListeners();
+      return;
+    }
 
     const delay = Math.min(
       WebSocketManager.BASE_RECONNECT_MS * 2 ** this.reconnectAttempts,
@@ -215,7 +252,11 @@ export class WebSocketManager {
     this.reconnectAttempts++;
     this.notifyStatusListeners();
     this.reconnectTimer = setTimeout(() => {
-      if (this.appSlug) this.connect(this.appSlug);
+      // Use internal reconnect path that preserves attempt counter — do NOT
+      // call this.connect() which resets reconnectAttempts to 0.
+      if (this.appSlug && !this.destroyed && !this.reconnectDisabled) {
+        this.openSocket(this.appSlug);
+      }
     }, delay);
   }
 

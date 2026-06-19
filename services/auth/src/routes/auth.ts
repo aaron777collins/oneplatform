@@ -193,21 +193,53 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
     return new Response(null, { status: 204 });
   });
 
-  // POST /api/v1/auth/refresh — public (the refresh token is in the body)
+  // POST /api/v1/auth/refresh — public (the refresh token is in the body or cookie)
   // Rotates the refresh token and issues a new access token.
   // Rate limited to 10 req/min per IP (V5-026).
+  //
+  // Dual-mode token retrieval: browser clients send the refresh token as an
+  // HttpOnly cookie (op_refresh_token) set during login. API clients send it
+  // in the JSON body. The cookie takes precedence when both are present, but
+  // in practice only one will be set.
   routes.post("/api/v1/auth/refresh", async (c) => {
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim()
       ?? c.req.header("x-real-ip")
       ?? "unknown";
     await checkRefreshRateLimit(ip);
 
-    const body = await c.req.json();
-    const parsed = refreshRequest.safeParse(body);
-    if (!parsed.success) {
-      throw new ValidationError("Invalid refresh request", parsed.error.issues);
+    // Try to extract the refresh token from the HttpOnly cookie first (browser
+    // clients). The cookie is set with Path=/api/v1/auth/refresh so it is only
+    // sent to this endpoint. Falls back to the JSON body for API clients.
+    const cookieHeader = c.req.header("cookie") ?? "";
+    const cookieMatch = cookieHeader.match(/(?:^|;\s*)op_refresh_token=([^;]+)/);
+    const cookieRefreshToken = cookieMatch?.[1] ?? null;
+
+    let refreshToken: string | undefined;
+
+    if (cookieRefreshToken) {
+      refreshToken = cookieRefreshToken;
+    } else {
+      const body = await c.req.json().catch(() => ({}));
+      const parsed = refreshRequest.safeParse(body);
+      if (!parsed.success) {
+        throw new ValidationError("Invalid refresh request — provide refreshToken in the JSON body or as the op_refresh_token cookie", parsed.error.issues);
+      }
+      refreshToken = parsed.data.refreshToken;
     }
-    const result = await tokenService.rotateRefreshToken(parsed.data.refreshToken);
+
+    const result = await tokenService.rotateRefreshToken(refreshToken);
+
+    // If the request came from a browser (Origin header present), set the new
+    // refresh token as an HttpOnly cookie so the cycle continues without the
+    // frontend needing to read the token from the response body.
+    if (c.req.header("Origin") !== undefined && result.refreshToken) {
+      const isSecure = c.req.url.startsWith("https://");
+      c.header(
+        "Set-Cookie",
+        `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+      );
+    }
+
     return c.json(result);
   });
 

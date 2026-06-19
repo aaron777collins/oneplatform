@@ -28,6 +28,7 @@ describe("useUser", () => {
       tenantId: "t1",
       roles: ["admin"],
       isGuest: false,
+      isLoaded: true,
     };
     mockUseAppContext.mockReturnValue({
       user,

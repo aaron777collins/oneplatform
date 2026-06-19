@@ -3,7 +3,9 @@
 #
 # One-shot initialization container. Runs as Layer 0 before any data store.
 # Generates all secrets that services need at runtime. Secrets are written
-# to /data/init/ on the init-data volume with mode 0400 so only root can read them.
+# to /data/init/ on the init-data volume with mode 0444 (world-readable) so that
+# service containers (UID 1001) and postgres (UID 70) can read them. The volume
+# is mounted :ro in docker-compose.yml, preventing writes regardless of mode.
 #
 # Ref spec §2 "Startup Sequence" step 1 and §4 "First-Run Bootstrap".
 
@@ -24,14 +26,14 @@ mkdir -p "$PUBKEYS_DIR"
 if [ -f "/run/secrets/op_master_key" ]; then
   echo "[op-init] Using Docker secret for OP_MASTER_KEY"
   cp /run/secrets/op_master_key "$INIT_DIR/master.key"
-  chmod 0400 "$INIT_DIR/master.key"
+  chmod 0444 "$INIT_DIR/master.key"
 else
   # Step 1b: No pre-existing secret — generate a new AES-256-GCM master key.
   # openssl rand -base64 32 produces 32 random bytes encoded as base64 (44 chars).
   if [ ! -f "$INIT_DIR/master.key" ]; then
     echo "[op-init] Generating OP_MASTER_KEY"
     openssl rand -base64 32 > "$INIT_DIR/master.key"
-    chmod 0400 "$INIT_DIR/master.key"
+    chmod 0444 "$INIT_DIR/master.key"
   else
     echo "[op-init] OP_MASTER_KEY already exists, skipping"
   fi
@@ -43,7 +45,7 @@ fi
 if [ ! -f "$INIT_DIR/bootstrap.token" ]; then
   echo "[op-init] Generating bootstrap token"
   openssl rand -hex 32 > "$INIT_DIR/bootstrap.token"
-  chmod 0400 "$INIT_DIR/bootstrap.token"
+  chmod 0444 "$INIT_DIR/bootstrap.token"
 else
   echo "[op-init] Bootstrap token already exists, skipping"
 fi
@@ -54,7 +56,7 @@ fi
 if [ ! -f "$INIT_DIR/jwt.secret" ]; then
   echo "[op-init] Generating OP_JWT_SECRET"
   openssl rand -hex 32 > "$INIT_DIR/jwt.secret"
-  chmod 0400 "$INIT_DIR/jwt.secret"
+  chmod 0444 "$INIT_DIR/jwt.secret"
 else
   echo "[op-init] OP_JWT_SECRET already exists, skipping"
 fi
@@ -66,7 +68,7 @@ fi
 if [ ! -f "$INIT_DIR/cursor.secret" ]; then
   echo "[op-init] Generating OP_CURSOR_SECRET"
   openssl rand -hex 32 > "$INIT_DIR/cursor.secret"
-  chmod 0400 "$INIT_DIR/cursor.secret"
+  chmod 0444 "$INIT_DIR/cursor.secret"
 else
   echo "[op-init] OP_CURSOR_SECRET already exists, skipping"
 fi
@@ -121,7 +123,7 @@ for SERVICE in auth gateway ingestion ontology pipeline execution app logging pl
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating DB password for ${SERVICE}_service_role"
     gen_password > "$PW_FILE"
-    chmod 0400 "$PW_FILE"
+    chmod 0444 "$PW_FILE"
   else
     echo "[op-init] DB password for ${SERVICE}_service_role already exists, skipping"
   fi
@@ -135,7 +137,7 @@ for PGBUSER in pgbouncer_admin pgbouncer_stats; do
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating password for ${PGBUSER}"
     gen_password > "$PW_FILE"
-    chmod 0400 "$PW_FILE"
+    chmod 0444 "$PW_FILE"
   else
     echo "[op-init] Password for ${PGBUSER} already exists, skipping"
   fi
@@ -147,7 +149,7 @@ done
 if [ ! -f "$INIT_DIR/db_password_postgres_superuser.txt" ]; then
   echo "[op-init] Generating Postgres superuser password"
   gen_password > "$INIT_DIR/db_password_postgres_superuser.txt"
-  chmod 0400 "$INIT_DIR/db_password_postgres_superuser.txt"
+  chmod 0444 "$INIT_DIR/db_password_postgres_superuser.txt"
 else
   echo "[op-init] Postgres superuser password already exists, skipping"
 fi
@@ -162,7 +164,7 @@ for REDIS_USER in admin auth pipeline logging gateway ingestion ontology app plu
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating Redis password for op_${REDIS_USER}"
     gen_password > "$PW_FILE"
-    chmod 0400 "$PW_FILE"
+    chmod 0444 "$PW_FILE"
   else
     echo "[op-init] Redis password for op_${REDIS_USER} already exists, skipping"
   fi
@@ -175,7 +177,7 @@ done
 # Ref spec §4 "Service-to-Service Auth".
 #
 # Key naming convention:
-#   Private:  $KEYS_DIR/<service-name>/private.pem   (mode 0400, service-only)
+#   Private:  $KEYS_DIR/<service-name>/private.pem   (mode 0444, volume is :ro)
 #   Public:   $PUBKEYS_DIR/<service-name>.pub         (mode 0444, all services)
 #
 # The public key filename must match the JWT sub claim (e.g. "gateway-service")
@@ -192,7 +194,7 @@ for SERVICE in gateway auth ingestion ontology pipeline execution app logging pl
   if [ ! -f "$PRIVATE_KEY_PATH" ]; then
     echo "[op-init] Generating Ed25519 key pair for ${SERVICE_NAME}"
     openssl genpkey -algorithm Ed25519 -out "$PRIVATE_KEY_PATH"
-    chmod 0400 "$PRIVATE_KEY_PATH"
+    chmod 0444 "$PRIVATE_KEY_PATH"
     openssl pkey -in "$PRIVATE_KEY_PATH" -pubout -out "$PUBLIC_KEY_PATH"
     chmod 0444 "$PUBLIC_KEY_PATH"
   else

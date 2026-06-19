@@ -41,7 +41,7 @@ export function createEventNamespace(
       }
 
       // transport.buildUrl() prepends the stored baseUrl — do not pass baseUrl here
-      const sseUrl = transport.buildUrl('/api/v1/events/subscribe');
+      const sseUrl = transport.buildUrl('/api/v1/events');
 
       return createSseSubscription(
         sseUrl,

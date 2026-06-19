@@ -8,6 +8,7 @@ import type {
 } from "./types.js";
 
 export interface ExportQueryOptions {
+  tenantId?: string;
   service?: string;
   level?: "debug" | "info" | "warn" | "error";
   traceId?: string;
@@ -87,6 +88,10 @@ export class LogEventRepository {
     const args: unknown[] = [];
     let n = 1;
 
+    if (params.tenantId !== undefined) {
+      conditions.push(`tenant_id = $${n++}`);
+      args.push(params.tenantId);
+    }
     if (params.service !== undefined) {
       conditions.push(`service = $${n++}`);
       args.push(params.service);
@@ -168,10 +173,23 @@ export class LogEventRepository {
   /**
    * Fetch a single log event by its UUID primary key.
    * Returns null when no matching row exists (across all partitions).
+   *
+   * When tenantId is provided the query includes a WHERE tenant_id clause
+   * so callers cannot read log events belonging to other tenants.
    */
-  async findById(id: string): Promise<LogEventRow | null> {
+  async findById(id: string, tenantId?: string): Promise<LogEventRow | null> {
+    if (tenantId !== undefined) {
+      const result = await this.db.query<LogEventRow>(
+        `SELECT id, tenant_id, trace_id, service, level, message, metadata, created_at
+         FROM logging.events
+         WHERE id = $1 AND tenant_id = $2
+         LIMIT 1`,
+        [id, tenantId]
+      );
+      return result.rows[0] ?? null;
+    }
     const result = await this.db.query<LogEventRow>(
-      `SELECT id, trace_id, service, level, message, metadata, created_at
+      `SELECT id, tenant_id, trace_id, service, level, message, metadata, created_at
        FROM logging.events
        WHERE id = $1
        LIMIT 1`,
@@ -193,6 +211,10 @@ export class LogEventRepository {
     const args: unknown[] = [];
     let n = 1;
 
+    if (opts.tenantId !== undefined) {
+      conditions.push(`tenant_id = $${n++}`);
+      args.push(opts.tenantId);
+    }
     if (opts.service !== undefined) {
       conditions.push(`service = $${n++}`);
       args.push(opts.service);
@@ -249,9 +271,20 @@ export class LogEventRepository {
    * the WHERE trace_id <> '' exclusion means empty-string system events
    * are not indexed and cannot match here.
    */
-  async queryByTraceId(traceId: string): Promise<LogEventRow[]> {
+  async queryByTraceId(traceId: string, tenantId?: string): Promise<LogEventRow[]> {
+    if (tenantId !== undefined) {
+      const result = await this.db.query<LogEventRow>(
+        `SELECT id, tenant_id, trace_id, service, level, message, metadata, created_at
+         FROM logging.events
+         WHERE trace_id = $1 AND tenant_id = $2
+         ORDER BY created_at DESC, id DESC
+         LIMIT 500`,
+        [traceId, tenantId]
+      );
+      return result.rows;
+    }
     const result = await this.db.query<LogEventRow>(
-      `SELECT id, trace_id, service, level, message, metadata, created_at
+      `SELECT id, tenant_id, trace_id, service, level, message, metadata, created_at
        FROM logging.events
        WHERE trace_id = $1
        ORDER BY created_at DESC, id DESC

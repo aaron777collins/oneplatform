@@ -131,7 +131,7 @@ export interface ConnectorTestResult {
 export interface SyncJob {
   readonly syncJobId: string;
   readonly connectorId: string;
-  readonly status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  readonly status: "queued" | "running" | "success" | "failed" | "cancelled";
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly recordsProcessed: number;

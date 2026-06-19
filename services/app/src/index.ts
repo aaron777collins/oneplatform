@@ -556,6 +556,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
       const configJsonRaw = JSON.stringify({
         appId:     tenantApp.id,
         tenantId:  tenantApp.tenant_id,
+        appSlug:   slug,
         bffOrigin: "",
       });
       // Defense-in-depth: escape "</script>" sequences in the JSON blob to prevent

@@ -51,8 +51,13 @@ export function createLogRoutes(
       throw new ValidationError("Invalid query parameters", parsed.error.issues);
     }
 
+    // Tenant isolation: non-admin callers are scoped to their own tenant.
+    // Admin callers can see all tenants' logs (no tenantId filter applied).
+    const isAdmin = user.scopes.includes("admin");
+
     const params: LogQueryParams = {
       limit: parsed.data.limit,
+      ...(!isAdmin ? { tenantId: user.tenantId } : {}),
       ...(parsed.data.service !== undefined ? { service: parsed.data.service } : {}),
       ...(parsed.data.level !== undefined ? { level: parsed.data.level } : {}),
       ...(parsed.data.traceId !== undefined ? { traceId: parsed.data.traceId } : {}),
@@ -111,6 +116,9 @@ export function createLogRoutes(
       );
     }
 
+    // Tenant isolation: non-admin callers are scoped to their own tenant.
+    const isAdmin = user.scopes.includes("admin");
+
     const format = params.format;
     const contentType =
       format === "csv" ? "text/csv" : "application/x-ndjson";
@@ -138,6 +146,7 @@ export function createLogRoutes(
       ...(params.level !== undefined ? { level: params.level } : {}),
       ...(params.traceId !== undefined ? { traceId: params.traceId } : {}),
       ...(params.search !== undefined ? { search: params.search } : {}),
+      ...(!isAdmin ? { tenantId: user.tenantId } : {}),
     };
 
     const stream = new ReadableStream({
@@ -214,7 +223,13 @@ export function createLogRoutes(
     }
 
     const id = c.req.param("id");
-    const row = await logEventRepository.findById(id);
+    // Tenant isolation: non-admin callers can only fetch log events
+    // belonging to their own tenant. Admins may access any log event.
+    const isAdmin = user.scopes.includes("admin");
+    const row = await logEventRepository.findById(
+      id,
+      isAdmin ? undefined : user.tenantId
+    );
 
     if (row === null) {
       throw new NotFoundError(`Log event ${id} not found`);

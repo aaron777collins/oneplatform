@@ -111,7 +111,7 @@ export function createLogNamespace(transport: Transport): LogNamespace {
           total: number | null;
         }>({
           method: 'GET',
-          path: '/api/v1/logs/audit',
+          path: '/api/v1/audit-events',
           query: {
             ...baseQuery,
             limit,

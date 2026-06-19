@@ -80,14 +80,14 @@ describe("PluginManifestSchema", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("rejects hook entrypoint with spaces", () => {
+  it("rejects hook entrypoint that is empty", () => {
     const result = validateManifest({
       ...VALID_MANIFEST,
       hooks: [
         {
           stage: "before:ingestion.receive",
           criticality: "critical",
-          entrypoint: "not valid",
+          entrypoint: "",
         },
       ],
     });

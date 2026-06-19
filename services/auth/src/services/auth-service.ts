@@ -663,6 +663,18 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         await redis.del(`auth:token-family:${tokenKey}`);
       }
       await redis.del(`auth:user-sessions:${userId}`);
+
+      // 7. Blocklist ALL outstanding access tokens for this user via a per-user
+      // revocation key. The auth middleware checks revocation:user:{userId} on
+      // every request — any active access token for this user will be rejected.
+      // TTL matches the max JWT lifetime so the entry self-cleans.
+      const jwtExpirySeconds = getJwtExpirySeconds();
+      await redis.set(
+        `revocation:user:${userId}`,
+        "1",
+        "EX",
+        jwtExpirySeconds
+      );
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -744,6 +756,18 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         await redis.del(`auth:token-family:${tokenKey}`);
       }
       await redis.del(`auth:user-sessions:${userId}`);
+
+      // 6. Blocklist ALL outstanding access tokens for this user via a per-user
+      // revocation key. The auth middleware checks revocation:user:{userId} on
+      // every request — any active access token for this user will be rejected.
+      // TTL matches the max JWT lifetime so the entry self-cleans.
+      const jwtExpirySeconds = getJwtExpirySeconds();
+      await redis.set(
+        `revocation:user:${userId}`,
+        "1",
+        "EX",
+        jwtExpirySeconds
+      );
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
