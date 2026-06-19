@@ -656,25 +656,63 @@ function ApprovalFields({
   config: StepConfig;
   onConfigChange: (k: string, v: unknown) => void;
 }) {
-  const approvers = ((config["approvers"] as string[] | undefined) ?? []).join(", ");
+  const approvers = (config["approvers"] as string[] | undefined) ?? [];
+  const [inputValue, setInputValue] = React.useState("");
+
+  function addApprover(email: string) {
+    const trimmed = email.trim();
+    if (trimmed && !approvers.includes(trimmed)) {
+      onConfigChange("approvers", [...approvers, trimmed]);
+    }
+    setInputValue("");
+  }
+
+  function removeApprover(email: string) {
+    onConfigChange("approvers", approvers.filter((a) => a !== email));
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
+      e.preventDefault();
+      addApprover(inputValue);
+    } else if (e.key === "Backspace" && inputValue === "" && approvers.length > 0) {
+      removeApprover(approvers[approvers.length - 1]!);
+    }
+  }
 
   return (
     <>
-      <FormField label="Approvers (comma-separated)" htmlFor="cfg-approvers">
-        <Input
-          id="cfg-approvers"
-          placeholder="user@example.com, admin@example.com"
-          value={approvers}
-          onChange={(e) =>
-            onConfigChange(
-              "approvers",
-              e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean)
-            )
-          }
-        />
+      <FormField label="Approvers" htmlFor="cfg-approvers">
+        <div className="flex flex-wrap gap-1.5 rounded-md border border-[var(--color-input)] bg-[var(--color-background)] px-2 py-1.5 min-h-[36px]">
+          {approvers.map((email) => (
+            <span
+              key={email}
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-2 py-0.5 text-xs"
+            >
+              {email}
+              <button
+                type="button"
+                onClick={() => removeApprover(email)}
+                className="ml-0.5 rounded-full hover:bg-[var(--color-primary)]/20 p-0.5"
+                aria-label={`Remove ${email}`}
+              >
+                <X className="h-3 w-3" aria-hidden />
+              </button>
+            </span>
+          ))}
+          <input
+            id="cfg-approvers"
+            className="flex-1 min-w-[120px] border-0 bg-transparent text-xs outline-none placeholder:text-[var(--color-muted-foreground)]"
+            placeholder={approvers.length === 0 ? "Type an email and press Enter" : "Add another..."}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={() => { if (inputValue.trim()) addApprover(inputValue); }}
+          />
+        </div>
+        <p className="text-[10px] text-[var(--color-muted-foreground)] mt-1">
+          Press Enter, Tab, or comma to add each email address.
+        </p>
       </FormField>
 
       <FormField label="Message (optional)" htmlFor="cfg-approval-msg">
@@ -846,17 +884,17 @@ function ConnectorFields({
         {connectorsLoading ? (
           <Input id="cfg-conn-id" disabled placeholder="Loading connectors..." />
         ) : connectors.length === 0 ? (
-          <>
-            <Input
-              id="cfg-conn-id"
-              placeholder="Connector UUID (no connectors found)"
-              value={selectedId}
-              onChange={(e) => onConfigChange("connectorInstanceId", e.target.value)}
-            />
-            <p className="mt-1 text-[10px] text-[var(--color-muted-foreground)]">
-              No connectors available. Enter an ID manually or create a connector first.
+          <div className="rounded-md border border-dashed border-[var(--color-border)] p-4 text-center">
+            <p className="text-xs text-[var(--color-muted-foreground)] mb-2">
+              No connectors available yet.
             </p>
-          </>
+            <a
+              href="/connectors/new"
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] hover:opacity-90 transition-opacity"
+            >
+              Create a connector
+            </a>
+          </div>
         ) : (
           <Select
             value={selectedId}

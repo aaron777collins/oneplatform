@@ -30,12 +30,25 @@ export interface BrandingRouteDeps {
 
 const PLATFORM_ADMIN_SCOPE = "admin";
 
-function requirePlatformAdmin(scopes: string[]): void {
-  if (!scopes.includes(PLATFORM_ADMIN_SCOPE)) {
-    throw new ForbiddenError(
-      "admin scope is required for branding management operations."
-    );
-  }
+/**
+ * V6-100: Allow both platform-admin and tenant-admin users to manage branding.
+ * Tenant-admin users can only access branding for their own tenant (enforced
+ * by the callerTenantId check). Platform-admin users can access any tenant.
+ */
+function requireBrandingAccess(
+  scopes: string[],
+  callerTenantId: string,
+  targetTenantId: string,
+): void {
+  // Platform-admin can manage branding for any tenant.
+  if (scopes.includes(PLATFORM_ADMIN_SCOPE)) return;
+
+  // Tenant-admin can manage branding for their own tenant only.
+  if (scopes.includes("users:manage") && callerTenantId === targetTenantId) return;
+
+  throw new ForbiddenError(
+    "admin scope or tenant-admin role for this tenant is required for branding management operations."
+  );
 }
 
 export function createBrandingRoutes(
@@ -47,9 +60,8 @@ export function createBrandingRoutes(
   // GET /api/v1/tenants/:id/branding
   // Returns the resolved branding config (defaults filled in for unset fields).
   routes.get("/api/v1/tenants/:id/branding", async (c) => {
-    requirePlatformAdmin(c.var.user.scopes);
-
     const id = c.req.param("id");
+    requireBrandingAccess(c.var.user.scopes, c.var.user.tenantId, id);
 
     // Verify the tenant exists before proxying to the service — gives a clear
     // 404 rather than silently returning defaults for a non-existent tenant.
@@ -65,9 +77,8 @@ export function createBrandingRoutes(
   // PATCH /api/v1/tenants/:id/branding
   // Partial update — only the fields present in the body are changed.
   routes.patch("/api/v1/tenants/:id/branding", async (c) => {
-    requirePlatformAdmin(c.var.user.scopes);
-
     const id = c.req.param("id");
+    requireBrandingAccess(c.var.user.scopes, c.var.user.tenantId, id);
     const body = await c.req.json();
     const parsed = updateBrandingRequest.safeParse(body);
     if (!parsed.success) {
@@ -101,9 +112,8 @@ export function createBrandingRoutes(
   // DELETE /api/v1/tenants/:id/branding
   // Removes all custom branding — UI reverts to platform defaults.
   routes.delete("/api/v1/tenants/:id/branding", async (c) => {
-    requirePlatformAdmin(c.var.user.scopes);
-
     const id = c.req.param("id");
+    requireBrandingAccess(c.var.user.scopes, c.var.user.tenantId, id);
 
     const tenant = await tenantRepository.findById(id);
     if (!tenant) {

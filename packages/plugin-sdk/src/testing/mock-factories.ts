@@ -23,8 +23,11 @@ import type {
   MockContextOptions,
   MockFetchCall,
   MockCredentialCall,
+  MockLogger,
+  MockSpan,
 } from "./mock-context.js";
-import type { OntologySchema } from "../types/context.js";
+import type { OntologySchema, CacheAccessor, TenantContext, OntologyAccessor, TracingContext } from "../types/context.js";
+import type { TransformerContext } from "../types/transformer.js";
 import type { DataRecord } from "../types/primitives.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -514,9 +517,16 @@ const TRANSFORMER_ONTOLOGY_SCHEMA: OntologySchema = {
   ],
 };
 
-export interface MockTransformerFactoryContext extends MockContext {
-  /** Convenience alias for ctx.fetch.__calls — inspect enrichment API calls. */
-  fetchCalls: MockFetchCall[];
+/**
+ * Mock transformer context that matches TransformerContext (no credentials or fetch).
+ *
+ * TransformerContext deliberately excludes credentials and fetch because
+ * transformers are pure data operations. This type reflects that constraint
+ * so tests catch accidental credential/fetch usage at compile time.
+ */
+export interface MockTransformerFactoryContext extends TransformerContext {
+  logger: MockLogger;
+  tracing: TracingContext & { __spans: MockSpan[] };
   /** The input records this context was seeded with. */
   inputRecords: DataRecord[];
 }
@@ -579,11 +589,14 @@ export function createTransformerMockContext(
     fetchHandler:  callerFetchHandler ?? defaultFetchHandler,
   });
 
+  // Return only the fields that TransformerContext exposes (no credentials, no fetch).
+  // This ensures tests catch accidental credential/fetch usage at compile time.
   return {
-    ...base,
-    get fetchCalls(): MockFetchCall[] {
-      return base.fetch.__calls;
-    },
+    tenant:   base.tenant,
+    logger:   base.logger,
+    ontology: base.ontology,
+    cache:    base.cache,
+    tracing:  base.tracing,
     inputRecords,
   };
 }

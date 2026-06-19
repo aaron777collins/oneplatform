@@ -16,7 +16,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutGrid, BarChart2, ClipboardList, FilePlus } from "lucide-react";
+import { LayoutGrid, BarChart2, ClipboardList, FilePlus, GitBranch, FileBarChart, PlugZap } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
@@ -51,7 +51,7 @@ import type { AppCardData } from "./AppCard.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type TemplateCategory = "admin" | "dashboard" | "form";
+export type TemplateCategory = "admin" | "dashboard" | "form" | "workflow" | "reporting" | "integration";
 
 export interface TemplateMeta {
   id:                   string;
@@ -69,9 +69,21 @@ export interface TemplateMeta {
 type IconComponent = React.ComponentType<{ className?: string }>;
 
 const CATEGORY_ICONS: Record<TemplateCategory, IconComponent> = {
-  admin:     LayoutGrid as IconComponent,
-  dashboard: BarChart2 as IconComponent,
-  form:      ClipboardList as IconComponent,
+  admin:       LayoutGrid as IconComponent,
+  dashboard:   BarChart2 as IconComponent,
+  form:        ClipboardList as IconComponent,
+  workflow:    GitBranch as IconComponent,
+  reporting:   FileBarChart as IconComponent,
+  integration: PlugZap as IconComponent,
+};
+
+const CATEGORY_LABELS: Record<TemplateCategory, string> = {
+  admin: "Admin",
+  dashboard: "Dashboard",
+  form: "Forms",
+  workflow: "Workflow",
+  reporting: "Reporting",
+  integration: "Integration",
 };
 
 // ---------------------------------------------------------------------------
@@ -111,6 +123,7 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
 
   const [step, setStep] = React.useState<Step>("pick");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = React.useState<TemplateCategory | "all">("all");
 
   // Fetch templates from backend — only when dialog opens
   const templatesQuery = useQuery({
@@ -128,8 +141,23 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
     if (!open) {
       setStep("pick");
       setSelectedId(null);
+      setActiveCategory("all");
     }
   }, [open]);
+
+  // Derive unique categories from templates
+  const templateCategories = React.useMemo(() => {
+    const cats = new Set(templates.map((t) => t.category));
+    return Array.from(cats) as TemplateCategory[];
+  }, [templates]);
+
+  const filteredTemplates = activeCategory === "all"
+    ? templates
+    : templates.filter((t) => t.category === activeCategory);
+
+  // Preview description for hovered/selected template
+  const [hoveredId, setHoveredId] = React.useState<string | null>(null);
+  const previewTemplate = templates.find((t) => t.id === (hoveredId ?? selectedId)) ?? null;
 
   const form = useForm<NewAppValues>({
     resolver: zodResolver(newAppSchema),
@@ -195,6 +223,39 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
               </DialogDescription>
             </DialogHeader>
 
+            {/* Category filter tabs */}
+            {templateCategories.length > 1 && (
+              <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveCategory("all")}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                    activeCategory === "all"
+                      ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
+                      : "bg-[var(--color-muted)] text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]",
+                  )}
+                >
+                  All
+                </button>
+                {templateCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setActiveCategory(cat)}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                      activeCategory === cat
+                        ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
+                        : "bg-[var(--color-muted)] text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]",
+                    )}
+                  >
+                    {CATEGORY_LABELS[cat] ?? cat}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Blank option always first */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mt-2">
               <TemplateCard
@@ -203,13 +264,15 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                 description="Start from the minimal default template."
                 selected={false}
                 onClick={() => handleTemplateSelect(null)}
+                onMouseEnter={() => setHoveredId(null)}
+                onMouseLeave={() => setHoveredId(null)}
               />
 
               {templatesQuery.isLoading
                 ? Array.from({ length: 3 }).map((_, i) => (
                     <div key={i} className="h-32 animate-pulse rounded-lg bg-[var(--color-muted)]" />
                   ))
-                : templates.map((t) => {
+                : filteredTemplates.map((t) => {
                     const Icon = CATEGORY_ICONS[t.category] ?? (FilePlus as IconComponent);
                     return (
                       <TemplateCard
@@ -219,10 +282,29 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                         description={t.description}
                         selected={selectedId === t.id}
                         onClick={() => handleTemplateSelect(t.id)}
+                        onMouseEnter={() => setHoveredId(t.id)}
+                        onMouseLeave={() => setHoveredId(null)}
                       />
                     );
                   })}
             </div>
+
+            {/* Preview description area */}
+            {previewTemplate !== null && (
+              <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/30 p-3">
+                <p className="text-xs font-semibold text-[var(--color-foreground)]">
+                  {previewTemplate.name}
+                </p>
+                <p className="mt-1 text-xs text-[var(--color-muted-foreground)] leading-relaxed">
+                  {previewTemplate.description}
+                </p>
+                {previewTemplate.requiredPermissions.length > 0 && (
+                  <p className="mt-1.5 text-[10px] text-[var(--color-muted-foreground)]">
+                    Requires: {previewTemplate.requiredPermissions.join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -331,13 +413,17 @@ interface TemplateCardProps {
   description: string;
   selected:    boolean;
   onClick():   void;
+  onMouseEnter?(): void;
+  onMouseLeave?(): void;
 }
 
-function TemplateCard({ icon: Icon, name, description, selected, onClick }: TemplateCardProps) {
+function TemplateCard({ icon: Icon, name, description, selected, onClick, onMouseEnter, onMouseLeave }: TemplateCardProps) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       className={cn(
         "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-all",
         "hover:border-[var(--color-primary)] hover:bg-[var(--color-muted)]",

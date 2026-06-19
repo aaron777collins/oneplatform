@@ -58,6 +58,13 @@ export interface BatchJobPayload {
   // Storing full record arrays in BullMQ payloads bloats Redis memory and risks
   // hitting the 512 MB default limit on large syncs.
   recordCount: number;
+  // NOTE: records are included directly in the BullMQ payload rather than
+  // staged externally (e.g. in S3/Redis blob). This is the current pattern
+  // because most batches are small enough to fit comfortably in a Redis value.
+  // A 10 MB size guard (see processSyncJob) warns when payloads grow large so
+  // operators can adjust batch sizes before Redis memory pressure becomes an
+  // issue. A future iteration may externalize large payloads via a staging
+  // store if connector batch sizes routinely exceed this threshold.
   records: DataRecord[];
 }
 
@@ -663,6 +670,21 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             recordCount: records.length,
             records,
           };
+
+          // V6-093: Soft size guard on the records array carried in the BullMQ
+          // payload. Warn at 10 MB so operators can tune batch sizes before
+          // Redis memory pressure becomes critical. This is a monitoring aid,
+          // not a hard limit — the 1 MB hard fail below protects Redis.
+          const recordsBytes = Buffer.byteLength(JSON.stringify(records), "utf8");
+          if (recordsBytes > 10_485_760) {
+            logger.warn("Batch records exceed 10 MB — consider reducing connector batch size or externalizing to a staging store", {
+              syncJobId,
+              connectorId,
+              batchSeqNum,
+              recordsBytes,
+              recordCount: records.length,
+            });
+          }
 
           // Guard against Redis memory exhaustion from oversized payloads.
           // Batches over 1 MB indicate a connector returning excessively large

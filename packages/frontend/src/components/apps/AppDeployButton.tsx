@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils.js";
 interface AppBuild {
   id: string;
   appId: string;
-  status: "queued" | "building" | "success" | "failed" | "cancelled";
+  status: "pending" | "building" | "success" | "failed";
   createdAt: string;
 }
 

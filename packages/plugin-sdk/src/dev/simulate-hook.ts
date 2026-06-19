@@ -157,6 +157,15 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
         process.exit(1);
       }
       entrypoint = rawManifest["entrypoint"];
+      // Warn that the fallback entrypoint must export a callable function, not
+      // just a plugin object (connector/transformer/etc.). Hook entrypoints are
+      // expected to be standalone functions, not the plugin's main export.
+      process.stderr.write(
+        `Warning: no hooks[] declared — falling back to top-level entrypoint "${entrypoint}".\n` +
+        `  Ensure "${entrypoint}" is exported as a callable function (not a plugin object).\n` +
+        `  Hook entrypoints should be async functions: (payload, context) => HookResult.\n` +
+        `  Add a hooks[] entry in plugin.manifest.json to avoid this fallback.\n`,
+      );
     }
   }
 
@@ -249,9 +258,18 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
       (async () => {
         ${bundleSource}
         const fn = exports[__entrypoint];
+        if (fn === undefined) {
+          throw new Error(
+            "Bundle does not export \\"" + __entrypoint + "\\". " +
+            "Available exports: " + Object.keys(exports).join(", ") + ". " +
+            "Ensure the hook entrypoint name matches a named export in your bundle."
+          );
+        }
         if (typeof fn !== "function") {
           throw new Error(
-            "Bundle export \\"" + __entrypoint + "\\" is not a callable function (got " + typeof fn + ")"
+            "Bundle export \\"" + __entrypoint + "\\" is not a callable function (got " + typeof fn + "). " +
+            "Hook entrypoints must be async functions: export async function " + __entrypoint + "(payload, context) { ... }. " +
+            "If this is a plugin object (connector/transformer), create a separate hook function export instead."
           );
         }
         __result = await fn(__hookPayload, __pluginContext);

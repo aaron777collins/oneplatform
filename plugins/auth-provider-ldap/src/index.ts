@@ -371,13 +371,21 @@ async function proxySearch(
   sizeLimit: number,
   fetchProxy: FetchProxy,
   logger: PluginLogger,
+  scope?: "base" | "one" | "sub",
 ): Promise<LdapEntry[]> {
   let response: Response;
   try {
     response = await fetchProxy.fetch(`${proxyUrl}/ldap/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...connection, searchBase, filter, attributes, sizeLimit }),
+      body: JSON.stringify({
+        ...connection,
+        searchBase,
+        filter,
+        attributes,
+        sizeLimit,
+        ...(scope !== undefined ? { scope } : {}),
+      }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -781,7 +789,8 @@ class LdapAuthProvider implements AuthProvider {
     const connection = this.buildConnectionParams(bindPassword);
 
     // Search for the DN directly — a DN-scoped search with scope=base is the
-    // most efficient way to check existence. We use a general object search filter.
+    // most efficient way to check existence. We use a general object search filter
+    // and scope='base' to avoid an expensive subtree scan.
     const searchBase = token.trim();
     const filter = "(objectClass=*)";
 
@@ -796,6 +805,7 @@ class LdapAuthProvider implements AuthProvider {
         1,
         fetchProxy,
         context.logger,
+        "base",
       );
     } catch (err) {
       if (err instanceof PluginAuthError) {

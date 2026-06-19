@@ -15,6 +15,7 @@ import * as React from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { Sidebar } from "@/components/layout/Sidebar.js";
 import { Topbar } from "@/components/layout/Topbar.js";
+import { MobileNavigation } from "@/components/mobile/MobileNavigation.js";
 import { Toaster } from "@/components/ui/toaster.js";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 
@@ -82,6 +83,9 @@ export function AppShell() {
           </main>
         </div>
       </div>
+
+      {/* Mobile bottom navigation — visible only on small screens */}
+      <MobileNavigation />
 
       {/* Toaster rendered outside the main layout flow to prevent z-index issues */}
       <Toaster />

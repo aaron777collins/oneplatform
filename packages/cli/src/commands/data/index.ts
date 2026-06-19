@@ -32,10 +32,22 @@ async function queryAction(entityType: string, opts: QueryOpts, ctx: CommandCont
 
   // The API returns either a paginated envelope { data, nextCursor } or a plain array.
   // Handle both shapes so this command works regardless of transport unwrapping.
+  // Auto-detect columns from the first record's keys when no explicit columns are defined.
+  function autoDetectColumns(rows: unknown[]): import("../../lib/output.js").ColumnDef[] | undefined {
+    if (rows.length === 0) return undefined;
+    const first = rows[0];
+    if (first === null || typeof first !== "object") return undefined;
+    return Object.keys(first as Record<string, unknown>).map((key) => ({
+      header: key.charAt(0).toUpperCase() + key.slice(1),
+      key,
+    }));
+  }
+
   if (Array.isArray(results)) {
-    ctx.renderer.render(results);
+    ctx.renderer.render(results, autoDetectColumns(results));
   } else {
-    ctx.renderer.render(results.data ?? []);
+    const data = results.data ?? [];
+    ctx.renderer.render(data, autoDetectColumns(data));
     // Print the next cursor to stderr so it can be captured separately from
     // the data output and passed to the next invocation via --cursor.
     const next = results.nextCursor ?? null;

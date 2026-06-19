@@ -115,6 +115,63 @@ function decodeCursor(cursor: string): CursorPayload {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Private network detection
+//
+// Allow plain HTTP for localhost and private network addresses where TLS
+// termination is handled by the infrastructure (e.g., sidecar proxy).
+// This matches the check used by the Postgres connector.
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true when the URL uses http:// and points to a recognised private
+ * network address. This allows developers to run a MySQL REST proxy on their
+ * local machine or inside a private VPC without requiring a TLS certificate.
+ *
+ * Recognised private ranges:
+ *   - 127.x.x.x  (loopback)
+ *   - 10.x.x.x   (Class A private)
+ *   - 172.16-31.x.x (Class B private)
+ *   - 192.168.x.x (Class C private)
+ *   - localhost / [::1] (IPv4/IPv6 loopback names)
+ */
+function isPrivateNetworkHttp(urlString: string): boolean {
+  if (!urlString.startsWith("http://")) {
+    return false;
+  }
+
+  let hostname: string;
+  try {
+    hostname = new URL(urlString).hostname;
+  } catch {
+    return false;
+  }
+
+  // Strip IPv6 brackets if present (URL constructor already does this, but be safe)
+  hostname = hostname.replace(/^\[|\]$/g, "");
+
+  // Loopback names
+  if (hostname === "localhost" || hostname === "::1") {
+    return true;
+  }
+
+  // IPv4 private ranges
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+    // 127.x.x.x — loopback
+    if (a === 127) return true;
+    // 10.x.x.x — Class A private
+    if (a === 10) return true;
+    // 172.16.0.0 – 172.31.255.255 — Class B private
+    if (a === 172 && b! >= 16 && b! <= 31) return true;
+    // 192.168.x.x — Class C private
+    if (a === 192 && b === 168) return true;
+  }
+
+  return false;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Config validation
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -197,16 +254,16 @@ function parseConfig(raw: Record<string, unknown>): MySqlConfig {
     );
   }
 
+  const trimmedProxyUrl = rawProxyUrl.trim();
+  if (!trimmedProxyUrl.startsWith("https://") && !isPrivateNetworkHttp(trimmedProxyUrl)) {
+    throw new PluginConfigError(
+      "proxyUrl must use HTTPS for public endpoints — plain HTTP is only permitted for localhost and private network addresses (10.x, 172.16-31.x, 192.168.x, 127.x)",
+      "proxyUrl",
+    );
+  }
   try {
-    const parsed = new URL(rawProxyUrl.trim());
-    if (parsed.protocol !== "https:") {
-      throw new PluginConfigError(
-        "proxyUrl must use https:// — the fetch proxy blocks non-TLS requests",
-        "proxyUrl",
-      );
-    }
-  } catch (err) {
-    if (err instanceof PluginConfigError) throw err;
+    new URL(trimmedProxyUrl);
+  } catch {
     throw new PluginConfigError(
       `proxyUrl is not a valid URL: "${rawProxyUrl}"`,
       "proxyUrl",

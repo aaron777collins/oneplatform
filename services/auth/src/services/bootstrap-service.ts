@@ -58,7 +58,35 @@ function checkBootstrapRateLimit(ipAddress: string): void {
   entry.count += 1;
 }
 
-// Exposed for testing — resets the in-memory counters
+/**
+ * V6-122: Periodic cleanup of expired rate limiter entries.
+ * Without cleanup, the Map grows unboundedly over time as unique IPs accumulate.
+ * This sweep runs every RATE_LIMIT_WINDOW_MS and removes entries whose window
+ * has fully elapsed, keeping memory usage proportional to active attackers only.
+ */
+const CLEANUP_INTERVAL_MS = RATE_LIMIT_WINDOW_MS;
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function startRateLimiterCleanup(): void {
+  if (cleanupTimer !== null) return;
+  cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of bootstrapAttemptsByIp) {
+      if (now - entry.windowStartMs >= RATE_LIMIT_WINDOW_MS) {
+        bootstrapAttemptsByIp.delete(ip);
+      }
+    }
+  }, CLEANUP_INTERVAL_MS);
+  // Unref so the timer does not prevent graceful process shutdown.
+  if (typeof cleanupTimer === "object" && "unref" in cleanupTimer) {
+    cleanupTimer.unref();
+  }
+}
+
+// Start cleanup on module load — runs for the lifetime of the process.
+startRateLimiterCleanup();
+
+// Exposed for testing — resets the in-memory counters and restarts cleanup
 export function resetBootstrapRateLimiter(): void {
   bootstrapAttemptsByIp.clear();
 }
@@ -328,12 +356,26 @@ export function createBootstrapService(
 
   function getJwtExpirySeconds(): number {
     const raw = process.env["OP_JWT_EXPIRY_SECONDS"];
-    return raw !== undefined ? parseInt(raw, 10) : 900;
+    if (raw === undefined) return 900;
+    const parsed = parseInt(raw, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      throw new Error(
+        `OP_JWT_EXPIRY_SECONDS must be a positive integer, got: "${raw}"`
+      );
+    }
+    return parsed;
   }
 
   function getRefreshTokenTtlSeconds(): number {
     const raw = process.env["OP_REFRESH_TOKEN_TTL_SECONDS"];
-    return raw !== undefined ? parseInt(raw, 10) : 604_800;
+    if (raw === undefined) return 604_800;
+    const parsed = parseInt(raw, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      throw new Error(
+        `OP_REFRESH_TOKEN_TTL_SECONDS must be a positive integer, got: "${raw}"`
+      );
+    }
+    return parsed;
   }
 
   // -------------------------------------------------------------------------

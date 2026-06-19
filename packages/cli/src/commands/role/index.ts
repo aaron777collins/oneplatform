@@ -17,7 +17,12 @@ interface CreateOpts { name: string; permissions: string }
 interface AssignOpts { user: string }
 
 async function listAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
-  const roles = await ctx.http.get<unknown[]>("/api/v1/roles");
+  const resp = await ctx.http.get<unknown[] | { data?: unknown[]; items?: unknown[] }>("/api/v1/roles");
+  // The API may return a paginated envelope { data: [...] } or { items: [...] }
+  // instead of a plain array. Extract the data array from either shape.
+  const roles = Array.isArray(resp)
+    ? resp
+    : (resp.data ?? resp.items ?? []);
   ctx.renderer.render(roles, ROLE_COLUMNS);
 }
 

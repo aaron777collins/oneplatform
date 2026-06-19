@@ -35,12 +35,15 @@ interface CsvConfig {
   encoding: string;
   idColumn: string | undefined;
   batchSize: number;
+  maxFileSizeMb: number;
+  bearerToken: string | undefined;
 }
 
 const DEFAULT_DELIMITER = ",";
 const DEFAULT_HAS_HEADER = true;
 const DEFAULT_ENCODING = "utf-8";
 const DEFAULT_BATCH_SIZE = 500;
+const DEFAULT_MAX_FILE_SIZE_MB = 100;
 
 /** Cache key for the parsed row set, scoped per connection. */
 function rowsCacheKey(connectionId: string): string {
@@ -257,7 +260,19 @@ function extractConfig(raw: Record<string, unknown>): CsvConfig {
       ? rawBatchSize
       : DEFAULT_BATCH_SIZE;
 
-  return { url: trimmedUrl, delimiter, hasHeader, encoding, idColumn, batchSize };
+  const rawMaxFileSizeMb = raw["maxFileSizeMb"];
+  const maxFileSizeMb =
+    typeof rawMaxFileSizeMb === "number" && rawMaxFileSizeMb > 0
+      ? rawMaxFileSizeMb
+      : DEFAULT_MAX_FILE_SIZE_MB;
+
+  const rawBearerToken = raw["bearerToken"];
+  const bearerToken =
+    typeof rawBearerToken === "string" && rawBearerToken.trim().length > 0
+      ? rawBearerToken.trim()
+      : undefined;
+
+  return { url: trimmedUrl, delimiter, hasHeader, encoding, idColumn, batchSize, maxFileSizeMb, bearerToken };
 }
 
 // ─── Connector Implementation ─────────────────────────────────────────────────
@@ -290,6 +305,8 @@ class CsvConnector implements Connector {
           encoding: { type: "string", default: "utf-8" },
           idColumn: { type: "string" },
           batchSize: { type: "number", default: 500 },
+          maxFileSizeMb: { type: "number", default: 100, description: "Maximum file size in MB. Responses exceeding this are rejected." },
+          bearerToken: { type: "string", description: "Optional bearer token included as Authorization header." },
         },
       },
       tags: ["csv", "file", "import", "data-source"],
@@ -313,7 +330,7 @@ class CsvConnector implements Connector {
     // If HEAD fails or the server returns an error, we surface it immediately
     // rather than deferring to the first fetchBatch call.
     try {
-      const headers = buildRequestHeaders(context);
+      const headers = buildRequestHeaders(context, cfg.bearerToken);
       const response = await context.fetch.fetch(cfg.url, { method: "HEAD", headers });
       if (!response.ok) {
         throw new PluginConfigError(
@@ -344,6 +361,8 @@ class CsvConnector implements Connector {
         encoding: cfg.encoding,
         idColumn: cfg.idColumn ?? null,
         batchSize: cfg.batchSize,
+        maxFileSizeMb: cfg.maxFileSizeMb,
+        bearerToken: cfg.bearerToken ?? null,
       },
     };
   }
@@ -359,6 +378,8 @@ class CsvConnector implements Connector {
     const hasHeader = meta["hasHeader"] as boolean;
     const idColumn = (meta["idColumn"] as string | null) ?? undefined;
     const batchSize = meta["batchSize"] as number;
+    const maxFileSizeMb = (meta["maxFileSizeMb"] as number | undefined) ?? DEFAULT_MAX_FILE_SIZE_MB;
+    const bearerToken = (meta["bearerToken"] as string | null) ?? undefined;
 
     const cacheKey = rowsCacheKey(handle.connectionId);
 
@@ -373,7 +394,7 @@ class CsvConnector implements Connector {
     } else {
       context.logger.info("Fetching CSV file", { url });
 
-      const headers = buildRequestHeaders(context);
+      const headers = buildRequestHeaders(context, bearerToken);
       let response: Response;
       try {
         response = await context.fetch.fetch(url, { method: "GET", headers });
@@ -389,12 +410,36 @@ class CsvConnector implements Connector {
         );
       }
 
+      // Enforce maxFileSizeMb: check Content-Length header first for an early
+      // rejection before downloading the body. If Content-Length is absent,
+      // the byte count is checked after reading the response body.
+      const maxBytes = maxFileSizeMb * 1024 * 1024;
+      const contentLength = response.headers.get("Content-Length");
+      if (contentLength !== null) {
+        const declaredSize = parseInt(contentLength, 10);
+        if (!isNaN(declaredSize) && declaredSize > maxBytes) {
+          throw new PluginDataError(
+            `CSV file exceeds maxFileSizeMb (${maxFileSizeMb} MB). Content-Length: ${declaredSize} bytes`,
+            { url, contentLength: declaredSize, maxBytes },
+          );
+        }
+      }
+
       let text: string;
       try {
         text = await response.text();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         throw new PluginDataError(`Failed to read CSV response body: ${message}`, { url });
+      }
+
+      // Post-download size check when Content-Length was absent or inaccurate.
+      const actualBytes = new TextEncoder().encode(text).byteLength;
+      if (actualBytes > maxBytes) {
+        throw new PluginDataError(
+          `CSV file exceeds maxFileSizeMb (${maxFileSizeMb} MB). Actual size: ${actualBytes} bytes`,
+          { url, actualBytes, maxBytes },
+        );
       }
 
       try {
@@ -478,16 +523,20 @@ class CsvConnector implements Connector {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Build request headers, injecting tracing context.
- * Bearer token attachment is intentionally deferred to the caller after
- * credentials.list() — we skip the credential read here because connect()
- * uses HEAD (which hits the network), and we don't want to fail the HEAD
- * check if no bearerToken credential was configured (it's optional).
+ * Build request headers, injecting tracing context and optional bearer token.
+ *
+ * When a bearerToken is configured, it is included as an Authorization header
+ * so the CSV endpoint can verify access. This supports authenticated CSV
+ * sources (e.g., private S3 presigned URLs, internal APIs behind auth).
  */
-function buildRequestHeaders(context: PluginContext): Record<string, string> {
+function buildRequestHeaders(context: PluginContext, bearerToken?: string): Record<string, string> {
   // Propagate distributed trace context so platform observability spans
   // can correlate the outbound CSV fetch with the ingestion job.
-  return context.tracing.injectHeaders({ Accept: "text/csv, text/plain, */*" });
+  const headers: Record<string, string> = { Accept: "text/csv, text/plain, */*" };
+  if (bearerToken !== undefined) {
+    headers["Authorization"] = `Bearer ${bearerToken}`;
+  }
+  return context.tracing.injectHeaders(headers);
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────

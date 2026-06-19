@@ -134,9 +134,19 @@ jobs:
           build-args: |
             SERVICE=${{ matrix.service }}
           push: false
+          load: true
           tags: oneplatform/${{ matrix.service }}-service:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Trivy container image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: oneplatform/${{ matrix.service }}-service:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
 
   docker-frontend:
     name: Docker Build (Frontend)
@@ -155,6 +165,16 @@ jobs:
           context: .
           file: docker/Dockerfile.frontend
           push: false
+          load: true
           tags: oneplatform/frontend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Trivy container image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: oneplatform/frontend:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true

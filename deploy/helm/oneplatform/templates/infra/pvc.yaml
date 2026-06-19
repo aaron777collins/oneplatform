@@ -17,6 +17,13 @@ metadata:
     {{- include "oneplatform.serviceLabels" (dict "service" "app" "root" .) | nindent 4 }}
 spec:
   accessModes:
+    # ReadWriteOnce: only one node can mount this volume at a time. If the app
+    # service HPA scales to multiple replicas on different nodes, only one pod
+    # will be able to mount this PVC. To support multi-node HPA scaling, either:
+    #   1. Switch to ReadWriteMany (requires a CSI driver that supports RWX,
+    #      e.g. EFS, NFS, CephFS, or Longhorn with NFS)
+    #   2. Use one PVC per replica via a StatefulSet instead of a Deployment
+    #   3. Move app assets to MinIO/S3 and remove local PVC dependency
     - ReadWriteOnce
   resources:
     requests:
@@ -37,6 +44,8 @@ metadata:
     {{- include "oneplatform.serviceLabels" (dict "service" "plugin" "root" .) | nindent 4 }}
 spec:
   accessModes:
+    # ReadWriteOnce: see app-data PVC comment above — same limitation applies
+    # when the plugin service HPA scales across nodes.
     - ReadWriteOnce
   resources:
     requests:

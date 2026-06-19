@@ -124,6 +124,17 @@ export interface AppNamespace {
   /** Permanently deletes an app and all its builds. */
   delete(id: string): Promise<void>;
 
+  /**
+   * Returns the total number of apps without fetching all items.
+   *
+   * Issues a single request with `limit=0` and reads the `total` field from
+   * the paginated response envelope.
+   *
+   * @param options - Optional filter/sort to count a subset.
+   * @returns The total count, or `null` if the server does not support counting.
+   */
+  count(options?: ListOptions): Promise<number | null>;
+
   // Build management
   /** Enqueue a new build for the app's current file set. */
   triggerBuild(id: string, data?: TriggerBuildRequest): Promise<AppBuild>;
@@ -205,6 +216,23 @@ export function createAppNamespace(transport: Transport): AppNamespace {
         });
         return { ...result, hasMore: result.nextCursor !== null };
       }, pageSize);
+    },
+
+    async count(options?: ListOptions): Promise<number | null> {
+      const baseQuery = serializeListQuery(options);
+      const result = await transport.request<{
+        items: App[];
+        nextCursor: string | null;
+        total: number | null;
+      }>({
+        method: 'GET',
+        path: BASE,
+        query: {
+          ...baseQuery,
+          limit: 0,
+        },
+      });
+      return result.total;
     },
 
     async get(id: string): Promise<App> {
@@ -307,7 +335,7 @@ export function createAppNamespace(transport: Transport): AppNamespace {
 
       return transport.requestMultipart<Deployment>({
         method: 'POST',
-        path: `${BASE}/${encodeURIComponent(id)}/deploy`,
+        path: `${BASE}/${encodeURIComponent(id)}/deploy/upload`,
         body: form,
       });
     },

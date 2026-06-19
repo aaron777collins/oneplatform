@@ -12,11 +12,16 @@ import {
 } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type pg from "pg";
-import type { UserRepository } from "../repositories/index.js";
+import type { UserRepository, RoleRepository } from "../repositories/index.js";
+import type { PasswordService } from "../services/password-service.js";
 import { createUserRequest, updateUserRequest } from "../schemas/index.js";
 
 export interface UserRouteDeps {
   userRepository: UserRepository;
+  // V6-103: Required for validating that requested roles exist in tenant.
+  roleRepository: RoleRepository;
+  // V6-099: Required for hashing temporaryPassword during admin user creation.
+  passwordService: PasswordService;
   // Required for session revocation when a user is deactivated.
   // Active access tokens must be blocklisted and refresh tokens deleted so
   // a deactivated user cannot continue operating with already-issued tokens.
@@ -26,7 +31,7 @@ export interface UserRouteDeps {
 
 export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { userRepository, db, redis } = deps;
+  const { userRepository, roleRepository, passwordService, db, redis } = deps;
 
   // POST /api/v1/users — admin-create a new user in the caller's tenant
   // Requires users:manage scope. The created user has no password and must
@@ -52,10 +57,30 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       );
     }
 
+    // V6-103: Validate that all requested roles exist in the tenant (or as
+    // predefined platform roles) before creating the user. This prevents silent
+    // assignment of nonexistent roles that would grant no permissions.
+    const tenantRoles = await roleRepository.findByTenantId(user.tenantId);
+    const knownRoleNames = new Set(tenantRoles.map((r) => r.name));
+    const unknownRoles = requestedRoles.filter((r) => !knownRoleNames.has(r));
+    if (unknownRoles.length > 0) {
+      throw new ValidationError(
+        `The following roles do not exist in this tenant: ${unknownRoles.join(", ")}`
+      );
+    }
+
     // Prevent duplicate emails within the tenant.
     const existing = await userRepository.findByEmail(user.tenantId, parsed.data.email);
     if (existing) {
       throw new ValidationError("A user with this email already exists in the tenant.");
+    }
+
+    // V6-099: If a temporaryPassword is provided, hash it and include in the
+    // create call so the user can log in immediately. If omitted, the user has
+    // no password and must complete onboarding via password reset or OAuth link.
+    let passwordHash: string | undefined;
+    if (parsed.data.temporaryPassword !== undefined) {
+      passwordHash = await passwordService.hash(parsed.data.temporaryPassword);
     }
 
     const created = await userRepository.create({
@@ -64,6 +89,7 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       display_name: parsed.data.displayName ?? "",
       roles: parsed.data.roles,
       email_verified: false,
+      ...(passwordHash !== undefined ? { password_hash: passwordHash } : {}),
     });
 
     return c.json({

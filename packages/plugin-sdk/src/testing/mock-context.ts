@@ -1,11 +1,12 @@
 /**
  * Mock context factories for plugin unit tests.
  *
- * createMockContext()            — general-purpose PluginContext for any plugin type.
- * createMockTransformerContext() — PluginContext shaped for Transformer plugins;
- *                                  pre-configures record transform helpers.
- * createMockAuthContext()        — PluginContext shaped for AuthProvider plugins;
- *                                  pre-configures credential access patterns.
+ * createMockContext()     — general-purpose PluginContext for any plugin type.
+ * createMockAuthContext() — PluginContext shaped for AuthProvider plugins;
+ *                           pre-configures credential access patterns.
+ *
+ * Per-type factories (createConnectorMockContext, createTransformerMockContext, etc.)
+ * live in mock-factories.ts — import them from "@oneplatform/plugin-sdk/testing".
  *
  * All factories are fully in-process — no Redis, no database, no network calls
  * unless allowRealFetch is set.
@@ -83,20 +84,6 @@ export interface MockContext extends PluginContext {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * MockTransformerContext — MockContext pre-configured for Transformer plugins.
- *
- * Transformers operate on records flowing through a pipeline step. They receive
- * a record, transform it, and return the modified record. This context type makes
- * test assertions clearer by surfacing the fetch proxy prominently (transformers
- * call external enrichment APIs) and suppressing ontology details irrelevant to
- * the transformation step.
- */
-export interface MockTransformerContext extends MockContext {
-  /** Convenience alias: fetch.__calls for asserting outbound enrichment calls. */
-  fetchCalls: MockFetchCall[];
-}
-
-/**
  * MockAuthContext — MockContext pre-configured for AuthProvider plugins.
  *
  * Auth plugins implement custom login flows (SAML, LDAP, magic links, etc.).
@@ -158,19 +145,6 @@ const DEFAULT_ONTOLOGY_SCHEMA: OntologySchema = {
   version: 0,
   updatedAt: new Date(0).toISOString(),
 };
-
-/**
- * Additional options for the Transformer context factory.
- * All MockContextOptions are also accepted.
- */
-export interface MockTransformerContextOptions extends MockContextOptions {
-  /**
-   * Expected shape of incoming records. Used to pre-validate test inputs
-   * and provide clearer assertion failure messages.
-   * Default: undefined (no validation).
-   */
-  expectedRecordShape?: Record<string, string>;
-}
 
 /**
  * Additional options for the Auth context factory.
@@ -370,41 +344,6 @@ export function createMockContext(options: MockContextOptions = {}): MockContext
     tenant,
     ontology: mockOntology,
     tracing: mockTracing,
-  };
-}
-
-/**
- * Create a mock context shaped for Transformer plugins.
- *
- * Transformers receive a record, optionally call external enrichment APIs,
- * and return a transformed record. This factory sets sensible defaults for
- * that pattern and exposes a `fetchCalls` alias for concise assertions:
- *
- * @example
- * const ctx = createMockTransformerContext({
- *   fetchHandler: async (url) => new Response(JSON.stringify({ category: "electronics" })),
- * });
- * await myTransformer({ data: { id: "1", name: "Widget" } }, ctx);
- * expect(ctx.fetchCalls).toHaveLength(1);
- */
-export function createMockTransformerContext(
-  options: MockTransformerContextOptions = {},
-): MockTransformerContext {
-  // Transformer plugins call enrichment endpoints but rarely need ontology access.
-  // Provide a realistic instanceId pattern that matches production pipeline step IDs.
-  const base = createMockContext({
-    instanceId: options.instanceId ?? "transformer-step-test",
-    tenantId:   options.tenantId  ?? "test-tenant",
-    ...options,
-  });
-
-  return {
-    ...base,
-    // Expose fetch calls at the top level for concise assertion syntax
-    // (ctx.fetchCalls vs ctx.fetch.__calls).
-    get fetchCalls() {
-      return base.fetch.__calls;
-    },
   };
 }
 

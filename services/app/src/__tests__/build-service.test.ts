@@ -514,23 +514,23 @@ describe("runRetentionCleanup", () => {
     expect(buildRepo.delete).toHaveBeenCalledWith("build-failed");
   });
 
-  it("does not delete failed builds from other apps", async () => {
+  it("scopes findFailedOlderThan to the current appId (V6-168)", async () => {
     const appRows = [{ id: "app-001", current_build_id: null }];
     pool.query.mockResolvedValue({ rows: appRows });
     buildRepo.findBeyondRetentionWindow.mockResolvedValue([]);
 
-    // Failed build belongs to a different app
-    const failedBuildOtherApp = makeBuildRow({
-      id:     "build-other-app",
-      app_id: "app-OTHER",
-      status: "failed",
-    });
-    buildRepo.findFailedOlderThan.mockResolvedValue([failedBuildOtherApp]);
+    // With V6-168 the query is scoped to appId by the repository, so the
+    // repo should never return builds from other apps. Verify the service
+    // passes the correct appId to findFailedOlderThan.
+    buildRepo.findFailedOlderThan.mockResolvedValue([]);
     buildRepo.delete.mockResolvedValue(true);
 
     await service.runRetentionCleanup(20);
 
-    expect(buildRepo.delete).not.toHaveBeenCalled();
+    expect(buildRepo.findFailedOlderThan).toHaveBeenCalledWith(
+      "app-001",
+      expect.any(Date),
+    );
   });
 
   it("logs info after completion", async () => {

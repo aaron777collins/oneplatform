@@ -238,6 +238,35 @@ const LEVEL_CLASSES: Record<ActivityEvent["level"], string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Friendly service name mapping
+// ---------------------------------------------------------------------------
+
+interface ServiceMeta {
+  label: string;
+  icon: IconComponent;
+}
+
+const SERVICE_LABELS: Record<string, ServiceMeta> = {
+  gateway:    { label: "API Gateway",      icon: PlugZapIcon },
+  auth:       { label: "Authentication",   icon: PlugZapIcon },
+  ingestion:  { label: "Data Ingestion",   icon: DatabaseIcon },
+  ontology:   { label: "Data Ontology",    icon: DatabaseIcon },
+  pipeline:   { label: "Pipeline Engine",  icon: GitBranchIcon },
+  execution:  { label: "Execution Engine", icon: GitBranchIcon },
+  app:        { label: "App Runtime",      icon: LayoutGridIcon },
+  logging:    { label: "Logging Service",  icon: DatabaseIcon },
+  plugin:     { label: "Plugin System",    icon: PlugZapIcon },
+};
+
+function getServiceLabel(raw: string): string {
+  return SERVICE_LABELS[raw]?.label ?? raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function getServiceIcon(raw: string): IconComponent {
+  return SERVICE_LABELS[raw]?.icon ?? PlugZapIcon;
+}
+
+// ---------------------------------------------------------------------------
 // Widget ordering — persisted in localStorage
 // ---------------------------------------------------------------------------
 
@@ -510,9 +539,15 @@ export default function DashboardPage() {
                     <Badge className={LEVEL_CLASSES[event.level]}>
                       {event.level}
                     </Badge>
-                    <span className="text-xs text-[var(--color-muted-foreground)]">
-                      {event.service}
-                    </span>
+                    {(() => {
+                      const SvcIcon = getServiceIcon(event.service);
+                      return (
+                        <span className="inline-flex items-center gap-1 text-xs text-[var(--color-muted-foreground)]" title={event.service}>
+                          <SvcIcon className="h-3 w-3 shrink-0" aria-hidden />
+                          {getServiceLabel(event.service)}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm" title={event.message}>
@@ -550,7 +585,7 @@ export default function DashboardPage() {
   const fullWidthWidgets = widgetOrder.filter((id) => id === "health");
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1">
       <header className="border-b border-[var(--color-border)] bg-[var(--color-background)] px-6 py-4">
         <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
       </header>

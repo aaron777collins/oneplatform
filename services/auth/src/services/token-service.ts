@@ -176,12 +176,28 @@ async function loadEdDsaPublicKey(): Promise<KeyLike> {
 
 function getJwtExpirySeconds(): number {
   const raw = process.env["OP_JWT_EXPIRY_SECONDS"];
-  return raw !== undefined ? parseInt(raw, 10) : 900;
+  if (raw === undefined) return 900;
+  // V6-124: Guard against NaN from malformed env var values.
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed) || parsed <= 0) {
+    throw new Error(
+      `OP_JWT_EXPIRY_SECONDS must be a positive integer, got: "${raw}"`
+    );
+  }
+  return parsed;
 }
 
 function getRefreshTokenTtlSeconds(): number {
   const raw = process.env["OP_REFRESH_TOKEN_TTL_SECONDS"];
-  return raw !== undefined ? parseInt(raw, 10) : 604_800; // 7 days
+  if (raw === undefined) return 604_800; // 7 days
+  // V6-124: Guard against NaN from malformed env var values.
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed) || parsed <= 0) {
+    throw new Error(
+      `OP_REFRESH_TOKEN_TTL_SECONDS must be a positive integer, got: "${raw}"`
+    );
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------

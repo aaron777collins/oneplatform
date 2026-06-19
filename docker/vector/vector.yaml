@@ -44,12 +44,19 @@ transforms:
         . = merge(., inner)
       }
 
-      # Extract the container ID from the source file path for per-service routing.
+      # Extract the container ID from the source file path as a fallback identifier.
       # Path format: /var/lib/docker/containers/<container-id>/<container-id>-json.log
       container_id_match = parse_regex(.file, r'/var/lib/docker/containers/(?P<id>[a-f0-9]+)/.+')
       if is_ok(container_id_match) {
         .container_id = container_id_match.ok.id
       }
+
+      # Prefer the service name from structured JSON logs (emitted by createLogger)
+      # over the opaque container ID. This produces human-readable file paths like
+      # /var/log/oneplatform/gateway-service.log instead of /var/log/oneplatform/<sha>.log.
+      # Falls back to container_id when the log line is not structured JSON or
+      # the serviceName field is absent (e.g. third-party container logs).
+      .service_name = string(.serviceName) ?? string(.service) ?? .container_id ?? "unknown"
 
 sinks:
   # Write parsed logs to per-container log files on the log-data named volume.
@@ -59,9 +66,9 @@ sinks:
     type: file
     inputs:
       - parse_docker_json
-    # Use container_id for the filename since we cannot resolve container names
-    # without docker.sock access. A separate labeling step can be added later.
-    path: /var/log/oneplatform/{{ container_id }}.log
+    # Use the service name from structured JSON logs when available, falling back
+    # to container_id for containers that do not emit structured logs.
+    path: /var/log/oneplatform/{{ service_name }}.log
     encoding:
       codec: json
     compression: none

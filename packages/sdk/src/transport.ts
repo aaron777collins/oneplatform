@@ -343,8 +343,8 @@ export class Transport {
       }
 
       // Unwrap the { data: T } envelope, consistent with request()
-      const envelope = parsed as { data?: T };
-      if (envelope.data !== undefined) return envelope.data;
+      const envelope = parsed as { data?: T | null };
+      if (envelope.data !== undefined && envelope.data !== null) return envelope.data;
       return parsed as T;
     } finally {
       this.activeControllers.delete(controller);
@@ -464,9 +464,11 @@ export class Transport {
         });
       }
 
-      // Unwrap the { data: T } envelope
-      const envelope = parsed as { data?: T };
-      if (envelope.data !== undefined) {
+      // Unwrap the { data: T } envelope.
+      // Check for both undefined and null — some server responses set data: null
+      // to indicate "no result" (e.g. empty search results wrapped in an envelope).
+      const envelope = parsed as { data?: T | null };
+      if (envelope.data !== undefined && envelope.data !== null) {
         return envelope.data;
       }
 

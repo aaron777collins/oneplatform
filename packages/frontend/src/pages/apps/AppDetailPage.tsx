@@ -114,6 +114,36 @@ export function AppDetailPage() {
     },
   });
 
+  if (query.isError) {
+    return (
+      <div className="flex-1 p-6">
+        <PageHeader
+          title="App not found"
+          breadcrumbs={[
+            { label: "Platform" },
+            { label: "Apps", href: "/apps" },
+            { label: id },
+          ]}
+        />
+        <div className="mt-6 rounded-lg border border-[var(--color-destructive)]/30 bg-[var(--color-destructive)]/5 p-4">
+          <p className="text-sm text-[var(--color-destructive)]">
+            {query.error instanceof ApiError
+              ? query.error.message
+              : "Failed to load app. It may have been deleted or you may not have access."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={() => void navigate({ to: "/apps" })}
+          >
+            Back to apps
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (query.isLoading || app === undefined) {
     return (
       <div className="flex-1 p-6">

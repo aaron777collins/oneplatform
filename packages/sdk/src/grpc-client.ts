@@ -244,6 +244,54 @@ async function grpcUnaryCall<TReq, TRes>(
   }
 }
 
+/**
+ * Decode gRPC-Web data frames from partial buffer, returning decoded messages
+ * and the number of bytes consumed so leftover bytes can be carried forward.
+ */
+function decodeFramesIncremental(buffer: Uint8Array): { messages: unknown[]; consumed: number } {
+  const messages: unknown[] = [];
+  let offset = 0;
+
+  while (offset + 5 <= buffer.byteLength) {
+    const flag = buffer[offset]!;
+    const messageLength =
+      ((buffer[offset + 1]! << 24) |
+       (buffer[offset + 2]! << 16) |
+       (buffer[offset + 3]! << 8) |
+        buffer[offset + 4]!) >>> 0;
+
+    // Not enough data for the full frame yet — stop and carry the remainder.
+    if (offset + 5 + messageLength > buffer.byteLength) break;
+
+    if (flag === GRPC_WEB_TRAILER_FRAME_FLAG) {
+      const trailerBytes = buffer.subarray(offset + 5, offset + 5 + messageLength);
+      const trailerText = new TextDecoder().decode(trailerBytes);
+      const statusMatch = /grpc-status:\s*(\d+)/.exec(trailerText);
+      const messageMatch = /grpc-message:\s*([^\r\n]*)/.exec(trailerText);
+      const status = statusMatch ? parseInt(statusMatch[1] ?? "0", 10) : 0;
+      if (status !== 0) {
+        const msg = messageMatch
+          ? decodeURIComponent(messageMatch[1] ?? "")
+          : `gRPC error status ${status}`;
+        throw new GrpcClientError(status, msg);
+      }
+      offset += 5 + messageLength;
+      continue;
+    }
+
+    if (flag !== GRPC_WEB_DATA_FRAME_FLAG) {
+      throw new GrpcClientError(13, `Unknown frame flag 0x${flag.toString(16)} at offset ${offset}`);
+    }
+
+    const payloadBytes = buffer.subarray(offset + 5, offset + 5 + messageLength);
+    const payloadText = new TextDecoder().decode(payloadBytes);
+    messages.push(JSON.parse(payloadText) as unknown);
+    offset += 5 + messageLength;
+  }
+
+  return { messages, consumed: offset };
+}
+
 async function* grpcServerStreamingCall<TReq, TRes>(
   opts: GrpcCallOptions,
   request: TReq,
@@ -269,10 +317,50 @@ async function* grpcServerStreamingCall<TReq, TRes>(
       throw new GrpcClientError(13, `HTTP ${response.status} from gRPC endpoint`);
     }
 
-    const buffer = await response.arrayBuffer();
-    const frames = decodeAllDataFrames(buffer);
-    for (const f of frames) {
-      yield f as TRes;
+    // Incremental frame parsing: read chunks from the response body stream and
+    // yield messages as soon as complete frames arrive, rather than buffering
+    // the entire response before decoding.
+    if (response.body) {
+      const reader = response.body.getReader();
+      let leftover = new Uint8Array(0);
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Concatenate leftover bytes from previous iteration with new chunk
+          const chunk = new Uint8Array(value as ArrayBuffer | Uint8Array);
+          const combined = new Uint8Array(leftover.byteLength + chunk.byteLength);
+          combined.set(leftover, 0);
+          combined.set(chunk, leftover.byteLength);
+
+          const { messages, consumed } = decodeFramesIncremental(combined);
+          for (const msg of messages) {
+            yield msg as TRes;
+          }
+
+          // Carry forward any unconsumed bytes
+          leftover = combined.subarray(consumed);
+        }
+
+        // Process any remaining bytes after stream ends
+        if (leftover.byteLength > 0) {
+          const { messages } = decodeFramesIncremental(leftover);
+          for (const msg of messages) {
+            yield msg as TRes;
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } else {
+      // Fallback for environments where response.body is null
+      const buffer = await response.arrayBuffer();
+      const frames = decodeAllDataFrames(buffer);
+      for (const f of frames) {
+        yield f as TRes;
+      }
     }
   } catch (err) {
     if (err instanceof GrpcClientError) throw err;

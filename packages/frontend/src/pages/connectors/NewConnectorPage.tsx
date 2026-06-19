@@ -3,10 +3,10 @@
  * Steps: 1) Choose type → 2) Configure → 3) Test connection → 4) Save
  * Route: /connectors/new
  */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, XCircle, Loader2, Puzzle } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Puzzle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
@@ -122,6 +122,18 @@ export function NewConnectorPage() {
       return { data: options };
     },
   });
+
+  // V6-131: Auto-select plugin when pluginId is passed as a search param
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pluginId = params.get("pluginId");
+    if (pluginId !== null && typesData?.data !== undefined && currentStep === "choose-type") {
+      const match = typesData.data.find((t) => t.id === pluginId);
+      if (match !== undefined) {
+        handleTypeSelect(match);
+      }
+    }
+  }, [typesData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createConnector = useMutation({
     mutationFn: (body: { pluginId: string; name: string; config: ConnectorFormValues; credentials?: Record<string, unknown> }) =>
@@ -289,7 +301,7 @@ export function NewConnectorPage() {
             <h2 className="text-base font-semibold">Creating and testing connection</h2>
 
             <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] p-4">
-              {(testStatus === "testing" || createConnector.isPending) && (
+              {(testStatus === "testing" || createConnector.isPending) && !createConnector.isError && (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" aria-hidden />
                   <p className="text-sm">
@@ -297,7 +309,22 @@ export function NewConnectorPage() {
                   </p>
                 </>
               )}
-              {testStatus === "success" && !createConnector.isPending && (
+              {createConnector.isError && (
+                <>
+                  <AlertCircle className="h-5 w-5 text-[var(--color-destructive)]" aria-hidden />
+                  <div>
+                    <p className="text-sm font-medium text-[var(--color-destructive)]">
+                      Failed to create connector
+                    </p>
+                    <p className="mt-0.5 text-xs text-[var(--color-muted-foreground)]">
+                      {createConnector.error instanceof ApiError
+                        ? createConnector.error.message
+                        : "An unexpected error occurred. Please try again."}
+                    </p>
+                  </div>
+                </>
+              )}
+              {testStatus === "success" && !createConnector.isPending && !createConnector.isError && (
                 <>
                   <CheckCircle2 className="h-5 w-5 text-[var(--color-status-success)]" aria-hidden />
                   <p className="text-sm font-medium text-[var(--color-status-success)]">
@@ -305,7 +332,7 @@ export function NewConnectorPage() {
                   </p>
                 </>
               )}
-              {testStatus === "failed" && !createConnector.isPending && (
+              {testStatus === "failed" && !createConnector.isPending && !createConnector.isError && (
                 <>
                   <XCircle className="h-5 w-5 text-[var(--color-destructive)]" aria-hidden />
                   <div>
@@ -324,6 +351,22 @@ export function NewConnectorPage() {
                 </>
               )}
             </div>
+
+            {/* Back button — shown when create mutation fails so user can go back and fix config */}
+            {createConnector.isError && (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    createConnector.reset();
+                    setTestStatus("idle");
+                    setCurrentStep("configure");
+                  }}
+                >
+                  Back to configuration
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

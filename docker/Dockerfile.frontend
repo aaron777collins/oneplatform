@@ -19,22 +19,13 @@ WORKDIR /build
 COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY .npmrc ./
 
-# Copy all workspace package.json files.
+# Copy only frontend-related workspace package.json files.
 COPY packages/frontend/package.json    ./packages/frontend/package.json
 COPY packages/core/package.json        ./packages/core/package.json
 COPY packages/sdk/package.json         ./packages/sdk/package.json
 COPY packages/app-sdk/package.json     ./packages/app-sdk/package.json
 COPY packages/plugin-sdk/package.json  ./packages/plugin-sdk/package.json
 COPY packages/cli/package.json         ./packages/cli/package.json
-COPY services/gateway/package.json     ./services/gateway/package.json
-COPY services/auth/package.json        ./services/auth/package.json
-COPY services/ingestion/package.json   ./services/ingestion/package.json
-COPY services/ontology/package.json    ./services/ontology/package.json
-COPY services/pipeline/package.json    ./services/pipeline/package.json
-COPY services/execution/package.json   ./services/execution/package.json
-COPY services/app/package.json         ./services/app/package.json
-COPY services/logging/package.json     ./services/logging/package.json
-COPY services/plugin/package.json      ./services/plugin/package.json
 
 RUN pnpm install --frozen-lockfile
 

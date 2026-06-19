@@ -9,6 +9,14 @@ import { streamSse } from "../../lib/streaming.js";
 import { colorizeLogLevel } from "../../lib/output.js";
 import { writeFileSync } from "node:fs";
 
+const LOG_COLUMNS = [
+  { header: "Timestamp", key: "timestamp" },
+  { header: "Service", key: "service" },
+  { header: "Level", key: "level" },
+  { header: "Message", key: "message" },
+  { header: "Trace ID", key: "traceId" },
+];
+
 const AUDIT_COLUMNS = [
   { header: "Timestamp", key: "timestamp" },
   { header: "Actor", key: "actorEmail" },
@@ -35,7 +43,7 @@ async function queryAction(opts: QueryOpts, ctx: CommandContext): Promise<void> 
   if (opts.traceId) query["traceId"] = opts.traceId;
   if (opts.limit) query["limit"] = opts.limit;
   const logs = await ctx.http.get<unknown[]>("/api/v1/logs", query);
-  ctx.renderer.render(logs);
+  ctx.renderer.render(logs, LOG_COLUMNS);
 }
 
 async function tailAction(opts: TailOpts, ctx: CommandContext): Promise<void> {

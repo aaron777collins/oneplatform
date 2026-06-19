@@ -597,6 +597,23 @@ async function main(): Promise<void> {
   const config = loadConfig(gatewayConfigSchema);
   const masterKey = loadMasterKey();
 
+  // Safety check: refuse to start in production with default MinIO credentials.
+  // Default credentials are acceptable for local development but must never
+  // reach production — they are publicly known and would allow any attacker
+  // to read/write the object store.
+  const nodeEnv = process.env["NODE_ENV"] ?? "";
+  const minioUser = process.env["OP_MINIO_USER"] ?? "";
+  const minioPassword = process.env["OP_MINIO_PASSWORD"] ?? "";
+  if (nodeEnv === "production") {
+    if (minioUser === "minioadmin" || minioPassword === "oneplatform_minio_dev_2024") {
+      throw new Error(
+        "Refusing to start: OP_MINIO_USER / OP_MINIO_PASSWORD are set to default " +
+        "development values in a production environment. Set strong, unique " +
+        "credentials via environment variables or the init-data volume.",
+      );
+    }
+  }
+
   const serviceToken = process.env["OP_SERVICE_TOKEN"];
 
   const { app, cleanup } = await createServiceApp({

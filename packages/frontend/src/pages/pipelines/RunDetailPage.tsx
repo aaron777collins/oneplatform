@@ -34,6 +34,90 @@ interface RunDetail {
 }
 
 // ---------------------------------------------------------------------------
+// Friendly trigger labels
+// ---------------------------------------------------------------------------
+
+const TRIGGER_LABELS: Record<string, string> = {
+  manual: "Manual trigger",
+  schedule: "Scheduled run",
+  cron: "Scheduled (cron)",
+  webhook: "Webhook trigger",
+  api: "API call",
+  event: "Event-driven",
+  retry: "Automatic retry",
+  system: "System trigger",
+  user: "User-initiated",
+};
+
+function getFriendlyTrigger(raw: string): string {
+  return TRIGGER_LABELS[raw.toLowerCase()] ?? raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// Error classification for run errors
+// ---------------------------------------------------------------------------
+
+interface ClassifiedRunError {
+  category: string;
+  title: string;
+  suggestion: string;
+}
+
+function classifyRunError(error: string): ClassifiedRunError {
+  const lower = error.toLowerCase();
+
+  if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("deadline")) {
+    return {
+      category: "Timeout",
+      title: "Execution timed out",
+      suggestion: "Consider increasing the timeout limit or optimizing the step that timed out.",
+    };
+  }
+  if (lower.includes("permission") || lower.includes("forbidden") || lower.includes("unauthorized") || lower.includes("access denied")) {
+    return {
+      category: "Permission",
+      title: "Permission denied",
+      suggestion: "Check that the pipeline's service account has the required permissions for all connected resources.",
+    };
+  }
+  if (lower.includes("connection") || lower.includes("network") || lower.includes("econnrefused") || lower.includes("enotfound")) {
+    return {
+      category: "Connection",
+      title: "Connection failed",
+      suggestion: "Verify that all external services and databases are reachable. Check network configuration and firewall rules.",
+    };
+  }
+  if (lower.includes("syntax") || lower.includes("parse") || lower.includes("unexpected token") || lower.includes("invalid")) {
+    return {
+      category: "Validation",
+      title: "Validation or syntax error",
+      suggestion: "Review the pipeline step configuration for syntax errors or invalid data.",
+    };
+  }
+  if (lower.includes("memory") || lower.includes("oom") || lower.includes("heap")) {
+    return {
+      category: "Resource",
+      title: "Out of memory",
+      suggestion: "The pipeline ran out of memory. Try processing data in smaller batches or increasing resource limits.",
+    };
+  }
+  return {
+    category: "Error",
+    title: "Execution failed",
+    suggestion: "Review the error details and logs below for more information.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Run number helper — derive a short run number from the run ID
+// ---------------------------------------------------------------------------
+
+function formatRunNumber(runId: string): string {
+  // Use the first 8 hex chars as a short identifier
+  return `#${runId.slice(0, 8).toUpperCase()}`;
+}
+
+// ---------------------------------------------------------------------------
 // Duration helper
 // ---------------------------------------------------------------------------
 
@@ -102,7 +186,7 @@ export function RunDetailPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <PageHeader
-        title={`Run ${runId.slice(0, 8)}…`}
+        title={run ? `${run.pipelineName} ${formatRunNumber(runId)}` : `Run ${formatRunNumber(runId)}`}
         breadcrumbs={[
           { label: "Platform" },
           { label: "Pipelines", href: "/pipelines" },
@@ -154,7 +238,7 @@ export function RunDetailPage() {
                     Triggered by
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="text-sm capitalize">{run.triggeredBy}</CardContent>
+                <CardContent className="text-sm">{getFriendlyTrigger(run.triggeredBy)}</CardContent>
               </Card>
 
               <Card>
@@ -180,16 +264,25 @@ export function RunDetailPage() {
               </Card>
             </div>
 
-            {/* Error message */}
-            {run.error !== undefined && (
-              <div
-                className="rounded-md border border-[var(--color-destructive)]/30 bg-[var(--color-destructive)]/10 px-4 py-3"
-                role="alert"
-              >
-                <p className="text-sm font-semibold text-[var(--color-destructive)]">Run failed</p>
-                <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">{run.error}</p>
-              </div>
-            )}
+            {/* Error message — categorized with actionable suggestions */}
+            {run.error !== undefined && (() => {
+              const classified = classifyRunError(run.error);
+              return (
+                <div
+                  className="rounded-md border border-[var(--color-destructive)]/30 bg-[var(--color-destructive)]/10 px-4 py-3"
+                  role="alert"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-[var(--color-destructive)]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-destructive)] uppercase tracking-wide">
+                      {classified.category}
+                    </span>
+                    <p className="text-sm font-semibold text-[var(--color-destructive)]">{classified.title}</p>
+                  </div>
+                  <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">{run.error}</p>
+                  <p className="mt-1.5 text-xs text-[var(--color-muted-foreground)] italic">{classified.suggestion}</p>
+                </div>
+              );
+            })()}
 
             {/* Log viewer */}
             <div>

@@ -27,6 +27,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # Allow in-flight requests to drain during rolling updates. This value
+      # should exceed the gateway's internal drain timeout (OP_SHUTDOWN_DRAIN_MS,
+      # default 10s) plus a buffer for SIGTERM propagation and load-balancer
+      # de-registration. 45s matches docker-compose.yml stop_grace_period.
+      terminationGracePeriodSeconds: 45
       {{- include "oneplatform.podScheduling" (dict "service" "gateway" "root" .) | nindent 6 }}
       containers:
         - name: gateway

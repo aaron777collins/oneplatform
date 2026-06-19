@@ -6,7 +6,7 @@
  * The builder manages local step state and surfaces the final step array via onSave.
  */
 import * as React from "react";
-import { Plus } from "lucide-react";
+import { Plus, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
@@ -132,6 +132,26 @@ export function PipelineBuilder({
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Visual editor callout */}
+      <div className="flex items-center gap-2 rounded-md border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 px-3 py-2">
+        <ArrowUpRight className="h-4 w-4 text-[var(--color-primary)]" aria-hidden="true" />
+        <p className="text-sm text-[var(--color-foreground)]">
+          Prefer a drag-and-drop experience?{" "}
+          <button
+            type="button"
+            className="font-semibold text-[var(--color-primary)] underline underline-offset-2 hover:opacity-80"
+            onClick={() => {
+              // Dispatch a custom event that PipelineBuilderPage can listen to,
+              // or rely on the parent's toggle. In standalone use, navigate to the
+              // visual editor route if available.
+              window.dispatchEvent(new CustomEvent("switch-to-visual-editor"));
+            }}
+          >
+            Switch to Visual Editor
+          </button>
+        </p>
+      </div>
+
       {/* Step list */}
       <div className="min-h-[120px] rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/20 p-4">
         {steps.length === 0 ? (

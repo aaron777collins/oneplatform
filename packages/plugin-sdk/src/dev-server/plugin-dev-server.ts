@@ -157,12 +157,6 @@ export class PluginDevServer {
       const plugin = await loadPlugin(pluginDir);
       printRunStart(plugin.manifest.id);
 
-      if (plugin.connector === undefined) {
-        // Non-connector plugins do not have a connector lifecycle the dev server
-        // can drive. Print type-specific guidance and return a synthetic summary.
-        return buildNonConnectorSummary(plugin.manifest);
-      }
-
       const contextOptions = {
         ...(options.tenantId       !== undefined ? { tenantId:       options.tenantId }       : {}),
         ...(options.instanceId     !== undefined ? { instanceId:     options.instanceId }     : {}),
@@ -172,6 +166,18 @@ export class PluginDevServer {
         ...(options.allowRealFetch !== undefined ? { allowRealFetch: options.allowRealFetch } : {}),
       };
       const context = createDevContext(contextOptions);
+
+      // Drive the transformer lifecycle when a transformer plugin is loaded.
+      if (plugin.transformer !== undefined) {
+        return await runTransformerLifecycle(plugin.transformer, plugin.manifest, context, options);
+      }
+
+      if (plugin.connector === undefined) {
+        // Non-connector/non-transformer plugins do not have a lifecycle the
+        // dev server can drive. Print type-specific guidance and return a
+        // synthetic summary.
+        return buildNonConnectorSummary(plugin.manifest);
+      }
 
       return await runConnectorLifecycle(plugin.connector, plugin.manifest, context, options);
     } finally {
@@ -185,6 +191,97 @@ export class PluginDevServer {
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { PluginManifest } from "../manifest/schema.js";
+import type { TransformerExport, DevServerOptions as DevServerOptionsType } from "./types.js";
+import type { DataRecord } from "../types/primitives.js";
+import type { DevContext } from "./dev-context.js";
+import { performance } from "node:perf_hooks";
+
+/**
+ * Run the transformer lifecycle: call metadata(), then transform() with sample
+ * records from the input file or built-in samples.
+ *
+ * This provides developers working on transformer plugins the same "one-command
+ * dev run" experience that connector developers already have.
+ */
+async function runTransformerLifecycle(
+  transformer: TransformerExport,
+  manifest: PluginManifest,
+  context: DevContext,
+  _options: DevServerOptionsType,
+): Promise<ConnectorRunSummary> {
+  const timings: Array<{ method: string; durationMs: number }> = [];
+
+  // metadata()
+  const metaStart = performance.now();
+  const meta = transformer.metadata();
+  timings.push({ method: "metadata", durationMs: Math.round(performance.now() - metaStart) });
+
+  process.stderr.write(`[dev-server] Transformer "${meta.name}" loaded (v${meta.version})\n`);
+
+  // Build sample records to transform. In a future iteration, the dev server
+  // could read --input <file.json> to supply custom records. For now, use
+  // built-in samples that exercise common field types.
+  const sampleRecords: DataRecord[] = [
+    {
+      sourceId: "sample-001",
+      data: { id: "sample-001", name: "Alice Example", email: "alice@example.test", score: 85 },
+      metadata: { createdAt: new Date().toISOString() },
+    },
+    {
+      sourceId: "sample-002",
+      data: { id: "sample-002", name: "Bob Builder", email: "bob@example.test", score: 92 },
+      metadata: { createdAt: new Date().toISOString() },
+    },
+  ];
+
+  const transformedRecords: DataRecord[] = [];
+
+  // Call transform() for each sample record, measuring timing.
+  for (const record of sampleRecords) {
+    const txStart = performance.now();
+    try {
+      const result = await transformer.transform(record, context);
+      timings.push({ method: "transform", durationMs: Math.round(performance.now() - txStart) });
+      if (result !== null) {
+        transformedRecords.push(result);
+        process.stderr.write(
+          `[dev-server] transform("${record.sourceId}") → record (sourceId: "${result.sourceId}")\n`,
+        );
+      } else {
+        process.stderr.write(
+          `[dev-server] transform("${record.sourceId}") → dropped (returned null)\n`,
+        );
+      }
+    } catch (err) {
+      timings.push({ method: "transform", durationMs: Math.round(performance.now() - txStart) });
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[dev-server] transform("${record.sourceId}") → ERROR: ${message}\n`,
+      );
+    }
+  }
+
+  process.stderr.write(
+    `[dev-server] Transformer run complete: ${transformedRecords.length}/${sampleRecords.length} records passed through\n`,
+  );
+
+  return {
+    manifest,
+    connectorMetadata: meta,
+    handle: { connectionId: "(transformer)", metadata: {} },
+    batches: [{
+      records: transformedRecords,
+      nextCursor: null,
+      hasMore: false,
+      fetchedAt: new Date().toISOString(),
+    }],
+    totalRecords: transformedRecords.length,
+    timings: timings as ConnectorRunSummary["timings"],
+    peakHeapUsedBytes: process.memoryUsage().heapUsed,
+    logs: context.__logs,
+    success: true,
+  };
+}
 
 function buildNonConnectorSummary(manifest: PluginManifest): ConnectorRunSummary {
   const typeGuidance: Record<string, string> = {

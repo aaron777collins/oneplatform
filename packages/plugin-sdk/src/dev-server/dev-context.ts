@@ -94,6 +94,22 @@ export function createDevContext(options: DevContextOptions = {}): DevContext {
   // ── Fetch ──────────────────────────────────────────────────────────────────
   // URL matching uses substring search so developers can provide concise keys
   // like "api.example.com/items" rather than exact URLs.
+
+  // Emit a prominent warning once if allowRealFetch is enabled so developers
+  // are aware that the sandbox URL allowlist is not enforced.
+  if (allowRealFetch) {
+    process.stderr.write(
+      "\n" +
+      "  ╔══════════════════════════════════════════════════════════════════╗\n" +
+      "  ║  WARNING: allowRealFetch is ON                                 ║\n" +
+      "  ║  All fetch() calls will bypass URL allowlist restrictions.      ║\n" +
+      "  ║  In production, only URLs matching requiredExternalUrls in the  ║\n" +
+      "  ║  manifest are permitted. Disable this flag before publishing.   ║\n" +
+      "  ╚══════════════════════════════════════════════════════════════════╝\n" +
+      "\n",
+    );
+  }
+
   const devFetch: FetchProxy = {
     async fetch(url: string, init?: RequestInit): Promise<Response> {
       if (allowRealFetch) {

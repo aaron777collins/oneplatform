@@ -6,7 +6,9 @@
  */
 
 import type { BatchResult, ConnectorHandle } from "../types/connector.js";
+import type { DataRecord } from "../types/primitives.js";
 import type { PluginContext } from "../types/context.js";
+import type { TransformerContext } from "../types/transformer.js";
 import type { AnyPluginMetadata } from "../types/metadata.js";
 import type { PluginManifest } from "../manifest/schema.js";
 
@@ -170,6 +172,11 @@ export interface LoadedPlugin {
    * undefined when the plugin type is not "connector".
    */
   connector?: ConnectorExport;
+  /**
+   * The transformer export resolved from the bundle file.
+   * undefined when the plugin type is not "transformer".
+   */
+  transformer?: TransformerExport;
 }
 
 /**
@@ -192,4 +199,21 @@ export interface ConnectorExport {
     handle: ConnectorHandle,
     context: PluginContext,
   ) => Promise<void>;
+}
+
+/**
+ * A transformer export resolved from the loaded bundle.
+ * The dev server performs structural validation here rather than relying on
+ * TypeScript types, because the bundle is loaded via dynamic import at runtime.
+ */
+export interface TransformerExport {
+  metadata: () => AnyPluginMetadata;
+  transform: (
+    record: DataRecord,
+    context: TransformerContext,
+  ) => Promise<DataRecord | null>;
+  transformBatch?: (
+    records: DataRecord[],
+    context: TransformerContext,
+  ) => Promise<DataRecord[]>;
 }

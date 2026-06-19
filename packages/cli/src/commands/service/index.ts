@@ -4,6 +4,7 @@
 import type { Command } from "commander";
 import { withContext } from "../../lib/context.js";
 import type { CommandContext } from "../../lib/context.js";
+import { CliError, EXIT } from "../../lib/errors.js";
 import { confirmDestructive } from "../../lib/prompts.js";
 
 interface RotateKeysOpts { service?: string; overlap?: string }
@@ -58,8 +59,7 @@ async function scaleAction(
 ): Promise<void> {
   const replicaCount = parseInt(replicas, 10);
   if (isNaN(replicaCount) || replicaCount < 1) {
-    ctx.renderer.error("Replica count must be a positive integer.");
-    process.exit(1);
+    throw new CliError("Replica count must be a positive integer.", EXIT.GENERAL);
   }
 
   // Scale is a 501 stub — requires Docker Swarm, Kubernetes, or equivalent.

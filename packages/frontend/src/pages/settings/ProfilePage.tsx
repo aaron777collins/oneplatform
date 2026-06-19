@@ -105,6 +105,7 @@ export function ProfilePage() {
       client.post("/v1/auth/change-password", {
         currentPassword: values.currentPassword,
         newPassword: values.newPassword,
+        confirmPassword: values.confirmPassword,
       }),
     onSuccess: () => {
       toast({ title: "Password changed" });

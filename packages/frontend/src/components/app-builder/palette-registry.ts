@@ -31,6 +31,26 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
       { key: "pageSize", label: "Page size", inputType: "number", defaultValue: 10 },
       { key: "emptyMessage", label: "Empty message", inputType: "text", defaultValue: "No data to display." },
       { key: "aria-label", label: "Accessible label", inputType: "text", defaultValue: "Data table" },
+      {
+        key: "columns",
+        label: "Column configuration",
+        inputType: "json",
+        defaultValue: [],
+        description: "Array of column definitions. Each column has: header (display name), field (data key), width (optional CSS width), sortable (boolean).",
+        jsonSchema: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              header: { type: "string", description: "Column display header" },
+              field: { type: "string", description: "Data field key to display" },
+              width: { type: "string", description: "CSS width, e.g. '150px' or '20%'" },
+              sortable: { type: "boolean", description: "Whether column is sortable" },
+            },
+            required: ["header", "field"],
+          },
+        },
+      },
     ],
   },
   {
@@ -116,7 +136,24 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
       filters: [],
       values: {},
     },
-    propSchema: [],
+    propSchema: [
+      { key: "filterField", label: "Filter field", inputType: "text", description: "Data field key to filter on" },
+      {
+        key: "filterType",
+        label: "Filter type",
+        inputType: "select",
+        defaultValue: "text",
+        options: [
+          { label: "Text search", value: "text" },
+          { label: "Select / dropdown", value: "select" },
+          { label: "Date range", value: "date-range" },
+          { label: "Number range", value: "number-range" },
+          { label: "Boolean toggle", value: "boolean" },
+        ],
+      },
+      { key: "label", label: "Filter label", inputType: "text", description: "Label shown above the filter control" },
+      { key: "placeholder", label: "Placeholder text", inputType: "text", description: "Placeholder shown inside the filter input" },
+    ],
   },
 
   // ---------------------------------------------------------------------------
@@ -165,7 +202,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
       html: "<p>Edit this HTML block.</p>",
     },
     propSchema: [
-      { key: "html", label: "HTML content", inputType: "textarea", defaultValue: "<p>Edit this HTML block.</p>" },
+      { key: "html", label: "HTML content", inputType: "richtext", defaultValue: "<p>Edit this HTML block.</p>", description: "Rich text editor (WYSIWYG). Supports formatting, links, images, and raw HTML." },
     ],
   },
   {
@@ -178,7 +215,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
       content: "## Heading\n\nEdit this Markdown block.",
     },
     propSchema: [
-      { key: "content", label: "Markdown content", inputType: "textarea", defaultValue: "## Heading\n\nEdit this Markdown block." },
+      { key: "content", label: "Markdown content", inputType: "richtext", defaultValue: "## Heading\n\nEdit this Markdown block.", description: "Rich text editor (WYSIWYG). Supports headings, lists, bold, italic, links, and standard Markdown syntax." },
     ],
   },
 ];

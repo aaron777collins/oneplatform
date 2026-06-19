@@ -82,7 +82,9 @@ export type PropInputType =
   | "boolean"
   | "select"
   | "color"
-  | "textarea";
+  | "textarea"
+  | "richtext"
+  | "json";
 
 export interface PropDescriptor {
   key: string;
@@ -92,6 +94,8 @@ export interface PropDescriptor {
   options?: Array<{ label: string; value: string }>;
   defaultValue?: unknown;
   description?: string;
+  /** For inputType === "json" — describes the expected JSON structure. */
+  jsonSchema?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------

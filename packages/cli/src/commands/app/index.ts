@@ -27,7 +27,7 @@ const APP_COLUMNS = [
 interface ListOpts { status?: string }
 interface CreateOpts { name: string; template?: string; slug?: string }
 interface InitOpts { name: string; slug?: string; out?: string }
-interface DeployOpts { file?: string; env?: string; wait?: boolean }
+interface DeployOpts { file?: string; env?: string; wait?: boolean; pollTimeout?: string }
 interface DevOpts { port?: string; preferLocal?: boolean; preferRemote?: boolean }
 interface LogsOpts { follow?: boolean; from?: string; level?: string }
 interface EnvSetOpts {}
@@ -119,8 +119,16 @@ async function deployAction(slug: string, opts: DeployOpts, ctx: CommandContext)
 
   if (!opts.wait) return;
 
+  const pollTimeoutSec = parseInt(opts.pollTimeout ?? "600", 10);
+  const deadline = Date.now() + pollTimeoutSec * 1000;
   while (true) {
     await new Promise((r) => setTimeout(r, 3000));
+    if (Date.now() > deadline) {
+      throw new CliError(
+        `Deploy --wait timed out after ${pollTimeoutSec}s. Deployment ${resp.deploymentId} may still be in progress.`,
+        EXIT.GENERAL,
+      );
+    }
     const status = await ctx.http.get<{ status: string; buildLogs?: string }>(
       `/api/v1/apps/${encodeURIComponent(slug)}/deployments/${resp.deploymentId}`,
     );
@@ -310,6 +318,7 @@ export function registerApp(program: Command): void {
     )
     .option("--env <env>", "Deployment environment: production|preview")
     .option("--wait", "Poll build until complete, stream build logs to stderr")
+    .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600)")
     .action(withContext<[string, DeployOpts]>(deployAction));
 
   app.command("dev").description("Start a local development server against the live platform")

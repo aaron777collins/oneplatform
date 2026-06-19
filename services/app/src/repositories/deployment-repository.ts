@@ -192,14 +192,17 @@ export class DeploymentRepository {
     return result.rows;
   }
 
-  // Returns failed builds older than the given cutoff timestamp.
-  async findFailedOlderThan(cutoffDate: Date): Promise<BuildRow[]> {
+  // Returns failed builds for a specific app older than the given cutoff
+  // timestamp. Scoped to appId so the retention cleanup loop does not query
+  // across all apps in a single call (V6-168).
+  async findFailedOlderThan(appId: string, cutoffDate: Date): Promise<BuildRow[]> {
     const result = await this.pool.query<BuildRow>(
       `SELECT ${BUILD_COLUMNS}
          FROM app.builds
-        WHERE status = 'failed'
-          AND created_at < $1`,
-      [cutoffDate]
+        WHERE app_id = $1
+          AND status = 'failed'
+          AND created_at < $2`,
+      [appId, cutoffDate]
     );
     return result.rows;
   }

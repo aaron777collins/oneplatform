@@ -81,7 +81,16 @@ async function createAction(opts: CreateOpts, ctx: CommandContext): Promise<void
       config[field.name] = value;
     }
   } else if (opts.config) {
-    config = JSON.parse(readFileSync(opts.config, "utf8")) as Record<string, unknown>;
+    if (opts.config === "-") {
+      // Read JSON config from stdin
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
+      config = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    } else {
+      config = JSON.parse(readFileSync(opts.config, "utf8")) as Record<string, unknown>;
+    }
   }
 
   if (opts.credentials) {
@@ -112,7 +121,17 @@ async function getAction(id: string, _opts: Record<string, never>, ctx: CommandC
 async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): Promise<void> {
   const body: Record<string, unknown> = {};
   if (opts.name) body["name"] = opts.name;
-  if (opts.config) body["config"] = JSON.parse(readFileSync(opts.config, "utf8")) as unknown;
+  if (opts.config) {
+    if (opts.config === "-") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
+      body["config"] = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    } else {
+      body["config"] = JSON.parse(readFileSync(opts.config, "utf8")) as unknown;
+    }
+  }
   if (opts.credentials) {
     body["credentials"] = JSON.parse(readFileSync(opts.credentials, "utf8")) as Record<string, string>;
   }
@@ -205,7 +224,7 @@ export function registerConnector(program: Command): void {
     .description("Create a new connector")
     .requiredOption("--plugin <plugin-id>", "Plugin ID of the connector plugin")
     .requiredOption("--name <name>", "Connector display name")
-    .option("--config <config.json>", "Path to JSON configuration file")
+    .option("--config <config.json>", "Path to JSON configuration file (use '-' to read from stdin)")
     .option("--credentials <credentials.json>", "Path to JSON file containing connector credentials (keep this file secure)")
     .option("--sync-mode <mode>", "Sync mode: full | incremental (default: connector plugin default)")
     .option("--enabled", "Enable the connector immediately (default: true)", true)
@@ -226,7 +245,7 @@ export function registerConnector(program: Command): void {
     .description("Update a connector")
     .argument("<id>", "Connector ID")
     .option("--name <name>", "New display name")
-    .option("--config <config.json>", "Path to updated JSON configuration")
+    .option("--config <config.json>", "Path to updated JSON configuration (use '-' to read from stdin)")
     .option("--credentials <credentials.json>", "Path to JSON file with updated credentials (keep this file secure)")
     .option("--sync-mode <mode>", "New sync mode: full | incremental", /^(full|incremental)$/)
     .option("--enabled", "Enable the connector")

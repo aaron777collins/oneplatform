@@ -58,14 +58,54 @@ interface Webhook {
   lastDeliveryStatus?: "success" | "failure";
 }
 
-const ALL_EVENTS = [
-  "pipeline.completed",
-  "pipeline.failed",
-  "build.success",
-  "build.failed",
-  "connector.sync.completed",
-  "dlq.job.added",
+// ---------------------------------------------------------------------------
+// Human-readable event labels grouped by category
+// ---------------------------------------------------------------------------
+
+interface EventDefinition {
+  event: string;
+  label: string;
+}
+
+interface EventCategory {
+  category: string;
+  events: EventDefinition[];
+}
+
+const EVENT_CATEGORIES: EventCategory[] = [
+  {
+    category: "Pipelines",
+    events: [
+      { event: "pipeline.completed", label: "Pipeline completed successfully" },
+      { event: "pipeline.failed", label: "Pipeline run failed" },
+    ],
+  },
+  {
+    category: "Builds",
+    events: [
+      { event: "build.success", label: "Build succeeded" },
+      { event: "build.failed", label: "Build failed" },
+    ],
+  },
+  {
+    category: "Connectors",
+    events: [
+      { event: "connector.sync.completed", label: "Connector sync completed" },
+    ],
+  },
+  {
+    category: "System",
+    events: [
+      { event: "dlq.job.added", label: "Dead-letter queue job added" },
+    ],
+  },
 ];
+
+const ALL_EVENTS = EVENT_CATEGORIES.flatMap((cat) => cat.events.map((e) => e.event));
+
+const EVENT_LABEL_MAP: Record<string, string> = Object.fromEntries(
+  EVENT_CATEGORIES.flatMap((cat) => cat.events.map((e) => [e.event, e.label])),
+);
 
 const webhookSchema = z.object({
   url: z.string().url("Enter a valid HTTPS URL"),
@@ -196,7 +236,9 @@ export function WebhooksPage() {
                     {webhook.url}
                   </TableCell>
                   <TableCell className="text-xs text-[var(--color-muted-foreground)]">
-                    {webhook.events.length === 0 ? "All events" : webhook.events.join(", ")}
+                    {webhook.events.length === 0
+                      ? "All events"
+                      : webhook.events.map((e) => EVENT_LABEL_MAP[e] ?? e).join(", ")}
                   </TableCell>
                   <TableCell className="text-sm">
                     {webhook.lastDeliveryAt !== undefined ? (
@@ -316,17 +358,27 @@ export function WebhooksPage() {
 
               <fieldset>
                 <legend className="mb-2 text-sm font-medium">Events to subscribe</legend>
-                <div className="space-y-1.5">
-                  {ALL_EVENTS.map((event) => (
-                    <label key={event} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedEvents.includes(event)}
-                        onChange={() => toggleEvent(event)}
-                        className="h-4 w-4 rounded border-[var(--color-input)] accent-[var(--color-primary)]"
-                      />
-                      <code className="font-mono text-xs">{event}</code>
-                    </label>
+                <div className="space-y-3">
+                  {EVENT_CATEGORIES.map((cat) => (
+                    <div key={cat.category}>
+                      <p className="text-xs font-semibold text-[var(--color-muted-foreground)] uppercase tracking-wide mb-1.5">
+                        {cat.category}
+                      </p>
+                      <div className="space-y-1.5 pl-1">
+                        {cat.events.map(({ event, label }) => (
+                          <label key={event} className="flex cursor-pointer items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={selectedEvents.includes(event)}
+                              onChange={() => toggleEvent(event)}
+                              className="h-4 w-4 rounded border-[var(--color-input)] accent-[var(--color-primary)]"
+                            />
+                            <span className="text-xs">{label}</span>
+                            <code className="font-mono text-[10px] text-[var(--color-muted-foreground)]">{event}</code>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </fieldset>

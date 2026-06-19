@@ -61,6 +61,14 @@ import { registerRoutes } from "./routes/index.js";
 const BOOTSTRAP_TOKEN_PATH = "/data/init/bootstrap.token";
 
 async function readBootstrapToken(): Promise<string | null> {
+  // V6-076: Check the environment variable first — this allows operators to
+  // inject the bootstrap token via orchestrators (Kubernetes secrets, Docker
+  // env) without requiring a writable filesystem mount.
+  const envToken = process.env["OP_BOOTSTRAP_TOKEN"];
+  if (envToken !== undefined && envToken.trim() !== "") {
+    return envToken.trim();
+  }
+
   try {
     const raw = await readFile(BOOTSTRAP_TOKEN_PATH, "utf-8");
     return raw.trim();
@@ -274,6 +282,7 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
     bootstrapService,
     authService,
     tokenService,
+    passwordService,
     apiKeyService,
     oauthService,
     guestSessionService,

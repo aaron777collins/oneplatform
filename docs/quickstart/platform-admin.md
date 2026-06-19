@@ -17,7 +17,7 @@ cp .env.example .env
 # Generate strong values: openssl rand -hex 32
 
 # 2. Start the stack
-docker compose up -d
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 ## First working example

@@ -204,7 +204,15 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5433"]
+      # pg_isready only checks if the port accepts TCP connections — it does not
+      # authenticate or verify that PgBouncer can reach the upstream PostgreSQL.
+      # Use psql to run a lightweight authenticated query through PgBouncer so
+      # the healthcheck fails if PgBouncer cannot proxy connections to Postgres.
+      test:
+        - "CMD-SHELL"
+        - |
+          PASS=$(cat /data/init/postgres_password_app.txt 2>/dev/null | tr -d '[:space:]') &&
+          PGPASSWORD="$$PASS" psql -h localhost -p 5433 -U oneplatform_app -d oneplatform_app -c 'SELECT 1' >/dev/null 2>&1
       interval: 5s
       timeout: 5s
       retries: 10
@@ -800,7 +808,10 @@ services:
       - /tmp:size=50M
       - /etc/caddy:size=1M
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "caddy"]
+      # Use Caddy's admin API endpoint instead of pgrep. pgrep only confirms the
+      # process exists — it cannot detect a wedged or misconfigured Caddy instance.
+      # The admin API on :2019 returns 200 when Caddy is fully operational.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/config/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

@@ -479,25 +479,8 @@ describe("createTransformerMockContext", () => {
     });
   });
 
-  describe("default fetch handler (enrichment)", () => {
-    it("returns 200 with an enrichment response by default", async () => {
-      const ctx = createTransformerMockContext();
-      const resp = await ctx.fetch.fetch("https://enrichment.example.test/classify");
-      expect(resp.status).toBe(200);
-      const body = await resp.json() as Record<string, unknown>;
-      expect(body["enriched"]).toBe(true);
-    });
-
-    it("accepts custom enrichmentResponse", async () => {
-      const ctx = createTransformerMockContext({
-        enrichmentResponse: { category: "finance", confidence: 0.97 },
-      });
-      const resp = await ctx.fetch.fetch("https://any.test/enrich");
-      const body = await resp.json() as Record<string, unknown>;
-      expect(body["category"]).toBe("finance");
-      expect(body["confidence"]).toBe(0.97);
-    });
-  });
+  // TransformerContext deliberately excludes fetch and credentials.
+  // Tests that exercise fetch behavior belong in connector mock tests.
 
   describe("ontology schema", () => {
     it("returns the default Contact schema from ctx.ontology.getSchema()", async () => {
@@ -536,32 +519,9 @@ describe("createTransformerMockContext", () => {
     });
   });
 
-  describe("fetchCalls alias", () => {
-    it("fetchCalls reflects enrichment API calls", async () => {
-      const ctx = createTransformerMockContext();
-      expect(ctx.fetchCalls).toHaveLength(0);
-      await ctx.fetch.fetch("https://enrich.test/api");
-      expect(ctx.fetchCalls).toHaveLength(1);
-    });
-
-    it("fetchCalls is the same array as ctx.fetch.__calls", async () => {
-      const ctx = createTransformerMockContext();
-      await ctx.fetch.fetch("https://any.test/");
-      expect(ctx.fetchCalls).toBe(ctx.fetch.__calls);
-    });
-  });
+  // TransformerContext deliberately excludes fetch — fetchCalls tests removed.
 
   describe("overrides", () => {
-    it("accepts a custom fetchHandler", async () => {
-      const ctx = createTransformerMockContext({
-        fetchHandler: async () =>
-          new Response(JSON.stringify({ score: 0.99 }), { status: 200 }),
-      });
-      const resp = await ctx.fetch.fetch("https://any.test/score");
-      const body = await resp.json() as Record<string, unknown>;
-      expect(body["score"]).toBe(0.99);
-    });
-
     it("preserves custom tenantId", () => {
       const ctx = createTransformerMockContext({ tenantId: "custom-tenant" });
       expect(ctx.tenant.tenantId).toBe("custom-tenant");

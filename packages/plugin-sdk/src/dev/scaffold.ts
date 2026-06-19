@@ -346,10 +346,10 @@ export const ${entrypoint}: AuthProvider = {
     };
   },
 
-  getAuthorizationUrl(state: string, options: AuthOptions): string {
-    const clientId = options.additionalParams?.["clientId"];
+  getAuthorizationUrl(state: string, options: AuthOptions, config?: Record<string, unknown>): string {
+    const clientId = config?.["clientId"] ?? options.additionalParams?.["clientId"];
     if (typeof clientId !== "string" || !clientId) {
-      throw new PluginAuthError("Missing required config: clientId — pass it via additionalParams");
+      throw new PluginAuthError("Missing required config: clientId — set it in the plugin config");
     }
     const params = new URLSearchParams({
       response_type: "code",
@@ -527,9 +527,8 @@ describe("${entrypoint}", () => {
     const ctx = createTransformerMockContext();
     const record = {
       sourceId: "rec-001",
-      entityType: "contact",
       data: { name: "Test" },
-      timestamp: new Date().toISOString(),
+      metadata: { createdAt: new Date().toISOString() },
     };
     const result = await ${entrypoint}.transform(record, ctx);
     expect(result).toEqual(record);
@@ -539,9 +538,8 @@ describe("${entrypoint}", () => {
     const ctx = createTransformerMockContext();
     const record = {
       sourceId: "",
-      entityType: "contact",
       data: { name: "Test" },
-      timestamp: new Date().toISOString(),
+      metadata: {},
     };
     await expect(${entrypoint}.transform(record, ctx)).rejects.toThrow("sourceId");
   });
@@ -600,8 +598,7 @@ describe("${entrypoint}", () => {
   it("generates a valid authorization URL", () => {
     const url = ${entrypoint}.getAuthorizationUrl("test-state", {
       redirectUri: "https://localhost/callback",
-      additionalParams: { clientId: "test-client-id" },
-    });
+    }, { clientId: "test-client-id" });
     expect(url).toContain("https://auth.example.com");
     expect(url).toContain("test-state");
     expect(url).toContain("test-client-id");
@@ -611,8 +608,7 @@ describe("${entrypoint}", () => {
     expect(() =>
       ${entrypoint}.getAuthorizationUrl("test-state", {
         redirectUri: "https://localhost/callback",
-        additionalParams: {},
-      }),
+      }, {}),
     ).toThrow("clientId");
   });
 
@@ -641,7 +637,7 @@ describe("${entrypoint}", () => {
     const html = ${entrypoint}.render({
       config: { title: "Test Widget" },
       user: { id: "user-1", roles: ["viewer"] },
-      data: {},
+      queryResults: {},
     });
     expect(html).toContain("<!DOCTYPE html>");
     expect(html).toContain("Test Widget");
@@ -781,7 +777,9 @@ dist/
  */
 export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
   // Compute once and pass down — avoids divergence between manifest and source file.
-  const entrypoint = toPascalCase(opts.name.replace(/[^a-zA-Z0-9]/g, " "));
+  // Use camelCase for generated identifiers so they follow JavaScript convention
+  // (named exports like `myConnector` rather than `MyConnector`).
+  const entrypoint = toCamelCase(opts.name.replace(/[^a-zA-Z0-9]/g, " "));
 
   const sourceBuilders: Record<PluginType, (o: ScaffoldOptions, e: string) => string> = {
     connector: buildConnectorSource,
@@ -816,4 +814,10 @@ function toPascalCase(input: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join("");
+}
+
+function toCamelCase(input: string): string {
+  const pascal = toPascalCase(input);
+  if (pascal.length === 0) return pascal;
+  return pascal.charAt(0).toLowerCase() + pascal.slice(1);
 }

@@ -162,9 +162,16 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
         res = await fetch(url, { method: "POST", headers, body: form, signal: controller.signal });
       } catch (err) {
         clearTimeout(timer);
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new CliError(
+            `Upload timed out after ${timeout}ms.`,
+            EXIT.NETWORK,
+          );
+        }
         throw new CliError(
           `Network error: ${err instanceof Error ? err.message : String(err)}`,
           EXIT.NETWORK,
+          err instanceof Error ? err : undefined,
         );
       } finally {
         clearTimeout(timer);
@@ -184,7 +191,45 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
         ...authHeaders(apiKey),
       };
 
-      const res = await fetch(url, { headers, ...(signal !== undefined ? { signal } : {}) });
+      // Connection timeout: abort if the initial connection is not established
+      // within the configured timeout. Once connected, the caller controls
+      // lifetime via the provided signal (e.g. Ctrl+C for SSE tailing).
+      const connController = new AbortController();
+      const connTimer = setTimeout(() => connController.abort(), timeout);
+
+      // Forward caller's abort to our controller so a single signal covers both
+      const onCallerAbort = (): void => connController.abort();
+      if (signal) {
+        if (signal.aborted) {
+          connController.abort();
+        } else {
+          signal.addEventListener("abort", onCallerAbort, { once: true });
+        }
+      }
+
+      let res: Response;
+      try {
+        res = await fetch(url, { headers, signal: connController.signal });
+      } catch (err) {
+        clearTimeout(connTimer);
+        if (signal) signal.removeEventListener("abort", onCallerAbort);
+        if (err instanceof Error && err.name === "AbortError") {
+          // If the caller's signal was aborted, it's a user cancellation — re-throw as-is
+          if (signal?.aborted) throw err;
+          throw new CliError(
+            `Stream connection timed out after ${timeout}ms.`,
+            EXIT.NETWORK,
+          );
+        }
+        throw new CliError(
+          `Network error: ${err instanceof Error ? err.message : String(err)}`,
+          EXIT.NETWORK,
+          err instanceof Error ? err : undefined,
+        );
+      } finally {
+        clearTimeout(connTimer);
+        if (signal) signal.removeEventListener("abort", onCallerAbort);
+      }
       if (!res.ok) {
         const errBody = await parseErrorBody(res);
         throw httpErrorToCliError(res.status, errBody, verbose);

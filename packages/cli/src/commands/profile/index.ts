@@ -15,7 +15,7 @@ import {
   getActiveProfileName,
   profileExists,
 } from "../../lib/profiles.js";
-import { saveCredentials } from "../../lib/credentials.js";
+import { saveCredentials, deleteCredentials } from "../../lib/credentials.js";
 import { confirmDestructive } from "../../lib/prompts.js";
 
 interface AddOpts { platform: string; key?: string }
@@ -96,6 +96,8 @@ async function removeAction(name: string, opts: RemoveOpts, ctx: CommandContext)
   }
 
   deleteProfile(name);
+  // Also remove stored credentials so they don't linger in the credentials file
+  deleteCredentials(name);
   ctx.renderer.success(`Profile '${name}' removed.`);
 }
 

@@ -87,6 +87,18 @@ export type {
   AuditQueryOptions,
 } from './types/resources.js';
 
+// Namespace types — useful for typing variables that hold a namespace reference
+export type { DataNamespace, EntityResource } from './resources/data.js';
+export type { PipelineNamespace } from './resources/pipelines.js';
+export type { ConnectorNamespace } from './resources/connectors.js';
+export type { OntologyNamespace } from './resources/ontologies.js';
+export type { EventNamespace } from './resources/events.js';
+export type { AppNamespace } from './resources/apps.js';
+export type { PluginNamespace } from './resources/plugins.js';
+export type { ApiKeyNamespace } from './resources/api-keys.js';
+export type { UserNamespace } from './resources/users.js';
+export type { LogNamespace } from './resources/logs.js';
+
 // App deployment and rollback result types
 export type {
   Deployment,
@@ -145,6 +157,7 @@ export {
 
 // Platform resource types — stable shapes for server-returned data
 export type {
+  ApiErrorResponse,
   WhoAmIResponse,
   Pipeline,
   PipelineRun,

@@ -242,12 +242,21 @@ export function SchemaInferencePanel({ onConfirm, isConfirming = false }: Schema
             <Input
               id="inferred-entity-name"
               value={entityName}
-              onChange={(e) => setEntityName(e.target.value)}
+              onChange={(e) => {
+                // Auto-convert to PascalCase on keystroke
+                const raw = e.target.value;
+                // If user is typing and last char is a space, underscore, or hyphen,
+                // capitalize the next character automatically
+                const pascal = raw
+                  .replace(/(?:^|[_\s-]+)([a-zA-Z])/g, (_match, ch: string) => ch.toUpperCase())
+                  .replace(/[^a-zA-Z0-9]/g, "");
+                setEntityName(pascal);
+              }}
               placeholder="e.g. CustomerRecord"
               className="max-w-xs"
             />
             <p className="text-xs text-[var(--color-muted-foreground)]">
-              Must start with a capital letter, alphanumeric only.
+              Must start with a capital letter, alphanumeric only. Automatically converts to PascalCase.
             </p>
           </div>
 

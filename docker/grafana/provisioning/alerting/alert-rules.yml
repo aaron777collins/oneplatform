@@ -27,7 +27,7 @@ groups:
     rules:
       - uid: op-alert-high-error-rate
         title: High Error Rate (>5% spans in 5 minutes)
-        condition: C
+        condition: F
         # Data query: count of error spans from gateway-service over the last 5 minutes.
         # The threshold is intentionally conservative for a Jaeger-only datasource;
         # replace with a PromQL rate() expression once Prometheus is available.
@@ -53,24 +53,48 @@ groups:
               service: gateway-service
               refId: B
 
-          # Classic condition: fire when (A / B) > 0.05 — error fraction exceeds 5%.
-          # Uses the "reduce" + "math" pipeline supported by Grafana Unified Alerting.
+          # Reduce A (error spans) to a single count.
           - refId: C
             datasourceUid: "__expr__"
             model:
-              type: classic_conditions
+              type: reduce
               refId: C
+              expression: A
+              reducer: count
+              settings:
+                mode: dropNN
+
+          # Reduce B (total spans) to a single count.
+          - refId: D
+            datasourceUid: "__expr__"
+            model:
+              type: reduce
+              refId: D
+              expression: B
+              reducer: count
+              settings:
+                mode: dropNN
+
+          # Compute error ratio: errors / total. Guard against division by zero
+          # by returning 0 when the total span count is 0 (no traffic).
+          - refId: E
+            datasourceUid: "__expr__"
+            model:
+              type: math
+              refId: E
+              expression: "$D == 0 ? 0 : $C / $D"
+
+          # Fire when the error ratio exceeds 5%.
+          - refId: F
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              refId: F
+              expression: E
               conditions:
                 - evaluator:
                     params: [0.05]
                     type: gt
-                  operator:
-                    type: and
-                  query:
-                    params: [A]
-                  reducer:
-                    type: count
-                  type: query
         noDataState: OK
         execErrState: Alerting
         for: 5m

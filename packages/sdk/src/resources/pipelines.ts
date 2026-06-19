@@ -56,8 +56,14 @@ export interface PipelineNamespace {
    */
   cancelRun(pipelineId: string, runId: string): Promise<PipelineRun>;
 
-  /** Streams log lines for a run in cursor-paginated pages. */
-  streamRunLogs(pipelineId: string, runId: string): PaginatedIterable<LogEntry>;
+  /**
+   * Streams log lines for a run in cursor-paginated pages.
+   *
+   * @param pipelineId - Pipeline ID or slug.
+   * @param runId      - Run ID.
+   * @param options    - Optional list options (limit, filter, sort).
+   */
+  streamRunLogs(pipelineId: string, runId: string, options?: ListOptions): PaginatedIterable<LogEntry>;
 }
 
 export function createPipelineNamespace(transport: Transport): PipelineNamespace {
@@ -148,7 +154,9 @@ export function createPipelineNamespace(transport: Transport): PipelineNamespace
       });
     },
 
-    streamRunLogs(pipelineId: string, runId: string): PaginatedIterable<LogEntry> {
+    streamRunLogs(pipelineId: string, runId: string, options?: ListOptions): PaginatedIterable<LogEntry> {
+      const pageSize = options?.limit ?? 50;
+      const baseQuery = serializeListQuery(options);
       return new Paginator<LogEntry>(async (cursor, limit) => {
         const result = await transport.request<{
           items: LogEntry[];
@@ -157,10 +165,10 @@ export function createPipelineNamespace(transport: Transport): PipelineNamespace
         }>({
           method: 'GET',
           path: `${BASE}/${encodeURIComponent(pipelineId)}/runs/${encodeURIComponent(runId)}/logs`,
-          query: { limit, ...(cursor !== null ? { cursor } : {}) },
+          query: { ...baseQuery, limit, ...(cursor !== null ? { cursor } : {}) },
         });
         return { ...result, hasMore: result.nextCursor !== null };
-      });
+      }, pageSize);
     },
   };
 }

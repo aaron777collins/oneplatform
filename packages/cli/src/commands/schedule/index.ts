@@ -30,7 +30,7 @@ function validateCron(expr: string): void {
 
 interface ListOpts { pipeline?: string; status?: string }
 interface CreateOpts { pipeline: string; cron: string; name?: string; timezone?: string; inputTemplate?: string; disabled?: boolean }
-interface UpdateOpts { name?: string; cron?: string; timezone?: string; inputTemplate?: string; enabled?: string }
+interface UpdateOpts { name?: string; cron?: string; timezone?: string; inputTemplate?: string; enabled?: boolean }
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -82,7 +82,7 @@ async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): 
       throw new CliError("--input-template must be valid JSON.", EXIT.GENERAL);
     }
   }
-  if (opts.enabled !== undefined) body["enabled"] = opts.enabled === "true";
+  if (opts.enabled !== undefined) body["enabled"] = opts.enabled;
 
   const resp = await ctx.http.patch<{ id: string; name: string }>(
     `/api/v1/schedules/${encodeURIComponent(id)}`,
@@ -125,7 +125,8 @@ export function registerSchedule(program: Command): void {
     .option("--cron <expr>", "New cron expression")
     .option("--timezone <tz>", "New IANA timezone string")
     .option("--input-template <json>", "New JSON input template")
-    .option("--enabled <bool>", "Set enabled state: true|false")
+    .option("--enabled", "Enable the schedule")
+    .option("--no-enabled", "Disable the schedule")
     .action(withContext<[string, UpdateOpts]>(updateAction));
 
   schedule.command("create").description("Create a cron schedule for a pipeline")

@@ -19,6 +19,9 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
+/** Minimum time (ms) a connection must remain alive before the reconnect counter resets. */
+const STABLE_CONNECTION_THRESHOLD_MS = 10_000;
+
 type StatusHandler = (status: Subscription['status']) => void;
 type ErrorHandler = (error: NetworkError | AuthError) => void;
 
@@ -155,6 +158,7 @@ export function createSseSubscription(
     if (destroyed) return;
 
     const sseUrl = buildSseUrl();
+    let connectedAt: number | null = null;
 
     try {
       const authHeaders = await authHandler.getHeaders();
@@ -207,7 +211,11 @@ export function createSseSubscription(
       }
 
       setStatus('connected');
-      reconnectAttempt = 0; // Reset counter on successful connection
+      // Track when the connection was established. The reconnect counter is only
+      // reset after the connection has been alive longer than the stability
+      // threshold (10 s). This prevents a fast connect-then-drop loop from
+      // resetting the backoff and retrying indefinitely.
+      connectedAt = Date.now();
 
       const reader = response.body.getReader();
       for await (const event of parseSseStream(reader)) {
@@ -243,9 +251,11 @@ export function createSseSubscription(
         }
       }
 
-      // Stream ended without error — server closed the connection; reconnect
+      // Stream ended without error — server closed the connection; reconnect.
+      // Only reset the attempt counter if the connection was stable (alive > threshold).
       if (!destroyed) {
-        await scheduleReconnect(reconnectAttempt);
+        const wasStable = Date.now() - connectedAt >= STABLE_CONNECTION_THRESHOLD_MS;
+        await scheduleReconnect(wasStable ? 0 : reconnectAttempt + 1);
       }
     } catch (err) {
       if (destroyed) return;
@@ -263,7 +273,12 @@ export function createSseSubscription(
             });
 
       emitError(networkErr);
-      await scheduleReconnect(reconnectAttempt + 1);
+      // Only reset the attempt counter if the connection was alive long enough
+      // to be considered stable; otherwise increment to trigger backoff.
+      const wasStable =
+        connectedAt !== null &&
+        Date.now() - connectedAt >= STABLE_CONNECTION_THRESHOLD_MS;
+      await scheduleReconnect(wasStable ? 0 : reconnectAttempt + 1);
     }
   }
 

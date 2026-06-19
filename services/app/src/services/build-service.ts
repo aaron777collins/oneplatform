@@ -712,13 +712,13 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         await buildRepo.delete(build.id);
       }
 
-      // Purge failed builds older than 7 days
+      // Purge failed builds older than 7 days, scoped to this app.
+      // V6-168: pass appId so the query only returns builds for the current app
+      // instead of scanning all apps and filtering in JS.
       const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const oldFailedBuilds = await buildRepo.findFailedOlderThan(cutoff);
+      const oldFailedBuilds = await buildRepo.findFailedOlderThan(appId, cutoff);
       for (const build of oldFailedBuilds) {
-        if (build.app_id === appId) {
-          await buildRepo.delete(build.id);
-        }
+        await buildRepo.delete(build.id);
       }
     }
 

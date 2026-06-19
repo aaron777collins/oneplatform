@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/layout/PageHeader.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { Input } from "@/components/ui/input.js";
 import { Label } from "@/components/ui/label.js";
+import { Button } from "@/components/ui/button.js";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select.js";
 import { PipelineBuilder } from "@/components/pipelines/PipelineBuilder.js";
+import { VisualPipelineEditor } from "@/components/pipeline-editor/VisualPipelineEditor.js";
 import { ScheduleBuilder } from "@/components/pipelines/ScheduleBuilder.js";
 import { useApiClient, type ApiResponse, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
@@ -47,21 +49,23 @@ export function PipelineBuilderPage() {
   const isNew = id === "new";
 
   const [name, setName] = React.useState("");
+  const [nameError, setNameError] = React.useState<string | null>(null);
   const [triggerType, setTriggerType] = React.useState<TriggerType>("manual");
   const [cronExpression, setCronExpression] = React.useState("");
   const [initialSteps, setInitialSteps] = React.useState<PipelineStep[]>([]);
   const [loaded, setLoaded] = React.useState(isNew);
+  const [editorMode, setEditorMode] = React.useState<"visual" | "steps">("visual");
 
-  const { isLoading } = useQuery({
-    queryKey: ["pipelines", id],
-    queryFn: () => client.get<ApiResponse<PipelineConfig>>(`/v1/pipelines/${id}`),
-    enabled: !isNew,
-    select: (data) => data.data,
-    // Populate local state once loaded
-  });
+  // Listen for "Switch to Visual Editor" event from PipelineBuilder component
+  React.useEffect(() => {
+    function handleSwitchToVisual() {
+      setEditorMode("visual");
+    }
+    window.addEventListener("switch-to-visual-editor", handleSwitchToVisual);
+    return () => window.removeEventListener("switch-to-visual-editor", handleSwitchToVisual);
+  }, []);
 
-  // We use a separate query with onSuccess behavior
-  const { data: pipelineData } = useQuery({
+  const { data: pipelineData, isLoading } = useQuery({
     queryKey: ["pipelines", id],
     queryFn: () => client.get<ApiResponse<PipelineConfig>>(`/v1/pipelines/${id}`),
     enabled: !isNew,
@@ -110,8 +114,13 @@ export function PipelineBuilderPage() {
   const isSaving = createPipeline.isPending || updatePipeline.isPending;
 
   async function handleSave(steps: PipelineStep[]) {
+    if (name.trim().length === 0) {
+      setNameError("Pipeline name is required.");
+      return;
+    }
+    setNameError(null);
     const body = {
-      name,
+      name: name.trim(),
       triggerType,
       ...(triggerType === "cron" && cronExpression.trim().length > 0
         ? { cronExpression: cronExpression.trim() }
@@ -155,8 +164,17 @@ export function PipelineBuilderPage() {
                   id="pipeline-name"
                   placeholder="e.g. Sync customers daily"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (e.target.value.trim().length > 0) setNameError(null);
+                  }}
+                  aria-invalid={nameError !== null ? true : undefined}
                 />
+                {nameError !== null && (
+                  <p className="text-xs text-[var(--color-destructive)]" role="alert">
+                    {nameError}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -186,10 +204,47 @@ export function PipelineBuilderPage() {
               )}
             </div>
 
-            {/* Step builder */}
+            {/* Editor mode toggle */}
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold">Pipeline steps</h2>
+              <div className="ml-auto flex items-center gap-1 rounded-md border border-[var(--color-border)] p-0.5">
+                <Button
+                  variant={editorMode === "visual" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setEditorMode("visual")}
+                  className="h-7 text-xs"
+                >
+                  Visual Editor
+                </Button>
+                <Button
+                  variant={editorMode === "steps" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setEditorMode("steps")}
+                  className="h-7 text-xs"
+                >
+                  Step List
+                </Button>
+              </div>
+            </div>
+
+            {/* Step builder / visual editor */}
             <div>
-              <h2 className="mb-3 text-sm font-semibold">Pipeline steps</h2>
-              {loaded && (
+              {loaded && editorMode === "visual" && (
+                <div className="h-[500px] rounded-md border border-[var(--color-border)]">
+                  {initialSteps.length > 0 ? (
+                    <VisualPipelineEditor
+                      initialDefinition={{
+                        version: 1,
+                        entryStepId: initialSteps[0]!.id,
+                        steps: initialSteps.map((s) => ({ id: s.id, type: s.type, name: s.name })),
+                      }}
+                    />
+                  ) : (
+                    <VisualPipelineEditor />
+                  )}
+                </div>
+              )}
+              {loaded && editorMode === "steps" && (
                 <PipelineBuilder
                   initialSteps={initialSteps}
                   onSave={(steps) => void handleSave(steps)}

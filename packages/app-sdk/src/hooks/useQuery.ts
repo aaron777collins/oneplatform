@@ -18,11 +18,16 @@
  *
  * @example
  * ```tsx
- * const { data, isLoading, fetchNextPage } = useQuery<Product>('Product', {
- *   filter: { status: { eq: 'active' } },
- *   sort: ['-createdAt'],
- *   limit: 20,
- * });
+ * // V6-165: Always memoize the options object to prevent refetch loops.
+ * const queryOptions = useMemo(
+ *   () => ({
+ *     filter: { status: { eq: 'active' } },
+ *     sort: ['-createdAt'],
+ *     limit: 20,
+ *   }),
+ *   [],
+ * );
+ * const { data, isLoading, fetchNextPage } = useQuery<Product>('Product', queryOptions);
  * ```
  */
 

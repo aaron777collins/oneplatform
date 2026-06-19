@@ -143,6 +143,11 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
         // User's roles within the app — the SDK uses this for permission checks
         roles:       roles.map((r) => r.name),
         isGuest:     user.isGuest,
+        // V6-190: signals to the SDK that the user object has been fully
+        // resolved from the backend. The SDK can use this flag to distinguish
+        // between a loading/placeholder state and a hydrated user object,
+        // avoiding flicker during initial auth resolution.
+        isLoaded:    true,
       },
     });
   });

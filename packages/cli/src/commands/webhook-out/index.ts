@@ -28,7 +28,7 @@ const DELIVERY_COLUMNS = [
 ];
 
 interface CreateOpts { url: string; events: string; secret?: string; description?: string }
-interface UpdateOpts { url?: string; events?: string; enabled?: string }
+interface UpdateOpts { url?: string; events?: string; enabled?: boolean }
 interface TestOpts { eventType?: string }
 interface LogsOpts { limit?: string; status?: string }
 
@@ -58,7 +58,7 @@ async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): 
   const body: Record<string, unknown> = {};
   if (opts.url) body["url"] = opts.url;
   if (opts.events) body["events"] = opts.events.split(",").map((e) => e.trim());
-  if (opts.enabled !== undefined) body["enabled"] = opts.enabled === "true";
+  if (opts.enabled !== undefined) body["enabled"] = opts.enabled;
   await ctx.http.patch(`/api/v1/webhooks/outbound/${encodeURIComponent(id)}`, body);
   ctx.renderer.success(`Webhook ${id} updated.`);
 }
@@ -111,7 +111,8 @@ export function registerWebhookOut(program: Command): void {
     .argument("<id>", "Webhook ID")
     .option("--url <url>", "New endpoint URL")
     .option("--events <event,...>", "New comma-separated event types")
-    .option("--enabled <bool>", "Enable or disable: true|false")
+    .option("--enabled", "Enable the webhook")
+    .option("--no-enabled", "Disable the webhook")
     .action(withContext<[string, UpdateOpts]>(updateAction));
 
   wh.command("delete").description("Delete an outbound webhook")

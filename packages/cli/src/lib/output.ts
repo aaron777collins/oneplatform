@@ -141,6 +141,9 @@ export function createOutputRenderer(
 
   function renderTsv(columns: ColumnDef[], rows: Record<string, unknown>[]): void {
     if (quiet) return;
+    // Header row so downstream tools (awk, cut, spreadsheets) know the field names
+    const header = columns.map((c) => c.header).join("\t");
+    process.stdout.write(header + "\n");
     for (const row of rows) {
       const line = columns.map((c) => stringify(row[c.key])).join("\t");
       process.stdout.write(line + "\n");

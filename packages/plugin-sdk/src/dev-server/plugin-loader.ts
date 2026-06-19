@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { validateManifest } from "../manifest/schema.js";
 import type { PluginManifest } from "../manifest/schema.js";
-import type { ConnectorExport, LoadedPlugin } from "./types.js";
+import type { ConnectorExport, TransformerExport, LoadedPlugin } from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error types
@@ -74,10 +74,10 @@ export async function loadPlugin(pluginDir: string): Promise<LoadedPlugin> {
   const manifest: PluginManifest = validationResult.manifest;
 
   // ── Bundle ─────────────────────────────────────────────────────────────────
-  // Only connector-type plugins have a connector lifecycle. Other plugin types
-  // (transformer, destination, auth-provider, widget) have a different execution
-  // model and are not driven by the dev server's connector lifecycle runner.
-  if (manifest.type !== "connector") {
+  // Connector and transformer plugins have lifecycle methods the dev server can
+  // drive. Other plugin types (destination, auth-provider, widget) have a different
+  // execution model and are not driven by the dev server's lifecycle runner.
+  if (manifest.type !== "connector" && manifest.type !== "transformer") {
     return { manifest };
   }
 
@@ -98,6 +98,11 @@ export async function loadPlugin(pluginDir: string): Promise<LoadedPlugin> {
     throw new PluginLoadError(
       `Failed to import plugin bundle at "${bundlePath}": ${String(err)}`,
     );
+  }
+
+  if (manifest.type === "transformer") {
+    const transformer = resolveTransformerExport(bundleModule, manifest.entrypoint, bundlePath);
+    return { manifest, transformer };
   }
 
   const connector = resolveConnectorExport(bundleModule, manifest.entrypoint, bundlePath);
@@ -149,4 +154,46 @@ function resolveConnectorExport(
   }
 
   return exported as ConnectorExport;
+}
+
+/**
+ * Resolve and validate the transformer export from the loaded bundle module.
+ * Throws PluginLoadError with an actionable message if the export is missing
+ * or does not satisfy the Transformer interface shape.
+ */
+function resolveTransformerExport(
+  bundleModule: unknown,
+  entrypoint: string,
+  bundlePath: string,
+): TransformerExport {
+  if (typeof bundleModule !== "object" || bundleModule === null) {
+    throw new PluginLoadError(
+      `Plugin bundle at "${bundlePath}" did not export a module object.`,
+    );
+  }
+
+  const mod = bundleModule as Record<string, unknown>;
+  const exported = mod[entrypoint];
+
+  if (typeof exported !== "object" || exported === null) {
+    const available = Object.keys(mod).join(", ") || "(none)";
+    throw new PluginLoadError(
+      `Plugin bundle does not export "${entrypoint}". ` +
+        `Available exports: ${available}. ` +
+        `Ensure manifest.entrypoint matches the named export in src/index.ts.`,
+    );
+  }
+
+  const transformer = exported as Record<string, unknown>;
+
+  for (const method of ["metadata", "transform"] as const) {
+    if (typeof transformer[method] !== "function") {
+      throw new PluginLoadError(
+        `Plugin export "${entrypoint}" is missing required method "${method}". ` +
+          `Ensure the export implements the Transformer interface.`,
+      );
+    }
+  }
+
+  return exported as TransformerExport;
 }

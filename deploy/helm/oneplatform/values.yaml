@@ -292,6 +292,35 @@ grafana:
   service:
     port: 3000
 
+# Vector log aggregation — deployed as a DaemonSet so every node in the cluster
+# runs one Vector pod that tails container JSON log files from the node's
+# /var/lib/docker/containers directory (read-only hostPath mount).
+# This mirrors the Docker Compose vector service (docker/vector/vector.yaml).
+#
+# When enabled, the chart creates a DaemonSet, ConfigMap (vector.yaml), and
+# a ServiceAccount with the minimum permissions needed to read log files.
+# Logs are written to the log-data PVC (or stdout for external shippers).
+vector:
+  enabled: false
+  image:
+    repository: timberio/vector
+    tag: "0.39.0-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+  # hostPath for Docker container log files — must match the container runtime
+  # log directory on the cluster nodes.
+  hostLogPath: /var/lib/docker/containers
+  # Additional Vector sinks (e.g. Loki, Elasticsearch, S3) can be configured
+  # by providing a custom vector.yaml via the configOverride key below.
+  # When empty, the default config (docker/vector/vector.yaml) is used.
+  configOverride: ""
+
 # ---------------------------------------------------------------------------
 # Application services
 # Each service block follows the same schema:

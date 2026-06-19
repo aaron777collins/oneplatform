@@ -9,7 +9,7 @@
 import React, { useState, useCallback, useId } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Plus, Trash2, Play, Download, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Play, Download, ChevronLeft, ChevronRight, AlertCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { Label } from "@/components/ui/label.js";
@@ -45,17 +45,17 @@ type WhereOperator =
   | "like" | "in" | "not_in" | "is_null" | "is_not_null";
 
 const OPERATOR_LABELS: Record<WhereOperator, string> = {
-  eq: "=",
-  neq: "!=",
-  gt: ">",
-  gte: ">=",
-  lt: "<",
-  lte: "<=",
-  like: "LIKE",
-  in: "IN",
-  not_in: "NOT IN",
-  is_null: "IS NULL",
-  is_not_null: "IS NOT NULL",
+  eq: "equals",
+  neq: "does not equal",
+  gt: "greater than",
+  gte: "greater than or equal to",
+  lt: "less than",
+  lte: "less than or equal to",
+  like: "contains (pattern)",
+  in: "is one of",
+  not_in: "is not one of",
+  is_null: "is empty",
+  is_not_null: "is not empty",
 };
 
 // Operators that do not take a value input
@@ -156,6 +156,79 @@ function downloadText(content: string, filename: string, mimeType: string): void
 }
 
 // ---------------------------------------------------------------------------
+// TagInput — reusable tag-style multi-value input for IN / NOT IN operators
+// ---------------------------------------------------------------------------
+
+function TagInput({
+  values,
+  onChange,
+  placeholder,
+  className,
+  "aria-label": ariaLabel,
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+  className?: string;
+  "aria-label"?: string;
+}) {
+  const [inputValue, setInputValue] = React.useState("");
+
+  function addValue(val: string) {
+    const trimmed = val.trim();
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed]);
+    }
+    setInputValue("");
+  }
+
+  function removeValue(val: string) {
+    onChange(values.filter((v) => v !== val));
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addValue(inputValue);
+    } else if (e.key === "Backspace" && inputValue === "" && values.length > 0) {
+      removeValue(values[values.length - 1]!);
+    }
+  }
+
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-1 rounded-md border border-[var(--color-input)] bg-[var(--color-background)] px-2 py-1 min-h-[36px] ${className ?? ""}`}
+      aria-label={ariaLabel}
+    >
+      {values.map((val) => (
+        <span
+          key={val}
+          className="inline-flex items-center gap-0.5 rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-2 py-0.5 text-xs"
+        >
+          {val}
+          <button
+            type="button"
+            onClick={() => removeValue(val)}
+            className="ml-0.5 rounded-full hover:bg-[var(--color-primary)]/20 p-0.5"
+            aria-label={`Remove ${val}`}
+          >
+            <X className="h-2.5 w-2.5" aria-hidden />
+          </button>
+        </span>
+      ))}
+      <input
+        className="flex-1 min-w-[80px] border-0 bg-transparent text-xs outline-none placeholder:text-[var(--color-muted-foreground)]"
+        placeholder={values.length === 0 ? placeholder : ""}
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => { if (inputValue.trim()) addValue(inputValue); }}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
@@ -208,20 +281,24 @@ function WhereClauseRow({ clause, fieldOptions, onChange, onRemove }: WhereClaus
         </SelectContent>
       </Select>
 
-      {/* Value input — hidden for nullary operators */}
-      {!isNullary && (
+      {/* Value input — hidden for nullary operators; tag input for IN / NOT IN */}
+      {!isNullary && (clause.operator === "in" || clause.operator === "not_in" ? (
+        <TagInput
+          values={clause.value ? clause.value.split(",").map((v) => v.trim()).filter(Boolean) : []}
+          onChange={(tags) => onChange({ ...clause, value: tags.join(", ") })}
+          placeholder="Type a value and press Enter"
+          aria-label="Values"
+          className="w-48"
+        />
+      ) : (
         <Input
           className="w-48"
-          placeholder={
-            clause.operator === "in" || clause.operator === "not_in"
-              ? "a, b, c"
-              : "value"
-          }
+          placeholder="value"
           value={clause.value}
           onChange={(e) => onChange({ ...clause, value: e.target.value })}
           aria-label="Value"
         />
-      )}
+      ))}
 
       <Button
         variant="ghost"

@@ -31,6 +31,7 @@ export type { LogNamespace } from './logs.js';
 export { createLogNamespace } from './logs.js';
 
 export type {
+  ApiErrorResponse,
   WhoAmIResponse,
   Pipeline,
   PipelineRun,

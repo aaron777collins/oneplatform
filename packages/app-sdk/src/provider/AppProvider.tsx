@@ -199,15 +199,16 @@ export function AppProvider({
       });
 
       // Step 4: fetch /bff/me and /bff/permissions in parallel (C-4).
-      // Wrapped in withRetry so transient BFF/network blips do not permanently
-      // break the app — three attempts with exponential backoff before giving up.
+      // V6-192: Each call retries independently so a transient failure on one
+      // does not reset the retry counter for the other. Both must succeed for
+      // initialisation to complete.
       try {
-        const [meResult] = await withRetry(() =>
-          Promise.all([
+        const [meResult] = await Promise.all([
+          withRetry(() =>
             bffClient.request<{ data: UserContext } | UserContext>("/bff/me"),
-            permissionCache.seed(bffClient),
-          ]),
-        );
+          ),
+          withRetry(() => permissionCache.seed(bffClient)),
+        ]);
 
         if (cancelled) return;
 

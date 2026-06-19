@@ -123,9 +123,20 @@ export function handler(csvText: string): Record<string, unknown>[] {
         type: "code",
         language: "typescript",
         code: `
-export async function handler(records: Record<string, unknown>[]): Promise<{ upserted: number }> {
-  const response = await fetch(
-    process.env["ONTOLOGY_SERVICE_URL"] + "/internal/entities/bulk-upsert",
+// Sandbox code must not reference process.env or global fetch directly.
+// The ontology service URL and the HTTP client are provided via the
+// context object injected by the execution runtime, keeping the sandbox
+// deterministic and environment-agnostic.
+export async function handler(
+  records: Record<string, unknown>[],
+  context: { env: Record<string, string>; fetch: typeof globalThis.fetch },
+): Promise<{ upserted: number }> {
+  const ontologyUrl = context.env["ONTOLOGY_SERVICE_URL"];
+  if (!ontologyUrl) {
+    throw new Error("ONTOLOGY_SERVICE_URL not provided via sandbox context");
+  }
+  const response = await context.fetch(
+    ontologyUrl + "/internal/entities/bulk-upsert",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

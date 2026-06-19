@@ -1,9 +1,9 @@
 /**
- * ServiceHealthGrid — polls GET /healthz on the gateway every 30 seconds
- * and displays the gateway health status only (not all services).
+ * ServiceHealthGrid — polls the gateway health endpoint every 30 seconds
+ * and displays per-service health status for all platform services.
  *
- * Per-service health aggregation is a planned future feature. Currently only
- * the gateway health check endpoint is available.
+ * The gateway /healthz endpoint returns an overall status plus a services
+ * map with individual service statuses.
  *
  * Color is supplemented by text labels per §14.4 (color is never the sole indicator).
  */
@@ -11,7 +11,6 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { useApiClient, ApiError } from "@/lib/api-client.js";
-import { Info } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,10 +24,29 @@ interface ServiceHealth {
   latencyMs?: number;
 }
 
+interface HealthzServiceEntry {
+  status: string;
+  latencyMs?: number;
+}
+
 interface HealthzResponse {
   status: string;
+  services?: Record<string, HealthzServiceEntry>;
   [key: string]: unknown;
 }
+
+/** All platform services to check. The gateway is always included. */
+const ALL_SERVICES = [
+  "Gateway",
+  "Auth",
+  "Ingestion",
+  "Ontology",
+  "Pipeline",
+  "Execution",
+  "App",
+  "Logging",
+  "Plugin",
+] as const;
 
 // ---------------------------------------------------------------------------
 // Status config
@@ -66,25 +84,46 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
       try {
         const result = await client.get<HealthzResponse>("/healthz");
         const latencyMs = Date.now() - start;
+
+        // If the gateway returns per-service status, use it
+        if (result.services !== undefined && Object.keys(result.services).length > 0) {
+          const services: ServiceHealth[] = ALL_SERVICES.map((serviceName) => {
+            const key = serviceName.toLowerCase();
+            const entry = result.services?.[key];
+            if (entry === undefined) {
+              return { name: serviceName, status: "unknown" as ServiceStatus };
+            }
+            const isUp = entry.status === "ok" || entry.status === "healthy";
+            return {
+              name: serviceName,
+              status: isUp ? "healthy" : entry.status === "degraded" ? "degraded" : "down",
+              latencyMs: entry.latencyMs,
+            } as ServiceHealth;
+          });
+          return { data: services };
+        }
+
+        // Fallback: only gateway status available
         const isHealthy = result.status === "ok" || result.status === "healthy";
         return {
-          data: [
-            {
-              name: "Gateway",
-              status: isHealthy ? "healthy" : "degraded",
-              latencyMs,
-            },
-          ],
+          data: ALL_SERVICES.map((serviceName) => {
+            if (serviceName === "Gateway") {
+              return {
+                name: "Gateway",
+                status: isHealthy ? "healthy" : "degraded",
+                latencyMs,
+              } as ServiceHealth;
+            }
+            return { name: serviceName, status: "unknown" as ServiceStatus };
+          }),
         };
       } catch (err) {
         return {
-          data: [
-            {
-              name: "Gateway",
-              status: "down" as ServiceStatus,
-              latencyMs: Date.now() - start,
-            },
-          ],
+          data: ALL_SERVICES.map((serviceName) => ({
+            name: serviceName,
+            status: "down" as ServiceStatus,
+            latencyMs: Date.now() - start,
+          })),
         };
       }
     },
@@ -98,7 +137,7 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
     return (
       <div className={className}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {Array.from({ length: 1 }).map((_, i) => (
+          {Array.from({ length: ALL_SERVICES.length }).map((_, i) => (
             <div key={i} className="flex items-center gap-2">
               <Skeleton className="h-2.5 w-2.5 rounded-full" />
               <Skeleton className="h-4 w-24" />
@@ -134,12 +173,6 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
             No service health data available.
           </p>
         )}
-      </div>
-      <div className="mt-3 flex items-start gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 py-2">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" aria-hidden="true" />
-        <p className="text-xs text-[var(--color-muted-foreground)]">
-          Per-service health aggregation is a planned feature. Currently showing gateway health only.
-        </p>
       </div>
     </div>
   );

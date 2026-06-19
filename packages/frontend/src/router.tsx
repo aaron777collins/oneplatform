@@ -101,7 +101,7 @@ const indexRoute = createRoute({
     // Redirecting here (in the loader, before render) avoids a flash of the
     // BootstrapGatePage component entirely.
     if (status.data.completed) {
-      throw redirect({ to: "/dashboard" });
+      throw redirect({ to: "/login" });
     }
 
     return {

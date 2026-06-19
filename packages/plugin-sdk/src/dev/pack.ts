@@ -444,13 +444,23 @@ async function extractOppkg(packagePath: string): Promise<ExtractedOppkg> {
     }
 
     offset += 512;
-    files[path.basename(name)] = buffer.subarray(offset, offset + size);
+    // Key by the full relative path (e.g. "dist/bundle.js") so entries in
+    // subdirectories are preserved. Also store by basename as a fallback so
+    // both lookup styles work — archives created with older versions may use
+    // flat (basename-only) entries.
+    files[name] = buffer.subarray(offset, offset + size);
+    const baseName = path.basename(name);
+    if (baseName !== name) {
+      files[baseName] = buffer.subarray(offset, offset + size);
+    }
     offset += Math.ceil(size / 512) * 512;
   }
 
+  // Look up by full relative path first, then fall back to basename for
+  // backward compatibility with archives that flatten entries to the root.
   const manifest = files["plugin.manifest.json"];
-  const bundle = files["bundle.js"];
-  const checksumFile = files["bundle.js.sha256"];
+  const bundle = files["dist/bundle.js"] ?? files["bundle.js"];
+  const checksumFile = files["dist/bundle.js.sha256"] ?? files["bundle.js.sha256"];
 
   if (manifest === undefined || bundle === undefined || checksumFile === undefined) {
     throw new Error(
