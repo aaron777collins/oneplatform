@@ -19,18 +19,43 @@ These directives apply to ALL work — analysis, implementation, testing, docume
 | **Low-Code / No-Code First** | Built-in capabilities for essentially everything any user would need. Custom code only for those who want more. |
 | **Future-Proof** | Design for the future. Consider every flow a user would want. Don't just solve today's problem. |
 
-### 1.2 Process Standards
+### 1.2 User Experience Standards
+
+| Directive | Detail |
+|-----------|--------|
+| **No-Code Users First** | The platform must be usable by humans with zero coding experience. Every feature must have a visual, template-based, or wizard-driven path. No user should ever need to write code to accomplish common tasks. |
+| **Developers Love It Too** | Power users and developers must equally enjoy the platform. Provide SDKs, CLI, APIs, plugin extensibility, and custom code hooks. Both audiences — non-coders and senior devs — should find the platform delightful. |
+| **Super Robust** | No issues. No edge cases that crash. No confusing error messages. Every flow must work perfectly, with helpful guidance when things go wrong. |
+| **Amazing to Use** | The platform should feel polished, professional, and intuitive. UI/UX matters. Every interaction should feel intentional and well-crafted. |
+
+### 1.3 Process Standards
 
 | Directive | Detail |
 |-----------|--------|
 | **Full Dev Flow** | Every change goes through: Propose → Architecture Review → Theoretical Test → Implementation → Practical Test → Code Review → loop until perfect. See `DEVELOPMENT-PROCESS.md` §4-8. |
-| **Agents & Sub-Agents** | Always use specialized agents (Architect, Architecture Reviewer, Developer, Tester, Code Reviewer, Explore). Use sub-agents for parallel work. Never do everything in the main context. See `DEVELOPMENT-PROCESS.md` §3. |
-| **Detailed Plans & Todos** | Use TaskCreate to track all work. Break work into discrete steps. Keep tasks updated with TaskUpdate. Mark completed as you go. |
-| **Detailed Prompts** | Every agent prompt must include: context, specific task, constraints, reference documents, output format, and quality criteria. See `DEVELOPMENT-PROCESS.md` §3.3. |
+| **Agents & Sub-Agents for EVERYTHING** | Always use specialized agents (Architect, Architecture Reviewer, Developer, Tester, Code Reviewer, Explore). Use sub-agents for parallel work. Never do everything in the main context. The main context is a **coordinator** — it dispatches agents, synthesizes results, and updates docs. See `DEVELOPMENT-PROCESS.md` §3. |
+| **Agent-Managed Workflows** | For large operations (24+ agents), use workflow scripts to orchestrate. Don't run everything through the main context — delegate to agents that manage sub-workflows. This protects the main context window from exhaustion. |
+| **Detailed Plans & Todos** | Use TaskCreate to track all work. Break work into discrete steps. Keep tasks updated with TaskUpdate. Mark completed as you go. Plans must be detailed enough for a fresh context to pick up. |
+| **Detailed Prompts** | Every agent prompt must include: context, specific task, constraints, reference documents, output format, and quality criteria. See `DEVELOPMENT-PROCESS.md` §3.3. No exceptions. |
 | **Detailed Responses** | Agents must provide comprehensive, specific responses — not summaries or hand-waves. Include file paths, line numbers, code snippets. |
 | **Commit Often, Push Often** | After each logical unit of work (a fix, a feature, a batch of related changes), commit and push. Don't batch everything at the end. |
 | **Keep Docs Up to Date** | Update `docs/WORKING-STATE.md`, `.claude/handoff.md`, and relevant design docs alongside code changes. Not as an afterthought — as part of the same work. |
 | **Write Handoff Docs Often** | Update `.claude/handoff.md` frequently so any session can pick up where the last left off. Include what was done, what's next, and any blockers. |
+| **Autonomous Operation** | Make smart decisions. Don't stop to ask for permission on every small choice. Use best judgment guided by SOLID principles and the quality standards above. Only stop for genuinely ambiguous architectural decisions. |
+
+### 1.4 Context Compaction Recovery
+
+After every context compaction (when conversation history is summarized), the agent MUST:
+
+1. **Re-read** these documents immediately:
+   - `docs/SYSTEM-ANALYSIS-PROTOCOL.md` (this document)
+   - `DEVELOPMENT-PROCESS.md` (full dev pipeline, agent types, prompt requirements)
+   - `docs/WORKING-STATE.md` (current state)
+   - `.claude/handoff.md` (session continuity)
+2. **Re-read** the current task list via TaskList
+3. **Resume** the next pending task — don't restart from scratch
+
+All handoffs, plans, and todos must include **full file path references** so a fresh context can find them. Never assume prior context survives compaction. Every doc must be self-contained enough to bootstrap a fresh agent.
 
 ---
 

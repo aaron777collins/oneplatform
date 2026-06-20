@@ -31,6 +31,39 @@ These principles govern every decision at every level. They are not suggestions 
 | **API First** | Every operation is available via REST API, CLI, and SDKs. The UI is one client of many. |
 | **No Compromise** | Never shortcut for "MVP". Always choose the best option. Finish everything perfectly. |
 
+### 1.3 User Experience Principles
+
+| Principle | How It's Applied |
+|-----------|------------------|
+| **No-Code Users First** | Every feature must have a visual, template-based, or wizard-driven path. Non-coders should be able to do essentially everything without writing code. Built-in capabilities for every common need. |
+| **Developers Love It Too** | Power users get SDKs, CLI, APIs, plugin extensibility, and custom code hooks. Both non-coders and senior devs should find the platform delightful. |
+| **Super Robust** | No edge cases that crash. No confusing error messages. Every flow works perfectly with helpful guidance when things go wrong. |
+| **Amazing to Use** | Polished, professional, intuitive. Every interaction feels intentional and well-crafted. |
+
+### 1.4 Process Principles
+
+| Principle | How It's Applied |
+|-----------|------------------|
+| **Agents & Sub-Agents for Everything** | Main context is a coordinator. Agents do the work. Sub-agents parallelize. Never do everything in one context. See §3 for agent types. |
+| **Agent-Managed Workflows** | Large operations use workflow scripts. Agents manage sub-workflows. This protects the main context from exhaustion. |
+| **Commit Often, Push Often** | After each logical unit of work, commit and push. Don't batch at the end. |
+| **Keep Docs Up to Date** | Update `WORKING-STATE.md`, `handoff.md`, and design docs alongside code changes. Not as an afterthought. |
+| **Write Handoff Docs Often** | `.claude/handoff.md` updated after every significant change. Always includes: what was done, what's next, blockers, and file references. |
+| **Detailed Plans & Todos** | TaskCreate for all work. Detailed descriptions. Keep updated with TaskUpdate. Plans self-contained enough for a fresh context. |
+| **Detailed Prompts & Responses** | Every agent prompt includes: context, task, constraints, references, output format, quality criteria. Responses include file paths, line numbers, code snippets. |
+| **Autonomous Operation** | Make smart decisions. Don't stop for every small choice. Use best judgment guided by SOLID and quality standards. Only pause for genuinely ambiguous architectural decisions. |
+
+### 1.5 Context Compaction Recovery
+
+After every context compaction, the agent MUST re-read:
+1. `DEVELOPMENT-PROCESS.md` (this document — full pipeline, agents, prompts)
+2. `docs/SYSTEM-ANALYSIS-PROTOCOL.md` (analysis protocol, quality gates, user personas)
+3. `docs/WORKING-STATE.md` (current state)
+4. `.claude/handoff.md` (session continuity)
+5. Current task list via TaskList
+
+All handoffs, plans, and todos must include **full file path references** so a fresh context can rebuild. Never assume prior context survives compaction.
+
 ---
 
 ## 2. Reference Hierarchy
