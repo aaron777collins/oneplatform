@@ -192,6 +192,11 @@ export function evaluateCondition(
       if (typeof fieldValue !== "string" || typeof condValue !== "string") {
         return false;
       }
+      // Reject overly complex patterns that could cause catastrophic backtracking.
+      // Patterns with nested quantifiers (e.g., (a+)+) are the primary ReDoS vector.
+      if (/([+*])\s*[)]\s*[+*{]/.test(condValue) || condValue.length > 256) {
+        return false;
+      }
       try {
         const re = new RegExp(condValue);
         return re.test(fieldValue);

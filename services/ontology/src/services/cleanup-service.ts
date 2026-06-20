@@ -68,7 +68,7 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
               continue;
             }
 
-            await db.query(`DROP TABLE ${fullTable}`);
+            await db.query(`DROP TABLE ${fullTable} CASCADE`);
             await shadowRegistryRepo.updateStatus(orphan.id, "dropped");
             tier1++;
             logger.info(`Cleaned up shadow table ${orphan.table_name}`);
@@ -84,7 +84,7 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
         for (const table of unregistered) {
           const fullTable = `${quotePgIdentifier(table["table_schema"])}.${quotePgIdentifier(table["table_name"])}`;
           try {
-            await db.query(`DROP TABLE ${fullTable}`);
+            await db.query(`DROP TABLE ${fullTable} CASCADE`);
             tier3++;
             logger.info(`Cleaned up unregistered shadow table ${table["table_name"]}`);
           } catch (err) {

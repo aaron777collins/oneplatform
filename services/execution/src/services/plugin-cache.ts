@@ -212,11 +212,14 @@ export function createPluginBundleCache(deps: PluginBundleCacheDeps): PluginBund
     // but its forEach method does work for eviction.
     const keysToDelete: string[] = [];
     lru.forEach((_entry, key) => {
-      const parts = key.split(":");
       // key format: "<tenantId>:<pluginId>:<version>"
-      // tenantId may contain hyphens (UUID) but not colons, so split at first two colons
-      const keyPluginId = parts[1];
-      const keyTenantId = parts[0];
+      // Use indexOf to split at exactly the first two colons rather than
+      // split(":") which breaks if any component contains colons.
+      const firstColon = key.indexOf(":");
+      const secondColon = key.indexOf(":", firstColon + 1);
+      if (firstColon === -1 || secondColon === -1) return;
+      const keyTenantId = key.slice(0, firstColon);
+      const keyPluginId = key.slice(firstColon + 1, secondColon);
 
       if (keyPluginId !== pluginId) return;
       if (tenantId !== undefined && tenantId !== null && keyTenantId !== tenantId) return;

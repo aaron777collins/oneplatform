@@ -175,6 +175,15 @@ export function createInternalRoutes(
     const pluginId = c.req.param("pluginId");
     const key = c.req.param("key");
 
+    // Validate all path params to prevent Redis key collision from values
+    // containing the ':' delimiter used in CacheRepository.buildKey().
+    const SAFE_PARAM = /^[\w\-.]+$/;
+    if (!SAFE_PARAM.test(tenantId) || !SAFE_PARAM.test(pluginId)) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "tenantId and pluginId must be URL-safe (no colons).", requestId: c.var.requestId } },
+        400
+      );
+    }
     if (key.length > 256 || !/^[\w\-.:]+$/.test(key)) {
       return c.json(
         { error: { code: "VALIDATION_ERROR", message: "key must be max 256 URL-safe chars.", requestId: c.var.requestId } },
@@ -202,6 +211,14 @@ export function createInternalRoutes(
     const pluginId = c.req.param("pluginId");
     const key = c.req.param("key");
 
+    // Validate path params to prevent Redis key collision (same as GET route)
+    const SAFE_PARAM = /^[\w\-.]+$/;
+    if (!SAFE_PARAM.test(tenantId) || !SAFE_PARAM.test(pluginId)) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "tenantId and pluginId must be URL-safe (no colons).", requestId: c.var.requestId } },
+        400
+      );
+    }
     if (key.length > 256 || !/^[\w\-.:]+$/.test(key)) {
       return c.json(
         { error: { code: "VALIDATION_ERROR", message: "key must be max 256 URL-safe chars.", requestId: c.var.requestId } },
@@ -240,6 +257,14 @@ export function createInternalRoutes(
     const pluginId = c.req.param("pluginId");
     const key = c.req.param("key");
 
+    // Validate path params to prevent Redis key collision (same as GET/PUT routes)
+    const SAFE_PARAM = /^[\w\-.]+$/;
+    if (!SAFE_PARAM.test(tenantId) || !SAFE_PARAM.test(pluginId)) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "tenantId and pluginId must be URL-safe (no colons).", requestId: c.var.requestId } },
+        400
+      );
+    }
     // Apply the same key validation used by GET and PUT — consistency prevents
     // malformed keys from being injected into the Redis key string
     // (plugin:cache:{tenantId}:{pluginId}:{key}).

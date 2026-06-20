@@ -67,7 +67,7 @@ export function createDraftRoutes(deps: DraftRouteDeps): Hono<{ Variables: AppVa
       throw new NotFoundError("Draft not found or already processed.");
     }
 
-    const confirmed = await draftRepo.confirm(c.req.param("id"), user.userId);
+    const confirmed = await draftRepo.confirm(c.req.param("id"), user.userId, user.tenantId);
     if (!confirmed) throw new NotFoundError("Draft not found or already processed.");
 
     return c.json({
@@ -88,7 +88,7 @@ export function createDraftRoutes(deps: DraftRouteDeps): Hono<{ Variables: AppVa
       throw new NotFoundError("Draft not found or already processed.");
     }
 
-    const rejected = await draftRepo.reject(c.req.param("id"));
+    const rejected = await draftRepo.reject(c.req.param("id"), user.tenantId);
     if (!rejected) throw new NotFoundError("Draft not found or already processed.");
 
     return c.json({ id: c.req.param("id"), status: "rejected" });

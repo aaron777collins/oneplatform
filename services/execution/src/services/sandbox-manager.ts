@@ -84,6 +84,7 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
   let consecutivePingMisses = 0;
   let pingIntervalHandle: ReturnType<typeof setInterval> | null = null;
   let recycleTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let isDraining = false;
 
   // ---------------------------------------------------------------------------
@@ -144,10 +145,13 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
   }
 
   function scheduleReconnect(delayMs: number): void {
-    setTimeout(() => {
+    // Store the handle so stop() can cancel a pending reconnect timer
+    reconnectTimeoutHandle = setTimeout(() => {
+      if (isDraining) return; // Do not reconnect during shutdown
       primary.client
         .connect(primary.socketPath)
         .then(() => {
+          reconnectTimeoutHandle = null;
           logger.info("SandboxManager: reconnected to sandbox socket");
           primary.state = "ACTIVE";
           primary.startedAt = new Date();
@@ -158,7 +162,7 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
           logger.warn("SandboxManager: reconnect attempt failed — retrying in 5s", {
             error: err instanceof Error ? err.message : String(err),
           });
-          scheduleReconnect(5_000);
+          if (!isDraining) scheduleReconnect(5_000);
         });
     }, delayMs);
   }
@@ -303,6 +307,7 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
   }
 
   function stop(): void {
+    isDraining = true;
     if (pingIntervalHandle !== null) {
       clearInterval(pingIntervalHandle);
       pingIntervalHandle = null;
@@ -310,6 +315,10 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
     if (recycleTimeoutHandle !== null) {
       clearTimeout(recycleTimeoutHandle);
       recycleTimeoutHandle = null;
+    }
+    if (reconnectTimeoutHandle !== null) {
+      clearTimeout(reconnectTimeoutHandle);
+      reconnectTimeoutHandle = null;
     }
     primary.client.close();
   }

@@ -1,4 +1,5 @@
-import Ajv from "ajv";
+import { createHash } from "node:crypto";
+import Ajv, { type ValidateFunction } from "ajv";
 import type pg from "pg";
 import type { Logger, EventPublisher } from "@oneplatform/core";
 import type { PluginRepository } from "../repositories/plugin-repository.js";
@@ -13,11 +14,30 @@ import {
 
 const ajv = new Ajv({ allErrors: true, useDefaults: false });
 
+// Bounded cache for compiled Ajv validators (same approach as instance-service)
+const MAX_VALIDATOR_CACHE_SIZE = 500;
+const validatorCache = new Map<string, ValidateFunction>();
+
+function getOrCompileValidator(schema: Record<string, unknown>): ValidateFunction {
+  const schemaJson = JSON.stringify(schema);
+  const hash = createHash("sha256").update(schemaJson).digest("hex");
+  let validator = validatorCache.get(hash);
+  if (validator === undefined) {
+    if (validatorCache.size >= MAX_VALIDATOR_CACHE_SIZE) {
+      const firstKey = validatorCache.keys().next().value as string;
+      validatorCache.delete(firstKey);
+    }
+    validator = ajv.compile(schema);
+    validatorCache.set(hash, validator);
+  }
+  return validator;
+}
+
 function validateConfigAgainstSchema(
   config: Record<string, unknown>,
   schema: Record<string, unknown>
 ): { valid: boolean; errors: string[] } {
-  const validate = ajv.compile(schema);
+  const validate = getOrCompileValidator(schema);
   const valid = validate(config) as boolean;
   if (valid) return { valid: true, errors: [] };
   const errors = (validate.errors ?? []).map((err) => {

@@ -117,12 +117,31 @@ export class ApprovalAlreadyDecidedError extends Error {
 // Factory
 // ---------------------------------------------------------------------------
 
+// Maximum number of completed/timed-out approval records to retain. Once this
+// threshold is exceeded, a sweep evicts all terminal entries.
+const MAX_TERMINAL_ENTRIES = 10_000;
+
 export function createApprovalService(): ApprovalService {
   // Composite key `${executionId}:${stepId}` → approval record
   const store = new Map<string, ApprovalRecord>();
 
   function key(executionId: string, stepId: string): string {
     return `${executionId}:${stepId}`;
+  }
+
+  /** Evict completed/timed-out records to prevent unbounded memory growth. */
+  function evictTerminalEntries(): void {
+    let terminalCount = 0;
+    for (const record of store.values()) {
+      if (record.status !== "pending") terminalCount++;
+    }
+    if (terminalCount > MAX_TERMINAL_ENTRIES) {
+      for (const [k, record] of store) {
+        if (record.status !== "pending") {
+          store.delete(k);
+        }
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -206,6 +225,7 @@ export function createApprovalService(): ApprovalService {
     };
 
     store.set(k, updated);
+    evictTerminalEntries();
     return updated;
   }
 

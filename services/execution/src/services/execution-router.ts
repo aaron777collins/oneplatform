@@ -392,13 +392,16 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
     let forceKilled = false;
 
     // Timeout enforcement via Node.js timer — spec §5.2
-    const forceKillTimer = setTimeout(async () => {
+    // Use a synchronous callback to avoid race conditions between the async
+    // deleteDockerContainer and the try/finally block. The forceKilled flag
+    // is set synchronously so the check after clearTimeout is reliable.
+    const forceKillTimer = setTimeout(() => {
       forceKilled = true;
       logger.warn("ExecutionRouter: Docker container timeout — force deleting", {
         executionId: request.executionId,
         containerId,
       });
-      await deleteDockerContainer(dockerSocketPath, containerId, true).catch(() => undefined);
+      void deleteDockerContainer(dockerSocketPath, containerId, true).catch(() => undefined);
     }, request.timeout);
 
     try {

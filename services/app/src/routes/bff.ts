@@ -27,6 +27,8 @@ export interface BffRouteDeps {
   permRepo:       PermissionRepository;
   permService:    PermissionService;
   authServiceUrl: string;
+  /** Execution service URL for data proxy routes. Falls back to EXECUTION_SERVICE_URL env var. */
+  executionServiceUrl?: string;
   // masterKey injected once at startup — never call loadMasterKey() per-request (W10)
   masterKey:      Buffer;
   redis:          Redis;
@@ -41,6 +43,7 @@ export interface BffRouteDeps {
 export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { appRepo, permRepo, permService, authServiceUrl, masterKey, redis, logger, serviceTokenSigner } = deps;
+  const executionServiceUrl = deps.executionServiceUrl ?? process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
 
   // ---------------------------------------------------------------------------
   // V5-017 — Entity-level RBAC enforcement for data proxy routes
@@ -228,7 +231,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     // V5-017: enforce entity-level RBAC before forwarding to execution service
     await assertEntityPermission(appId, user.roles, entity, "read");
 
-    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    // executionServiceUrl is derived from deps at factory time (see above)
 
     const queryParams = new URLSearchParams(c.req.query()).toString();
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}${queryParams ? `?${queryParams}` : ""}`;
@@ -278,7 +281,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
 
     const body = await c.req.json().catch(() => null);
 
-    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    // executionServiceUrl is derived from deps at factory time (see above)
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}`;
 
     const resp = await fetch(upstreamUrl, {
@@ -338,7 +341,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     await assertEntityPermission(appId, user.roles, entity, "update");
 
     const body = await c.req.json().catch(() => null);
-    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    // executionServiceUrl is derived from deps at factory time (see above)
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/${encodeURIComponent(itemId)}`;
 
     const resp = await fetch(upstreamUrl, {
@@ -387,7 +390,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     await assertEntityPermission(appId, user.roles, entity, "update");
 
     const body = await c.req.json().catch(() => null);
-    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    // executionServiceUrl is derived from deps at factory time (see above)
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/${encodeURIComponent(itemId)}`;
 
     const resp = await fetch(upstreamUrl, {
@@ -435,7 +438,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     // V5-017: enforce entity-level RBAC before forwarding to execution service
     await assertEntityPermission(appId, user.roles, entity, "delete");
 
-    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    // executionServiceUrl is derived from deps at factory time (see above)
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/${encodeURIComponent(itemId)}`;
 
     const resp = await fetch(upstreamUrl, {
@@ -481,7 +484,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     await assertEntityPermission(appId, user.roles, entity, "create");
 
     const body = await c.req.json().catch(() => null);
-    const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
+    // executionServiceUrl is derived from deps at factory time (see above)
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/bulk`;
 
     const resp = await fetch(upstreamUrl, {

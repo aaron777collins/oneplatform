@@ -97,9 +97,9 @@ async function evaluateFilter(
   filterExpr: string,
   eventData: Record<string, unknown>,
 ): Promise<boolean> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
     const expr = jsonata(filterExpr);
-    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => reject(new FilterTimeoutError()), 100);
     });
@@ -114,6 +114,9 @@ async function evaluateFilter(
   } catch {
     // Timeout or evaluation errors are fail-open for event triggers
     return true;
+  } finally {
+    // Always clear the timeout to prevent dangling timer resources
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }
 }
 

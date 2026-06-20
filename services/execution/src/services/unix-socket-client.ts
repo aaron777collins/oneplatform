@@ -111,6 +111,10 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
   const { logger } = deps;
 
   let socket: net.Socket | null = null;
+  // Use a buffer list to avoid O(n^2) Buffer.concat on every data chunk.
+  // Chunks are collected in an array and only concatenated when needed for parsing.
+  let readChunks: Buffer[] = [];
+  let readBufferTotalLength = 0;
   let readBuffer = Buffer.alloc(0);
 
   // Pending requests keyed by correlation ID. Each entry holds the resolve/reject
@@ -247,6 +251,8 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
 
   async function connect(socketPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      readChunks = [];
+      readBufferTotalLength = 0;
       readBuffer = Buffer.alloc(0);
       const s = net.createConnection(socketPath);
 
@@ -257,8 +263,20 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
       });
 
       s.on("data", (chunk: Buffer) => {
-        readBuffer = Buffer.concat([readBuffer, chunk]);
+        // Collect chunks and only concatenate when processing, reducing O(n^2)
+        // Buffer.concat overhead for high-throughput log streams.
+        readChunks.push(chunk);
+        readBufferTotalLength += chunk.length;
+        readBuffer = Buffer.concat(readChunks, readBufferTotalLength);
         processReadBuffer();
+        // After processing, update chunks to only contain the remaining buffer
+        if (readBuffer.length > 0) {
+          readChunks = [readBuffer];
+          readBufferTotalLength = readBuffer.length;
+        } else {
+          readChunks = [];
+          readBufferTotalLength = 0;
+        }
       });
 
       s.on("error", (err: Error) => {

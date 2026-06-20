@@ -132,13 +132,11 @@ export function createEntityRepository(db: pg.Pool): EntityRepository {
     },
 
     async countDataRows(schemaName, entitySlug) {
-      // Escape embedded double quotes to prevent SQL injection via identifier
-      // interpolation. PostgreSQL's quoted-identifier syntax requires doubling
-      // any literal double-quote character inside the delimiters.
-      const safeSchema = schemaName.replace(/"/g, '""');
-      const safeSlug = entitySlug.replace(/"/g, '""');
+      // Use quotePgIdentifier for consistency with the rest of the codebase.
+      // It validates identifiers against a strict regex and double-quote escapes.
+      const table = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(entitySlug)}`;
       const result = await db.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM "${safeSchema}"."${safeSlug}"`,
+        `SELECT COUNT(*)::text AS count FROM ${table}`,
       );
       return parseInt(result.rows[0]!["count"], 10);
     },

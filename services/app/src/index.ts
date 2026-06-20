@@ -174,11 +174,14 @@ async function checkGuestRateLimit(
   ip: string
 ): Promise<boolean> {
   const key    = `rate:guest-session:${ip}`;
-  const count  = await redis.incr(key);
-  if (count === 1) {
-    // Set TTL on first request so the counter resets each minute
-    await redis.expire(key, 60);
-  }
+  // Use a pipeline to make INCR + EXPIRE atomic, preventing the case where
+  // EXPIRE fails after INCR and the key persists forever without a TTL.
+  const pipeline = redis.pipeline();
+  pipeline.incr(key);
+  pipeline.expire(key, 60);
+  const results = await pipeline.exec();
+  // results[0] is the INCR result: [error, value]
+  const count = (results?.[0]?.[1] as number) ?? 1;
   return count <= 20;
 }
 
@@ -478,6 +481,16 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     const slug    = c.req.param("slug");
     const rawPath = c.req.url.split(`/apps/${slug}/`)[1] ?? "";
 
+    // Prevent path traversal attacks. Reject any rawPath containing '..'
+    // segments that could escape the app's directory in MinIO.
+    const decodedPath = decodeURIComponent(rawPath);
+    if (decodedPath.split("/").some((seg) => seg === ".." || seg === ".")) {
+      return c.json(
+        { error: { code: "INVALID_PATH", message: "Path traversal is not allowed." } },
+        400
+      );
+    }
+
     // Resolve app by slug — check public first, then require a validated
     // session for platform-user apps (B4).
     let tenantApp = await appRepo.findPublicBySlug(slug);
@@ -535,9 +548,11 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
           const guestData = await guestResponse.json() as { token?: string };
           if (guestData.token !== undefined) {
             // Set the guest session cookie; HttpOnly + SameSite=Lax
+            // Sanitize slug in Path to prevent cookie attribute injection via semicolons.
+            const safeCookieSlug = encodeURIComponent(slug);
             c.header(
               "Set-Cookie",
-              `op_guest_session=${guestData.token}; Path=/apps/${slug}; HttpOnly; SameSite=Lax; Max-Age=86400`
+              `op_guest_session=${guestData.token}; Path=/apps/${safeCookieSlug}; HttpOnly; SameSite=Lax; Max-Age=86400`
             );
           }
         }
@@ -687,6 +702,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
     });
 
     sub.on("error", () => {
+      clearInterval(keepAlive);
       void writer.close();
       void sub.unsubscribe(channel).catch(() => {});
       void sub.quit();
@@ -817,12 +833,24 @@ async function main(): Promise<void> {
             res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
             void response.arrayBuffer().then((buf: ArrayBuffer) => {
               res.end(Buffer.from(buf));
+            }).catch((err: unknown) => {
+              console.error("Unhandled error reading response body:", err);
+              if (!res.headersSent) {
+                res.writeHead(500, { "Content-Type": "text/plain" });
+              }
+              res.end("Internal Server Error");
             });
           }
         };
 
         if (responseOrPromise instanceof Promise) {
-          void responseOrPromise.then(handleResponse);
+          void responseOrPromise.then(handleResponse).catch((err: unknown) => {
+            console.error("Unhandled error in app.fetch:", err);
+            if (!res.headersSent) {
+              res.writeHead(500, { "Content-Type": "text/plain" });
+            }
+            res.end("Internal Server Error");
+          });
         } else {
           handleResponse(responseOrPromise);
         }

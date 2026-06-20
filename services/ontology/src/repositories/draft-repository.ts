@@ -6,8 +6,8 @@ export interface DraftRepository {
   findById(id: string): Promise<DraftOntologyRow | null>;
   findByConnectorId(connectorId: string, status?: string): Promise<DraftOntologyRow[]>;
   findByTenantId(tenantId: string): Promise<DraftOntologyRow[]>;
-  confirm(id: string, confirmedBy: string): Promise<DraftOntologyRow | null>;
-  reject(id: string): Promise<boolean>;
+  confirm(id: string, confirmedBy: string, tenantId?: string): Promise<DraftOntologyRow | null>;
+  reject(id: string, tenantId?: string): Promise<boolean>;
 }
 
 export function createDraftRepository(db: pg.Pool): DraftRepository {
@@ -63,23 +63,33 @@ export function createDraftRepository(db: pg.Pool): DraftRepository {
       return result.rows;
     },
 
-    async confirm(id, confirmedBy) {
+    async confirm(id, confirmedBy, tenantId?) {
+      // Include tenant_id in WHERE clause when provided for defense-in-depth
+      // against TOCTOU races between findById tenant check and confirm.
+      const tenantClause = tenantId !== undefined ? " AND tenant_id = $3" : "";
+      const params: unknown[] = [confirmedBy, id];
+      if (tenantId !== undefined) params.push(tenantId);
       const result = await db.query<DraftOntologyRow>(
         `UPDATE ontology.draft_ontologies
          SET status = 'confirmed', confirmed_at = now(), confirmed_by = $1, updated_at = now()
-         WHERE id = $2 AND status = 'draft'
+         WHERE id = $2 AND status = 'draft'${tenantClause}
          RETURNING *`,
-        [confirmedBy, id],
+        params,
       );
       return result.rows[0] ?? null;
     },
 
-    async reject(id) {
+    async reject(id, tenantId?) {
+      // Include tenant_id in WHERE clause when provided for defense-in-depth
+      // against TOCTOU races between findById tenant check and reject.
+      const tenantClause = tenantId !== undefined ? " AND tenant_id = $2" : "";
+      const params: unknown[] = [id];
+      if (tenantId !== undefined) params.push(tenantId);
       const result = await db.query(
         `UPDATE ontology.draft_ontologies
          SET status = 'rejected', updated_at = now()
-         WHERE id = $1 AND status = 'draft'`,
-        [id],
+         WHERE id = $1 AND status = 'draft'${tenantClause}`,
+        params,
       );
       return result.rowCount !== null && result.rowCount > 0;
     },

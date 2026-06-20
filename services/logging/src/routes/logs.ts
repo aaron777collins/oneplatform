@@ -191,18 +191,28 @@ export function createLogRoutes(
                 : {}),
             });
 
+            // Sanitize a CSV cell value to prevent formula injection in
+            // spreadsheet applications. Prefix cells starting with formula
+            // trigger characters with a single quote.
+            const sanitizeCsvCell = (val: string): string => {
+              if (val.length > 0 && "=+-@\t\r".includes(val[0]!)) {
+                return "'" + val;
+              }
+              return val;
+            };
+
             for (const row of rows) {
               let line: string;
               if (format === "csv") {
                 const meta = JSON.stringify(row.metadata).replace(/"/g, '""');
                 line = [
                   row.id,
-                  `"${row.trace_id.replace(/"/g, '""')}"`,
-                  `"${row.service.replace(/"/g, '""')}"`,
+                  `"${sanitizeCsvCell(row.trace_id).replace(/"/g, '""')}"`,
+                  `"${sanitizeCsvCell(row.service).replace(/"/g, '""')}"`,
                   row.level,
-                  `"${row.message.replace(/"/g, '""')}"`,
+                  `"${sanitizeCsvCell(row.message).replace(/"/g, '""')}"`,
                   row.created_at.toISOString(),
-                  `"${meta}"`,
+                  `"${sanitizeCsvCell(meta)}"`,
                 ].join(",");
               } else {
                 line = JSON.stringify(mapRow(row));

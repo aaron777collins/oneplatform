@@ -41,6 +41,7 @@ export { useSubscription } from "./hooks/useSubscription.js";
 export { useUser } from "./hooks/useUser.js";
 export { usePermission } from "./hooks/usePermission.js";
 export { useAppStorage } from "./hooks/useAppStorage.js";
+export { useQueryInvalidation } from "./hooks/useQueryInvalidation.js";
 
 // UI components
 export {

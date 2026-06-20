@@ -206,7 +206,7 @@ describe("InstanceService.createInstance — plugin resolution", () => {
   });
 
   it("throws PluginNotFoundError when neither lookup finds the plugin", async () => {
-    pluginRepo.findById.mockRejectedValue(new Error("bad uuid"));
+    pluginRepo.findById.mockRejectedValue(Object.assign(new Error("bad uuid"), { code: "22P02" }));
     pluginRepo.findActiveByManifestId.mockResolvedValue(null);
 
     await expect(
@@ -221,7 +221,7 @@ describe("InstanceService.createInstance — plugin resolution", () => {
   });
 
   it("throws PluginNotActiveError when plugin is not in active status", async () => {
-    pluginRepo.findById.mockRejectedValue(new Error("bad uuid"));
+    pluginRepo.findById.mockRejectedValue(Object.assign(new Error("bad uuid"), { code: "22P02" }));
     pluginRepo.findActiveByManifestId.mockResolvedValue(
       makePluginRow({ status: "installed" })
     );
@@ -486,8 +486,9 @@ describe("InstanceService.createInstance — Ajv config validation", () => {
 
     // First call: UUID lookup fails (input is a manifest_id string, not a UUID).
     // Second call: enableInstance resolves the plugin by its actual UUID.
+    const pgError = Object.assign(new Error("bad uuid"), { code: "22P02" });
     pluginRepo.findById
-      .mockRejectedValueOnce(new Error("bad uuid"))
+      .mockRejectedValueOnce(pgError)
       .mockResolvedValue(plugin);
     pluginRepo.findActiveByManifestId.mockResolvedValue(plugin);
     instanceRepo.create.mockResolvedValue(makeInstanceRow());

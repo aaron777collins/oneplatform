@@ -105,6 +105,14 @@ export function createVersionRoutes(deps: VersionRouteDeps): Hono<{ Variables: A
     }
     const buildId = c.req.param("buildId");
 
+    // Verify tenant ownership of the build before streaming logs.
+    // Without this check, any authenticated user who knows a buildId could
+    // subscribe to another tenant's build logs.
+    const build = await buildService.getBuild(user.tenantId, appId, buildId);
+    if (build === null) {
+      throw new NotFoundError("Build not found.");
+    }
+
     const LOG_KEY     = `app:build-logs:${buildId}`;
     const LOG_CHANNEL = `app:build:${buildId}:log`;
 

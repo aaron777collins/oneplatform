@@ -1,4 +1,5 @@
-import Ajv from "ajv";
+import { createHash } from "node:crypto";
+import Ajv, { type ValidateFunction } from "ajv";
 import type pg from "pg";
 import type { Logger, EventPublisher } from "@oneplatform/core";
 import type { InstanceRepository } from "../repositories/instance-repository.js";
@@ -27,6 +28,28 @@ import {
 // ---------------------------------------------------------------------------
 const ajv = new Ajv({ allErrors: true, useDefaults: false });
 
+// Bounded cache for compiled Ajv validators keyed by a hash of the schema
+// JSON. This prevents unbounded memory growth from ajv.compile() creating a
+// new internal cache entry for each distinct schema object.
+const MAX_VALIDATOR_CACHE_SIZE = 500;
+const validatorCache = new Map<string, ValidateFunction>();
+
+function getOrCompileValidator(schema: Record<string, unknown>): ValidateFunction {
+  const schemaJson = JSON.stringify(schema);
+  const hash = createHash("sha256").update(schemaJson).digest("hex");
+  let validator = validatorCache.get(hash);
+  if (validator === undefined) {
+    // Evict oldest entries if cache is full (simple FIFO eviction)
+    if (validatorCache.size >= MAX_VALIDATOR_CACHE_SIZE) {
+      const firstKey = validatorCache.keys().next().value as string;
+      validatorCache.delete(firstKey);
+    }
+    validator = ajv.compile(schema);
+    validatorCache.set(hash, validator);
+  }
+  return validator;
+}
+
 // ---------------------------------------------------------------------------
 // Validate a plugin instance config object against the plugin manifest's
 // configSchema (JSON Schema Draft-07).
@@ -38,8 +61,8 @@ function validateConfigAgainstSchema(
   config: Record<string, unknown>,
   schema: Record<string, unknown>
 ): { valid: boolean; errors: string[] } {
-  // compile() caches by schema identity; safe to call on every request.
-  const validate = ajv.compile(schema);
+  // Use a bounded cache to avoid unbounded Ajv internal cache growth.
+  const validate = getOrCompileValidator(schema);
   const valid = validate(config) as boolean;
 
   if (valid) {
@@ -292,7 +315,18 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
   return {
     async createInstance({ pluginIdOrManifestId, tenantId, displayName, config, createdBy }) {
       // Resolve plugin — must be active.
-      let plugin = await pluginRepo.findById(pluginIdOrManifestId).catch(() => null);
+      // First try by ID, then fall back to manifest ID. Only catch errors
+      // that indicate the input is not a UUID (findById may throw a
+      // pg invalid_text_representation error for non-UUID strings).
+      // Re-throw actual infrastructure failures (connection errors, etc.).
+      let plugin: Awaited<ReturnType<typeof pluginRepo.findById>> | null = null;
+      try {
+        plugin = await pluginRepo.findById(pluginIdOrManifestId);
+      } catch (err: unknown) {
+        // PostgreSQL error code 22P02 = invalid_text_representation (not a valid UUID)
+        const pgCode = (err as { code?: string }).code;
+        if (pgCode !== "22P02") throw err;
+      }
       if (plugin === null) {
         plugin = await pluginRepo.findActiveByManifestId(pluginIdOrManifestId);
       }

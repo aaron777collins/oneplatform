@@ -729,6 +729,11 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     });
 
     for (const id of killedExecutionIds) {
+      // Clean up in-memory maps to prevent stale entries that could cause
+      // context calls to be incorrectly routed to dead execution contexts.
+      executionStartedAt.delete(id);
+      activeExecutionContexts.delete(id);
+
       // Best-effort DB update and SSE notification — crash recovery must not block
       executionRepo
         .updateStatus(id, {

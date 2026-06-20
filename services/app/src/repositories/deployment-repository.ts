@@ -122,6 +122,9 @@ export class DeploymentRepository {
       throw new Error(`update() called with no fields to update for build ${id}`);
     }
 
+    // Always update the updated_at timestamp on writes
+    sets.push(`updated_at = now()`);
+
     values.push(id);
 
     const result = await this.pool.query<BuildRow>(

@@ -6,6 +6,10 @@ import type { Logger } from "@oneplatform/core";
 // replay all lines via Last-Event-ID without a full DB round-trip.
 const LOG_BUFFER_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// Maximum log lines retained per execution to prevent memory exhaustion from
+// executions producing extremely high volumes of output.
+const MAX_LOG_BUFFER_SIZE = 50_000;
+
 // ---------------------------------------------------------------------------
 // SseManager — fan-out SSE log streaming for in-progress executions
 // Design spec §4.3
@@ -195,6 +199,11 @@ export function createSseManager(deps: SseManagerDeps): SseManager {
     if (buf === undefined) {
       buf = [];
       logBuffers.set(executionId, buf);
+    }
+    // Cap the buffer to prevent memory exhaustion from high-output executions.
+    // Once the cap is reached, old entries are discarded (ring buffer behavior).
+    if (buf.length >= MAX_LOG_BUFFER_SIZE) {
+      buf.shift();
     }
     buf.push(logLine);
 

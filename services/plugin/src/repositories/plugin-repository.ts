@@ -127,13 +127,16 @@ export class PluginRepository {
     );
     const total = parseInt(countResult.rows[0]?.["count"] ?? "0", 10);
 
-    // Add cursor condition after the total count to avoid skewing it
+    // Add cursor condition after the total count to avoid skewing it.
+    // The cursor is a plugin ID; we use a composite condition on
+    // (installed_at, id) to match the ORDER BY and avoid skipping rows
+    // whose installed_at timestamps collide with the cursor row.
     const paginatedConditions = [...conditions];
     const paginatedValues = [...values];
     if (options.cursor !== undefined) {
-      // ORDER BY id DESC means the next page contains rows with id < cursor,
-      // not id > cursor (which would travel backwards toward the first page).
-      paginatedConditions.push(`id < $${idx++}`);
+      paginatedConditions.push(
+        `(installed_at, id) < ((SELECT installed_at, id FROM plugin.plugins WHERE id = $${idx++}))`
+      );
       paginatedValues.push(options.cursor);
     }
     paginatedValues.push(options.limit);

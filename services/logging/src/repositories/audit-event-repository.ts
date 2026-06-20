@@ -178,8 +178,26 @@ export class AuditEventRepository {
    */
   async queryByResource(
     resourceType: string,
-    resourceId: string
+    resourceId: string,
+    tenantId?: string
   ): Promise<AuditEventRow[]> {
+    // When tenantId is provided, enforce tenant isolation to prevent
+    // cross-tenant data leakage. All public callers should supply tenantId.
+    if (tenantId !== undefined) {
+      const result = await this.db.query<AuditEventRow>(
+        `SELECT id, trace_id, actor_id, actor_type, tenant_id, action,
+                resource_type, resource_id, result, metadata, created_at,
+                archived, job_id
+         FROM logging.audit_events
+         WHERE resource_type = $1
+           AND resource_id = $2
+           AND tenant_id = $3
+         ORDER BY created_at DESC
+         LIMIT 500`,
+        [resourceType, resourceId, tenantId]
+      );
+      return result.rows;
+    }
     const result = await this.db.query<AuditEventRow>(
       `SELECT id, trace_id, actor_id, actor_type, tenant_id, action,
               resource_type, resource_id, result, metadata, created_at,

@@ -233,6 +233,7 @@ const SSRF_BLOCKED_PATTERNS = [
   /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
+  /^https?:\/\/\[fe80:/i,               // IPv6 link-local addresses
   /^https?:\/\/0\.0\.0\.0(:\d+)?(\/|$)/,
   /^https?:\/\/metadata\.google\.internal(:\d+)?(\/|$)/,
   /^https?:\/\/100\.100\.100\.200(:\d+)?(\/|$)/,
@@ -1762,6 +1763,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
               status: "failed",
               error: { code: "PIPELINE_HOOK_CRITICAL_FAILURE", message: errMessage },
             });
+            // Update SSE tracker to reflect the step as failed so real-time
+            // subscribers see the correct status (was set to 'completed' above).
+            executionTracker?.updateStepStatus(runId, step.id, "failed");
             failedStepId = step.id;
             failureError = err instanceof Error ? err : new Error(errMessage);
             break stepTraversal;
