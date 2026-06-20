@@ -46,11 +46,12 @@ npm run build
 # 3. Validate the manifest before packaging
 npm run validate
 
-# 4. Package and install into your platform instance
+# 4. Package the plugin into a .oppkg bundle
 op plugin pack
-op plugin install ./dist/example-shopify-products-1.0.0.oplugin \
-  --platform https://your-instance.example.com \
-  --api-key op_live_...
+
+# 5. Install into your platform instance
+#    (authenticate first: op auth login --platform https://your-instance.example.com --key op_live_...)
+op plugin install ./dist/example-shopify-products-1.0.0.oppkg
 ```
 
 After installation, create a connector instance from the platform UI under

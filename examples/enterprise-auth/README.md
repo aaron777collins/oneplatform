@@ -48,18 +48,20 @@ export OP_API_KEY="op_live_..."
 The fastest way to set up a fully configured tenant with enterprise SSO:
 
 ```bash
-# 1. Create a tenant with an admin user, import roles, and configure OIDC + LDAP
-./scripts/create-tenant.sh \
-  --tenant-name "Acme Corporation" \
-  --tenant-slug "acme-corp" \
-  --admin-email "admin@acme-corp.com" \
-  --setup-oidc \
-  --setup-ldap
+# 1. Create a tenant with authentication providers configured via scripts
+./scripts/create-tenant.sh --tenant acme-corp
+./scripts/setup-oidc.sh --tenant-id acme-corp
+./scripts/setup-ldap.sh --tenant-id acme-corp
 
-# 2. Verify the setup
-op auth login --tenant <tenant-id> --email admin@acme-corp.com
+# 2. Invite the admin user to the new tenant
+op user invite --email admin@acme-corp.com --role tenant-admin
+
+# 3. Verify authentication works
+op auth login --platform https://your-instance.example.com --key <admin-api-key>
 op auth whoami
-op auth roles list
+
+# 4. List existing roles
+op role list
 ```
 
 If you prefer to configure each piece individually, follow the step-by-step
@@ -346,14 +348,23 @@ Beyond scopes, roles can define fine-grained permissions on specific entity type
 
 See the `entityPermissions` section in `rbac-roles.json` for examples.
 
-### Importing roles
+### Creating roles
+
+The `configs/rbac-roles.json` file documents the roles and their permissions. Create them one at a time with the CLI:
 
 ```bash
-# Roles are imported automatically by create-tenant.sh, or manually:
-op auth roles import --config configs/rbac-roles.json --tenant <tenant-id>
+# Create each custom role with its permission scopes
+op role create --name "data-engineer" \
+  --permissions "data:read,data:write,ontology:read,ontology:write,pipelines:read,pipelines:trigger,pipelines:manage,plugins:read,execution:read,execution:run"
+
+op role create --name "business-analyst" \
+  --permissions "data:read,ontology:read,apps:read,apps:deploy,execution:read,execution:run"
+
+op role create --name "viewer" \
+  --permissions "data:read,ontology:read,apps:read,pipelines:read,execution:read,logs:read"
 
 # Verify roles
-op auth roles list --tenant <tenant-id>
+op role list
 ```
 
 ---
@@ -452,16 +463,16 @@ text.
 
 ```bash
 # Via the CLI
-op auth api-keys create \
+op auth generate-key \
   --name "ETL Pipeline Service" \
   --scopes "data:read,data:write,pipelines:trigger" \
   --expires "2027-01-01T00:00:00Z"
 ```
 
-Or via the API:
+Or via the REST API:
 
 ```bash
-curl -X POST "$OP_PLATFORM_URL/api/v1/api-keys" \
+curl -X POST "$OP_PLATFORM_URL/api/v1/auth/api-keys" \
   -H "Authorization: Bearer $OP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -481,11 +492,24 @@ or a subset. This prevents privilege escalation through key creation.
 
 ### Key rotation
 
-Rotate a key atomically (the old key is revoked and a new key is created in a
-single transaction, so there is no window where neither key works):
+Rotate a key atomically (the old key stays valid during an overlap period so you
+have time to update dependent services):
 
 ```bash
-op auth api-keys rotate <key-id>
+# Rotate a key with a 1-hour overlap (default)
+op auth rotate-key <key-id>
+
+# Rotate with a 30-minute overlap
+op auth rotate-key <key-id> --overlap 30m
+```
+
+The command prints the new key and the time the old key expires. Update the new
+key in your secrets manager before the overlap period ends.
+
+To list all keys and find the ID to rotate:
+
+```bash
+op auth list-keys
 ```
 
 ### Key lifecycle management
@@ -570,9 +594,20 @@ section in `audit-policy.json` for the full configuration.
 
 ### Applying the audit policy
 
+The audit policy is applied via the REST API (there is no dedicated CLI command for this):
+
 ```bash
-op audit policy apply --config configs/audit-policy.json
-op audit policy show
+curl -X PUT "$OP_PLATFORM_URL/api/v1/admin/audit-policy" \
+  -H "Authorization: Bearer $OP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @configs/audit-policy.json
+
+# To view the current policy:
+curl -s "$OP_PLATFORM_URL/api/v1/admin/audit-policy" \
+  -H "Authorization: Bearer $OP_API_KEY" | jq .
+
+# To query the audit log:
+op logs audit --from "2026-01-01" --to "2026-12-31" --action auth.login
 ```
 
 ---

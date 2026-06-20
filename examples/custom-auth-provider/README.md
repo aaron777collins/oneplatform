@@ -59,10 +59,12 @@ npm run build
 ### 4. Validate the Manifest
 
 ```bash
-op plugin validate
+# Pack the plugin first, then validate the resulting .oppkg
+op plugin pack
+op plugin validate ./dist/com.example.saml-auth-provider-1.0.0.oppkg
 ```
 
-This checks that `manifest.json` conforms to the platform's manifest schema and that the entrypoint matches the bundle's exports.
+This checks that `plugin.manifest.json` conforms to the platform's manifest schema and that the entrypoint matches the bundle's exports.
 
 ### 5. Package for Installation
 
@@ -78,14 +80,23 @@ This creates a `.oppkg` file in `dist/` that can be installed into a running One
 op plugin install ./dist/com.example.saml-auth-provider-1.0.0.oppkg
 ```
 
-### 7. Configure for a Tenant
+### 7. Enable for a Tenant
 
-After installing the plugin, enable it for a tenant through the platform UI or CLI:
+After installing the plugin, enable it for a specific tenant via the CLI:
 
 ```bash
-op plugin enable com.example.saml-auth-provider \
-  --tenant acme-corp \
-  --config '{
+op plugin enable com.example.saml-auth-provider --tenant acme-corp
+```
+
+Then configure the plugin's instance settings (IdP entity ID, SSO URL, certificate, etc.)
+through the platform UI under **Settings > Plugins > SAML Auth Provider > Configure**, or
+via the REST API:
+
+```bash
+curl -X PUT "$OP_PLATFORM_URL/api/v1/plugins/com.example.saml-auth-provider/config" \
+  -H "Authorization: Bearer $OP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
     "idpEntityId": "https://idp.example.com/saml/metadata",
     "idpSsoUrl": "https://idp.example.com/saml/sso",
     "idpCertificate": "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----",
@@ -300,11 +311,16 @@ op plugin pack
 
 ### 3. Publish
 
+Run from the plugin project root (the directory containing `plugin.manifest.json`):
+
 ```bash
-op plugin publish ./dist/com.yourcompany.saml-provider-1.0.0.oppkg \
-  --platform https://marketplace.oneplatform.io \
-  --api-key op_live_...
+# Pack the plugin (creates dist/<id>-<version>.oppkg) and publish to the marketplace
+op plugin publish --category authentication --tags "saml,sso,enterprise"
 ```
+
+The `publish` command reads `plugin.manifest.json` from the current directory,
+packs the bundle automatically, and uploads it to the marketplace. You will be
+prompted to select a category and confirm the publish if you do not pass `--category`.
 
 ### 4. Marketplace Listing
 

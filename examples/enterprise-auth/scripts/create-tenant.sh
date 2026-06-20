@@ -21,7 +21,7 @@
 #   - op CLI installed (npm install -g @oneplatform/cli)
 #   - curl and jq available on PATH
 #   - Platform admin API key with admin scope
-#   - RBAC roles imported (run: op auth roles import --config configs/rbac-roles.json)
+#   - RBAC roles created (run: op role create --name <role> --permissions <perm,...>)
 # --------------------------------------------------------------------------
 
 set -euo pipefail
@@ -269,9 +269,11 @@ else
   echo "    1. Set up auth providers for each tenant:"
   echo "       ./scripts/setup-oidc.sh --tenant-id <slug>"
   echo "       ./scripts/setup-ldap.sh --tenant-id <slug>"
-  echo "    2. Create API keys:"
-  echo "       op auth api-keys create --config configs/api-keys.json --tenant-id <slug>"
-  echo "    3. Apply audit policy:"
-  echo "       op audit policy apply --config configs/audit-policy.json --tenant-id <slug>"
+  echo "    2. Create API keys for service accounts:"
+  echo "       op auth generate-key --name 'CI Pipeline' --scopes 'pipelines:manage,data:read' --expires 2027-01-01"
+  echo "       (See configs/api-keys.json for the keys you need to create)"
+  echo "    3. Configure audit and security settings via the platform admin UI or REST API:"
+  echo "       POST $PLATFORM_URL/api/v1/admin/audit-policy"
+  echo "       (See configs/audit-policy.json for the policy definition)"
   echo ""
 fi
