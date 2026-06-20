@@ -292,6 +292,54 @@ function escapeLdapFilterValue(value: string): string {
     .replace(/\0/g, "\\00");
 }
 
+function escapeDnValue(value: string): string {
+  let escaped = value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\+/g, "\\+")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
+    .replace(/</g, "\\<")
+    .replace(/>/g, "\\>")
+    .replace(/\0/g, "\\00");
+  if (escaped.startsWith("#")) {
+    escaped = "\\" + escaped;
+  }
+  if (escaped.startsWith(" ")) {
+    escaped = "\\ " + escaped.slice(1);
+  }
+  if (escaped.endsWith(" ")) {
+    escaped = escaped.slice(0, -1) + "\\ ";
+  }
+  return escaped;
+}
+
+/**
+ * Split a Distinguished Name string on unescaped commas per RFC 4514 section 3.
+ *
+ * Commas that are preceded by a backslash (e.g., "cn=Finance\, Legal") are
+ * treated as part of the current RDN value, not as an RDN separator.
+ */
+function splitOnUnescapedComma(dn: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  for (let i = 0; i < dn.length; i++) {
+    const ch = dn[i];
+    if (ch === "\\" && i + 1 < dn.length) {
+      // Consume the backslash and the following character as a pair.
+      current += ch + dn[i + 1];
+      i++;
+    } else if (ch === ",") {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // LDAP proxy client
 //

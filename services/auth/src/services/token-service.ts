@@ -361,7 +361,13 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     issuePipeline.sadd(`auth:refresh-family:${familyId}`, token);
     issuePipeline.expire(`auth:refresh-family:${familyId}`, 30 * 24 * 60 * 60);
     issuePipeline.sadd(`auth:user-sessions:${userId}`, token);
-    await issuePipeline.exec();
+    const issueResults = await issuePipeline.exec();
+    if (!issueResults) {
+      throw new Error("Redis pipeline failed during refresh token issuance.");
+    }
+    for (const [err] of issueResults) {
+      if (err) throw err;
+    }
     return { token, jti };
   }
 
@@ -575,7 +581,13 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // Update user-sessions set: remove old, add new
     rotationPipeline.srem(`auth:user-sessions:${payload.userId}`, oldToken);
     rotationPipeline.sadd(`auth:user-sessions:${payload.userId}`, newToken);
-    await rotationPipeline.exec();
+    const rotationResults = await rotationPipeline.exec();
+    if (!rotationResults) {
+      throw new Error("Redis pipeline failed during refresh token rotation.");
+    }
+    for (const [err] of rotationResults) {
+      if (err) throw err;
+    }
 
     // Step 5: Fetch user for token issuance
     const userResult = await db.query<{

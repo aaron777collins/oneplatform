@@ -31,7 +31,12 @@ export async function runMigrations(pool: pg.Pool): Promise<MigrationResult> {
   const allFiles = await readdir(MIGRATIONS_DIR);
   const migrationFiles = allFiles
     .filter((f) => f.endsWith(".sql"))
-    .sort();
+    .sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    });
 
   const applied: string[] = [];
   const skipped: string[] = [];

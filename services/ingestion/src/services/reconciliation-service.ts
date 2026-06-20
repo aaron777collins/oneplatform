@@ -138,6 +138,8 @@ export interface ReconciliationServiceDeps {
   masterKey: Buffer;
   logger: Logger;
   executionServiceUrl?: string;
+  /** Redis URL for BullMQ queues. Falls back to OP_REDIS_URL env var. */
+  redisUrl?: string;
 }
 
 // Deps required by the standalone executeReconcileJob function. Separated so
@@ -167,7 +169,7 @@ const MAX_RECONCILE_FETCH_PAGES = 200;
 
 const DEFAULT_SAMPLE_SIZE = 100;
 
-const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
+const DEFAULT_REDIS_URL = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
 
 // ---------------------------------------------------------------------------
 // executeReconcileJob — standalone export matching the executeWatchdog pattern.
@@ -367,6 +369,10 @@ export function createReconciliationService(
     deps.executionServiceUrl ??
     process.env["EXECUTION_SERVICE_URL"] ??
     "http://execution-service:3005";
+
+  // Derive BullMQ Redis URL from the injected dependency, falling back to the
+  // module-level default.
+  const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
   const reconcileQueue = new Queue<ReconcileJobPayload>("ingestion:reconcile", {
     connection: { lazyConnect: true, url: redisUrl },

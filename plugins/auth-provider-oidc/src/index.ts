@@ -365,6 +365,7 @@ class OidcAuthProvider implements AuthProvider {
    */
   private readonly redirectUriByState = new Map<string, { uri: string; expiresAt: number }>();
   private static readonly REDIRECT_URI_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly MAX_PENDING_REDIRECTS = 10_000;
 
   metadata(): AuthProviderMetadata {
     return {
@@ -440,7 +441,6 @@ class OidcAuthProvider implements AuthProvider {
 
       context.logger.info("OIDC provider initialized", {
         issuerUrl: this.config.issuerUrl,
-        clientId: this.config.clientId,
         scopes: this.config.scopes,
       });
 
@@ -492,11 +492,22 @@ class OidcAuthProvider implements AuthProvider {
     // Cache the redirect_uri keyed by state so handleCallback() can retrieve the
     // exact URI that was used in this authorization request. This avoids the
     // fragile pattern of reading redirect_uri from tenant config during callback.
+
+    // Evict expired entries first to free space before checking the cap.
+    this.evictExpiredRedirectUris();
+
+    // Enforce an upper bound to prevent memory exhaustion from automated
+    // login initiation requests that never complete the callback flow.
+    if (this.redirectUriByState.size >= OidcAuthProvider.MAX_PENDING_REDIRECTS) {
+      throw new Error(
+        "Too many pending authentication flows. Please try again later.",
+      );
+    }
+
     this.redirectUriByState.set(state, {
       uri: options.redirectUri,
       expiresAt: Date.now() + OidcAuthProvider.REDIRECT_URI_TTL_MS,
     });
-    this.evictExpiredRedirectUris();
 
     return `${authEndpoint}?${params.toString()}`;
   }
@@ -583,12 +594,21 @@ class OidcAuthProvider implements AuthProvider {
       context.logger,
     );
 
-    // Prefer ID token claims (explicitly issued to this client).
-    // Fall back to access token payload for OAuth2-only providers.
     const claims =
       tokenResponse.id_token !== undefined
         ? decodeJwtPayloadUnsafe(tokenResponse.id_token)
         : decodeJwtPayloadUnsafe(tokenResponse.access_token);
+
+    if (tokenResponse.id_token !== undefined) {
+      const aud = claims["aud"];
+      const audValues = typeof aud === "string" ? [aud] : Array.isArray(aud) ? aud.map(String) : [];
+      if (audValues.length > 0 && !audValues.includes(cfg.clientId)) {
+        throw new PluginAuthError(
+          `ID token audience does not match client_id: expected "${cfg.clientId}", got "${audValues.join(", ")}"`,
+          { expectedAud: cfg.clientId, actualAud: audValues },
+        );
+      }
+    }
 
     const providerUserId = typeof claims["sub"] === "string" ? claims["sub"] : "";
     if (providerUserId === "") {

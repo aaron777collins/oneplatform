@@ -196,9 +196,10 @@ export function useQuery<T = unknown>(
 
   const fetchPage = React.useCallback(
     async (cursor: string | undefined, append: boolean): Promise<void> => {
+      // Abort any previous in-flight fetch so stale responses cannot
+      // overwrite the cache after the new request completes.
+      abortControllerRef.current?.abort();
       const controller = new AbortController();
-      // Replace any previous controller; the old request is already settled or
-      // will be ignored because its abort signal fires independently.
       abortControllerRef.current = controller;
       const params = buildQueryParams(optionsRef.current, cursor);
 

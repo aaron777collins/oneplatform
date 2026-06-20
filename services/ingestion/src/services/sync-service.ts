@@ -168,6 +168,8 @@ export interface SyncServiceDeps {
   masterKey: Buffer;
   logger: Logger;
   executionServiceUrl?: string;
+  /** Redis URL for BullMQ queues. Falls back to OP_REDIS_URL env var. */
+  redisUrl?: string;
   /** Optional — when omitted, schema drift detection is skipped. */
   schemaDriftService?: SchemaDriftService;
   /** Optional — when omitted, data quality analysis is skipped. */
@@ -183,7 +185,10 @@ const BATCH_QUEUE_MAX = 50_000;
 // around the same time as the underlying BullMQ job data.
 const PROGRESS_TERMINAL_TTL_SECONDS = 604_800;
 
-const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
+// Fallback Redis URL — prefer the injected dependency's connection info when
+// available, but fall back to the environment variable for BullMQ Queue
+// construction which requires a URL string (not an ioredis client).
+const DEFAULT_REDIS_URL = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
 
 // Shape of the response returned by the Execution Service fetchBatch method.
 interface FetchBatchResponse {
@@ -261,6 +266,11 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     deps.executionServiceUrl ??
     process.env["EXECUTION_SERVICE_URL"] ??
     "http://execution-service:3005";
+
+  // Derive BullMQ Redis URL from the injected dependency, falling back to the
+  // module-level default. This ensures queues connect to the same Redis instance
+  // as the rest of the service.
+  const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
   // Queues are created lazily once — constructed at module level but connected
   // on first use. This defers connection errors to the first actual enqueue,
@@ -979,12 +989,22 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         })();
       }
 
-      await ontologyQueue.add("map", {
-        connectorId,
-        batchId,
-        tenantId,
-        batchSeqNum,
-      });
+      try {
+        await ontologyQueue.add("map", {
+          connectorId,
+          batchId,
+          tenantId,
+          batchSeqNum,
+        });
+      } catch (ontologyErr) {
+        logger.error("Failed to enqueue ontology:map job after successful batch insert", {
+          syncJobId,
+          connectorId,
+          batchId,
+          batchSeqNum,
+          error: ontologyErr instanceof Error ? ontologyErr.message : String(ontologyErr),
+        });
+      }
 
       await incrementBatchProgress(syncJobId, records.length);
 

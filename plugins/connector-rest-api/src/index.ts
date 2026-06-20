@@ -600,6 +600,7 @@ class RestApiConnector implements Connector {
         response = await context.fetch.fetch(fetchUrl, {
           method: meta.method,
           headers,
+          redirect: "manual",
           ...(fetchBody !== undefined ? { body: fetchBody } : {}),
         });
       } catch (err) {
@@ -609,6 +610,39 @@ class RestApiConnector implements Connector {
           throw new PluginTimeoutError(`REST API request timed out: ${message}`);
         }
         throw new PluginTimeoutError(`REST API network error: ${message}`);
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("Location");
+        if (location === null) {
+          throw new PluginDataError(
+            `REST API returned ${response.status} redirect without Location header`,
+            { status: response.status, url: fetchUrl },
+          );
+        }
+        const redirectHeaders = { ...headers };
+        try {
+          const originalOrigin = new URL(fetchUrl).origin;
+          const redirectOrigin = new URL(location, fetchUrl).origin;
+          if (originalOrigin !== redirectOrigin) {
+            delete redirectHeaders["Authorization"];
+            delete redirectHeaders["X-API-Key"];
+          }
+        } catch {
+          delete redirectHeaders["Authorization"];
+          delete redirectHeaders["X-API-Key"];
+        }
+        try {
+          response = await context.fetch.fetch(location, {
+            method: meta.method,
+            headers: redirectHeaders,
+            redirect: "manual",
+            ...(fetchBody !== undefined ? { body: fetchBody } : {}),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new PluginTimeoutError(`REST API redirect request failed: ${message}`);
+        }
       }
 
       if (!response.ok) {

@@ -1,5 +1,6 @@
 import type pg from "pg";
 import type { EntityRow, CreateEntityData, UpdateEntityData } from "./types.js";
+import { quotePgIdentifier } from "../utils/pg-identifier.js";
 
 export interface EntityRepository {
   create(data: CreateEntityData): Promise<EntityRow>;

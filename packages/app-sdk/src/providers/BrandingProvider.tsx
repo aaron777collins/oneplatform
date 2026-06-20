@@ -74,9 +74,12 @@ function applyCssVariables(
 function sanitizeCss(css: string): string {
   let sanitized = css;
   sanitized = sanitized.replace(/@import\b[^;]*;?/gi, "");
-  sanitized = sanitized.replace(/expression\s*\([^)]*\)/gi, "");
+  sanitized = sanitized.replace(/expression\s*\([^)]*(?:\([^)]*\)[^)]*)*\)/gi, "");
+  // Replace dangerous url() schemes (anything except data: and https:).
+  // The regex handles nested parentheses in the URL argument to avoid
+  // leaving trailing ')' that would produce malformed CSS.
   sanitized = sanitized.replace(
-    /url\s*\(\s*(?:['"]?\s*(?!(?:data:|https:))[a-z][a-z0-9+.-]*:)[^)]*\)/gi,
+    /url\s*\(\s*(?:['"]?\s*(?!(?:data:|https:))[a-z][a-z0-9+.-]*:)[^)]*(?:\([^)]*\)[^)]*)*\)/gi,
     "url(about:invalid)",
   );
   sanitized = sanitized.replace(/<\/?script[^>]*>/gi, "");

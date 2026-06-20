@@ -524,9 +524,16 @@ export function createPipelineService(deps: PipelineServiceDeps): PipelineServic
   // validateDefinition — pure graph validation, no I/O
   // -------------------------------------------------------------------------
 
+  const MAX_PIPELINE_NODES = 500;
+
   function validateDefinition(definition: PipelineDefinition): ValidationResult {
     const errors: string[] = [];
     const allStepIds = collectAllStepIds(definition.steps);
+
+    if (allStepIds.size > MAX_PIPELINE_NODES) {
+      errors.push(`Pipeline exceeds the maximum of ${MAX_PIPELINE_NODES} nodes (found ${allStepIds.size}).`);
+      return { valid: false, errors };
+    }
 
     // entryStepId must reference an existing step
     if (!allStepIds.has(definition.entryStepId)) {

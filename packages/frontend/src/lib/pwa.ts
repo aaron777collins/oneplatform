@@ -155,14 +155,18 @@ export async function enqueueMutation(mutation: Omit<QueuedMutation, "id" | "que
     queuedAt: Date.now(),
   };
 
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readwrite");
-    const store = tx.objectStore(IDB_STORE);
-    const request = store.add(entry);
-    request.onsuccess = () => resolve();
-    request.onerror = () =>
-      reject(new Error(`Failed to enqueue mutation: ${request.error?.message ?? "unknown"}`));
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const store = tx.objectStore(IDB_STORE);
+      const request = store.add(entry);
+      request.onsuccess = () => resolve();
+      request.onerror = () =>
+        reject(new Error(`Failed to enqueue mutation: ${request.error?.message ?? "unknown"}`));
+    });
+  } finally {
+    db.close();
+  }
 
   // Request background sync if available — the browser will invoke the
   // service worker's sync event when it detects connectivity.

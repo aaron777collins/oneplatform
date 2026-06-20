@@ -120,12 +120,16 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
   // Debounced auto-save: waits 500ms after last keystroke
   const debouncedSave = React.useMemo(
     () =>
-      debounce(async (path: string, content: string, fileVersion: number) => {
+      debounce(async (path: string, content: string, _fileVersion: number) => {
         try {
+          // Read the latest fileVersion from the store at execution time
+          // to avoid using a stale value captured at keystroke time.
+          const currentFile = storeRef.current.openFiles.get(path);
+          const latestFileVersion = currentFile?.fileVersion ?? 0;
           const encodedPath = path.split("/").map(encodeURIComponent).join("/");
           const result = await clientRef.current.put<{ data: { fileVersion: number } }>(
             `/v1/apps/${appId}/files/${encodedPath}`,
-            { content, fileVersion },
+            { content, fileVersion: latestFileVersion },
           );
           storeRef.current.markSaved(path, result.data.fileVersion);
         } catch (err) {
@@ -147,9 +151,9 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
   function handleEditorChange(content: string) {
     if (activeFilePath === null) return;
     editorStore.markDirty(activeFilePath, content);
-    if (activeFile !== undefined) {
-      debouncedSave(activeFilePath, content, activeFile.fileVersion);
-    }
+    // Pass fileVersion as 0 here; the debounced callback reads the latest
+    // fileVersion from storeRef at execution time to avoid stale closures.
+    debouncedSave(activeFilePath, content, 0);
   }
 
   function handleManualSave() {

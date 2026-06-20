@@ -56,10 +56,10 @@ function storageKey(prefix: string, name: string): string {
 
 /**
  * Generate a cryptographically random code verifier for PKCE.
- * Uses 32 bytes → 43-char base64url string (PKCE min is 43 chars).
+ * Uses 48 bytes → 64-char base64url string (PKCE spec: 43-128 chars).
  */
 function generateCodeVerifier(): string {
-  const array = new Uint8Array(32);
+  const array = new Uint8Array(48);
   crypto.getRandomValues(array);
   return base64UrlEncode(array);
 }

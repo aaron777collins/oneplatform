@@ -44,6 +44,7 @@ const DEFAULT_HAS_HEADER = true;
 const DEFAULT_ENCODING = "utf-8";
 const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_FILE_SIZE_MB = 100;
+const MAX_FIELDS_PER_ROW = 1000;
 
 /** Cache key for the parsed row set, scoped per connection. */
 function rowsCacheKey(connectionId: string): string {
@@ -133,6 +134,13 @@ function parseRow(text: string, delimiter: string, start: number): RowResult {
   const len = text.length;
 
   while (pos <= len) {
+    if (fields.length >= MAX_FIELDS_PER_ROW) {
+      throw new PluginDataError(
+        `Row exceeds maximum field count of ${MAX_FIELDS_PER_ROW}`,
+        { maxFields: MAX_FIELDS_PER_ROW },
+      );
+    }
+
     if (pos === len) {
       // EOF mid-row: emit the last (empty) field to close the row.
       fields.push("");
@@ -467,6 +475,10 @@ class CsvConnector implements Connector {
         }
         const message = err instanceof Error ? err.message : String(err);
         throw new PluginDataError(`Failed to read CSV response body: ${message}`, { url });
+      }
+
+      if (text.charCodeAt(0) === 0xfeff) {
+        text = text.slice(1);
       }
 
       try {

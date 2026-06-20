@@ -42,6 +42,20 @@ export interface OntologyEntitySchema {
   fields: EntityField[];
 }
 
+// ─── Slug validation ─────────────────────────────────────────────────────────
+
+/** Validates that a slug is a safe TypeScript identifier (alphanumeric + underscore). */
+const SAFE_SLUG_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+function assertSafeSlug(slug: string, context: string): void {
+  if (!SAFE_SLUG_PATTERN.test(slug)) {
+    throw new Error(
+      `Unsafe ${context} slug "${slug}" from ontology API. ` +
+      `Slugs must match /^[a-zA-Z_][a-zA-Z0-9_]*$/ to be safe TypeScript identifiers.`,
+    );
+  }
+}
+
 // ─── Conversion helpers ───────────────────────────────────────────────────────
 
 /**
@@ -54,6 +68,7 @@ export interface OntologyEntitySchema {
  * unrecognised fieldType strings so generated code always compiles.
  */
 export function fieldToTs(field: EntityField): string {
+  assertSafeSlug(field.slug, "field");
   let tsType: string;
 
   if (field.fieldType === "enum" && field.enumValues && field.enumValues.length > 0) {
@@ -94,6 +109,7 @@ export function generateEntityTypes(entities: OntologyEntitySchema[]): string {
   }
 
   const entityInterfaces = entities.map((entity) => {
+    assertSafeSlug(entity.slug, "entity");
     const fieldLines = entity.fields.map(fieldToTs);
     // Every entity always has an id field injected by the platform.
     // Only add it if the entity schema does not already declare it.

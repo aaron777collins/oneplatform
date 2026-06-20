@@ -143,6 +143,10 @@ interface RunContext {
   // (e.g. A calls B, B calls A). Immutable for each context instance; child
   // contexts receive a new array with the parent pipelineId appended.
   subWorkflowCallStack: readonly string[];
+  // Milliseconds the BullMQ job waited in the queue before processing began.
+  // Step executors subtract this from their configured timeout so the overall
+  // pipeline deadline is honoured even when the queue is congested.
+  queueWaitMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +248,12 @@ function isUrlSsrfBlocked(url: string): boolean {
 
 function cancellationKey(runId: string): string {
   return `queue:pipeline:run:${runId}:cancel`;
+}
+
+const MIN_STEP_TIMEOUT_MS = 5_000;
+
+function adjustTimeoutForQueueWait(timeoutMs: number, queueWaitMs: number): number {
+  return Math.max(timeoutMs - queueWaitMs, MIN_STEP_TIMEOUT_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -551,7 +561,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     ctx: RunContext,
     resolvedInput: Record<string, unknown>,
   ): Promise<ExecutionResponse> {
-    const timeoutMs = step.timeout ?? ctx.definition.options?.stepTimeout ?? stepDefaultTimeoutMs;
+    const rawTimeoutMs = step.timeout ?? ctx.definition.options?.stepTimeout ?? stepDefaultTimeoutMs;
+    const timeoutMs = adjustTimeoutForQueueWait(rawTimeoutMs, ctx.queueWaitMs);
 
     return callExecutionService({
       language: step.language,
@@ -1265,7 +1276,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     }
 
     if (step.type === "transformer") {
-      const timeoutMs = step.timeout ?? ctx.definition.options?.stepTimeout ?? stepDefaultTimeoutMs;
+      const rawTimeoutMs = step.timeout ?? ctx.definition.options?.stepTimeout ?? stepDefaultTimeoutMs;
+      const timeoutMs = adjustTimeoutForQueueWait(rawTimeoutMs, ctx.queueWaitMs);
       const result = await callExecutionService({
         pluginId: step.transformerId,
         entrypoint: "main",
@@ -1399,6 +1411,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       // Build the run context shared across all step executions.
       // subWorkflowCallStack is empty for top-level runs; child runs receive
       // a context with the parent pipelineId appended (see executeSubWorkflowStep).
+      const queueWaitMs = job.processedOn !== undefined && job.timestamp !== undefined
+        ? Math.max(job.processedOn - job.timestamp, 0)
+        : 0;
       const ctx: RunContext = {
         runId,
         tenantId,
@@ -1412,6 +1427,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           return flag !== null;
         },
         subWorkflowCallStack: [],
+        queueWaitMs,
       };
 
       // Step 3: Transition to running

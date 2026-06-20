@@ -43,10 +43,13 @@ function promptPassphrase(prompt: string): Promise<string> {
       stdin.setRawMode(true);
     }
 
-    // Restore terminal state and clean up listeners before exiting
+    // Restore terminal state and clean up all listeners before exiting.
+    // cleanup() is called from both the normal data handler and the SIGINT
+    // handler, so it must be safe to call regardless of which path runs first.
     const cleanup = (): void => {
       if (stdin.setRawMode) stdin.setRawMode(false);
       stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSigint);
       rl.close();
     };
 

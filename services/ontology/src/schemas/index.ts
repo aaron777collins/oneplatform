@@ -103,6 +103,7 @@ const EXPRESSION_DANGEROUS_PATTERNS = [
   /\beval\b/,          // eval() inside an expression is doubly dangerous
   /\bFunction\b/,      // new Function() bypasses expression scope
   /\bGlobalThis\b/i,   // globalThis reference
+  /\[\s*['"`]/,        // Bracket notation with string literals (e.g., this['constructor'])
 ];
 
 function validateExpressionTransform(val: string): boolean {
@@ -156,6 +157,17 @@ export const updateMappingRuleRequest = z.object({
   priority: z.number().int().min(0).optional(),
 }).superRefine((data, ctx) => {
   // Apply the same expression safety check on updates as on creation.
+  // When transformType is changed to 'expression', require a new transform value
+  // so the existing (unvalidated) stored transform cannot be promoted to expression
+  // type without re-validation.
+  if (data.transformType === "expression" && data.transform === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["transform"],
+      message:
+        "When changing transformType to 'expression', a new transform value must be provided.",
+    });
+  }
   if (
     (data.transformType === "expression" || data.transformType === undefined) &&
     data.transform != null

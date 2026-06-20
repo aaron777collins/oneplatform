@@ -118,6 +118,16 @@ export interface CreateAppConfig {
    * business logic runs, preventing memory exhaustion from oversized uploads.
    */
   maxBodySize?: number;
+
+  /**
+   * Optional async health check callback invoked by the `/healthz` endpoint.
+   *
+   * When provided, the health check verifies external dependencies (database,
+   * cache, message broker) and returns `503 Service Unavailable` if any check
+   * fails. When omitted, `/healthz` returns `200 OK` unconditionally (liveness
+   * only, no dependency verification).
+   */
+  healthCheck?: () => Promise<{ healthy: boolean; details?: Record<string, unknown> }>;
 }
 
 /**

@@ -41,6 +41,8 @@ import type { GraphQLSchema } from "./types.js";
 export interface ParseOptions {
   /** Maximum allowed selection-set nesting depth. Defaults to 5. */
   maxDepth?: number;
+  /** Maximum allowed number of field aliases per document. Defaults to 50. */
+  maxAliases?: number;
 }
 
 export interface ParseError {
@@ -55,7 +57,8 @@ export type ParseResult =
 
 export function parseDocument(source: string, options: ParseOptions = {}): ParseResult {
   const maxDepth = options.maxDepth ?? 5;
-  const parser = new Parser(source, maxDepth);
+  const maxAliases = options.maxAliases ?? 50;
+  const parser = new Parser(source, maxDepth, maxAliases);
   return parser.parse();
 }
 
@@ -345,8 +348,9 @@ class Parser {
   private readonly lexer: Lexer;
   private current: Token;
   private readonly errors: ParseError[] = [];
+  private aliasCount = 0;
 
-  constructor(src: string, private readonly maxDepth: number) {
+  constructor(src: string, private readonly maxDepth: number, private readonly maxAliases: number) {
     this.lexer = new Lexer(src);
     this.current = this.lexer.next();
   }
@@ -606,6 +610,15 @@ class Parser {
       alias = name;
       this.advance();
       name = this.expect("NAME").value;
+      this.aliasCount++;
+      if (this.aliasCount > this.maxAliases) {
+        this.errors.push({
+          message: `Query exceeds maximum allowed alias count of ${this.maxAliases}.`,
+          line: this.current.line,
+          column: this.current.column,
+        });
+        return null;
+      }
     }
 
     // Arguments

@@ -10,6 +10,9 @@ import { ExportTooLargeError } from "../services/errors.js";
 const EXPORT_MAX_WINDOW_DAYS = (): number =>
   parseInt(process.env["OP_EXPORT_MAX_WINDOW_DAYS"] ?? "7", 10);
 
+const MAX_CONCURRENT_EXPORTS_PER_TENANT = 2;
+const tenantExportCounts = new Map<string, number>();
+
 function mapRow(row: LogEventRow) {
   return {
     id: row.id,
@@ -117,6 +120,20 @@ export function createLogRoutes(
       );
     }
 
+    const currentExports = tenantExportCounts.get(user.tenantId) ?? 0;
+    if (currentExports >= MAX_CONCURRENT_EXPORTS_PER_TENANT) {
+      return c.json(
+        {
+          error: {
+            code: "EXPORT_CONCURRENCY_LIMIT",
+            message: `Maximum ${MAX_CONCURRENT_EXPORTS_PER_TENANT} concurrent exports per tenant. Wait for an existing export to complete.`,
+          },
+        },
+        429
+      );
+    }
+    tenantExportCounts.set(user.tenantId, currentExports + 1);
+
     // Tenant isolation: non-admin callers are scoped to their own tenant.
     const isAdmin = user.scopes.includes("admin");
 
@@ -154,59 +171,65 @@ export function createLogRoutes(
       ...(tenantId !== undefined ? { tenantId } : {}),
     };
 
+    const exportTenantId = user.tenantId;
     const stream = new ReadableStream({
       async start(controller) {
-        if (format === "csv") {
-          controller.enqueue(encoder.encode(CSV_HEADER + "\n"));
-        }
-
-        // Stream rows in pages using keyset pagination. OFFSET is avoided
-        // because it scans and skips all prior rows, which degrades at scale
-        // and can skip rows inserted mid-export on a busy table.
-        let afterCreatedAt: string | undefined;
-        let afterId: string | undefined;
-        let hasMore = true;
-
-        while (hasMore) {
-          const rows = await logEventRepository.exportPage({
-            ...exportOpts,
-            ...(afterCreatedAt !== undefined && afterId !== undefined
-              ? { afterCreatedAt, afterId }
-              : {}),
-          });
-
-          for (const row of rows) {
-            let line: string;
-            if (format === "csv") {
-              const meta = JSON.stringify(row.metadata).replace(/"/g, '""');
-              line = [
-                row.id,
-                `"${row.trace_id.replace(/"/g, '""')}"`,
-                `"${row.service.replace(/"/g, '""')}"`,
-                row.level,
-                `"${row.message.replace(/"/g, '""')}"`,
-                row.created_at.toISOString(),
-                `"${meta}"`,
-              ].join(",");
-            } else {
-              line = JSON.stringify(mapRow(row));
-            }
-            controller.enqueue(encoder.encode(line + "\n"));
+        try {
+          if (format === "csv") {
+            controller.enqueue(encoder.encode(CSV_HEADER + "\n"));
           }
 
-          hasMore = rows.length === exportChunkSize;
+          let afterCreatedAt: string | undefined;
+          let afterId: string | undefined;
+          let hasMore = true;
 
-          // Advance keyset anchor to the last row of this page
-          if (rows.length > 0) {
-            const lastRow = rows[rows.length - 1];
-            if (lastRow !== undefined) {
-              afterCreatedAt = lastRow.created_at.toISOString();
-              afterId = lastRow.id;
+          while (hasMore) {
+            const rows = await logEventRepository.exportPage({
+              ...exportOpts,
+              ...(afterCreatedAt !== undefined && afterId !== undefined
+                ? { afterCreatedAt, afterId }
+                : {}),
+            });
+
+            for (const row of rows) {
+              let line: string;
+              if (format === "csv") {
+                const meta = JSON.stringify(row.metadata).replace(/"/g, '""');
+                line = [
+                  row.id,
+                  `"${row.trace_id.replace(/"/g, '""')}"`,
+                  `"${row.service.replace(/"/g, '""')}"`,
+                  row.level,
+                  `"${row.message.replace(/"/g, '""')}"`,
+                  row.created_at.toISOString(),
+                  `"${meta}"`,
+                ].join(",");
+              } else {
+                line = JSON.stringify(mapRow(row));
+              }
+              controller.enqueue(encoder.encode(line + "\n"));
+            }
+
+            hasMore = rows.length === exportChunkSize;
+
+            if (rows.length > 0) {
+              const lastRow = rows[rows.length - 1];
+              if (lastRow !== undefined) {
+                afterCreatedAt = lastRow.created_at.toISOString();
+                afterId = lastRow.id;
+              }
             }
           }
-        }
 
-        controller.close();
+          controller.close();
+        } finally {
+          const count = tenantExportCounts.get(exportTenantId) ?? 1;
+          if (count <= 1) {
+            tenantExportCounts.delete(exportTenantId);
+          } else {
+            tenantExportCounts.set(exportTenantId, count - 1);
+          }
+        }
       },
     });
 

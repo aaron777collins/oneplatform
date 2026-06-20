@@ -21,6 +21,8 @@ export type LogQueryInput = z.infer<typeof logQuerySchema>;
 // Audit query — used by GET /api/v1/audit-events
 // ---------------------------------------------------------------------------
 
+const MAX_AUDIT_QUERY_RANGE_DAYS = 90;
+
 export const auditQuerySchema = z.object({
   actorId: z.string().max(255).optional(),
   actorType: z.enum(["user", "service", "system"]).optional(),
@@ -33,6 +35,19 @@ export const auditQuerySchema = z.object({
   to: z.string().datetime().optional(),
   cursor: z.string().max(512).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+}).superRefine((data, ctx) => {
+  if (data.from !== undefined && data.to !== undefined) {
+    const fromMs = new Date(data.from).getTime();
+    const toMs = new Date(data.to).getTime();
+    const maxRangeMs = MAX_AUDIT_QUERY_RANGE_DAYS * 24 * 60 * 60 * 1000;
+    if (toMs - fromMs > maxRangeMs) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Audit query time range must not exceed ${MAX_AUDIT_QUERY_RANGE_DAYS} days.`,
+        path: ["to"],
+      });
+    }
+  }
 });
 
 export type AuditQueryInput = z.infer<typeof auditQuerySchema>;

@@ -128,7 +128,7 @@ const BATCH_SIZE = 1_000;
 const SCHEMA_INFERENCE_ROWS = 200;
 const FILE_UPLOADS_BUCKET = "file-uploads";
 
-const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
+const DEFAULT_REDIS_URL = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
 
 // ---------------------------------------------------------------------------
 // CreateUpload input
@@ -158,10 +158,16 @@ export interface UploadServiceDeps {
   rawTableRepo: RawTableRepository;
   storage: ObjectStorageClient;
   logger: Logger;
+  /** Redis URL for BullMQ queues. Falls back to OP_REDIS_URL env var. */
+  redisUrl?: string;
 }
 
 export function createUploadService(deps: UploadServiceDeps): UploadService {
   const { uploadJobRepo, rawTableRepo, storage, logger } = deps;
+
+  // Derive BullMQ Redis URL from the injected dependency, falling back to the
+  // module-level default.
+  const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
   // TODO(#PLAT-???): No Worker consumes "ontology:map" yet — jobs accumulate in Redis
   // until the ontology service implements a consumer. Retry config matches the platform

@@ -260,19 +260,12 @@ export function createClient(options: ClientOptions): OnePlatformClient {
       };
       // Also monitor for auto-close (e.g. max reconnects exhausted) so the
       // subscription is removed from the set even if the user never calls
-      // unsubscribe(). Poll the status to detect the 'closed' transition.
-      const originalOnStatus = sub.onStatusChange;
-      if (typeof originalOnStatus === 'function') {
-        const wrappedOnStatus = sub as { onStatusChange: (handler: (status: string) => void) => void };
-        wrappedOnStatus.onStatusChange = (handler: (status: string) => void) => {
-          originalOnStatus((status: string) => {
-            if (status === 'closed') {
-              activeSubscriptions.delete(sub);
-            }
-            handler(status);
-          });
-        };
-      }
+      // unsubscribe(). Listen for the 'closed' status transition.
+      sub.on('status', (status) => {
+        if (status === 'closed') {
+          activeSubscriptions.delete(sub);
+        }
+      });
       return sub;
     },
   };

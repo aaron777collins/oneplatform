@@ -28,11 +28,20 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
   // Registered BEFORE parameterized management routes to avoid route shadowing.
 
   routes.post("/inbound/:id/receive", async (c) => {
+    const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB
+    const contentLength = c.req.header("content-length");
+    if (contentLength !== undefined && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
+      return c.json({ error: "Payload too large" }, 413);
+    }
+
     // Anti-enumeration: always return 200 OK regardless of outcome.
     // An attacker probing for valid receiver IDs must not be able to distinguish
     // "receiver not found", "HMAC mismatch", or "processing error" from success.
     try {
       const rawBody = Buffer.from(await c.req.arrayBuffer());
+      if (rawBody.length > MAX_BODY_BYTES) {
+        return c.json({ error: "Payload too large" }, 413);
+      }
       const receiverId = c.req.param("id");
 
       // Collect a safe subset of headers. Authorization / Cookie values are

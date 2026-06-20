@@ -195,6 +195,10 @@ export function createMarketplaceService(
   const DEFAULT_LIMIT = 20;
   const MAX_LIMIT = 100;
 
+  function sanitizeSearchInput(raw: string): string {
+    return raw.replace(/[^\p{L}\p{N}\s\-_.@]/gu, "").trim().slice(0, 200);
+  }
+
   return {
     async listPlugins(options) {
       const limit = Math.min(
@@ -202,10 +206,11 @@ export function createMarketplaceService(
         MAX_LIMIT
       );
 
-      // Build the query omitting undefined optional properties so they are
-      // truly absent (required by exactOptionalPropertyTypes).
+      const sanitizedSearch =
+        options.search !== undefined ? sanitizeSearchInput(options.search) : undefined;
+
       const { rows, total } = await marketplaceRepo.list({
-        ...(options.search !== undefined ? { search: options.search } : {}),
+        ...(sanitizedSearch !== undefined && sanitizedSearch.length > 0 ? { search: sanitizedSearch } : {}),
         ...(options.type !== undefined ? { type: options.type } : {}),
         ...(options.category !== undefined ? { category: options.category } : {}),
         ...(options.sortBy !== undefined ? { sortBy: options.sortBy } : {}),

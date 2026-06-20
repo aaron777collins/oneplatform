@@ -23,8 +23,7 @@ export function createApiKeyHandler(apiKey: string): AuthHandler {
   const isValid = VALID_PREFIXES.some((prefix) => apiKey.startsWith(prefix));
   if (!isValid) {
     throw new ConfigurationError(
-      `Invalid API key format. Keys must start with "op_live_" or "op_test_". ` +
-        `Received key starting with: "${apiKey.slice(0, 3)}..."`,
+      `Invalid API key format. Keys must start with "op_live_" or "op_test_".`,
     );
   }
 

@@ -384,11 +384,23 @@ function parseJsxProps(attrsStr: string): Record<string, unknown> {
     result[m[1]!] = m[2];
   }
 
-  // Expression: key={value}
-  const exprPattern = /(\w[\w-]*)=\{([\s\S]*?)\}/g;
-  while ((m = exprPattern.exec(attrsStr)) !== null) {
-    const key = m[1]!;
-    const expr = m[2]!.trim();
+  // Expression: key={value} — uses brace counting to handle nested braces
+  // (e.g. key={{ nested: true }}) correctly instead of a non-greedy regex
+  // which would stop at the first closing brace.
+  const exprStartPattern = /(\w[\w-]*)=\{/g;
+  let exprMatch: RegExpExecArray | null;
+  while ((exprMatch = exprStartPattern.exec(attrsStr)) !== null) {
+    const key = exprMatch[1]!;
+    const contentStart = exprMatch.index + exprMatch[0].length;
+    let depth = 1;
+    let i = contentStart;
+    while (i < attrsStr.length && depth > 0) {
+      if (attrsStr[i] === "{") depth++;
+      else if (attrsStr[i] === "}") depth--;
+      if (depth > 0) i++;
+    }
+    if (depth !== 0) continue; // unbalanced — skip
+    const expr = attrsStr.slice(contentStart, i).trim();
     // Boolean false
     if (expr === "false") { result[key] = false; continue; }
     // Try JSON parse for number / array / object

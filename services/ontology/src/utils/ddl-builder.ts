@@ -91,7 +91,12 @@ function escapeSqlString(val: string): string {
 export function buildRlsDDL(schemaName: string, entitySlug: string, tenantId: string): string {
   const table = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(entitySlug)}`;
   const policyName = quotePgIdentifier(`tenant_isolation_${entitySlug}`);
+  // Strip hyphens and validate the result is a hex UUID to prevent SQL injection
+  // via crafted tenant IDs containing single quotes.
   const tenantSafe = tenantId.replace(/-/g, "");
+  if (!/^[a-f0-9]+$/.test(tenantSafe)) {
+    throw new Error(`Invalid tenant ID for RLS policy: "${tenantId}"`);
+  }
 
   return [
     `ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`,
@@ -170,9 +175,10 @@ export function buildJoinTableDDL(
   const fromCol = quotePgIdentifier(`${fromSlug}_id`);
   const toCol = quotePgIdentifier(`${toSlug}_id`);
 
+  const deleteAction = cascadeDelete ? "ON DELETE CASCADE" : "ON DELETE RESTRICT";
   return `CREATE TABLE ${table} (
-  ${fromCol} UUID NOT NULL REFERENCES ${fromTable}("_id") ON DELETE CASCADE,
-  ${toCol}   UUID NOT NULL REFERENCES ${toTable}("_id")   ON DELETE CASCADE,
+  ${fromCol} UUID NOT NULL REFERENCES ${fromTable}("_id") ${deleteAction},
+  ${toCol}   UUID NOT NULL REFERENCES ${toTable}("_id")   ${deleteAction},
   "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (${fromCol}, ${toCol})
 )`;

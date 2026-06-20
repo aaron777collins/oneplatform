@@ -261,8 +261,10 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
           return `${qField} <= $${params.length}`;
         }
         case "like": {
-          params.push(clause.value);
-          return `${qField} LIKE $${params.length}`;
+          const raw = typeof clause.value === "string" ? clause.value : String(clause.value);
+          const escaped = raw.replace(/[\\%_]/g, (ch) => "\\" + ch);
+          params.push(escaped);
+          return `${qField} LIKE $${params.length} ESCAPE '\\'`;
         }
         case "in": {
           params.push(clause.value);
@@ -421,6 +423,11 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
 
       const client = await db.connect();
       try {
+        // Wrap in a transaction so SET LOCAL takes effect. SET LOCAL only
+        // applies within a transaction block; without BEGIN it is silently
+        // ignored and queries run without timeout protection.
+        await client.query("BEGIN");
+
         // Per-query timeout: if the query exceeds 30 s, PostgreSQL cancels it.
         // This protects against runaway analytical queries on large tenants.
         await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
@@ -444,6 +451,10 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
             );
           }
           throw err;
+        } finally {
+          // Always commit (read-only queries) to release the transaction and
+          // ensure SET LOCAL is scoped properly.
+          await client.query("COMMIT");
         }
 
         const executionTimeMs = Date.now() - startTime;

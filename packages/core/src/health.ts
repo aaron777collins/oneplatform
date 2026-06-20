@@ -5,6 +5,7 @@ import type { Redis } from "ioredis";
 export interface HealthConfig {
   service: string;
   version: string;
+  healthCheck?: () => Promise<{ healthy: boolean; details?: Record<string, unknown> }>;
 }
 
 export interface ReadyzConfig extends HealthConfig {
@@ -17,6 +18,28 @@ type CheckResult = "ok" | "error";
 export function healthz(config: HealthConfig) {
   return async (c: Context) => {
     const start = Date.now();
+
+    if (config.healthCheck) {
+      try {
+        const result = await config.healthCheck();
+        const httpStatus = result.healthy ? 200 : 503;
+        c.header("X-Response-Time", `${Date.now() - start}ms`);
+        return c.json({
+          status: result.healthy ? "ok" : "unhealthy",
+          service: config.service,
+          version: config.version,
+          ...(result.details !== undefined ? { details: result.details } : {}),
+        }, httpStatus);
+      } catch {
+        c.header("X-Response-Time", `${Date.now() - start}ms`);
+        return c.json({
+          status: "unhealthy",
+          service: config.service,
+          version: config.version,
+        }, 503);
+      }
+    }
+
     const body = {
       status: "ok",
       service: config.service,

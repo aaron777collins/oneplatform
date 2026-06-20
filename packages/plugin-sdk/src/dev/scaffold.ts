@@ -806,7 +806,16 @@ export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
   // Compute once and pass down — avoids divergence between manifest and source file.
   // Use camelCase for generated identifiers so they follow JavaScript convention
   // (named exports like `myConnector` rather than `MyConnector`).
-  const entrypoint = toCamelCase(opts.name.replace(/[^a-zA-Z0-9]/g, " "));
+  let entrypoint = toCamelCase(opts.name.replace(/[^a-zA-Z0-9]/g, " "));
+
+  // Ensure the generated identifier is a valid JavaScript identifier.
+  // If the name produces an empty string (e.g., "---") or starts with a digit
+  // (e.g., "123 Widget"), prefix with an underscore to make it valid.
+  if (entrypoint.length === 0) {
+    entrypoint = "plugin";
+  } else if (/^[0-9]/.test(entrypoint)) {
+    entrypoint = "_" + entrypoint;
+  }
 
   const sourceBuilders: Record<PluginType, (o: ScaffoldOptions, e: string) => string> = {
     connector: buildConnectorSource,
@@ -836,7 +845,10 @@ export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
 // ────────────────────────────────────────────────────────────────────────────
 
 function escapeJsString(value: string): string {
-  return JSON.stringify(value).slice(1, -1);
+  // JSON.stringify handles double-quotes and control characters, but does NOT
+  // escape backticks or template literal expressions (${...}). Since the scaffold
+  // builders emit output inside template literals, we must escape those too.
+  return JSON.stringify(value).slice(1, -1).replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
 }
 
 function toPascalCase(input: string): string {

@@ -74,6 +74,22 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
       }
     });
 
+    // Handle connection errors to avoid silent infinite reconnect storms.
+    // Close the EventSource after repeated failures rather than letting the
+    // browser hammer the server at its default 3-second reconnect interval.
+    let errorCount = 0;
+    const MAX_ERRORS = 5;
+    es.onerror = () => {
+      errorCount++;
+      if (errorCount >= MAX_ERRORS) {
+        es.close();
+      }
+    };
+    // Reset error count on successful connection
+    es.onopen = () => {
+      errorCount = 0;
+    };
+
     return () => es.close();
   }, [appSlug, isModeA]);
 

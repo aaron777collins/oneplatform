@@ -122,20 +122,27 @@ export function VisualPipelineEditor({
   }
 
   // Keyboard shortcuts for undo/redo
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleUndoRef = React.useRef(handleUndo);
+  handleUndoRef.current = handleUndo;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleRedoRef = React.useRef(handleRedo);
+  handleRedoRef.current = handleRedo;
+
   React.useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey;
       if (isMeta && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
-        handleUndo();
+        handleUndoRef.current();
       } else if (isMeta && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
         e.preventDefault();
-        handleRedo();
+        handleRedoRef.current();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  });
+  }, []);
 
   function handleSelectionChange(sel: SelectionState) {
     setSelection(sel);

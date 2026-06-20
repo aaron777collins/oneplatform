@@ -144,10 +144,9 @@ export function useAppStorage<T>(
       }
 
       // Optimistic update — apply locally before the network round-trip.
-      // Capture the server-confirmed value (not the React state) so that rapid
-      // successive writes always roll back to the true persisted value rather
-      // than a prior unconfirmed optimistic value.
-      const rollbackValue = confirmedValueRef.current;
+      // Read the rollback value from confirmedValueRef at failure time (not
+      // capture time) so that if write A succeeds and then write B fails,
+      // B rolls back to A's confirmed value rather than the pre-A value.
       setValueState(newValue);
 
       try {
@@ -155,9 +154,11 @@ export function useAppStorage<T>(
           method: "PUT",
           body: { value: newValue },
         });
+        // Only update the confirmed ref after the server acknowledges the write.
         confirmedValueRef.current = newValue;
       } catch (err) {
-        setValueState(rollbackValue);
+        // Roll back to the latest confirmed value (not a stale snapshot).
+        setValueState(confirmedValueRef.current);
         if (
           err instanceof DOMException && err.name === "QuotaExceededError" ||
           (err instanceof Error && err.message.includes("quota"))

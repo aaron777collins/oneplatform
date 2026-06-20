@@ -172,7 +172,12 @@ function readCredentialsFile(): CredentialsStore {
 
 function writeCredentialsFile(store: CredentialsStore): void {
   ensureConfigDir();
-  writeFileSync(CREDENTIALS_FILE, JSON.stringify(store, null, 2), "utf8");
+  writeFileSync(CREDENTIALS_FILE, JSON.stringify(store, null, 2), {
+    encoding: "utf8",
+    mode: SECURE_MODE,
+  });
+  // Ensure permissions are correct even on pre-existing files where mode
+  // in writeFileSync options only applies to newly created files.
   chmodSync(CREDENTIALS_FILE, SECURE_MODE);
 }
 

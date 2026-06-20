@@ -59,13 +59,25 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
   const platformUrl = cfg.platformUrl.replace(/\/+$/, "");
   const { apiKey, timeout, verbose } = cfg;
 
+  // Fail fast with an actionable message when no platform URL is configured,
+  // rather than letting `new URL('')` throw a cryptic "Invalid URL" error.
+  if (!platformUrl) {
+    throw new CliError(
+      "No platform URL configured. Run `op profile add` or set the OP_PLATFORM_URL environment variable.",
+      EXIT.GENERAL,
+    );
+  }
+
   if (cfg.insecureTls) {
     // NODE_TLS_REJECT_UNAUTHORIZED is a process-level flag in Node.js — there is no
     // per-request TLS bypass in native fetch. This intentionally affects all HTTPS
     // connections for the lifetime of this process, not just calls to platformUrl.
     // Bun handles this differently via its own TLS options.
     process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
-    console.warn("Warning: TLS verification disabled for all connections in this session");
+    console.warn(
+      "Warning: TLS verification disabled for ALL connections in this session " +
+      "(including third-party URLs). Only use --insecure-tls for development."
+    );
   }
 
   async function request<T>(

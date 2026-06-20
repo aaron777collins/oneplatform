@@ -161,16 +161,22 @@ export interface WebhookReceiveServiceDeps {
   credentialService: CredentialService;
   masterKey: Buffer;
   logger: Logger;
+  /** Redis URL for BullMQ queues. Falls back to OP_REDIS_URL env var. */
+  redisUrl?: string;
 }
 
 const CACHE_CAPACITY = 1_000;
 const CACHE_TTL_MS = 30_000;
-const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
+const DEFAULT_REDIS_URL = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
 
 export function createWebhookReceiveService(
   deps: WebhookReceiveServiceDeps,
 ): WebhookReceiveService {
   const { receiverRepo, rawTableRepo, credentialService, masterKey, logger } = deps;
+
+  // Derive BullMQ Redis URL from the injected dependency, falling back to the
+  // module-level default.
+  const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
   // Per-service LRU cache with 30-second TTL so rotation/disablement
   // propagates quickly without hitting the DB on every event.

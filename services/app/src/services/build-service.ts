@@ -587,6 +587,17 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         status:        "failed",
         error_message: err instanceof Error ? err.message : String(err),
       });
+
+      try {
+        const prefix = `${tenantId}/${appId}/builds/${build.id}`;
+        for (const filename of ["bundle.js", "bundle.js.map", "build-manifest.json"]) {
+          const url = `${minioEndpoint}/${minioBucket}/${prefix}/${filename}`;
+          await minioFetch("DELETE", url, minioAccessKey, minioSecretKey, minioRegion).catch(() => {});
+        }
+      } catch {
+        logger.warn("Failed to clean up partial artifacts", { buildId: build.id });
+      }
+
       logger.error("Build dispatch error", {
         tenantId, appId, buildId: build.id,
         error: err instanceof Error ? err.message : String(err),

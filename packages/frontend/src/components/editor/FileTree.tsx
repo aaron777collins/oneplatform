@@ -104,8 +104,11 @@ export function FileTree({ appId, activePath, onFileOpen, className }: FileTreeP
   // Open file: fetch content then notify editor
   async function handleFileClick(path: string) {
     try {
+      // Encode each path segment individually so slashes are preserved
+      // as path separators rather than being encoded as %2F.
+      const encodedPath = path.split("/").map(encodeURIComponent).join("/");
       const response = await client.get<{ data: { content: string; fileVersion: number } }>(
-        `/v1/apps/${appId}/files/${encodeURIComponent(path)}`,
+        `/v1/apps/${appId}/files/${encodedPath}`,
       );
       onFileOpen(path, response.data.content, response.data.fileVersion);
     } catch {

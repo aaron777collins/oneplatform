@@ -37,6 +37,8 @@ import {
 // Internal types
 // ────────────────────────────────────────────────────────────────────────────
 
+const MAX_PAYLOAD_BYTES = 1024 * 1024; // 1 MB
+
 /** Validated config extracted from the raw plugin config object. */
 interface WebhookConfig {
   webhookPath: string;
@@ -44,6 +46,7 @@ interface WebhookConfig {
   signatureAlgorithm: "sha256" | "sha1";
   idField: string | undefined;
   batchSize: number;
+  maxPayloadBytes: number;
 }
 
 /**
@@ -146,12 +149,19 @@ function parseConfig(raw: Record<string, unknown>): WebhookConfig {
     return batchSize;
   })();
 
+  const rawMaxPayloadBytes = raw["maxPayloadBytes"];
+  const resolvedMaxPayloadBytes =
+    typeof rawMaxPayloadBytes === "number" && rawMaxPayloadBytes > 0
+      ? Math.floor(rawMaxPayloadBytes)
+      : MAX_PAYLOAD_BYTES;
+
   return {
     webhookPath,
     signatureHeader: typeof signatureHeader === "string" ? signatureHeader : undefined,
     signatureAlgorithm: resolvedAlgorithm,
     idField: typeof idField === "string" ? idField : undefined,
     batchSize: resolvedBatchSize,
+    maxPayloadBytes: resolvedMaxPayloadBytes,
   };
 }
 
@@ -352,11 +362,11 @@ function mapPayloadToRecord(
 interface WebhookHandleMetadata {
   webhookPath: string;
   signatureVerificationEnabled: boolean;
-  /** The exact header name as provided in config. Stored so fetchBatch doesn't re-read config. */
   signatureHeader: string | undefined;
   signatureAlgorithm: "sha256" | "sha1";
   idField: string | undefined;
   batchSize: number;
+  maxPayloadBytes: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -459,11 +469,11 @@ const webhookConnector: Connector = {
     const handleMetadata: WebhookHandleMetadata = {
       webhookPath: parsed.webhookPath,
       signatureVerificationEnabled,
-      // Stored so fetchBatch can read the exact header name without re-parsing config.
       signatureHeader: parsed.signatureHeader,
       signatureAlgorithm: parsed.signatureAlgorithm,
       idField: parsed.idField,
       batchSize: parsed.batchSize,
+      maxPayloadBytes: parsed.maxPayloadBytes,
     };
 
     context.logger.info("Webhook connector connected", {
@@ -505,7 +515,8 @@ const webhookConnector: Connector = {
   ): Promise<BatchResult> {
     const { instanceId } = context.tenant;
     const handleMeta = handle.metadata as unknown as WebhookHandleMetadata;
-    const { signatureVerificationEnabled, signatureAlgorithm, idField, batchSize } = handleMeta;
+    const { signatureVerificationEnabled, signatureAlgorithm, idField, batchSize, maxPayloadBytes } = handleMeta;
+    const effectiveMaxPayloadBytes = maxPayloadBytes ?? MAX_PAYLOAD_BYTES;
 
     const span = context.tracing.startSpan("webhook.fetchBatch");
     span.setAttribute("cursor", cursor ?? "null");
@@ -568,10 +579,17 @@ const webhookConnector: Connector = {
           continue;
         }
 
-        // Verify HMAC if a signature header is configured. Invalid payloads are
-        // logged and skipped rather than halting the batch — one malformed delivery
-        // must not block the rest of the queue. Platform monitoring alerts will
-        // surface repeated failures.
+        if (payload.rawBody.length > effectiveMaxPayloadBytes) {
+          context.logger.warn("Webhook payload exceeds maximum size — skipping", {
+            instanceId,
+            payloadId,
+            size: payload.rawBody.length,
+            maxPayloadBytes: effectiveMaxPayloadBytes,
+          });
+          processedIds.push(payloadId);
+          continue;
+        }
+
         if (signatureVerificationEnabled && secret !== undefined && handleMeta.signatureHeader !== undefined) {
           try {
             await verifySignature(payload, handleMeta.signatureHeader, signatureAlgorithm, secret);

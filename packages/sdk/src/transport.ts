@@ -214,7 +214,7 @@ export class Transport {
   private readonly warnedDeprecations = new Set<string>();
 
   /** Active AbortControllers for in-flight requests — aborted on destroy(). */
-  readonly activeControllers = new Set<AbortController>();
+  private readonly activeControllers = new Set<AbortController>();
 
   constructor(opts: TransportOptions) {
     this.opts = opts;

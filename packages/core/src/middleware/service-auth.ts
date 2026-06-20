@@ -187,9 +187,9 @@ export function serviceAuthMiddleware(config: ServiceAuthConfig) {
         // Runtime validation: ensure critical UserContext fields are present
         // so downstream code does not operate on a structurally invalid context.
         if (
-          typeof parsed.userId !== "string" ||
-          typeof parsed.tenantId !== "string" ||
-          !Array.isArray(parsed.roles)
+          typeof parsed["userId"] !== "string" ||
+          typeof parsed["tenantId"] !== "string" ||
+          !Array.isArray(parsed["roles"])
         ) {
           return c.json(
             { error: { code: "UNAUTHORIZED", message: "X-User-Context is missing required fields (userId, tenantId, roles).", requestId } },

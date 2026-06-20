@@ -127,12 +127,12 @@ export class WebhookDeliveryLogRepositoryImpl implements WebhookDeliveryLogRepos
             `SELECT ${LOG_COLUMNS}
                FROM ingestion.webhook_delivery_log
               WHERE webhook_id = $1
-                AND received_at < (
-                      SELECT received_at
+                AND (received_at, id) < (
+                      SELECT received_at, id
                         FROM ingestion.webhook_delivery_log
-                       WHERE id = $2
+                       WHERE id = $2 AND webhook_id = $1
                     )
-              ORDER BY received_at DESC
+              ORDER BY received_at DESC, id DESC
               LIMIT $3`,
             [webhookId, options.cursor, options.limit],
           )
@@ -140,7 +140,7 @@ export class WebhookDeliveryLogRepositoryImpl implements WebhookDeliveryLogRepos
             `SELECT ${LOG_COLUMNS}
                FROM ingestion.webhook_delivery_log
               WHERE webhook_id = $1
-              ORDER BY received_at DESC
+              ORDER BY received_at DESC, id DESC
               LIMIT $2`,
             [webhookId, options.limit],
           ),
