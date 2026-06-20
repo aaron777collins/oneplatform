@@ -437,7 +437,9 @@ class Parser {
         return {
           ok: false,
           errors: [{
-            message: `Query exceeds maximum allowed depth of ${this.maxDepth} (got ${depth}).`,
+            message: depth === Infinity
+              ? "Query rejected: fragment cycle detected."
+              : `Query exceeds maximum allowed depth of ${this.maxDepth} (got ${depth}).`,
             line: 1,
             column: 1,
           }],
