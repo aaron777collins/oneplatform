@@ -15,8 +15,9 @@ export interface Entity {
 /**
  * Returns the parsed `dataJson` field of an {@link Entity} as a typed object.
  *
- * Caches the parsed result on the entity instance so subsequent calls avoid
- * redundant JSON.parse() overhead.
+ * Caches the parsed result in a WeakMap so subsequent calls avoid redundant
+ * JSON.parse() overhead without mutating the entity object (which may be frozen
+ * or shared across code paths).
  *
  * @param entity - A gRPC Entity whose `dataJson` field contains serialised JSON.
  * @returns The parsed data object, typed as `T`.
@@ -27,15 +28,14 @@ export interface Entity {
  * const product = parseEntityData<Product>(entity);
  * ```
  */
+const parseCache = new WeakMap<Entity, unknown>();
+
 export function parseEntityData<T = Record<string, unknown>>(entity: Entity): T {
-  // Cache parsed result on the entity to avoid repeated parsing
-  const cacheKey = '__parsedData';
-  const entityAny = entity as unknown as Record<string, unknown>;
-  const cached = entityAny[cacheKey];
+  const cached = parseCache.get(entity);
   if (cached !== undefined) return cached as T;
 
   const parsed = JSON.parse(entity.dataJson) as T;
-  entityAny[cacheKey] = parsed;
+  parseCache.set(entity, parsed);
   return parsed;
 }
 

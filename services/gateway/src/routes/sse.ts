@@ -39,17 +39,20 @@ export function createSseRoutes(deps: SseRouteDeps): Hono<{ Variables: AppVariab
         },
       }, 429);
     }
+
+    // Increment immediately after the limit check, before any further work,
+    // so concurrent requests that both pass the check cannot both exceed the cap.
+    // Node.js processes synchronous code without interleaving, so check+increment
+    // in the same synchronous block is safe against concurrent requests.
+    activeConnectionsByKey.set(connectionKey, currentConnections + 1);
+
     const patterns = query.data.events.split(",").map((s) => s.trim()).filter(Boolean);
     if (patterns.length === 0) {
+      activeConnectionsByKey.set(connectionKey, currentConnections);
       return c.json({
         error: { code: "VALIDATION_ERROR", message: "At least one event pattern is required in the 'events' parameter." },
       }, 400);
     }
-
-    // Increment immediately after all validation passes, closing the TOCTOU
-    // window — concurrent requests that pass the limit check simultaneously
-    // must not both be allowed to open connections past the cap.
-    activeConnectionsByKey.set(connectionKey, currentConnections + 1);
 
     const lastEventId = query.data["Last-Event-ID"] ?? c.req.header("Last-Event-ID");
 

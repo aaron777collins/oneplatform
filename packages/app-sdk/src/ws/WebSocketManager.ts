@@ -67,7 +67,12 @@ export class WebSocketManager {
    * URL is derived from window.location.origin only (C-6).
    */
   connect(slug: string): void {
-    if (this.destroyed) return;
+    // Allow a previously-destroyed instance to be reused when AppProvider remounts
+    // (e.g. React Strict Mode double-mount or user-triggered retry via retryCount).
+    // The refs in useProviderSingletons are non-null after the first mount, so
+    // resetting here lets the existing instance reconnect rather than silently
+    // refusing because the destroyed flag was set by the prior cleanup.
+    this.destroyed = false;
 
     this.appSlug = slug;
     // A manual connect() call resets retry state so the manager gets a fresh

@@ -640,6 +640,7 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_SERVICE_TOKEN: ${OP_SERVICE_TOKEN:-}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro

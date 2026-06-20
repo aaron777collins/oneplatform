@@ -186,7 +186,11 @@ function parseConfig(raw: Record<string, unknown>): LdapConfig {
     rawGroupMapping !== undefined &&
     typeof rawGroupMapping === "object" &&
     !Array.isArray(rawGroupMapping)
-      ? (rawGroupMapping as Record<string, string>)
+      ? Object.fromEntries(
+          Object.entries(rawGroupMapping as Record<string, unknown>).filter(
+            ([, v]) => typeof v === "string",
+          ),
+        )
       : {};
 
   // useTLS defaults to true — operators must explicitly opt out.
@@ -248,8 +252,9 @@ function parseConfig(raw: Record<string, unknown>): LdapConfig {
  * Otherwise append baseDN: "ou=users" + "dc=example,dc=com" → "ou=users,dc=example,dc=com".
  */
 function buildSearchBase(searchBase: string, baseDN: string): string {
-  const lower = searchBase.toLowerCase();
-  if (lower.includes("dc=") || lower.includes("o=") || lower.includes("c=")) {
+  // Match dc=, o=, or c= only when they appear as RDN components (at start or after a comma),
+  // preventing false positives from OU names containing these substrings (e.g., "ou=production").
+  if (/(?:^|,)\s*(dc|o|c)\s*=/i.test(searchBase)) {
     // Looks like a full DN — use as-is
     return searchBase;
   }
@@ -346,10 +351,7 @@ async function proxyBind(
   if (!response.ok || !body.success) {
     const reason = body.error ?? `HTTP ${response.status}`;
     logger.debug("LDAP bind failed", { bindDN: params.bindDN, reason });
-    throw new PluginAuthError(`LDAP bind failed for ${params.bindDN}: ${reason}`, {
-      bindDN: params.bindDN,
-      reason,
-    });
+    throw new PluginAuthError("LDAP bind failed", { reason });
   }
 
   logger.debug("LDAP bind successful", { bindDN: params.bindDN });
@@ -824,15 +826,23 @@ class LdapAuthProvider implements AuthProvider {
       return { valid: false, error: "User DN no longer exists in directory" };
     }
 
-    const groups = await this.getGroupMembership(
-      proxyUrl,
-      cfg,
-      token.trim(),
-      userEntry,
-      bindPassword,
-      fetchProxy,
-      context.logger,
-    );
+    let groups: string[];
+    try {
+      groups = await this.getGroupMembership(
+        proxyUrl,
+        cfg,
+        token.trim(),
+        userEntry,
+        bindPassword,
+        fetchProxy,
+        context.logger,
+      );
+    } catch (err) {
+      if (err instanceof PluginAuthError) {
+        return { valid: false, error: err.message };
+      }
+      throw err;
+    }
 
     const claims = this.buildClaims(token.trim(), userEntry.attributes, groups);
 
@@ -1111,16 +1121,14 @@ class LdapAuthProvider implements AuthProvider {
     const groupNames: string[] = [];
 
     for (const dn of memberDNs) {
-      // Extract the first RDN value from the DN.
-      // DN format: "cn=GroupName,ou=groups,dc=example,dc=com"
-      // We want "GroupName" when groupNameAttribute is "cn".
-      const namePrefix = `${groupNameAttribute}=`;
+      // The memberOf DN's first RDN attribute is fixed by the directory schema (typically "cn=").
+      // Always extract the value of the first RDN regardless of groupNameAttribute, since
+      // groupNameAttribute refers to the attribute fetched from group entries during explicit
+      // group search and is not applicable to DN parsing here.
       const firstRDN = dn.split(",")[0] ?? "";
-      const lowerRDN = firstRDN.toLowerCase();
-      const lowerPrefix = namePrefix.toLowerCase();
-
-      if (lowerRDN.startsWith(lowerPrefix)) {
-        const name = firstRDN.slice(namePrefix.length).trim();
+      const eqIndex = firstRDN.indexOf("=");
+      if (eqIndex !== -1) {
+        const name = firstRDN.slice(eqIndex + 1).trim();
         if (name !== "") {
           groupNames.push(name);
         }

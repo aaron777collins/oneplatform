@@ -376,22 +376,22 @@ export interface PipelineServiceDeps {
 
 const SSRF_BLOCKED_PATTERNS = [
   // Loopback
-  /^https?:\/\/localhost(:\d+)?\//i,
-  /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/\[::1\](:\d+)?\//i,
+  /^https?:\/\/localhost(:\d+)?(\/|$)/i,
+  /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
   // RFC-1918 private ranges
-  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?\//,
-  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?\//,
+  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
+  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
   // Link-local
-  /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?\//,
+  /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/\[fe80:/i,
   // AWS metadata endpoint
-  /^https?:\/\/169\.254\.169\.254(:\d+)?\//,
+  /^https?:\/\/169\.254\.169\.254(:\d+)?(\/|$)/,
   // GCP metadata
-  /^https?:\/\/metadata\.google\.internal(:\d+)?\//i,
+  /^https?:\/\/metadata\.google\.internal(:\d+)?(\/|$)/i,
   // Azure metadata
-  /^https?:\/\/169\.254\.169\.254(:\d+)?\//,
+  /^https?:\/\/169\.254\.169\.254(:\d+)?(\/|$)/,
 ];
 
 function isUrlSsrfBlocked(url: string): boolean {
@@ -402,14 +402,24 @@ function isUrlSsrfBlocked(url: string): boolean {
 // Slug derivation — lowercase, spaces→hyphens, strip unsafe chars
 // ---------------------------------------------------------------------------
 
+// Slug schema requires /^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$/ (min 3 chars).
+// If the name produces a slug that is too short or empty (e.g. all non-ASCII
+// characters, emoji, or only hyphens) we fall back to a UUID-based slug so
+// the derived value always passes schema validation.
 function deriveSlug(name: string): string {
-  return name
+  const candidate = name
     .toLowerCase()
     .trim()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
+
+  const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
+  if (SLUG_RE.test(candidate)) {
+    return candidate;
+  }
+  return `pipeline-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 // ---------------------------------------------------------------------------

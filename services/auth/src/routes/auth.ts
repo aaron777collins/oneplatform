@@ -43,16 +43,40 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
 
   const REFRESH_RATE_LIMIT = 10;
   const REFRESH_RATE_WINDOW_SEC = 60;
+  const REFRESH_RATE_WINDOW_MS = REFRESH_RATE_WINDOW_SEC * 1_000;
   const refreshAttempts = new Map<string, { count: number; windowStartMs: number }>();
+
+  // Periodic cleanup prevents the in-memory fallback Map from growing
+  // unboundedly when many distinct IPs make requests and never return.
+  // Entries whose window has fully elapsed are safe to remove.
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of refreshAttempts) {
+      if (now - entry.windowStartMs >= REFRESH_RATE_WINDOW_MS) {
+        refreshAttempts.delete(ip);
+      }
+    }
+  }, REFRESH_RATE_WINDOW_MS);
+  if (typeof cleanupTimer === "object" && "unref" in cleanupTimer) {
+    (cleanupTimer as { unref(): void }).unref();
+  }
 
   async function checkRefreshRateLimit(ip: string): Promise<void> {
     const key = `auth:refresh-rate:${ip}`;
     if (redis) {
-      // Atomic Redis increment with TTL
-      const count = await redis.incr(key);
-      if (count === 1) {
-        await redis.expire(key, REFRESH_RATE_WINDOW_SEC);
-      }
+      // Atomic Lua script makes INCR + EXPIRE a single operation, eliminating
+      // the TOCTOU window where a crash between the two calls would leave the
+      // key without a TTL and permanently block that IP.
+      const count = await redis.eval(
+        `local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count`,
+        1,
+        key,
+        REFRESH_RATE_WINDOW_SEC,
+      ) as number;
       if (count > REFRESH_RATE_LIMIT) {
         const ttl = await redis.ttl(key);
         throw new RateLimitError(Math.max(ttl, 1));

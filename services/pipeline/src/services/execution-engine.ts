@@ -798,7 +798,11 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       }
       return { output };
     } else {
-      // waitMode === "any": first branch to succeed wins
+      // waitMode === "any": first branch to succeed wins.
+      // We attach a no-op catch to each losing promise so unhandled rejection
+      // warnings don't surface after the race resolves — the branches still run
+      // to completion but their results are intentionally discarded.
+      branchPromises.forEach((p) => p.catch(() => undefined));
       const result = await Promise.race(branchPromises);
       return { output: { [result.branchId]: result.output } };
     }
@@ -1485,9 +1489,10 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       while (currentStepId !== null) {
         // Cancellation check between steps
         if (await ctx.isCancelled()) {
-          // Mark all remaining pending steps as cancelled — use the pre-fetched
-          // map instead of re-querying.
-          const pendingRows = allRunStepRows.filter((r) => r.status === "pending");
+          // Re-fetch current statuses so we only cancel steps that are still
+          // pending — not steps that completed during the traversal loop.
+          const freshRunStepRows = await runStepRepo.findByRunId(runId);
+          const pendingRows = freshRunStepRows.filter((r) => r.status === "pending");
           await Promise.all(
             pendingRows.map((r) => runStepRepo.updateStatus(runId, r.step_id, { status: "cancelled" })),
           );

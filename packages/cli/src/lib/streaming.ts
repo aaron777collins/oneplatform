@@ -31,7 +31,7 @@ export function parseSseChunk(chunk: string, buffer: string): { events: SseEvent
       }
       current = {};
     } else if (line.startsWith("data:")) {
-      current.data = line.slice(5).trimStart();
+      current.data = current.data !== undefined ? current.data + "\n" + line.slice(5).trimStart() : line.slice(5).trimStart();
     } else if (line.startsWith("event:")) {
       current.event = line.slice(6).trimStart();
     } else if (line.startsWith("id:")) {

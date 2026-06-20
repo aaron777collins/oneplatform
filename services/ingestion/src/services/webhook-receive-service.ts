@@ -147,11 +147,10 @@ export interface WebhookReceiveService {
   receiveEvent(
     receiverId: string,
     rawBody: Buffer,
-    signatureHeader: string | undefined,
-    // Optional headers forwarded to delivery logging middleware.  The core
-    // HMAC path never reads this — it is only consumed by the delivery logger
-    // wrapper so the hot path stays free of audit-log concerns.
-    incomingHeaders?: Record<string, string>,
+    // All request headers (excluding blocked ones such as Authorization/Cookie).
+    // The service extracts the signature using the receiver's configured headerName
+    // so custom header names set via the management API are honoured.
+    incomingHeaders: Record<string, string>,
   ): Promise<ReceiveEventResult>;
   invalidateCache(receiverId: string): void;
 }
@@ -177,8 +176,17 @@ export function createWebhookReceiveService(
   // propagates quickly without hitting the DB on every event.
   const cache = new LruCache(CACHE_CAPACITY, CACHE_TTL_MS);
 
+  // TODO(#PLAT-???): No Worker consumes "ontology:map" yet — jobs accumulate in Redis
+  // until the ontology service implements a consumer. Retry config matches the platform
+  // standard so jobs are not silently discarded on enqueue failures.
   const ontologyQueue = new Queue("ontology:map", {
     connection: { lazyConnect: true, url: redisUrl },
+    defaultJobOptions: {
+      attempts: 5,
+      backoff: { type: "exponential", delay: 1_000 },
+      removeOnComplete: { age: 86_400 },
+      removeOnFail: { age: 604_800 },
+    },
   });
 
   // -------------------------------------------------------------------------
@@ -193,7 +201,7 @@ export function createWebhookReceiveService(
   async function receiveEvent(
     receiverId: string,
     rawBody: Buffer,
-    signatureHeader: string | undefined,
+    incomingHeaders: Record<string, string>,
   ): Promise<ReceiveEventResult> {
     // Step 1: Look up receiver config — cache first to avoid DB round-trip.
     let receiver = cache.get(receiverId);
@@ -246,9 +254,13 @@ export function createWebhookReceiveService(
     }
 
     // Step 4: HMAC verification.
-    // Normalise the incoming signature: strip the "sha256=" or "sha512=" prefix
-    // if present. Some senders include it, some do not.
-    const rawSignature = signatureHeader ?? "";
+    // Extract the signature using the receiver's configured header name so that
+    // custom headerName values set via the management API are honoured. Headers
+    // are matched case-insensitively to handle sender variations.
+    const configuredHeaderLower = receiver.header_name.toLowerCase();
+    const rawSignature = incomingHeaders[configuredHeaderLower]
+      ?? incomingHeaders[receiver.header_name]
+      ?? "";
     const prefixPattern = /^sha(?:256|512)=/i;
     const incomingHex = rawSignature.replace(prefixPattern, "").toLowerCase();
 

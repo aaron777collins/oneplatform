@@ -67,7 +67,7 @@ async function* parseSseStream(
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
+    const lines = buffer.split(/\r\n|\r|\n/);
     // Keep the last (potentially incomplete) line in the buffer
     buffer = lines.pop() ?? '';
 
@@ -84,7 +84,8 @@ async function* parseSseStream(
       } else if (line.startsWith('event:')) {
         eventType = line.slice(6).trim();
       } else if (line.startsWith('data:')) {
-        const chunk = line.slice(5).trimStart();
+        const raw = line.slice(5);
+        const chunk = raw.startsWith(' ') ? raw.slice(1) : raw;
         eventData = eventData === '' ? chunk : `${eventData}\n${chunk}`;
       } else if (line.startsWith('id:')) {
         eventId = line.slice(3).trim();

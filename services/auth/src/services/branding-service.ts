@@ -116,13 +116,17 @@ export function sanitizeCss(raw: string): string {
 
   // Strip url(...) including nested quotes and whitespace — covers data: URIs,
   // remote resources loaded via http, and other protocol schemes.
-  sanitised = sanitised.replace(/url\s*\([^)]*\)/gi, "");
+  // Greedy match up to the last ')' on the line handles escaped parens and
+  // nested constructs like url(calc(1)) that [^)]* would leave partial.
+  sanitised = sanitised.replace(/url\s*\([^)]*(?:\([^)]*\)[^)]*)*\)/gi, "");
 
   // Strip any remaining javascript: protocol occurrences in property values.
   sanitised = sanitised.replace(/javascript\s*:/gi, "");
 
   // Strip IE-era CSS expressions — expression(<js>) executes arbitrary code.
-  sanitised = sanitised.replace(/expression\s*\([^)]*\)/gi, "");
+  // Same nested-paren strategy as url() above prevents expression(nested(evil))
+  // from leaving a dangling ')'.
+  sanitised = sanitised.replace(/expression\s*\([^)]*(?:\([^)]*\)[^)]*)*\)/gi, "");
 
   // Re-check byte length after stripping in case the raw input was under the
   // limit but adversarial nesting caused expansion (unlikely but defensive).

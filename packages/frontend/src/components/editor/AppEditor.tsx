@@ -78,6 +78,12 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
   const queryClient = useQueryClient();
 
   const editorStore = useEditorStore();
+
+  // Refs keep the debounced callback from closing over stale client/store values
+  const clientRef = React.useRef(client);
+  clientRef.current = client;
+  const storeRef = React.useRef(editorStore);
+  storeRef.current = editorStore;
   const [activeBuildId, setActiveBuildId] = React.useState<string | null>(null);
   const [buildErrors, setBuildErrors] = React.useState<BuildError[]>([]);
 
@@ -117,11 +123,11 @@ export function AppEditor({ appId, appName, appSlug, className }: AppEditorProps
       debounce(async (path: string, content: string, fileVersion: number) => {
         try {
           const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-          const result = await client.put<{ data: { fileVersion: number } }>(
+          const result = await clientRef.current.put<{ data: { fileVersion: number } }>(
             `/v1/apps/${appId}/files/${encodedPath}`,
             { content, fileVersion },
           );
-          editorStore.markSaved(path, result.data.fileVersion);
+          storeRef.current.markSaved(path, result.data.fileVersion);
         } catch (err) {
           if (err instanceof ApiError && err.code === "APP_FILE_VERSION_CONFLICT") {
             toast({

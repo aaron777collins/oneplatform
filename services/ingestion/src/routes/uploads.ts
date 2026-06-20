@@ -10,34 +10,37 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/json",
   "text/tab-separated-values",
   "application/x-ndjson",
+  "application/octet-stream",
 ]);
 
 const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
 const FILE_UPLOADS_BUCKET = "file-uploads";
-const redisUrl = process.env["OP_REDIS_URL"] ?? "redis://localhost:6379";
-
-// The file-parse queue is shared across all upload route instances (module-level
-// singleton so we don't create a new connection per request).
-const fileParseQueue = new Queue<FileParseJobPayload>("ingestion:file-parse", {
-  connection: { lazyConnect: true, url: redisUrl },
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 5_000 },
-    removeOnComplete: { age: 86_400 },
-    removeOnFail: { age: 604_800 },
-  },
-});
 
 export interface UploadRouteDeps {
   uploadService: UploadService;
   storage: ObjectStorageClient;
   maxFileSizeBytes?: number;
+  /** Redis URL for the file-parse queue — must match the validated service config. */
+  redisUrl: string;
 }
 
 export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { uploadService, storage } = deps;
   const maxFileSize = deps.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+
+  // Queue is created inside the factory so it uses the validated config URL
+  // rather than reading process.env at import time. This also ensures the queue
+  // is scoped to this route instance and can be closed during graceful shutdown.
+  const fileParseQueue = new Queue<FileParseJobPayload>("ingestion:file-parse", {
+    connection: { lazyConnect: true, url: deps.redisUrl },
+    defaultJobOptions: {
+      attempts: 5,
+      backoff: { type: "exponential", delay: 1_000 },
+      removeOnComplete: { count: 0 },
+      removeOnFail: { count: 100 },
+    },
+  });
 
   routes.post("/", async (c) => {
     const user = c.var.user;
@@ -73,13 +76,19 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
       ? formData["connectorId"]
       : undefined;
 
+    if (!connectorId) {
+      throw new ValidationError(
+        "connectorId is required. File uploads must be linked to a connector so the ingested data can be tracked and cleaned up by the retention service.",
+      );
+    }
+
     const uploadJob = await uploadService.createUpload({
       tenantId: user.tenantId,
       userId: user.userId,
       filename,
       contentType,
       fileSize: file.size,
-      ...(connectorId ? { connectorId } : {}),
+      connectorId,
     });
 
     // Stream the multipart bytes to MinIO before returning.
@@ -90,11 +99,11 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
     await storage.putObject(FILE_UPLOADS_BUCKET, minioKey, fileStream, contentType);
 
     // Enqueue the parse worker now that the bytes are durably in MinIO.
+    // connector_id is guaranteed non-null here because we validated it above.
     await fileParseQueue.add("parse", {
       uploadJobId: uploadJob.id,
       tenantId: user.tenantId,
-      // Use connector ID from the job row (may be null for unlinked uploads).
-      connectorId: uploadJob.connector_id ?? uploadJob.id,
+      connectorId: uploadJob.connector_id ?? connectorId,
       minioKey,
       contentType,
       filename,

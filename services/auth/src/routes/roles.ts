@@ -141,21 +141,60 @@ export function createRoleRoutes(deps: RoleRouteDeps): Hono<{ Variables: AppVari
 
     const isRename = parsed.data.name !== undefined && parsed.data.name !== existing.name;
 
-    const updated = await roleRepository.update(id, {
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-      ...(parsed.data.permissions !== undefined ? { permissions: parsed.data.permissions } : {}),
-    });
+    let updated: import("../repositories/types.js").Role;
 
     if (isRename) {
-      await db.query(
-        `UPDATE auth.users
-            SET roles = array_replace(roles, $1, $2),
-                updated_at = now()
-          WHERE tenant_id = $3
-            AND $1 = ANY(roles)`,
-        [existing.name, parsed.data.name, user.tenantId],
-      );
+      // Wrap both the role update and the user roles array_replace in a single
+      // transaction so a crash between them cannot leave users referencing a
+      // role name that no longer exists (or retaining the old name after rename).
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+
+        const sets: string[] = [];
+        const values: unknown[] = [];
+        let idx = 1;
+        if (parsed.data.name !== undefined) { sets.push(`name = $${idx++}`); values.push(parsed.data.name); }
+        if (parsed.data.description !== undefined) { sets.push(`description = $${idx++}`); values.push(parsed.data.description); }
+        if (parsed.data.permissions !== undefined) { sets.push(`permissions = $${idx++}`); values.push(parsed.data.permissions); }
+        sets.push(`updated_at = now()`);
+        values.push(id);
+        const roleResult = await client.query<import("../repositories/types.js").Role>(
+          `UPDATE auth.roles
+              SET ${sets.join(", ")}
+            WHERE id = $${idx}
+              AND is_predefined = false
+         RETURNING id, tenant_id, name, description, is_predefined, permissions, created_at, updated_at`,
+          values,
+        );
+        const updatedRow = roleResult.rows[0];
+        if (updatedRow === undefined) {
+          throw new Error(`UPDATE auth.roles found no updatable row with id=${id}`);
+        }
+        updated = updatedRow;
+
+        await client.query(
+          `UPDATE auth.users
+              SET roles = array_replace(roles, $1, $2),
+                  updated_at = now()
+            WHERE tenant_id = $3
+              AND $1 = ANY(roles)`,
+          [existing.name, parsed.data.name, user.tenantId],
+        );
+
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      updated = await roleRepository.update(id, {
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+        ...(parsed.data.permissions !== undefined ? { permissions: parsed.data.permissions } : {}),
+      });
     }
 
     return c.json({

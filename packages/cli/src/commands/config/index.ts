@@ -220,7 +220,7 @@ export function registerConfig(program: Command): void {
   config.command("export").description("Export platform configuration to YAML/JSON")
     .option("--format <fmt>", "Output format: yaml|json", "yaml")
     .option("--include-credentials", "Include encrypted credential values (requires --passphrase)")
-    .option("--passphrase <pass>", "Passphrase for credential encryption")
+    .option("--passphrase <pass>", "Passphrase for credential encryption (omit to be prompted interactively; avoid passing on command line as it is visible in shell history and /proc)")
     .option("--out <path>", "Write to file instead of stdout")
     .option("--kinds <kinds>", "Comma-separated resource kinds to export (default: all)")
     .action(withContext<[ExportOpts]>(exportAction));
@@ -229,7 +229,7 @@ export function registerConfig(program: Command): void {
     .requiredOption("--file <path>", "Path to config export file")
     .option("--on-conflict <mode>", "Conflict resolution: fail|skip|overwrite|merge", "fail")
     .option("--dry-run", "Perform full validation without any writes")
-    .option("--passphrase <pass>", "Required if config contains encrypted credentials")
+    .option("--passphrase <pass>", "Required if config contains encrypted credentials (omit to be prompted interactively; avoid passing on command line as it is visible in shell history and /proc)")
     .action(withContext<[ImportOpts]>(importAction));
 
   config.command("diff").description("Preview changes from a config file (alias for import --dry-run)")

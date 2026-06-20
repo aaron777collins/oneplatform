@@ -285,8 +285,17 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     },
   });
 
+  // TODO(#PLAT-???): No Worker consumes "ontology:map" yet — jobs accumulate in Redis
+  // until the ontology service implements a consumer. Retry config is set to match
+  // the platform standard so jobs are not silently discarded on enqueue failures.
   const ontologyQueue = new Queue("ontology:map", {
     connection: { lazyConnect: true, url: redisUrl },
+    defaultJobOptions: {
+      attempts: 5,
+      backoff: { type: "exponential", delay: 1_000 },
+      removeOnComplete: { age: 86_400 },
+      removeOnFail: { age: 604_800 },
+    },
   });
 
   // -------------------------------------------------------------------------
@@ -413,6 +422,89 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     }
   }
 
+  // Atomically increments completedBatches and processedRecords on the progress
+  // key using a Lua script so concurrent batch workers cannot lose updates.
+  // The script is a compare-and-swap loop: read → decode → increment → write,
+  // all within a single Redis execution context (no interleaving possible).
+  const incrProgressScript = `
+    local key = KEYS[1]
+    local pubChannel = KEYS[2]
+    local batchIncr = tonumber(ARGV[1])
+    local recordIncr = tonumber(ARGV[2])
+    local lastBatchAt = ARGV[3]
+    local raw = redis.call('GET', key)
+    if not raw then return nil end
+    local ok, progress = pcall(cjson.decode, raw)
+    if not ok then return nil end
+    progress['completedBatches'] = (progress['completedBatches'] or 0) + batchIncr
+    progress['processedRecords'] = (progress['processedRecords'] or 0) + recordIncr
+    progress['lastBatchAt'] = lastBatchAt
+    local encoded = cjson.encode(progress)
+    redis.call('SET', key, encoded)
+    redis.call('PUBLISH', pubChannel, encoded)
+    return 1
+  `;
+
+  async function incrementBatchProgress(
+    syncJobId: string,
+    recordCount: number,
+  ): Promise<void> {
+    const key = `ingestion:sync:${syncJobId}:progress`;
+    const pubChannel = `ingestion:sync:${syncJobId}:events`;
+    const result = await redis.eval(
+      incrProgressScript,
+      2,
+      key,
+      pubChannel,
+      "1",
+      String(recordCount),
+      new Date().toISOString(),
+    );
+    if (result === null) {
+      logger.warn("incrementBatchProgress: progress key missing, skipping update", { syncJobId });
+    }
+  }
+
+  // Atomically increments failedBatches and appends an error entry.
+  const incrFailedBatchScript = `
+    local key = KEYS[1]
+    local pubChannel = KEYS[2]
+    local errorJson = ARGV[1]
+    local raw = redis.call('GET', key)
+    if not raw then return nil end
+    local ok, progress = pcall(cjson.decode, raw)
+    if not ok then return nil end
+    progress['failedBatches'] = (progress['failedBatches'] or 0) + 1
+    local errors = progress['errors'] or {}
+    local errOk, errEntry = pcall(cjson.decode, errorJson)
+    if errOk then
+      table.insert(errors, errEntry)
+    end
+    progress['errors'] = errors
+    local encoded = cjson.encode(progress)
+    redis.call('SET', key, encoded)
+    redis.call('PUBLISH', pubChannel, encoded)
+    return 1
+  `;
+
+  async function incrementFailedBatch(
+    syncJobId: string,
+    errorEntry: { batchId: string; message: string; code: string; recordCount: number },
+  ): Promise<void> {
+    const key = `ingestion:sync:${syncJobId}:progress`;
+    const pubChannel = `ingestion:sync:${syncJobId}:events`;
+    const result = await redis.eval(
+      incrFailedBatchScript,
+      2,
+      key,
+      pubChannel,
+      JSON.stringify(errorEntry),
+    );
+    if (result === null) {
+      logger.warn("incrementFailedBatch: progress key missing, skipping update", { syncJobId });
+    }
+  }
+
   // -------------------------------------------------------------------------
   // listSyncs — reads job history from BullMQ.
   // -------------------------------------------------------------------------
@@ -482,10 +574,16 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         ? filtered.filter((item) => item.status === query.filterStatus)
         : filtered;
 
-    const cursorIdx =
-      query.cursor !== undefined
-        ? statusFiltered.findIndex((item) => item.syncJobId === query.cursor) + 1
-        : 0;
+    let cursorIdx = 0;
+    if (query.cursor !== undefined) {
+      const found = statusFiltered.findIndex((item) => item.syncJobId === query.cursor);
+      if (found === -1) {
+        // Cursor not found — the job may have been removed from BullMQ between pages.
+        // Return an empty page rather than silently restarting from the beginning.
+        return { items: [], nextCursor: null, total: statusFiltered.length };
+      }
+      cursorIdx = found + 1;
+    }
 
     const page = statusFiltered.slice(cursorIdx, cursorIdx + query.limit);
     const nextCursor =
@@ -676,26 +774,23 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             records,
           };
 
-          // V6-093: Soft size guard on the records array carried in the BullMQ
-          // payload. Warn at 10 MB so operators can tune batch sizes before
-          // Redis memory pressure becomes critical. This is a monitoring aid,
-          // not a hard limit — the 1 MB hard fail below protects Redis.
-          const recordsBytes = Buffer.byteLength(JSON.stringify(records), "utf8");
-          if (recordsBytes > 10_485_760) {
-            logger.warn("Batch records exceed 10 MB — consider reducing connector batch size or externalizing to a staging store", {
+          // Guard against Redis memory exhaustion from oversized payloads.
+          // Batches over 1 MB indicate a connector returning excessively large
+          // records; fail loudly so the issue is caught early rather than
+          // silently bloating the queue. A single serialization of the full
+          // payload covers both the records-only and full-payload checks since
+          // the payload always includes the records.
+          const payloadBytes = Buffer.byteLength(JSON.stringify(jobPayload), "utf8");
+          if (payloadBytes > 10_485_760) {
+            logger.warn("Batch payload exceeds 10 MB — consider reducing connector batch size or externalizing to a staging store", {
               syncJobId,
               connectorId,
               batchSeqNum,
-              recordsBytes,
+              payloadBytes,
               recordCount: records.length,
             });
           }
 
-          // Guard against Redis memory exhaustion from oversized payloads.
-          // Batches over 1 MB indicate a connector returning excessively large
-          // records; fail loudly so the issue is caught early rather than
-          // silently bloating the queue.
-          const payloadBytes = Buffer.byteLength(JSON.stringify(jobPayload), "utf8");
           if (payloadBytes > 1_048_576) {
             logger.error("Batch job payload exceeds 1 MB — aborting sync to protect Redis memory", {
               syncJobId,
@@ -891,15 +986,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         batchSeqNum,
       });
 
-      const progressData = await getSyncProgress(syncJobId);
-      if (progressData !== null) {
-        await writeProgress({
-          ...progressData,
-          completedBatches: progressData.completedBatches + 1,
-          processedRecords: progressData.processedRecords + records.length,
-          lastBatchAt: new Date().toISOString(),
-        });
-      }
+      await incrementBatchProgress(syncJobId, records.length);
 
       logger.info("Batch job completed", {
         syncJobId,
@@ -911,22 +998,12 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
 
-      const progressData = await getSyncProgress(syncJobId);
-      if (progressData !== null) {
-        await writeProgress({
-          ...progressData,
-          failedBatches: progressData.failedBatches + 1,
-          errors: [
-            ...progressData.errors,
-            {
-              batchId,
-              message,
-              code: err instanceof AppError ? err.code : (err instanceof Error ? err.name : "UNKNOWN"),
-              recordCount: records.length,
-            },
-          ],
-        });
-      }
+      await incrementFailedBatch(syncJobId, {
+        batchId,
+        message,
+        code: err instanceof AppError ? err.code : (err instanceof Error ? err.name : "UNKNOWN"),
+        recordCount: records.length,
+      });
 
       logger.error("Batch job failed", {
         syncJobId,

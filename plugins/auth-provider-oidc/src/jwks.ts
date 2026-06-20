@@ -205,7 +205,15 @@ async function importJwk(jwk: JsonWebKey): Promise<CryptoKey | null> {
     return null;
   }
 
-  const alg = jwk.alg ?? (jwk.kty === "EC" ? "ES256" : "RS256");
+  const alg =
+    jwk.alg ??
+    (jwk.kty === "EC"
+      ? jwk.crv === "P-384"
+        ? "ES384"
+        : jwk.crv === "P-521"
+          ? "ES512"
+          : "ES256"
+      : "RS256");
 
   try {
     const params = algorithmParams(alg);
@@ -324,9 +332,15 @@ async function verifySignatureWithKeySet(
 
     try {
       // For RSA-PSS we need to specify the salt length at verify time.
+      // Per RFC 7518 §3.5, salt length must equal the hash output length.
+      const hashSizeBytes: Record<string, number> = { "SHA-256": 32, "SHA-384": 48, "SHA-512": 64 };
       const verifyAlg =
         cryptoKey.algorithm.name === "RSA-PSS"
-          ? { name: "RSA-PSS", saltLength: 32 }
+          ? {
+              name: "RSA-PSS",
+              saltLength:
+                hashSizeBytes[(cryptoKey.algorithm as RsaHashedKeyAlgorithm).hash.name] ?? 32,
+            }
           : cryptoKey.algorithm;
 
       // Web Crypto requires Uint8Array<ArrayBuffer>, not Uint8Array<ArrayBufferLike>.

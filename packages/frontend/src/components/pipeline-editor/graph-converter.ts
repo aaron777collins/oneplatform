@@ -275,26 +275,27 @@ export function applyAutoLayout(
     adjList.get(edge.source)?.push(edge.target);
   }
 
-  // BFS to compute layer (depth) for each node
+  // Longest-path layering: propagate the maximum layer to every node so that
+  // nodes reachable via multiple paths are placed after all their predecessors.
   const layerOf = new Map<string, number>();
   const queue: Array<{ id: string; layer: number }> = [{ id: entryStepId, layer: 0 }];
-  const visited = new Set<string>();
+  layerOf.set(entryStepId, 0);
 
   while (queue.length > 0) {
     const item = queue.shift();
     if (item === undefined) break;
     const { id, layer } = item;
 
-    if (visited.has(id)) continue;
-    visited.add(id);
-    layerOf.set(id, layer);
+    // Skip if we have already processed this node at a greater or equal layer,
+    // meaning a longer path has already been accounted for.
+    if ((layerOf.get(id) ?? 0) > layer) continue;
 
     for (const neighbor of adjList.get(id) ?? []) {
-      if (!visited.has(neighbor)) {
-        // A node may be reachable from multiple parents (e.g. conditional
-        // branches merge) — use the maximum layer to avoid overlaps.
-        const existing = layerOf.get(neighbor) ?? 0;
-        queue.push({ id: neighbor, layer: Math.max(existing, layer + 1) });
+      const newLayer = layer + 1;
+      const existing = layerOf.get(neighbor) ?? -1;
+      if (newLayer > existing) {
+        layerOf.set(neighbor, newLayer);
+        queue.push({ id: neighbor, layer: newLayer });
       }
     }
   }

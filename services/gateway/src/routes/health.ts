@@ -18,7 +18,7 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono<{ Variables: App
   // Redis outage does not cause the orchestrator to restart the pod.
   routes.get("/healthz", (c) => {
     return c.json({
-      status: "alive",
+      status: "ok",
       service: "gateway",
       uptime: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
     }, 200);
@@ -27,14 +27,14 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono<{ Variables: App
   // Readiness probe — verifies that the service can handle traffic by
   // checking connectivity to Postgres and Redis.
   routes.get("/readyz", async (c) => {
-    const checks: Record<string, string> = {};
+    const checks: Record<string, "ok" | "fail"> = {};
     let ready = true;
 
     try {
       await pool.query("SELECT 1");
       checks["postgres"] = "ok";
     } catch {
-      checks["postgres"] = "error";
+      checks["postgres"] = "fail";
       ready = false;
     }
 
@@ -42,7 +42,7 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono<{ Variables: App
       await redis.ping();
       checks["redis"] = "ok";
     } catch {
-      checks["redis"] = "error";
+      checks["redis"] = "fail";
       ready = false;
     }
 

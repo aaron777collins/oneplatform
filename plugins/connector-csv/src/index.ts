@@ -8,8 +8,8 @@
  *   if the remote file changes mid-ingestion.
  * - No external CSV parsing libraries are used. The parser is implemented
  *   inline per the RFC 4180 spec, keeping the bundle self-contained.
- * - http:// URLs are supported in config (user intent), but the FetchProxy
- *   enforces the manifest's requiredExternalUrls allowlist at the platform layer.
+ * - Only https:// URLs are accepted. http:// URLs are rejected at config validation
+ *   time with a clear error, since the FetchProxy blocks unencrypted HTTP anyway.
  */
 
 import type {
@@ -231,9 +231,15 @@ function extractConfig(raw: Record<string, unknown>): CsvConfig {
   }
 
   const trimmedUrl = url.trim();
-  if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) {
+  if (trimmedUrl.startsWith("http://")) {
     throw new PluginConfigError(
-      "config.url must begin with http:// or https://",
+      "Only https:// URLs are supported. The platform does not allow unencrypted HTTP connections.",
+      "url",
+    );
+  }
+  if (!trimmedUrl.startsWith("https://")) {
+    throw new PluginConfigError(
+      "config.url must begin with https://",
       "url",
     );
   }
@@ -374,6 +380,7 @@ class CsvConnector implements Connector {
     const url = meta["url"] as string;
     const delimiter = meta["delimiter"] as string;
     const hasHeader = meta["hasHeader"] as boolean;
+    const encoding = (meta["encoding"] as string | undefined) ?? DEFAULT_ENCODING;
     const idColumn = (meta["idColumn"] as string | null) ?? undefined;
     const batchSize = meta["batchSize"] as number;
     const maxFileSizeMb = (meta["maxFileSizeMb"] as number | undefined) ?? DEFAULT_MAX_FILE_SIZE_MB;
@@ -428,19 +435,22 @@ class CsvConnector implements Connector {
 
       let text: string;
       try {
-        text = await response.text();
+        const buffer = await response.arrayBuffer();
+        // Post-download size check when Content-Length was absent or inaccurate.
+        const actualBytes = buffer.byteLength;
+        if (actualBytes > maxBytes) {
+          throw new PluginDataError(
+            `CSV file exceeds maxFileSizeMb (${maxFileSizeMb} MB). Actual size: ${actualBytes} bytes`,
+            { url, actualBytes, maxBytes },
+          );
+        }
+        text = new TextDecoder(encoding).decode(buffer);
       } catch (err) {
+        if (err instanceof PluginDataError) {
+          throw err;
+        }
         const message = err instanceof Error ? err.message : String(err);
         throw new PluginDataError(`Failed to read CSV response body: ${message}`, { url });
-      }
-
-      // Post-download size check when Content-Length was absent or inaccurate.
-      const actualBytes = new TextEncoder().encode(text).byteLength;
-      if (actualBytes > maxBytes) {
-        throw new PluginDataError(
-          `CSV file exceeds maxFileSizeMb (${maxFileSizeMb} MB). Actual size: ${actualBytes} bytes`,
-          { url, actualBytes, maxBytes },
-        );
       }
 
       try {
@@ -512,12 +522,16 @@ class CsvConnector implements Connector {
   }
 
   async disconnect(_handle: ConnectorHandle, context: PluginContext): Promise<void> {
-    // No persistent connection to tear down. We log the disconnect event for
-    // operational visibility but take no other action. The cached parsed rows
-    // will expire naturally via the 24-hour TTL set in fetchBatch.
     context.logger.info("CSV connector disconnected", {
       connectionId: _handle.connectionId,
     });
+    try {
+      await context.cache.delete(rowsCacheKey(_handle.connectionId));
+    } catch (err) {
+      context.logger.warn("Failed to clear CSV cache", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

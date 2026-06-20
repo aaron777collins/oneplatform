@@ -12,8 +12,11 @@
  * Pagination index (written by fetchBatch to track which IDs remain):
  *   webhook:index:{connectorInstanceId}
  *
- * The cursor passed between fetchBatch calls is the ID of the last payload
- * that was successfully processed. Null means start from the oldest stored.
+ * The cursor passed between fetchBatch calls is a sentinel: null means no more
+ * payloads remain (or first run), and "continue" means more payloads exist and
+ * the caller should invoke fetchBatch again. Because processed IDs are eagerly
+ * removed from the index within each batch, a payload-ID cursor cannot be used
+ * for resumption — always start from index 0 of the remaining entries.
  */
 
 import type {
@@ -206,14 +209,15 @@ async function computeHmac(
  * Constant-time byte comparison to prevent timing attacks.
  * Standard string equality short-circuits on the first differing character,
  * leaking timing information about how many leading bytes matched.
- * XOR-folding all bytes prevents that.
+ * XOR-folding all bytes across the full length of the longer string prevents
+ * early-exit on length mismatch, which could otherwise reveal whether a
+ * malformed prefix caused a length divergence rather than a content mismatch.
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  const maxLen = Math.max(a.length, b.length);
+  let mismatch = a.length !== b.length ? 1 : 0;
+  for (let i = 0; i < maxLen; i++) {
+    mismatch |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   }
   return mismatch === 0;
 }
@@ -241,11 +245,14 @@ async function verifySignature(
   }
 
   // Some senders prefix the signature with the algorithm name (e.g., "sha256=abc123").
-  // Strip that prefix before comparing.
+  // Normalize to lowercase and trim before stripping the prefix so that
+  // case variations (e.g., "SHA256=") and surrounding whitespace do not cause
+  // a length mismatch that leaks information via the timing-safe comparison.
+  const normalizedSignature = receivedSignature.toLowerCase().trim();
   const prefix = `${algorithm}=`;
-  const rawSignature = receivedSignature.startsWith(prefix)
-    ? receivedSignature.slice(prefix.length)
-    : receivedSignature;
+  const rawSignature = normalizedSignature.startsWith(prefix)
+    ? normalizedSignature.slice(prefix.length)
+    : normalizedSignature;
 
   const expectedSignature = await computeHmac(secret, payload.rawBody, algorithm);
 
@@ -483,8 +490,13 @@ const webhookConnector: Connector = {
    *     and removes consumed IDs from the index.
    *
    * Cursor semantics:
-   *   null   → first run; process the oldest `batchSize` payloads
-   *   string → resume after the payload with this ID (exclusive)
+   *   null       → first run or no more payloads remain
+   *   "continue" → more payloads remain; call again to drain the next batch
+   *
+   * Because fetchBatch eagerly removes processed IDs from the index after each
+   * batch, the next call always starts from index 0 of the pruned list. A
+   * payload-ID cursor cannot work here (the ID is removed before the next call),
+   * so the cursor is a sentinel that only signals whether more data exists.
    */
   async fetchBatch(
     handle: ConnectorHandle,
@@ -514,16 +526,10 @@ const webhookConnector: Connector = {
         };
       }
 
-      // Determine where to resume. If cursor is non-null, skip IDs up to and
-      // including the cursor — they were already successfully processed.
-      const startIndex = cursor === null
-        ? 0
-        : (() => {
-            const cursorIndex = allIds.indexOf(cursor);
-            // If the cursor ID is no longer in the index (TTL eviction or manual
-            // cleanup), restart from the beginning to avoid silent data loss.
-            return cursorIndex === -1 ? 0 : cursorIndex + 1;
-          })();
+      // Always start from index 0 of the current (already-pruned) index.
+      // Processed IDs are removed from the index at the end of each batch, so
+      // the next call sees only unprocessed entries starting at position 0.
+      const startIndex = 0;
 
       const pageIds = allIds.slice(startIndex, startIndex + batchSize);
 
@@ -544,7 +550,6 @@ const webhookConnector: Connector = {
       }
 
       const records: DataRecord[] = [];
-      let lastSuccessfulId: string | null = null;
       const processedIds: string[] = [];
 
       for (const payloadId of pageIds) {
@@ -589,32 +594,34 @@ const webhookConnector: Connector = {
         try {
           const record = mapPayloadToRecord(payload, idField);
           records.push(record);
-          lastSuccessfulId = payloadId;
           processedIds.push(payloadId);
         } catch (err) {
-          throw new PluginDataError(
-            `Failed to map webhook payload ${payloadId} to DataRecord`,
-            { payloadId },
-          );
+          context.logger.warn("Failed to map webhook payload — skipping", {
+            instanceId,
+            payloadId,
+            error: String(err),
+          });
+          processedIds.push(payloadId);
+          continue;
         }
       }
 
       // Remove processed IDs from the index and their individual cache entries.
       if (processedIds.length > 0) {
-        const remainingIds = allIds.filter((id) => !processedIds.includes(id));
+        const processedSet = new Set(processedIds);
+        const remainingIds = allIds.filter((id) => !processedSet.has(id));
         await context.cache.set<PendingIndex>(pendingIndexKey(instanceId), { ids: remainingIds });
 
-        for (const processedId of processedIds) {
-          await context.cache.delete(pendingPayloadKey(instanceId, processedId));
-        }
+        await Promise.all(processedIds.map((id) => context.cache.delete(pendingPayloadKey(instanceId, id))));
       }
 
       const remainingAfterPage = allIds.length - startIndex - pageIds.length;
       const hasMore = remainingAfterPage > 0;
-      // Cursor advances only when there are more payloads to fetch — a null cursor
-      // signals completion and prevents the Ingestion Service from scheduling a
-      // redundant follow-up call.
-      const nextCursor = hasMore ? lastSuccessfulId : null;
+      // Use a sentinel cursor rather than a payload ID. Since processed IDs are
+      // removed from the index within fetchBatch, a payload-ID cursor would always
+      // resolve to indexOf==-1 on the next call. The sentinel "continue" signals
+      // to the caller that more data exists without encoding a resumable position.
+      const nextCursor = hasMore ? "continue" : null;
 
       span.setAttribute("recordCount", records.length);
       span.setAttribute("hasMore", hasMore);

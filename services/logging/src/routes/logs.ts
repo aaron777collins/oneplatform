@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
 import { ValidationError, ForbiddenError, NotFoundError } from "@oneplatform/core";
 import type { LogEventRepository } from "../repositories/index.js";
@@ -180,8 +181,8 @@ export function createLogRoutes(
               const meta = JSON.stringify(row.metadata).replace(/"/g, '""');
               line = [
                 row.id,
-                row.trace_id,
-                row.service,
+                `"${row.trace_id.replace(/"/g, '""')}"`,
+                `"${row.service.replace(/"/g, '""')}"`,
                 row.level,
                 `"${row.message.replace(/"/g, '""')}"`,
                 row.created_at.toISOString(),
@@ -227,6 +228,10 @@ export function createLogRoutes(
     }
 
     const id = c.req.param("id");
+    const idResult = z.string().uuid().safeParse(id);
+    if (!idResult.success) {
+      throw new ValidationError("Invalid log event ID", idResult.error.issues);
+    }
     // Tenant isolation: non-admin callers can only fetch log events
     // belonging to their own tenant. Admins may access any log event.
     const isAdmin = user.scopes.includes("admin");

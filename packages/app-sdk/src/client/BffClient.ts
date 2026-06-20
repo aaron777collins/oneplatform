@@ -221,6 +221,16 @@ export class BffClient {
 
     return response.json() as Promise<T>;
   }
+
+  /**
+   * Makes an authenticated request to the BFF for endpoints that return no
+   * response body (204 No Content). Use this instead of `request<void>()` or
+   * `request<undefined>()` to make the no-body contract explicit at the call
+   * site and avoid unsafe `undefined as T` casts for concrete types.
+   */
+  async requestVoid(path: string, options: BffRequestOptions = {}): Promise<void> {
+    await this.request<undefined>(path, options);
+  }
 }
 
 // ─── Exported singleton ───────────────────────────────────────────────────────

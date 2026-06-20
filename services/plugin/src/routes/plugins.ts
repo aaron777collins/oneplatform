@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { writeFile } from "node:fs/promises";
+import { writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -191,8 +191,9 @@ export function createPluginRoutes(
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
       : undefined;
 
-    const { plugin, approvedUrls, requiresUrlApproval, urlPatterns } =
-      await pluginService.installPlugin({
+    let installResult: Awaited<ReturnType<typeof pluginService.installPlugin>>;
+    try {
+      installResult = await pluginService.installPlugin({
         bundlePath,
         approveUrls,
         platformWide,
@@ -205,6 +206,11 @@ export function createPluginRoutes(
             }
           : {}),
       });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    const { plugin, approvedUrls, requiresUrlApproval, urlPatterns } = installResult;
 
     if (requiresUrlApproval) {
       return c.json(

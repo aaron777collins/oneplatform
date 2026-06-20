@@ -24,7 +24,7 @@ export function createApiKeyHandler(apiKey: string): AuthHandler {
   if (!isValid) {
     throw new ConfigurationError(
       `Invalid API key format. Keys must start with "op_live_" or "op_test_". ` +
-        `Received key starting with: "${apiKey.slice(0, 8)}..."`,
+        `Received key starting with: "${apiKey.slice(0, 3)}..."`,
     );
   }
 

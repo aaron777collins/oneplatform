@@ -284,8 +284,9 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
     const client: UnixSocketClient = sandbox.client;
 
     let response: SandboxResponse;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(
+      timeoutHandle = setTimeout(
         () => reject(new Error("EXECUTION_TIMEOUT")),
         request.timeout + 2_000, // 2s buffer so sandbox-side watchdog fires first
       );
@@ -296,7 +297,9 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
         client.send(sandboxReq),
         timeoutPromise,
       ]);
+      clearTimeout(timeoutHandle!);
     } catch (err) {
+      clearTimeout(timeoutHandle!);
       sandboxManager.recordCompletion(request.executionId);
 
       const errMsg = err instanceof Error ? err.message : String(err);

@@ -239,9 +239,10 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
   } = deps;
 
   // MinIO credentials — read once at service creation, not on every call (W10)
+  // Use OP_MINIO_USER / OP_MINIO_PASSWORD to match what Docker Compose injects.
   const minioEndpoint  = process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000";
-  const minioAccessKey = process.env["MINIO_ACCESS_KEY"] ?? "minioadmin";
-  const minioSecretKey = process.env["MINIO_SECRET_KEY"] ?? "minioadmin";
+  const minioAccessKey = process.env["OP_MINIO_USER"]    ?? process.env["MINIO_ACCESS_KEY"] ?? "minioadmin";
+  const minioSecretKey = process.env["OP_MINIO_PASSWORD"] ?? process.env["MINIO_SECRET_KEY"] ?? "minioadmin";
   const minioRegion    = process.env["MINIO_REGION"]     ?? "us-east-1";
   const minioBucket    = "op-app-artifacts";
 

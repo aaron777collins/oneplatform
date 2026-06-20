@@ -57,6 +57,18 @@ const RATE_LIMIT_MAX_TOKENS = 10;      // max new embed tokens per user per wind
 
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
 
+// Purge expired buckets every 5 minutes so the Map doesn't grow without bound
+// as unique users accumulate. Unref lets the process exit without waiting for
+// this timer when running in test environments.
+const _rateLimitCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [userId, bucket] of rateLimitBuckets) {
+    if (now >= bucket.resetAt) {
+      rateLimitBuckets.delete(userId);
+    }
+  }
+}, 5 * 60_000).unref();
+
 function checkRateLimit(userId: string): boolean {
   const now    = Date.now();
   const bucket = rateLimitBuckets.get(userId);

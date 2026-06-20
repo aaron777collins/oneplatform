@@ -110,14 +110,16 @@ export function serviceAuthMiddleware(config: ServiceAuthConfig) {
       );
     }
 
-    // Reject unknown callers — no public key = no access
+    // Reject unknown callers — no public key = no access.
+    // Avoid reflecting the unverified callerService value into the response to
+    // prevent log injection from attacker-controlled JWT payloads.
     const publicKeyPem = config.servicePublicKeys[callerService];
     if (!publicKeyPem) {
       return c.json(
         {
           error: {
             code: "UNAUTHORIZED",
-            message: `Unknown service: ${callerService}`,
+            message: "Service token issued by an unrecognized service.",
             requestId,
           },
         },

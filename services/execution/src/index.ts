@@ -398,12 +398,19 @@ async function main(): Promise<void> {
             );
             void response.arrayBuffer().then((buf) => {
               res.end(Buffer.from(buf));
+            }).catch(() => {
+              if (!res.headersSent) res.writeHead(500);
+              res.end();
             });
           }
         };
 
         if (responseOrPromise instanceof Promise) {
-          void responseOrPromise.then(handleResponse);
+          void responseOrPromise.then(handleResponse).catch((err) => {
+            console.error("Unhandled error in app.fetch:", err);
+            if (!res.headersSent) res.writeHead(500);
+            res.end();
+          });
         } else {
           handleResponse(responseOrPromise);
         }

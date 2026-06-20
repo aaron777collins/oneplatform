@@ -236,6 +236,9 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
       await client.query("BEGIN");
       await hookRepo.updateStateByInstance(client, instance.id, "disabled");
       await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
     } finally {
       client.release();
     }
@@ -393,7 +396,11 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
         if (plugin === null) {
           throw new PluginNotFoundError(`Plugin ${instance.plugin_id} not found`);
         }
-        const result = await enableInstance(instance, plugin.id);
+        const freshInstance = await instanceRepo.findByIdAndTenant(instanceId, tenantId);
+        if (freshInstance === null) {
+          throw new InstanceNotFoundError(`Instance '${instanceId}' not found`);
+        }
+        const result = await enableInstance(freshInstance, plugin.id);
         await eventPublisher.publish({
           eventType: "plugin.enabled",
           eventVersion: "1.0.0",

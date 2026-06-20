@@ -287,7 +287,11 @@ export function createClient(options: ClientOptions): OnePlatformClient {
 
     destroy(): void {
       for (const sub of activeSubscriptions) {
-        sub.unsubscribe();
+        try {
+          sub.unsubscribe();
+        } catch {
+          // Ensure all subscriptions are cleaned up even if one throws
+        }
       }
       activeSubscriptions.clear();
       // Abort all in-flight HTTP requests tracked by the transport

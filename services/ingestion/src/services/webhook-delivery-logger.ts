@@ -35,22 +35,21 @@ export function createWebhookDeliveryLogger(
   async function receiveEvent(
     receiverId: string,
     rawBody: Buffer,
-    signatureHeader: string | undefined,
-    // Extra context supplied by the route layer — not part of the public
-    // WebhookReceiveService interface but forwarded here by the delivery logger wrapper.
-    incomingHeaders?: Record<string, string>,
+    incomingHeaders: Record<string, string>,
   ): Promise<ReceiveEventResult> {
     const startMs = Date.now();
 
-    const result = await inner.receiveEvent(receiverId, rawBody, signatureHeader);
+    const result = await inner.receiveEvent(receiverId, rawBody, incomingHeaders);
 
     const processingTimeMs = Date.now() - startMs;
 
     // Derive signature_valid from whether an eventId was produced.
     // The service only sets eventId when HMAC verification passed and the
-    // event was staged successfully.
-    const signatureValid =
-      result.eventId !== undefined ? true : signatureHeader !== undefined ? false : null;
+    // event was staged successfully. When no eventId is set we use null
+    // (unknown) because the event may have been dropped for reasons other
+    // than HMAC failure (receiver not found, receiver disabled, etc.).
+    const signatureValid: boolean | null =
+      result.eventId !== undefined ? true : null;
 
     // Truncate body before storage.
     const bodyBytes = rawBody.length > MAX_BODY_BYTES ? rawBody.subarray(0, MAX_BODY_BYTES) : rawBody;

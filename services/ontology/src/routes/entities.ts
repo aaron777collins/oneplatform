@@ -62,7 +62,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
       data: {
         items,
         nextCursor: result.nextCursor,
-        total: items.length,
+        total: null,
         hasMore: result.nextCursor !== null,
       },
     });

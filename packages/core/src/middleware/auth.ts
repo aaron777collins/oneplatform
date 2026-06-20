@@ -84,9 +84,14 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
       wildcardPublicRoutes.push(new RegExp("^" + escaped.replace(/\*/g, ".*") + "$"));
     } else if (normalized.includes(":")) {
-      // Strip the trailing `/:paramName` segment(s) to get the prefix.
-      const prefix = normalized.replace(/\/:[^/]+/g, "");
-      prefixPublicRoutes.push(prefix);
+      // Convert each :param segment into [^/]+ so mid-path and trailing params
+      // match any concrete segment without producing nonsensical prefixes.
+      const regexStr = normalized
+        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+        .split("/")
+        .map((seg) => (seg.startsWith(":") ? "[^/]+" : seg))
+        .join("/");
+      wildcardPublicRoutes.push(new RegExp("^" + regexStr + "$"));
     } else {
       exactPublicRoutes.add(normalized);
     }

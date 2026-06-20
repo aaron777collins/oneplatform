@@ -30,9 +30,9 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono {
 
     try {
       await pool.query("SELECT 1");
-      checks["database"] = "ok";
+      checks["postgres"] = "ok";
     } catch {
-      checks["database"] = "fail";
+      checks["postgres"] = "fail";
     }
 
     try {

@@ -136,7 +136,7 @@ describe("receiveEvent — anti-enumeration (always 200)", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(null);
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent("nonexistent-id", Buffer.from("body"), undefined);
+    const result = await svc.receiveEvent("nonexistent-id", Buffer.from("body"), {});
     expect(result.received).toBe(true);
   });
 
@@ -144,7 +144,7 @@ describe("receiveEvent — anti-enumeration (always 200)", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow({ is_enabled: false }));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), undefined);
+    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), {});
     expect(result.received).toBe(true);
   });
 
@@ -152,7 +152,7 @@ describe("receiveEvent — anti-enumeration (always 200)", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow({ deleted_at: new Date() }));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), undefined);
+    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), {});
     expect(result.received).toBe(true);
   });
 
@@ -160,7 +160,7 @@ describe("receiveEvent — anti-enumeration (always 200)", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow());
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), "sha256=invalidsig");
+    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), { "x-webhook-signature": "sha256=invalidsig" });
     expect(result.received).toBe(true);
   });
 
@@ -170,7 +170,7 @@ describe("receiveEvent — anti-enumeration (always 200)", () => {
     const credentialService = makeCredentialService();
     credentialService.getDecryptedCredential.mockRejectedValue(new Error("decrypt failed"));
     const svc = buildService({ receiverRepo, credentialService });
-    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), "sha256=anything");
+    const result = await svc.receiveEvent(RECEIVER_ID, Buffer.from("body"), { "x-webhook-signature": "sha256=anything" });
     expect(result.received).toBe(true);
   });
 });
@@ -186,7 +186,7 @@ describe("receiveEvent — HMAC verification", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow({ hmac_algorithm: "sha256" }));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, sig);
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(result.received).toBe(true);
     expect(result.eventId).toBeDefined();
   });
@@ -197,7 +197,7 @@ describe("receiveEvent — HMAC verification", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow({ hmac_algorithm: "sha256" }));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, sig);
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(result.received).toBe(true);
     expect(result.eventId).toBeDefined();
   });
@@ -208,7 +208,7 @@ describe("receiveEvent — HMAC verification", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow({ hmac_algorithm: "sha512" }));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, sig);
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(result.received).toBe(true);
     expect(result.eventId).toBeDefined();
   });
@@ -220,7 +220,7 @@ describe("receiveEvent — HMAC verification", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow({ hmac_algorithm: "sha256" }));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, badSig);
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": badSig });
     // Still returns 200 — anti-enumeration
     expect(result.received).toBe(true);
     expect(result.eventId).toBeUndefined();
@@ -231,7 +231,29 @@ describe("receiveEvent — HMAC verification", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow());
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, "");
+    const result = await svc.receiveEvent(RECEIVER_ID, body, {});
+    expect(result.received).toBe(true);
+    expect(result.eventId).toBeUndefined();
+  });
+
+  it("uses the receiver's configured headerName to extract the signature", async () => {
+    const body = Buffer.from(JSON.stringify({ id: "custom-header-evt" }));
+    const sig = signBody(body, SIGNING_SECRET, "sha256");
+    const receiverRepo = makeReceiverRepo();
+    receiverRepo.findById.mockResolvedValue(makeReceiverRow({ hmac_algorithm: "sha256", header_name: "X-Custom-Sig" }));
+    const svc = buildService({ receiverRepo });
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-custom-sig": sig });
+    expect(result.received).toBe(true);
+    expect(result.eventId).toBeDefined();
+  });
+
+  it("rejects when signature is in the wrong header", async () => {
+    const body = Buffer.from(JSON.stringify({ id: "wrong-header-evt" }));
+    const sig = signBody(body, SIGNING_SECRET, "sha256");
+    const receiverRepo = makeReceiverRepo();
+    receiverRepo.findById.mockResolvedValue(makeReceiverRow({ hmac_algorithm: "sha256", header_name: "X-Custom-Sig" }));
+    const svc = buildService({ receiverRepo });
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(result.received).toBe(true);
     expect(result.eventId).toBeUndefined();
   });
@@ -248,8 +270,8 @@ describe("LRU cache", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow());
     const svc = buildService({ receiverRepo });
-    await svc.receiveEvent(RECEIVER_ID, body, sig);
-    await svc.receiveEvent(RECEIVER_ID, body, sig);
+    await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
+    await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(receiverRepo.findById.mock.calls).toHaveLength(1);
   });
 
@@ -259,9 +281,9 @@ describe("LRU cache", () => {
     const receiverRepo = makeReceiverRepo();
     receiverRepo.findById.mockResolvedValue(makeReceiverRow());
     const svc = buildService({ receiverRepo });
-    await svc.receiveEvent(RECEIVER_ID, body, sig);
+    await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     svc.invalidateCache(RECEIVER_ID);
-    await svc.receiveEvent(RECEIVER_ID, body, sig);
+    await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(receiverRepo.findById.mock.calls).toHaveLength(2);
   });
 
@@ -283,7 +305,7 @@ describe("receiveEvent — non-JSON body handling", () => {
     receiverRepo.findById.mockResolvedValue(makeReceiverRow());
     const rawTableRepo = makeRawTableRepo();
     const svc = buildService({ receiverRepo, rawTableRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, sig);
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(result.received).toBe(true);
     expect(result.eventId).toBeDefined();
   });
@@ -301,7 +323,7 @@ describe("receiveEvent — stats failure does not abort", () => {
     receiverRepo.findById.mockResolvedValue(makeReceiverRow());
     receiverRepo.incrementEventsReceived.mockRejectedValue(new Error("DB error"));
     const svc = buildService({ receiverRepo });
-    const result = await svc.receiveEvent(RECEIVER_ID, body, sig);
+    const result = await svc.receiveEvent(RECEIVER_ID, body, { "x-webhook-signature": sig });
     expect(result.received).toBe(true);
   });
 });

@@ -176,7 +176,7 @@ export class ErrorBoundary extends React.Component<
         <div className="flex gap-2">
           {classified.category === "permission" ? (
             <Button
-              onClick={() => { window.location.href = "/auth/login"; }}
+              onClick={() => { window.location.href = "/login"; }}
               variant="default"
             >
               Sign in

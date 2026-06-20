@@ -386,7 +386,13 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
         if (!headerPart) throw new Error("empty");
         const headerJson = Buffer.from(headerPart, "base64url").toString("utf8");
         const header = JSON.parse(headerJson) as { alg?: string };
-        tokenAlgorithm = header.alg === "EdDSA" ? "EdDSA" : "HS256";
+        if (header.alg === "EdDSA") {
+          tokenAlgorithm = "EdDSA";
+        } else if (header.alg === "HS256") {
+          tokenAlgorithm = "HS256";
+        } else {
+          return null;
+        }
       } catch {
         return null;
       }

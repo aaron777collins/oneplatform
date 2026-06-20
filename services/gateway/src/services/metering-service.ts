@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import type { Redis } from "ioredis";
 import type { Logger } from "@oneplatform/core";
+import { decrypt } from "@oneplatform/core";
 import { validateWebhookUrl } from "../utils/ssrf-guard.js";
 import type { UsageEventRepository, UsageSummaryRepository, BillingWebhookConfigRepository } from "../repositories/usage-event-repository.js";
 import type { UsageEventType, UsagePeriodType } from "../repositories/types.js";
@@ -178,11 +179,12 @@ export interface MeteringServiceDeps {
   usageEventRepo: UsageEventRepository;
   usageSummaryRepo: UsageSummaryRepository;
   billingWebhookConfigRepo: BillingWebhookConfigRepository;
+  masterKey: Buffer;
   logger: Logger;
 }
 
 export function createMeteringService(deps: MeteringServiceDeps): MeteringService {
-  const { redis, usageEventRepo, usageSummaryRepo, billingWebhookConfigRepo, logger } = deps;
+  const { redis, usageEventRepo, usageSummaryRepo, billingWebhookConfigRepo, masterKey, logger } = deps;
 
   // -------------------------------------------------------------------------
   // Internal: increment a Redis counter and track the tenant as pending.
@@ -358,9 +360,11 @@ export function createMeteringService(deps: MeteringServiceDeps): MeteringServic
       const key = counterKey(tenantId);
       const metaKey = `${key}:meta`;
 
-      // Atomic read-and-delete so we don't double-count.
+      // Atomic read-and-delete so we don't double-count. MULTI/EXEC guarantees
+      // no other commands interleave between HGETALL and DEL, preventing loss
+      // of increments that race with the flush.
       const [getallResult, metaResult] = await redis
-        .pipeline()
+        .multi()
         .hgetall(key)
         .hgetall(metaKey)
         .del(key)
@@ -486,11 +490,13 @@ export function createMeteringService(deps: MeteringServiceDeps): MeteringServic
       return;
     }
 
-    // Decrypt the signing secret if present. Config stores the raw secret
-    // (callers pass it pre-encrypted via the repository upsert path).
-    // For the threshold webhook we use the raw secret value — the config
-    // upsert route handles encryption before storage.
-    const secret = config.secret_encrypted;
+    // Decrypt the signing secret before passing it to deliverBillingWebhook.
+    // The column stores AES-256-GCM ciphertext; HMAC must be computed over the
+    // plaintext shared secret so webhook consumers can verify signatures.
+    let secret: string | null = null;
+    if (config.secret_encrypted !== null) {
+      secret = await decrypt(config.secret_encrypted, masterKey);
+    }
 
     const payload = {
       tenantId,

@@ -33,8 +33,13 @@ export class PermissionCache {
   /**
    * Seeds the cache from the BFF and starts background refresh.
    * Called once by AppProvider at mount.
+   *
+   * Resets the destroyed flag so a previously-destroyed instance (held by
+   * AppProvider's useRef) can be reused when the effect re-runs on retry,
+   * instead of silently refusing to refresh permissions.
    */
   async seed(bffClient: BffClient): Promise<void> {
+    this.destroyed = false;
     const resp = await bffClient.request<BffPermissionsResponse>("/bff/permissions");
     this.applySnapshot(resp.data.permissions);
     this.startBackgroundRefresh(bffClient);

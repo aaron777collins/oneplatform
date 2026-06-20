@@ -37,22 +37,26 @@ export class TokenManager {
   async refresh(): Promise<string> {
     // Deduplicate concurrent refresh calls
     if (this.refreshInFlight === null) {
-      this.refreshInFlight = this.refreshFn().finally(() => {
-        this.refreshInFlight = null;
-      });
+      this.refreshInFlight = this.refreshFn();
     }
 
-    const newToken = await this.refreshInFlight;
-    if (newToken === null) {
-      throw new AuthError({
-        code: 'UNAUTHORIZED',
-        message: 'Token refresh failed: refresh callback returned null.',
-        statusCode: 401,
-        retryable: false,
-      });
-    }
+    try {
+      const newToken = await this.refreshInFlight;
+      if (newToken === null) {
+        throw new AuthError({
+          code: 'UNAUTHORIZED',
+          message: 'Token refresh failed: refresh callback returned null.',
+          statusCode: 401,
+          retryable: false,
+        });
+      }
 
-    this.currentToken = newToken;
-    return newToken;
+      this.currentToken = newToken;
+      return newToken;
+    } finally {
+      // Clear only after currentToken is updated so no caller sees a null
+      // refreshInFlight before the new token is stored.
+      this.refreshInFlight = null;
+    }
   }
 }

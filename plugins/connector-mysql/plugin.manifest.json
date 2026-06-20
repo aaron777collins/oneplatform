@@ -12,7 +12,7 @@
   "tags": ["mysql", "database", "sql", "connector"],
   "configSchema": {
     "type": "object",
-    "required": ["table", "database"],
+    "required": ["table", "database", "proxyUrl"],
     "properties": {
       "database": {
         "type": "string",
@@ -53,7 +53,7 @@
       "required": true
     }
   ],
-  "requiredExternalUrls": [],
+  "requiredExternalUrls": ["https://**", "http://localhost/**", "http://127.*/**", "http://10.*/**", "http://172.*/**", "http://192.168.*/**"],
   "requiredApis": ["credentials", "fetch", "cache", "tracing"],
   "hooks": [],
   "bundleChecksum": "0000000000000000000000000000000000000000000000000000000000000000"

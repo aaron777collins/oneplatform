@@ -115,7 +115,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): Hono<{ Variables: AppVa
     const header = "tenant_id,type,value,metadata,timestamp\n";
     const rows = events.map((ev) => {
       const meta = ev.metadata !== undefined ? JSON.stringify(ev.metadata).replace(/"/g, '""') : "";
-      return `"${ev.tenantId}","${ev.type}",${ev.value},"${meta}","${ev.timestamp}"`;
+      return `"${escapeCsvField(ev.tenantId)}","${escapeCsvField(ev.type)}",${ev.value},"${meta}","${ev.timestamp}"`;
     });
 
     return new Response(header + rows.join("\n"), {
@@ -127,4 +127,15 @@ export function createUsageRoutes(deps: UsageRouteDeps): Hono<{ Variables: AppVa
   });
 
   return routes;
+}
+
+// Escape a CSV field value: double embedded double-quotes and prefix formula
+// injection characters (=, +, -, @) with a single quote to prevent spreadsheet
+// applications from interpreting field content as formulas.
+function escapeCsvField(value: string): string {
+  const escaped = value.replace(/"/g, '""');
+  if (/^[=+\-@]/.test(escaped)) {
+    return `'${escaped}`;
+  }
+  return escaped;
 }

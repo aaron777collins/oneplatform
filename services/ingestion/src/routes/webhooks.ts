@@ -35,12 +35,11 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
       const rawBody = Buffer.from(await c.req.arrayBuffer());
       const receiverId = c.req.param("id");
 
-      const signatureHeader = c.req.header("X-Webhook-Signature")
-        ?? c.req.header("x-hub-signature-256")
-        ?? c.req.header("x-signature");
-
-      // Collect a safe subset of headers for the delivery log.
-      // Authorization / Cookie values are stripped to avoid storing secrets.
+      // Collect a safe subset of headers. Authorization / Cookie values are
+      // stripped to avoid storing secrets in the delivery log. The service
+      // looks up the configured headerName per-receiver so we must pass all
+      // non-sensitive headers rather than hardcoding which header holds the
+      // signature — the receiver may use any custom header name.
       const BLOCKED_HEADERS = new Set([
         "authorization",
         "cookie",
@@ -50,11 +49,11 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
       const incomingHeaders: Record<string, string> = {};
       for (const [key, value] of Object.entries(c.req.header())) {
         if (!BLOCKED_HEADERS.has(key.toLowerCase())) {
-          incomingHeaders[key] = value;
+          incomingHeaders[key.toLowerCase()] = value;
         }
       }
 
-      await webhookReceiveService.receiveEvent(receiverId, rawBody, signatureHeader, incomingHeaders);
+      await webhookReceiveService.receiveEvent(receiverId, rawBody, incomingHeaders);
     } catch {
       // Intentionally swallowed — errors are logged inside the service.
       // The caller receives { ok: true } regardless so receiver IDs cannot

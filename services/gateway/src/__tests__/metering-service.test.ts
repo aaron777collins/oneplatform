@@ -41,6 +41,7 @@ function makeRedis() {
 
   return {
     pipeline: vi.fn().mockReturnValue(pipelineMock),
+    multi: vi.fn().mockReturnValue(pipelineMock),
     smembers: vi.fn().mockResolvedValue([]),
     del: vi.fn().mockResolvedValue(1),
     _pipeline: pipelineMock,
@@ -76,6 +77,7 @@ function makeDeps(overrides: Partial<MeteringServiceDeps> = {}): MeteringService
     usageEventRepo: makeUsageEventRepo() as unknown as MeteringServiceDeps["usageEventRepo"],
     usageSummaryRepo: makeUsageSummaryRepo() as unknown as MeteringServiceDeps["usageSummaryRepo"],
     billingWebhookConfigRepo: makeBillingWebhookConfigRepo() as unknown as MeteringServiceDeps["billingWebhookConfigRepo"],
+    masterKey: Buffer.alloc(32),
     logger: makeLogger() as unknown as MeteringServiceDeps["logger"],
     ...overrides,
   };
@@ -347,6 +349,7 @@ describe("MeteringService.flushPendingEvents()", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const deps = makeDeps({
       redis: redisBase as unknown as MeteringServiceDeps["redis"],
@@ -388,6 +391,7 @@ describe("MeteringService.flushPendingEvents()", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const usageEventRepo = makeUsageEventRepo();
     let insertCallCount = 0;
@@ -434,6 +438,7 @@ describe("MeteringService.flushPendingEvents()", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const deps = makeDeps({
       redis: redisBase as unknown as MeteringServiceDeps["redis"],
@@ -483,6 +488,7 @@ describe("MeteringService — period boundary correctness", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const deps = makeDeps({
       redis: redisBase as unknown as MeteringServiceDeps["redis"],
@@ -523,6 +529,7 @@ describe("MeteringService — period boundary correctness", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const deps = makeDeps({
       redis: redisBase as unknown as MeteringServiceDeps["redis"],
@@ -562,6 +569,7 @@ describe("MeteringService — billing webhook threshold checks", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const billingWebhookConfigRepo = makeBillingWebhookConfigRepo();
     billingWebhookConfigRepo.findByTenantId = vi.fn().mockResolvedValue(null);
@@ -595,6 +603,7 @@ describe("MeteringService — billing webhook threshold checks", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const billingWebhookConfigRepo = makeBillingWebhookConfigRepo();
     billingWebhookConfigRepo.findByTenantId = vi.fn().mockResolvedValue({
@@ -674,6 +683,7 @@ describe("MeteringService — Redis counter to DB flush", () => {
       ]),
     };
     redisBase.pipeline = vi.fn().mockReturnValue(pipelineMock);
+    redisBase.multi = vi.fn().mockReturnValue(pipelineMock);
 
     const deps = makeDeps({
       redis: redisBase as unknown as MeteringServiceDeps["redis"],

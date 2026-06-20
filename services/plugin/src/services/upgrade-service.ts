@@ -1,3 +1,4 @@
+import Ajv from "ajv";
 import type pg from "pg";
 import type { Logger, EventPublisher } from "@oneplatform/core";
 import type { PluginRepository } from "../repositories/plugin-repository.js";
@@ -9,6 +10,22 @@ import {
   PluginNotFoundError,
   ConfigMigrationRequiredError,
 } from "./errors.js";
+
+const ajv = new Ajv({ allErrors: true, useDefaults: false });
+
+function validateConfigAgainstSchema(
+  config: Record<string, unknown>,
+  schema: Record<string, unknown>
+): { valid: boolean; errors: string[] } {
+  const validate = ajv.compile(schema);
+  const valid = validate(config) as boolean;
+  if (valid) return { valid: true, errors: [] };
+  const errors = (validate.errors ?? []).map((err) => {
+    const path = err.dataPath ? `config${err.dataPath}` : "config";
+    return `${path}: ${err.message ?? err.keyword}`;
+  });
+  return { valid: false, errors };
+}
 
 // ---------------------------------------------------------------------------
 // UpgradeService — version upgrade and rollback (spec §10)
@@ -215,16 +232,11 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
       for (const instance of allInstances) {
         if (instance.enabled !== "enabled") continue;
 
-        // Validate required fields from the new schema.
-        const required = newConfigSchema["required"];
-        if (Array.isArray(required)) {
-          for (const key of required) {
-            if (typeof key === "string" && !(key in instance.config)) {
-              failingInstances.push(
-                `instance '${instance.id}' (tenant '${instance.tenant_id}'): missing required field '${key}'`
-              );
-            }
-          }
+        const validation = validateConfigAgainstSchema(instance.config, newConfigSchema);
+        if (!validation.valid) {
+          failingInstances.push(
+            `instance '${instance.id}' (tenant '${instance.tenant_id}'): ${validation.errors.join("; ")}`
+          );
         }
       }
 

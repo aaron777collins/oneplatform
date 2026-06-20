@@ -527,12 +527,26 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
 
   function getJwtExpirySeconds(): number {
     const raw = process.env["OP_JWT_EXPIRY_SECONDS"];
-    return raw !== undefined ? parseInt(raw, 10) : 900;
+    if (raw === undefined) return 900;
+    const parsed = parseInt(raw, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      throw new Error(
+        `OP_JWT_EXPIRY_SECONDS must be a positive integer, got: "${raw}"`
+      );
+    }
+    return parsed;
   }
 
   function getRefreshTokenTtlSeconds(): number {
     const raw = process.env["OP_REFRESH_TOKEN_TTL_SECONDS"];
-    return raw !== undefined ? parseInt(raw, 10) : 604_800;
+    if (raw === undefined) return 604_800;
+    const parsed = parseInt(raw, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      throw new Error(
+        `OP_REFRESH_TOKEN_TTL_SECONDS must be a positive integer, got: "${raw}"`
+      );
+    }
+    return parsed;
   }
 
   // -------------------------------------------------------------------------

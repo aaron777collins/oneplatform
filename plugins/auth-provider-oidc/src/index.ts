@@ -262,10 +262,17 @@ function decodeJwtPayloadUnsafe(token: string): Record<string, unknown> {
   try {
     // Prefer Node.js Buffer for reliable multi-byte handling.
     // The atob() fallback covers browser and WASM environments.
-    const json =
-      typeof Buffer !== "undefined"
-        ? Buffer.from(payloadPart, "base64url").toString("utf8")
-        : atob(payloadPart.replace(/-/g, "+").replace(/_/g, "/"));
+    let json: string;
+    if (typeof Buffer !== "undefined") {
+      json = Buffer.from(payloadPart, "base64url").toString("utf8");
+    } else {
+      const binaryString = atob(payloadPart.replace(/-/g, "+").replace(/_/g, "/"));
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      json = new TextDecoder().decode(bytes);
+    }
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return {};
@@ -526,7 +533,10 @@ class OidcAuthProvider implements AuthProvider {
     // Keep the in-memory endpoint current on discovery cache refresh
     this.authorizationEndpoint = discovery.authorization_endpoint;
 
-    const clientSecret = await context.credentials.get("clientSecret");
+    let clientSecret = await context.cache.get<string>(CLIENT_SECRET_CACHE_KEY);
+    if (clientSecret === null || clientSecret === "") {
+      clientSecret = await context.credentials.get("clientSecret");
+    }
     if (clientSecret === null || clientSecret === "") {
       throw new PluginAuthError(
         "OIDC client secret not available — ensure initialize() completed before the first login",
@@ -681,10 +691,12 @@ class OidcAuthProvider implements AuthProvider {
     // enough that a crash cannot cause a permanent deadlock.
     const lock = await context.cache.lock(lockKey, 30);
 
+    const refreshedCacheKey = `oidc:refreshed:token:${hashString(refreshToken)}`;
+
     if (lock === null) {
       // Another concurrent request holds the refresh lock for this token.
       // Return the result it cached, or surface a retryable error.
-      const cached = await context.cache.get<TokenPair>("oidc:refreshed:token");
+      const cached = await context.cache.get<TokenPair>(refreshedCacheKey);
       if (cached !== null) {
         context.logger.debug("Refresh lock held by another request — returning cached result");
         return cached;
@@ -703,8 +715,11 @@ class OidcAuthProvider implements AuthProvider {
         logger: context.logger,
       });
 
-      const clientSecret = await context.cache.get<string>(CLIENT_SECRET_CACHE_KEY);
-      if (clientSecret === null) {
+      let clientSecret = await context.cache.get<string>(CLIENT_SECRET_CACHE_KEY);
+      if (clientSecret === null || clientSecret === "") {
+        clientSecret = await context.credentials.get("clientSecret");
+      }
+      if (clientSecret === null || clientSecret === "") {
         throw new PluginAuthError(
           "Client secret not available for token refresh — re-enable the OIDC plugin to re-initialize",
         );
@@ -739,7 +754,7 @@ class OidcAuthProvider implements AuthProvider {
 
       // Cache the refreshed pair briefly so concurrent requests waiting on the
       // lock can read it immediately after the lock is released (15-second window).
-      await context.cache.set("oidc:refreshed:token", result, 15);
+      await context.cache.set(refreshedCacheKey, result, 15);
 
       context.logger.info("OIDC token refresh successful", {
         hasNewRefreshToken: tokenResponse.refresh_token !== undefined,

@@ -124,7 +124,8 @@ async function migrateAction(entityType: string, opts: MigrateOpts, ctx: Command
     const status = await ctx.http.get<{ status: string; progress: number; total: number; durationMs?: number }>(
       `/api/v1/ontology/migrations/${resp.migrationId}`,
     );
-    ctx.renderer.info(`Progress: ${status.progress} / ${status.total} (${Math.round(status.progress / status.total * 100)}%)`);
+    const pct = status.total > 0 ? Math.round(status.progress / status.total * 100) : 0;
+    ctx.renderer.info(`Progress: ${status.progress} / ${status.total} (${pct}%)`);
     if (status.status === "completed") {
       ctx.renderer.success(`Migration complete in ${((status.durationMs ?? 0) / 1000).toFixed(1)}s`);
       return;

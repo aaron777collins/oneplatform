@@ -25,6 +25,7 @@ const MAX_AGE = "86400";
  * @param config - Explicit list of permitted origins.
  */
 export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
+  const allowAll = config.allowedOrigins.includes("*");
   const originSet = new Set(config.allowedOrigins);
 
   function setCorsHeaders(origin: string, headers: Headers): void {
@@ -48,7 +49,7 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
       return;
     }
 
-    if (!originSet.has(origin)) {
+    if (!allowAll && !originSet.has(origin)) {
       return c.json(
         {
           error: {

@@ -229,6 +229,20 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       throw new NotFoundError(`User ${id} not found.`);
     }
 
+    // V6-103: Validate that all requested roles exist in the tenant before
+    // updating — matches the same check on the POST /api/v1/users route.
+    if (parsed.data.roles !== undefined) {
+      const requestedRoles = parsed.data.roles as string[];
+      const tenantRoles = await roleRepository.findByTenantId(user.tenantId);
+      const knownRoleNames = new Set(tenantRoles.map((r) => r.name));
+      const unknownRoles = requestedRoles.filter((r) => !knownRoleNames.has(r));
+      if (unknownRoles.length > 0) {
+        throw new ValidationError(
+          `The following roles do not exist in this tenant: ${unknownRoles.join(", ")}`
+        );
+      }
+    }
+
     const updated = await userRepository.update(id, {
       ...(parsed.data.displayName !== undefined ? { display_name: parsed.data.displayName } : {}),
       ...(parsed.data.roles !== undefined ? { roles: parsed.data.roles } : {}),

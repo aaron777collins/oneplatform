@@ -113,48 +113,96 @@ describe("connect()", () => {
     ).rejects.toBeInstanceOf(PluginConfigError);
   });
 
-  it("resolves bearer token auth from credentials", async () => {
-    const ctx = createMockContext({ credentials: { bearerToken: "tok-abc123" } });
-    const handle = await connector.connect(BASE_CONFIG, ctx);
-    const meta = handle.metadata as Record<string, unknown>;
-    expect(meta["authType"]).toBe("bearer");
-    expect(meta["authHeader"]).toBe("Bearer tok-abc123");
-  });
-
-  it("resolves apiKey auth from credentials", async () => {
-    const ctx = createMockContext({ credentials: { apiKey: "key-xyz" } });
-    const handle = await connector.connect(BASE_CONFIG, ctx);
-    const meta = handle.metadata as Record<string, unknown>;
-    expect(meta["authType"]).toBe("apiKey");
-    expect(meta["authHeader"]).toBe("key-xyz");
-  });
-
-  it("resolves basic auth when username and password are both present", async () => {
+  it("resolves bearer token auth from credentials and applies it in fetchBatch", async () => {
+    let capturedHeaders: Record<string, string> = {};
     const ctx = createMockContext({
-      credentials: { username: "alice", password: "s3cr3t" },
+      credentials: { bearerToken: "tok-abc123" },
+      fetchHandler: (url, init) => {
+        capturedHeaders = Object.fromEntries(
+          Object.entries((init?.headers as Record<string, string>) ?? {}),
+        );
+        return Promise.resolve(jsonResponse([{ id: "1" }]));
+      },
+    });
+    const handle = await connector.connect(BASE_CONFIG, ctx);
+    // Auth credentials must NOT be stored in metadata (credential isolation).
+    const meta = handle.metadata as Record<string, unknown>;
+    expect(meta["authType"]).toBeUndefined();
+    expect(meta["authHeader"]).toBeUndefined();
+    // Auth must be applied at request time by fetchBatch.
+    await connector.fetchBatch(handle, null, ctx);
+    expect(capturedHeaders["Authorization"]).toBe("Bearer tok-abc123");
+  });
+
+  it("resolves apiKey auth from credentials and applies it in fetchBatch", async () => {
+    let capturedHeaders: Record<string, string> = {};
+    const ctx = createMockContext({
+      credentials: { apiKey: "key-xyz" },
+      fetchHandler: (url, init) => {
+        capturedHeaders = Object.fromEntries(
+          Object.entries((init?.headers as Record<string, string>) ?? {}),
+        );
+        return Promise.resolve(jsonResponse([{ id: "1" }]));
+      },
     });
     const handle = await connector.connect(BASE_CONFIG, ctx);
     const meta = handle.metadata as Record<string, unknown>;
-    expect(meta["authType"]).toBe("basic");
-    // encoded value is base64("alice:s3cr3t")
-    expect(meta["authHeader"]).toBe(`Basic ${Buffer.from("alice:s3cr3t").toString("base64")}`);
+    expect(meta["authType"]).toBeUndefined();
+    expect(meta["authHeader"]).toBeUndefined();
+    await connector.fetchBatch(handle, null, ctx);
+    expect(capturedHeaders["X-API-Key"]).toBe("key-xyz");
+  });
+
+  it("resolves basic auth when username and password are both present and applies it in fetchBatch", async () => {
+    let capturedHeaders: Record<string, string> = {};
+    const ctx = createMockContext({
+      credentials: { username: "alice", password: "s3cr3t" },
+      fetchHandler: (url, init) => {
+        capturedHeaders = Object.fromEntries(
+          Object.entries((init?.headers as Record<string, string>) ?? {}),
+        );
+        return Promise.resolve(jsonResponse([{ id: "1" }]));
+      },
+    });
+    const handle = await connector.connect(BASE_CONFIG, ctx);
+    const meta = handle.metadata as Record<string, unknown>;
+    expect(meta["authType"]).toBeUndefined();
+    expect(meta["authHeader"]).toBeUndefined();
+    await connector.fetchBatch(handle, null, ctx);
+    expect(capturedHeaders["Authorization"]).toBe(
+      `Basic ${Buffer.from("alice:s3cr3t").toString("base64")}`,
+    );
   });
 
   it("connects without error when no credentials are provided (no-auth API)", async () => {
-    const ctx = createMockContext({ credentials: {} });
-    const handle = await connector.connect(BASE_CONFIG, ctx);
-    const meta = handle.metadata as Record<string, unknown>;
-    expect(meta["authType"]).toBe("none");
-    expect(meta["authHeader"]).toBeNull();
-  });
-
-  it("prefers bearerToken over apiKey when both are present", async () => {
     const ctx = createMockContext({
-      credentials: { bearerToken: "bearer-wins", apiKey: "api-loses" },
+      credentials: {},
+      fetchHandler: () => Promise.resolve(jsonResponse([{ id: "1" }])),
     });
     const handle = await connector.connect(BASE_CONFIG, ctx);
     const meta = handle.metadata as Record<string, unknown>;
-    expect(meta["authType"]).toBe("bearer");
+    // Auth credentials must NOT be stored in metadata.
+    expect(meta["authType"]).toBeUndefined();
+    expect(meta["authHeader"]).toBeUndefined();
+    // fetchBatch must succeed without auth headers.
+    await expect(connector.fetchBatch(handle, null, ctx)).resolves.toBeDefined();
+  });
+
+  it("prefers bearerToken over apiKey when both are present", async () => {
+    let capturedHeaders: Record<string, string> = {};
+    const ctx = createMockContext({
+      credentials: { bearerToken: "bearer-wins", apiKey: "api-loses" },
+      fetchHandler: (url, init) => {
+        capturedHeaders = Object.fromEntries(
+          Object.entries((init?.headers as Record<string, string>) ?? {}),
+        );
+        return Promise.resolve(jsonResponse([{ id: "1" }]));
+      },
+    });
+    const handle = await connector.connect(BASE_CONFIG, ctx);
+    await connector.fetchBatch(handle, null, ctx);
+    expect(capturedHeaders["Authorization"]).toBe("Bearer bearer-wins");
+    expect(capturedHeaders["X-API-Key"]).toBeUndefined();
   });
 
   it("defaults method to GET when not specified", async () => {

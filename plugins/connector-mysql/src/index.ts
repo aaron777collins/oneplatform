@@ -192,12 +192,19 @@ function parseConfig(raw: Record<string, unknown>): MySqlConfig {
     );
   }
 
-  // Reject names that contain backticks — they would break the SQL quoting.
-  // Full identifier validation happens inside the proxy, but we catch the
-  // obvious injection vector here to surface a clear config error early.
-  if (database.includes("`") || table.includes("`")) {
+  // Restrict identifiers to safe MySQL unquoted identifier syntax. Backticks,
+  // backslashes, null bytes, and other control characters can break out of the
+  // backtick quoting used in buildTableQuery even when the proxy is hardened.
+  const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+  if (!SAFE_IDENTIFIER.test(database.trim())) {
     throw new PluginConfigError(
-      "database and table names must not contain backtick characters",
+      "database name must contain only letters, digits, and underscores, and must start with a letter or underscore (max 64 characters)",
+      "database",
+    );
+  }
+  if (!SAFE_IDENTIFIER.test(table.trim())) {
+    throw new PluginConfigError(
+      "table name must contain only letters, digits, and underscores, and must start with a letter or underscore (max 64 characters)",
       "table",
     );
   }
@@ -208,9 +215,9 @@ function parseConfig(raw: Record<string, unknown>): MySqlConfig {
       ? rawIncrementalColumn.trim()
       : null;
 
-  if (incrementalColumn !== null && incrementalColumn.includes("`")) {
+  if (incrementalColumn !== null && !SAFE_IDENTIFIER.test(incrementalColumn)) {
     throw new PluginConfigError(
-      "incrementalColumn must not contain backtick characters",
+      "incrementalColumn must contain only letters, digits, and underscores, and must start with a letter or underscore (max 64 characters)",
       "incrementalColumn",
     );
   }
@@ -226,6 +233,13 @@ function parseConfig(raw: Record<string, unknown>): MySqlConfig {
     typeof rawCustomQuery === "string" && rawCustomQuery.trim() !== ""
       ? rawCustomQuery.trim()
       : null;
+
+  if (customQuery !== null && incrementalColumn !== null) {
+    throw new PluginConfigError(
+      "incrementalColumn cannot be used together with customQuery — the connector cannot apply an incremental WHERE filter to a caller-supplied query",
+      "incrementalColumn",
+    );
+  }
 
   if (customQuery !== null) {
     // Validate it looks like a SELECT — the proxy enforces this too, but failing
@@ -623,7 +637,7 @@ class MySqlConnector implements Connector {
       },
       configSchema: {
         type: "object",
-        required: ["database", "table"],
+        required: ["database", "table", "proxyUrl"],
         properties: {
           database: { type: "string" },
           table: { type: "string" },

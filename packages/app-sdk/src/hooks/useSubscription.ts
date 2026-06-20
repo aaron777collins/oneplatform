@@ -37,6 +37,8 @@ import type {
 } from "../types/entities.js";
 import type { WsStatus } from "../ws/WebSocketManager.js";
 
+declare const __OP_DEV__: boolean | undefined;
+
 export function useSubscription<T = unknown>(
   entity: string,
   options: SubscriptionOptions = {},
@@ -61,8 +63,37 @@ export function useSubscription<T = unknown>(
   // Use a ref to hold the latest options so the effect closure does not go stale
   // when options change, without needing to re-register the subscription.
   const optionsRef = React.useRef(options);
+
+  // Track whether the component has mounted so we can detect post-mount changes
+  // to filter/events. Changes after mount are silently ignored by the server-side
+  // subscription (the registration is not re-sent), so we warn in development to
+  // help callers catch the mistake. Use a key prop or memoize the options object
+  // to force a clean remount when filter/events must change dynamically.
+  const isMountedRef = React.useRef(false);
+  const prevFilterRef = React.useRef(options.filter);
+  const prevEventsRef = React.useRef(options.events);
+
   React.useEffect(() => {
+    if (
+      isMountedRef.current &&
+      (typeof __OP_DEV__ !== "undefined" ? __OP_DEV__ : true)
+    ) {
+      const filterChanged = options.filter !== prevFilterRef.current;
+      const eventsChanged = options.events !== prevEventsRef.current;
+      if (filterChanged || eventsChanged) {
+        console.warn(
+          `[app-sdk] useSubscription("${entity}"): ` +
+            (filterChanged ? "filter " : "") +
+            (eventsChanged ? "events " : "") +
+            "changed after mount. The server-side subscription still uses the original values. " +
+            "Add a key prop or memoize the options object to force a clean remount when these values change.",
+        );
+      }
+    }
+    prevFilterRef.current = options.filter;
+    prevEventsRef.current = options.events;
     optionsRef.current = options;
+    isMountedRef.current = true;
   });
 
   // autoInvalidate is read directly from the current render's options, not from

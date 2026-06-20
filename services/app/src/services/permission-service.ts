@@ -142,7 +142,7 @@ export function createPermissionService(deps: PermissionServiceDeps): Permission
       throw new AppNotFoundError(`Role "${roleId}" not found.`, { roleId, appId });
     }
 
-    await permRepo.deleteRole(roleId);
+    await permRepo.deleteRole(roleId, appId);
     logger.info("App role deleted", { tenantId, appId, roleId });
   }
 

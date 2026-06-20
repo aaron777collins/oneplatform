@@ -524,7 +524,15 @@ class PostgresConnector implements Connector {
       handleProxyError(response.status, SCHEMA_PATH, body);
     }
 
-    const json: unknown = await response.json();
+    const schemaText = await response.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(schemaText) as unknown;
+    } catch {
+      throw new PluginDataError(`Proxy returned non-JSON response from ${SCHEMA_PATH}`, {
+        body: schemaText.slice(0, 500),
+      });
+    }
     if (
       typeof json !== "object" ||
       json === null ||
@@ -804,8 +812,14 @@ interface RehydratedConfig {
 
 function handleToConfig(handle: ConnectorHandle): RehydratedConfig {
   const m = handle.metadata;
+  const proxyUrl = m["proxyUrl"] as string | undefined;
+  if (typeof proxyUrl !== "string" || proxyUrl === "") {
+    throw new PluginConfigError(
+      "Handle metadata is missing proxyUrl -- the connector handle may be corrupted",
+    );
+  }
   return {
-    proxyUrl: m["proxyUrl"] as string,
+    proxyUrl,
     table: (m["table"] as string | null) ?? null,
     schema: (m["schema"] as string) ?? DEFAULT_SCHEMA,
     incrementalColumn: (m["incrementalColumn"] as string | null) ?? null,
@@ -836,7 +850,15 @@ async function parseRowsResponse(
   response: Response,
   path: string,
 ): Promise<ProxyRowsResponse> {
-  const json: unknown = await response.json();
+  const responseText = await response.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(responseText) as unknown;
+  } catch {
+    throw new PluginDataError(`Proxy returned non-JSON response from ${path}`, {
+      body: responseText.slice(0, 500),
+    });
+  }
 
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
     throw new PluginDataError(

@@ -124,9 +124,17 @@ async function apiFetch<T>(
   // --- 429: Retry after Retry-After header (max 2 retries) ---
   if (response.status === 429 && retryCount < 2) {
     const retryAfterHeader = response.headers.get("Retry-After");
-    const retryAfterMs = retryAfterHeader
-      ? parseInt(retryAfterHeader, 10) * 1000
-      : 1000;
+    let retryAfterMs = 1000;
+    if (retryAfterHeader !== null) {
+      const parsed = parseInt(retryAfterHeader, 10);
+      if (!isNaN(parsed)) {
+        retryAfterMs = parsed * 1000;
+      } else {
+        // HTTP-date format fallback
+        const dateMs = new Date(retryAfterHeader).getTime() - Date.now();
+        retryAfterMs = dateMs > 0 ? dateMs : 1000;
+      }
+    }
     await delay(retryAfterMs);
     return apiFetch<T>(path, init, isRetry, retryCount + 1);
   }

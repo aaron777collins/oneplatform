@@ -1,7 +1,7 @@
 import type pg from "pg";
 import type { Redis } from "ioredis";
 import type { Logger } from "@oneplatform/core";
-import { ConflictError } from "@oneplatform/core";
+import { ConflictError, ValidationError } from "@oneplatform/core";
 import type { EntityRepository } from "../repositories/entity-repository.js";
 import type { FieldRepository } from "../repositories/field-repository.js";
 import type { RelationshipRepository } from "../repositories/relationship-repository.js";
@@ -681,9 +681,21 @@ function buildMigrationFieldSpec(
 
   if (diff.addFields) {
     for (const f of diff.addFields) {
-      const defaultExpr = f.defaultValue !== undefined
-        ? (typeof f.defaultValue === "string" ? `'${f.defaultValue.replace(/'/g, "''")}'` : String(f.defaultValue))
-        : "NULL";
+      let defaultExpr: string;
+      if (f.defaultValue === undefined) {
+        defaultExpr = "NULL";
+      } else if (typeof f.defaultValue === "string") {
+        defaultExpr = `'${f.defaultValue.replace(/'/g, "''")}'`;
+      } else if (typeof f.defaultValue === "number" && isFinite(f.defaultValue)) {
+        defaultExpr = String(f.defaultValue);
+      } else if (typeof f.defaultValue === "boolean") {
+        defaultExpr = f.defaultValue ? "TRUE" : "FALSE";
+      } else {
+        throw new ValidationError(
+          `Field '${f.slug}': defaultValue must be a string, finite number, or boolean`,
+          [],
+        );
+      }
       specs.push({ slug: f.slug, isNew: true, defaultExpression: defaultExpr });
     }
   }

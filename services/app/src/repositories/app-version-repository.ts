@@ -18,35 +18,51 @@ export class AppVersionRepository {
   // Insert a new version for the app. version_number is assigned by taking
   // MAX(version_number) + 1 inside the INSERT so there is no separate counter
   // table and the unique constraint on (app_id, version_number) prevents races.
+  // When two concurrent inserts read the same MAX, one will hit the unique
+  // constraint (Postgres error 23505); we retry up to 3 times so the caller
+  // receives the created row rather than an unhandled 500.
   // Returns the newly created row.
   async create(data: CreateAppVersionData): Promise<AppVersionRow> {
-    const result = await this.pool.query<AppVersionRow>(
-      `INSERT INTO app.app_versions
-         (app_id, version_number, files_snapshot, message, created_by)
-       VALUES (
-         $1,
-         COALESCE(
-           (SELECT MAX(version_number) FROM app.app_versions WHERE app_id = $1),
-           0
-         ) + 1,
-         $2::jsonb,
-         $3,
-         $4
-       )
-       RETURNING ${VERSION_COLUMNS}`,
-      [
-        data.app_id,
-        JSON.stringify(data.files_snapshot),
-        data.message ?? null,
-        data.created_by,
-      ]
-    );
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await this.pool.query<AppVersionRow>(
+          `INSERT INTO app.app_versions
+             (app_id, version_number, files_snapshot, message, created_by)
+           VALUES (
+             $1,
+             COALESCE(
+               (SELECT MAX(version_number) FROM app.app_versions WHERE app_id = $1),
+               0
+             ) + 1,
+             $2::jsonb,
+             $3,
+             $4
+           )
+           RETURNING ${VERSION_COLUMNS}`,
+          [
+            data.app_id,
+            JSON.stringify(data.files_snapshot),
+            data.message ?? null,
+            data.created_by,
+          ]
+        );
 
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new Error(`Failed to insert version for app ${data.app_id}`);
+        const row = result.rows[0];
+        if (row === undefined) {
+          throw new Error(`Failed to insert version for app ${data.app_id}`);
+        }
+        return row;
+      } catch (err) {
+        // Postgres unique_violation — concurrent insert claimed this version_number
+        const pgErr = err as { code?: string };
+        if (pgErr.code === "23505" && attempt < MAX_RETRIES) {
+          continue;
+        }
+        throw err;
+      }
     }
-    return row;
+    throw new Error(`Failed to insert version for app ${data.app_id} after ${MAX_RETRIES} attempts`);
   }
 
   // Keyset pagination ordered by created_at DESC (most-recent first).

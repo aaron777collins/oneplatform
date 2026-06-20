@@ -71,7 +71,16 @@ class FilterBuilderImpl implements FilterBuilder {
   toParams(): Record<string, string> {
     const params: Record<string, string> = {};
     for (const condition of this.conditions) {
-      params[`filter[${condition.field}][${condition.operator}]`] = condition.value;
+      const key = `filter[${condition.field}][${condition.operator}]`;
+      if (key in params) {
+        throw new ValidationError({
+          code: 'VALIDATION_ERROR',
+          message: `[OnePlatform SDK] Duplicate filter condition: field "${condition.field}" with operator "${condition.operator}" appears more than once. Only the last value would be sent, discarding earlier conditions.`,
+          retryable: false,
+          fields: [{ field: condition.field, message: `Duplicate operator "${condition.operator}" for field "${condition.field}".` }],
+        });
+      }
+      params[key] = condition.value;
     }
     return params;
   }

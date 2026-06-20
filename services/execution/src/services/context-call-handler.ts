@@ -144,7 +144,17 @@ function isIpv4Blocked(ip: string): boolean {
 function isIpv6Blocked(ip: string): boolean {
   // Normalise to lowercase for consistent prefix matching
   const lower = ip.toLowerCase().replace(/^\[|\]$/g, "");
-  return BLOCKED_IPV6_PREFIXES.some((prefix) => lower === prefix || lower.startsWith(prefix));
+  if (BLOCKED_IPV6_PREFIXES.some((prefix) => lower === prefix || lower.startsWith(prefix))) {
+    return true;
+  }
+  // For IPv4-mapped IPv6 addresses (::ffff:<ipv4>), also validate the embedded
+  // IPv4 address against the blocked ranges — catches private ranges expressed
+  // in non-standard prefix forms that might slip past the prefix list.
+  const ipv4MappedMatch = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (ipv4MappedMatch !== null && ipv4MappedMatch[1] !== undefined) {
+    return isIpv4Blocked(ipv4MappedMatch[1]);
+  }
+  return false;
 }
 
 function isUrlBlocked(url: string): boolean {

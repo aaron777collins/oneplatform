@@ -5,7 +5,7 @@
  * Conflict resolution prompts the user unless --prefer-local or --prefer-remote is set.
  */
 import { watch, readFileSync, writeFileSync, statSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { HttpClient } from "./http-client.js";
 
 export type ConflictResolution = "prompt" | "prefer-local" | "prefer-remote";
@@ -75,6 +75,11 @@ export async function applyRemoteChange(
   onStatus: (msg: string) => void,
 ): Promise<void> {
   const localPath = join(localDir, event.path);
+  const resolvedPath = resolve(localPath);
+  const resolvedDir = resolve(localDir);
+  if (!resolvedPath.startsWith(resolvedDir + sep) && resolvedPath !== resolvedDir) {
+    throw new Error(`path traversal detected: ${event.path}`);
+  }
 
   if (existsSync(localPath)) {
     const localMtime = statSync(localPath).mtimeMs;

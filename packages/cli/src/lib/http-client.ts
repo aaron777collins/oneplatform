@@ -28,7 +28,8 @@ export interface HttpClientConfig {
 }
 
 function buildUrl(base: string, path: string, query?: Record<string, unknown>): string {
-  const url = new URL(path, base.endsWith("/") ? base : base + "/");
+  const baseUrl = new URL(base.endsWith("/") ? base : base + "/");
+  const url = new URL(path.startsWith("/") ? path.slice(1) : path, baseUrl);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null) {

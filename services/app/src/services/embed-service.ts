@@ -328,13 +328,24 @@ function rowToConfig(row: EmbedTokenRow): EmbedConfig {
  *   Empty list     → rejects all origins (most restrictive)
  */
 export function isOriginAllowed(requestOrigin: string, allowedOrigins: string[]): boolean {
+  // Browsers send Origin with a scheme (e.g., "https://example.com") but stored
+  // patterns are bare hostnames (e.g., "example.com") per the originPattern schema.
+  // Extract just the hostname for comparison; fall back to the raw value if the
+  // origin is not a valid URL (e.g., "null" or empty string).
+  let requestHostname: string;
+  try {
+    requestHostname = new URL(requestOrigin).hostname;
+  } catch {
+    requestHostname = requestOrigin;
+  }
+
   for (const pattern of allowedOrigins) {
     if (pattern === "*") return true;
-    if (pattern === requestOrigin) return true;
+    if (pattern === requestHostname) return true;
 
     if (pattern.startsWith("*.")) {
       const suffix = pattern.slice(1);  // ".example.com"
-      if (requestOrigin.endsWith(suffix)) return true;
+      if (requestHostname.endsWith(suffix)) return true;
     }
   }
   return false;

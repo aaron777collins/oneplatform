@@ -288,6 +288,7 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
 
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
 
+    validateFilePath(parsed.data.fromPath);
     validateFilePath(parsed.data.toPath);
 
     const result = await fileRepo.rename(

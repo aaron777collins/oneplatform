@@ -393,6 +393,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   const uploadRoutes = createUploadRoutes({
     uploadService,
     storage,
+    redisUrl: config.redisUrl,
     ...(maxFileSizeBytes ? { maxFileSizeBytes } : {}),
   });
   app.route("/api/v1/uploads", uploadRoutes);

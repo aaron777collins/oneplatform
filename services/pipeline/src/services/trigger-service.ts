@@ -84,20 +84,35 @@ export interface TriggerServiceDeps {
 // Fail-open: if the filter expression throws or times out, the trigger fires.
 // ---------------------------------------------------------------------------
 
+// Sentinel class so a timeout cannot be confused with a legitimate undefined
+// result from the JSONata evaluator (undefined is a valid JSONata return value).
+class FilterTimeoutError extends Error {
+  constructor() {
+    super("Filter expression timed out");
+    this.name = "FilterTimeoutError";
+  }
+}
+
 async function evaluateFilter(
   filterExpr: string,
   eventData: Record<string, unknown>,
 ): Promise<boolean> {
   try {
     const expr = jsonata(filterExpr);
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new FilterTimeoutError()), 100);
+    });
     const result = await Promise.race([
-      expr.evaluate(eventData),
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 100)),
+      expr.evaluate(eventData).then((value: unknown) => {
+        clearTimeout(timeoutHandle);
+        return value;
+      }),
+      timeoutPromise,
     ]);
-    // undefined means timeout — fail-open
-    return result === undefined ? true : Boolean(result);
+    return Boolean(result);
   } catch {
-    // Filter evaluation errors are fail-open for event triggers
+    // Timeout or evaluation errors are fail-open for event triggers
     return true;
   }
 }

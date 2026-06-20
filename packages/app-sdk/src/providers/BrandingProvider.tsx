@@ -84,6 +84,21 @@ function applyCustomCss(css: string | null): void {
 }
 
 /**
+ * Returns true when the URL uses a safe protocol (http: or https:).
+ * Rejects data:, blob:, javascript:, and any other unexpected scheme that a
+ * compromised or misconfigured branding API could inject to track users or
+ * execute scripts.
+ */
+function isSafeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Replaces the browser tab favicon.
  * Manages a dedicated `<link>` element to avoid clobbering the default icon
  * set in the HTML shell.
@@ -92,6 +107,13 @@ function applyFavicon(faviconUrl: string | null): void {
   document.getElementById(BRANDING_FAVICON_ID)?.remove();
 
   if (!faviconUrl) return;
+
+  if (!isSafeUrl(faviconUrl)) {
+    console.warn(
+      `[BrandingProvider] Rejecting faviconUrl with unsafe protocol: "${faviconUrl}"`
+    );
+    return;
+  }
 
   const link = document.createElement("link");
   link.id = BRANDING_FAVICON_ID;
@@ -263,7 +285,7 @@ export function BrandLogo({
   const { branding } = useBranding();
   const resolvedAlt = alt ?? branding.appName;
 
-  if (branding.logoUrl) {
+  if (branding.logoUrl && isSafeUrl(branding.logoUrl)) {
     return (
       <img
         src={branding.logoUrl}

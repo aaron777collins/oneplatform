@@ -321,8 +321,12 @@ function buildAuthProviderSource(opts: ScaffoldOptions, entrypoint: string): str
   CallbackParams,
   AuthContext,
   AuthResult,
+  PluginContext,
 } from "@oneplatform/plugin-sdk";
 import { PluginAuthError } from "@oneplatform/plugin-sdk";
+
+// Stored during initialize() and used by getAuthorizationUrl().
+let _clientId: string | undefined;
 
 export const ${entrypoint}: AuthProvider = {
   metadata(): AuthProviderMetadata {
@@ -346,14 +350,20 @@ export const ${entrypoint}: AuthProvider = {
     };
   },
 
-  getAuthorizationUrl(state: string, options: AuthOptions, config?: Record<string, unknown>): string {
-    const clientId = config?.["clientId"] ?? options.additionalParams?.["clientId"];
-    if (typeof clientId !== "string" || !clientId) {
+  async initialize(config: Record<string, unknown>, _context: PluginContext): Promise<void> {
+    if (typeof config["clientId"] !== "string" || !config["clientId"]) {
       throw new PluginAuthError("Missing required config: clientId — set it in the plugin config");
+    }
+    _clientId = config["clientId"] as string;
+  },
+
+  getAuthorizationUrl(state: string, options: AuthOptions): string {
+    if (!_clientId) {
+      throw new PluginAuthError("Plugin not initialized — clientId is not set");
     }
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: clientId,
+      client_id: _clientId,
       state,
       redirect_uri: options.redirectUri,
     });
@@ -583,7 +593,7 @@ describe("${entrypoint}", () => {
 }
 
 function buildAuthProviderTestSource(opts: ScaffoldOptions, entrypoint: string): string {
-  return `import { describe, it, expect } from "vitest";
+  return `import { describe, it, expect, beforeEach } from "vitest";
 import { createAuthProviderMockContext } from "@oneplatform/plugin-sdk/testing";
 import { ${entrypoint} } from "../index.js";
 
@@ -595,21 +605,20 @@ describe("${entrypoint}", () => {
     expect(meta.protocol).toBeDefined();
   });
 
-  it("generates a valid authorization URL", () => {
+  it("generates a valid authorization URL", async () => {
+    const ctx = createAuthProviderMockContext();
+    await ${entrypoint}.initialize!({ clientId: "test-client-id" }, ctx);
     const url = ${entrypoint}.getAuthorizationUrl("test-state", {
       redirectUri: "https://localhost/callback",
-    }, { clientId: "test-client-id" });
+    });
     expect(url).toContain("https://auth.example.com");
     expect(url).toContain("test-state");
     expect(url).toContain("test-client-id");
   });
 
-  it("throws on missing clientId", () => {
-    expect(() =>
-      ${entrypoint}.getAuthorizationUrl("test-state", {
-        redirectUri: "https://localhost/callback",
-      }, {}),
-    ).toThrow("clientId");
+  it("throws on missing clientId during initialize", async () => {
+    const ctx = createAuthProviderMockContext();
+    await expect(${entrypoint}.initialize!({}, ctx)).rejects.toThrow("clientId");
   });
 
   it("returns empty role array from mapClaimsToRoles", () => {

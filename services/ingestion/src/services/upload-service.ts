@@ -114,6 +114,7 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "text/csv",
   "application/json",
   "text/tab-separated-values",
+  "application/x-ndjson",
   "application/octet-stream",
 ]);
 
@@ -162,8 +163,17 @@ export interface UploadServiceDeps {
 export function createUploadService(deps: UploadServiceDeps): UploadService {
   const { uploadJobRepo, rawTableRepo, storage, logger } = deps;
 
+  // TODO(#PLAT-???): No Worker consumes "ontology:map" yet — jobs accumulate in Redis
+  // until the ontology service implements a consumer. Retry config matches the platform
+  // standard so jobs are not silently discarded on enqueue failures.
   const ontologyQueue = new Queue("ontology:map", {
     connection: { lazyConnect: true, url: redisUrl },
+    defaultJobOptions: {
+      attempts: 5,
+      backoff: { type: "exponential", delay: 1_000 },
+      removeOnComplete: { age: 86_400 },
+      removeOnFail: { age: 604_800 },
+    },
   });
 
   // -------------------------------------------------------------------------

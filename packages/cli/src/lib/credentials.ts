@@ -185,7 +185,7 @@ export function checkCredentialsPermissions(): string | null {
   const stats = statSync(CREDENTIALS_FILE);
   // mode & 0o777 gives the permission bits
   const mode = stats.mode & 0o777;
-  if (mode > SECURE_MODE) {
+  if ((mode & 0o177) !== 0) {
     return (
       `credentials.json has insecure permissions (${mode.toString(8)}).\n` +
       `Fix with: chmod 600 ${CREDENTIALS_FILE}`

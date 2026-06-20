@@ -210,6 +210,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     usageEventRepo,
     usageSummaryRepo,
     billingWebhookConfigRepo,
+    masterKey: config.masterKey,
     logger,
   });
 
@@ -301,7 +302,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
         headers: {
           "Content-Type": "application/json",
           ...(config.serviceToken !== undefined
-            ? { Authorization: `Bearer ${config.serviceToken}` }
+            ? { "X-Service-Token": config.serviceToken }
             : {}),
         },
         body: JSON.stringify({ apiKey }),

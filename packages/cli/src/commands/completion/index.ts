@@ -43,7 +43,7 @@ _op_completion() {
       COMPREPLY=( \$(compgen -W "list create get update delete test trigger" -- "\${cur}") )
       ;;
     mapping)
-      COMPREPLY=( \$(compgen -W "list create update delete preview" -- "\${cur}") )
+      COMPREPLY=( \$(compgen -W "list create update delete preview import" -- "\${cur}") )
       ;;
     webhook-out)
       COMPREPLY=( \$(compgen -W "list create update delete test logs" -- "\${cur}") )
@@ -52,10 +52,10 @@ _op_completion() {
       COMPREPLY=( \$(compgen -W "list get create update delete trigger runs run-status run-cancel run-logs" -- "\${cur}") )
       ;;
     schedule)
-      COMPREPLY=( \$(compgen -W "list create pause resume delete" -- "\${cur}") )
+      COMPREPLY=( \$(compgen -W "list get create update pause resume delete" -- "\${cur}") )
       ;;
     dlq)
-      COMPREPLY=( \$(compgen -W "list replay discard" -- "\${cur}") )
+      COMPREPLY=( \$(compgen -W "list replay replay-all discard" -- "\${cur}") )
       ;;
     exec)
       COMPREPLY=( \$(compgen -W "run history logs" -- "\${cur}") )
@@ -179,7 +179,7 @@ _op() {
       _describe 'connector subcommand' sub
       ;;
     mapping)
-      local -a sub=('list' 'create' 'update' 'delete' 'preview')
+      local -a sub=('list' 'create' 'update' 'delete' 'preview' 'import')
       _describe 'mapping subcommand' sub
       ;;
     webhook-out)
@@ -191,11 +191,11 @@ _op() {
       _describe 'pipeline subcommand' sub
       ;;
     schedule)
-      local -a sub=('list' 'create' 'pause' 'resume' 'delete')
+      local -a sub=('list' 'get' 'create' 'update' 'pause' 'resume' 'delete')
       _describe 'schedule subcommand' sub
       ;;
     dlq)
-      local -a sub=('list' 'replay' 'discard')
+      local -a sub=('list' 'replay' 'replay-all' 'discard')
       _describe 'dlq subcommand' sub
       ;;
     exec)
@@ -281,7 +281,7 @@ complete -c op -f -n '__fish_seen_subcommand_from data' -a 'query get create upd
 complete -c op -f -n '__fish_seen_subcommand_from connector' -a 'list create get update delete test trigger'
 
 # mapping subcommands
-complete -c op -f -n '__fish_seen_subcommand_from mapping' -a 'list create update delete preview'
+complete -c op -f -n '__fish_seen_subcommand_from mapping' -a 'list create update delete preview import'
 
 # webhook-out subcommands
 complete -c op -f -n '__fish_seen_subcommand_from webhook-out' -a 'list create update delete test logs'
@@ -290,10 +290,10 @@ complete -c op -f -n '__fish_seen_subcommand_from webhook-out' -a 'list create u
 complete -c op -f -n '__fish_seen_subcommand_from pipeline' -a 'list get create update delete trigger runs run-status run-cancel run-logs'
 
 # schedule subcommands
-complete -c op -f -n '__fish_seen_subcommand_from schedule' -a 'list create pause resume delete'
+complete -c op -f -n '__fish_seen_subcommand_from schedule' -a 'list get create update pause resume delete'
 
 # dlq subcommands
-complete -c op -f -n '__fish_seen_subcommand_from dlq' -a 'list replay discard'
+complete -c op -f -n '__fish_seen_subcommand_from dlq' -a 'list replay replay-all discard'
 
 # exec subcommands
 complete -c op -f -n '__fish_seen_subcommand_from exec' -a 'run history logs'

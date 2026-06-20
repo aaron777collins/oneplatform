@@ -82,6 +82,12 @@ export function useAppStorage<T>(
   const [value, setValueState] = React.useState<T>(defaultValue);
   const [isLoaded, setIsLoaded] = React.useState(false);
 
+  // Tracks the last value confirmed by the server. Used by setValue to roll back
+  // to the true server state on failure, even when multiple optimistic writes are
+  // in-flight concurrently (where the React state may already hold an unconfirmed
+  // optimistic value from a prior write).
+  const confirmedValueRef = React.useRef<T>(defaultValue);
+
   // Load the stored value from the BFF on first mount (and when isReady becomes true).
   // Skipped entirely when the key is invalid so we never make a request with a
   // malformed path segment.
@@ -95,7 +101,9 @@ export function useAppStorage<T>(
         if (!cancelled) {
           // BFF returns { data: { key, value, updatedAt } } envelope; unwrap if present.
           const storageData = (res as { data?: BffStorageGetResponse }).data ?? (res as BffStorageGetResponse);
-          setValueState(storageData.value !== null ? (storageData.value as T) : defaultValue);
+          const loaded = storageData.value !== null ? (storageData.value as T) : defaultValue;
+          confirmedValueRef.current = loaded;
+          setValueState(loaded);
           setIsLoaded(true);
         }
       })
@@ -136,8 +144,10 @@ export function useAppStorage<T>(
       }
 
       // Optimistic update — apply locally before the network round-trip.
-      // Capture the previous value so we can revert if the server request fails.
-      const previousValue = value;
+      // Capture the server-confirmed value (not the React state) so that rapid
+      // successive writes always roll back to the true persisted value rather
+      // than a prior unconfirmed optimistic value.
+      const rollbackValue = confirmedValueRef.current;
       setValueState(newValue);
 
       try {
@@ -145,14 +155,16 @@ export function useAppStorage<T>(
           method: "PUT",
           body: { value: newValue },
         });
+        // Only update the confirmed ref after the server acknowledges the write.
+        confirmedValueRef.current = newValue;
       } catch (err) {
         // Revert the optimistic update on failure so the UI stays consistent
         // with the persisted server state.
-        setValueState(previousValue);
+        setValueState(rollbackValue);
         throw err;
       }
     },
-    [isKeyValid, key, bffClient, value],
+    [isKeyValid, key, bffClient],
   );
 
   const meta: AppStorageMeta = {

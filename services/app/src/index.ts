@@ -660,7 +660,17 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   // Preview hot-reload SSE stream (design spec §11.4)
   honoApp.get("/apps/:slug/preview/reload-stream", async (c) => {
     const slug   = c.req.param("slug");
-    const appRow = await appRepo.findPublicBySlug(slug);
+
+    // Check public apps first; platform-user apps require an authenticated session.
+    let appRow = await appRepo.findPublicBySlug(slug);
+
+    if (appRow === null) {
+      const user = c.var.user;
+      if (user === undefined) {
+        return c.json({ error: { code: "UNAUTHORIZED", message: "Authentication required." } }, 401);
+      }
+      appRow = await (appRepo as AppRepositoryType).findByTenantAndSlug(user.tenantId, slug);
+    }
 
     if (appRow === null) {
       return c.json({ error: { code: "APP_NOT_FOUND", message: `App "${slug}" not found.` } }, 404);
@@ -741,7 +751,7 @@ async function main(): Promise<void> {
     minioSecretKey:     process.env["OP_MINIO_SECRET_KEY"]  ?? process.env["MINIO_SECRET_KEY"] ?? "minioadmin",
     minioRegion:        process.env["OP_MINIO_REGION"]      ?? process.env["MINIO_REGION"]     ?? "us-east-1",
     buildRetentionCount: parseInt(process.env["APP_BUILD_RETENTION_COUNT"] ?? "20", 10),
-    serviceKeysDir:     process.env["SERVICE_KEYS_DIR"] ?? "/data/service-keys",
+    serviceKeysDir:     process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys",
     startWorkers:       true,
   };
 

@@ -11,6 +11,7 @@
 # Required env vars: set these in your .env file before running.
 #   OP_MINIO_PASSWORD   — MinIO admin password (openssl rand -hex 32)
 #   POSTGRES_PASSWORD   — Postgres superuser password (openssl rand -hex 32)
+#   OP_GRAFANA_PASSWORD — Grafana admin password (openssl rand -hex 32)
 #   OP_ALLOWED_ORIGINS  — Comma-separated list of allowed CORS origins
 #   OP_BASE_URL         — Public base URL (e.g. https://platform.example.com)
 #   OP_DOMAIN           — Public domain name (e.g. platform.example.com)
@@ -192,6 +193,13 @@ services:
         limits:
           memory: 512m
           cpus: "0.5"
+
+  # ── Grafana: require a strong admin password ──────────────────────────────
+  grafana:
+    environment:
+      # :? syntax causes Docker Compose to fail with a clear error if unset.
+      # The dev default ('admin') is not safe for production.
+      GF_SECURITY_ADMIN_PASSWORD: "${OP_GRAFANA_PASSWORD:?Must set a strong OP_GRAFANA_PASSWORD for production. Generate with: openssl rand -hex 32}"
 
   # ── Caddy TLS: require production domain and email ────────────────────────
   caddy:

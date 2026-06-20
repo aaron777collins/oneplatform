@@ -64,14 +64,16 @@ type ResolvedAuth =
  * inside the connector. The trade-off is that property accesses via the index
  * signature bypass exactOptionalPropertyTypes, so we read handle.metadata via
  * a double-cast in fetchBatch (unknown → HandleMetadata).
+ *
+ * Auth credentials are intentionally excluded — they are re-resolved from
+ * context.credentials on each fetchBatch() call to avoid persisting secrets
+ * in a structure the platform interface documents as potentially checkpointed.
  */
 interface HandleMetadata extends Record<string, unknown> {
   baseUrl: string;
   endpoint: string;
   method: HttpMethod;
   staticHeaders: Record<string, string>;
-  authHeader: string | null; // Null when auth type is "none"
-  authType: ResolvedAuth["type"];
   responseDataPath: string | null;
   paginationType: PaginationType;
   pageSize: number;
@@ -143,13 +145,29 @@ function parseConfig(raw: Record<string, unknown>): RestApiConfig {
     rawMethod === "GET" || rawMethod === "POST" ? rawMethod : "GET";
 
   const rawHeaders = raw["headers"];
-  const headers: Record<string, string> =
+  const headers: Record<string, string> = {};
+  if (
     rawHeaders !== null &&
     rawHeaders !== undefined &&
     typeof rawHeaders === "object" &&
     !Array.isArray(rawHeaders)
-      ? (rawHeaders as Record<string, string>)
-      : {};
+  ) {
+    for (const [key, value] of Object.entries(rawHeaders as Record<string, unknown>)) {
+      if (typeof value !== "string") {
+        throw new PluginConfigError(
+          `headers["${key}"] must be a string, got ${typeof value}`,
+          "headers",
+        );
+      }
+      if (key.toLowerCase() === "authorization" || key.toLowerCase() === "x-api-key") {
+        throw new PluginConfigError(
+          `headers["${key}"] is managed by the auth credential system and must not be set manually`,
+          "headers",
+        );
+      }
+      headers[key] = value;
+    }
+  }
 
   const rawDataPath = raw["responseDataPath"];
   const responseDataPath =
@@ -271,7 +289,12 @@ function throwForHttpStatus(status: number, url: string, retryAfter: string | nu
 
 function parseRetryAfter(value: string): number | undefined {
   const seconds = parseInt(value, 10);
-  return isNaN(seconds) ? undefined : seconds;
+  if (!isNaN(seconds)) return seconds;
+  const date = new Date(value);
+  if (!isNaN(date.getTime())) {
+    return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
+  }
+  return undefined;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -371,24 +394,12 @@ function extractTimestamp(
  * Example header: <https://api.example.com/items?page=2>; rel="next", <...>; rel="last"
  */
 function parseNextLinkHeader(linkHeader: string): string | null {
-  const parts = linkHeader.split(",").map((p) => p.trim());
-
-  for (const part of parts) {
-    const segments = part.split(";").map((s) => s.trim());
-    const urlSegment = segments[0];
-    const relSegment = segments.find((s) => s.startsWith("rel="));
-
-    if (urlSegment === undefined || relSegment === undefined) {
-      continue;
-    }
-
-    const relValue = relSegment.replace(/^rel=["']?/, "").replace(/["']?$/, "");
-    if (relValue === "next") {
-      // Strip surrounding angle brackets from the URL segment.
-      return urlSegment.replace(/^</, "").replace(/>$/, "");
-    }
+  // Use a regex-based parser that correctly handles commas inside angle-bracketed URLs.
+  const linkRegex = /<([^>]*)>\s*;\s*rel=["']?([^"',;]*)["']?/g;
+  let match: RegExpExecArray | null;
+  while ((match = linkRegex.exec(linkHeader)) !== null) {
+    if (match[2] === "next") return match[1];
   }
-
   return null;
 }
 
@@ -492,7 +503,6 @@ class RestApiConnector implements Connector {
     try {
       const parsed = parseConfig(config);
       const auth = await resolveAuth(context);
-      const authHeader = authToHeader(auth);
 
       span.setAttribute("connector.baseUrl", parsed.baseUrl);
       span.setAttribute("connector.paginationType", parsed.paginationType);
@@ -511,8 +521,6 @@ class RestApiConnector implements Connector {
         endpoint: parsed.endpoint,
         method: parsed.method,
         staticHeaders: parsed.headers,
-        authHeader,
-        authType: auth.type,
         responseDataPath: parsed.responseDataPath,
         paginationType: parsed.paginationType,
         pageSize: parsed.pageSize,
@@ -540,10 +548,12 @@ class RestApiConnector implements Connector {
 
       const { url, isLinkFollowRequest } = this.buildRequestUrl(meta, decodedCursor);
 
+      const auth = await resolveAuth(context);
+      const authHeader = authToHeader(auth);
       const headers = buildHeaders(
         meta.staticHeaders,
-        meta.authHeader,
-        meta.authType,
+        authHeader,
+        auth.type,
         context.tracing,
       );
 
@@ -662,6 +672,14 @@ class RestApiConnector implements Connector {
         // On subsequent calls, follow the exact next URL from the Link header
         // (the API owns the full URL structure).
         if (cursor?.nextUrl !== undefined) {
+          const nextOrigin = new URL(cursor.nextUrl).origin;
+          const baseOrigin = new URL(meta.baseUrl).origin;
+          if (nextOrigin !== baseOrigin) {
+            throw new PluginDataError(
+              `Link header next URL origin "${nextOrigin}" does not match baseUrl origin "${baseOrigin}"`,
+              { nextUrl: cursor.nextUrl, baseUrl: meta.baseUrl },
+            );
+          }
           return { url: cursor.nextUrl, isLinkFollowRequest: true };
         }
         return {
@@ -704,7 +722,7 @@ class RestApiConnector implements Connector {
         }
 
         return {
-          nextCursor: encodeCursor({ offset: nextOffset }),
+          nextCursor: encodeCursor({ offset: nextOffset, since: previousCursor?.since }),
           hasMore: true,
         };
       }
@@ -715,7 +733,7 @@ class RestApiConnector implements Connector {
           return { nextCursor: null, hasMore: false };
         }
         return {
-          nextCursor: encodeCursor({ token: nextToken }),
+          nextCursor: encodeCursor({ token: nextToken, since: previousCursor?.since }),
           hasMore: true,
         };
       }
@@ -730,7 +748,7 @@ class RestApiConnector implements Connector {
           return { nextCursor: null, hasMore: false };
         }
         return {
-          nextCursor: encodeCursor({ nextUrl }),
+          nextCursor: encodeCursor({ nextUrl, since: previousCursor?.since }),
           hasMore: true,
         };
       }
@@ -752,6 +770,12 @@ class RestApiConnector implements Connector {
 // Different APIs use different field names. We check common conventions in order.
 // ────────────────────────────────────────────────────────────────────────────
 
+function safeNested(parent: unknown, key: string): unknown {
+  return parent !== null && typeof parent === "object" && !Array.isArray(parent)
+    ? (parent as Record<string, unknown>)[key]
+    : undefined;
+}
+
 function extractCursorToken(body: unknown): string | null {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return null;
@@ -767,9 +791,9 @@ function extractCursorToken(body: unknown): string | null {
     obj["next_page_token"],
     obj["nextPageToken"],
     obj["page_token"],
-    (obj["meta"] as Record<string, unknown> | undefined)?.["next_cursor"],
-    (obj["pagination"] as Record<string, unknown> | undefined)?.["cursor"],
-    (obj["paging"] as Record<string, unknown> | undefined)?.["cursor"],
+    safeNested(obj["meta"], "next_cursor"),
+    safeNested(obj["pagination"], "cursor"),
+    safeNested(obj["paging"], "cursor"),
   ];
 
   for (const candidate of candidates) {

@@ -352,15 +352,17 @@ describe("deleteRole", () => {
 
   it("deletes the role when app exists", async () => {
     appRepo.findByTenantAndId.mockResolvedValue(makeAppRow());
+    permRepo.findRoleByAppAndId.mockResolvedValue(makeRoleRow());
     permRepo.deleteRole.mockResolvedValue(true);
 
     await service.deleteRole("tenant-001", "app-001", "role-001");
 
-    expect(permRepo.deleteRole).toHaveBeenCalledWith("role-001");
+    expect(permRepo.deleteRole).toHaveBeenCalledWith("role-001", "app-001");
   });
 
   it("logs info after deletion", async () => {
     appRepo.findByTenantAndId.mockResolvedValue(makeAppRow());
+    permRepo.findRoleByAppAndId.mockResolvedValue(makeRoleRow());
     permRepo.deleteRole.mockResolvedValue(true);
 
     await service.deleteRole("tenant-001", "app-001", "role-001");

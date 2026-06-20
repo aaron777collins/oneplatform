@@ -183,7 +183,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
 
   await retryWithBackoff(
     async () => {
-      await redis.connect();
+      if (redis.status === "wait") await redis.connect();
       await redis.ping();
     },
     "Redis",
@@ -444,12 +444,12 @@ async function main(): Promise<void> {
   const masterKey = loadMasterKey();
   void masterKey; // Reserved for future field-level config encryption (spec §15.4)
 
-  // B7 fix: spec requires OP_SERVICE_TOKEN_SECRET; guard against empty string so
-  // internal endpoints are not accidentally left open in misconfigured deploys.
-  const serviceToken = process.env["OP_SERVICE_TOKEN_SECRET"] ?? "";
+  // Guard against empty string so internal endpoints are not accidentally left
+  // open in misconfigured deploys. Standardized on OP_SERVICE_TOKEN across all services.
+  const serviceToken = process.env["OP_SERVICE_TOKEN"] ?? "";
   if (serviceToken === "") {
     console.error(
-      "FATAL: OP_SERVICE_TOKEN_SECRET is not set. Internal endpoints will reject all requests."
+      "FATAL: OP_SERVICE_TOKEN is not set. Internal endpoints will reject all requests."
     );
     process.exit(1);
   }

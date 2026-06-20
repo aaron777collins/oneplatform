@@ -45,9 +45,9 @@ export class WebhookRepository {
     return row;
   }
 
-  // Returns only enabled webhooks — the index on tenant_id WHERE enabled=true
-  // makes this the fast path for event fan-out.
-  // Optional cursor/limit support for the management API (pagination).
+  // Returns all webhooks for the management API (enabled and disabled).
+  // Cursor encodes "<created_at_iso>|<id>" for stable compound keyset pagination
+  // that correctly orders by (created_at, id) regardless of UUID ordering.
   async findByTenantId(
     tenantId: string,
     options?: { cursor?: string; limit?: number }
@@ -56,15 +56,18 @@ export class WebhookRepository {
     const cursor = options?.cursor;
 
     if (cursor !== undefined) {
+      const [cursorTs, cursorId] = cursor.split("|");
+      if (cursorTs === undefined || cursorId === undefined) {
+        throw new Error("Invalid webhook cursor format: expected '<created_at_iso>|<id>'");
+      }
       const result = await this.pool.query<WebhookRow>(
         `SELECT ${WEBHOOK_COLUMNS}
            FROM gateway.webhooks
           WHERE tenant_id = $1
-            AND enabled = true
-            AND id > $2
+            AND (created_at, id) > ($2::timestamptz, $3::uuid)
           ORDER BY created_at ASC, id ASC
-          LIMIT $3`,
-        [tenantId, cursor, limit]
+          LIMIT $4`,
+        [tenantId, cursorTs, cursorId, limit]
       );
       return result.rows;
     }
@@ -73,7 +76,6 @@ export class WebhookRepository {
       `SELECT ${WEBHOOK_COLUMNS}
          FROM gateway.webhooks
         WHERE tenant_id = $1
-          AND enabled = true
         ORDER BY created_at ASC, id ASC
         LIMIT $2`,
       [tenantId, limit]

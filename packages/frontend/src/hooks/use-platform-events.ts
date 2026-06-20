@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSSEStream } from "./use-sse-stream.js";
 import type { SSEEvent } from "./use-sse-stream.js";
@@ -50,6 +50,14 @@ export function usePlatformEvents(
 ): UsePlatformEventsResult {
   const queryClient = useQueryClient();
 
+  // Keep eventFilter and handler in refs so the callback below never needs to
+  // re-create (and tear down the SSE connection) when only the filter content
+  // or handler identity changes.
+  const eventFilterRef = useRef(eventFilter);
+  eventFilterRef.current = eventFilter;
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
   const onEvent = useCallback(
     (sseEvent: SSEEvent) => {
       if (sseEvent.type !== "message" && sseEvent.type !== "platform-event") return;
@@ -62,9 +70,11 @@ export function usePlatformEvents(
         return;
       }
 
+      const currentFilter = eventFilterRef.current;
+
       // Filter: skip events that don't match any of the caller's prefixes
-      if (eventFilter.length > 0) {
-        const matches = eventFilter.some((filter) => {
+      if (currentFilter.length > 0) {
+        const matches = currentFilter.some((filter) => {
           if (filter.endsWith(".*")) {
             const prefix = filter.slice(0, -2);
             return event.eventType.startsWith(prefix);
@@ -83,10 +93,9 @@ export function usePlatformEvents(
         queryKey: [resourceKey, event.resourceId],
       });
 
-      handler?.(event);
+      handlerRef.current?.(event);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queryClient, handler, JSON.stringify(eventFilter)],
+    [queryClient],
   );
 
   return useSSEStream("/api/v1/events/stream", {

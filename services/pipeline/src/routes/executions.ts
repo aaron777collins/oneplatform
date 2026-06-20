@@ -11,9 +11,8 @@
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { UnauthorizedError } from "@oneplatform/core";
+import { UnauthorizedError, ValidationError, NotFoundError } from "@oneplatform/core";
 import type { ExecutionTracker } from "../services/execution-tracker.js";
-import { PipelineNotFoundError } from "../services/errors.js";
 import type { PipelineService } from "../services/pipeline-service.js";
 
 // ---------------------------------------------------------------------------
@@ -50,7 +49,7 @@ export function createExecutionRoutes(
 
     const pipelineId = c.req.param("pipelineId");
     if (pipelineId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing pipelineId path parameter." } }, 400);
+      throw new ValidationError("Missing pipelineId path parameter.");
     }
 
     // Verify the pipeline exists and belongs to this tenant before returning data.
@@ -60,15 +59,7 @@ export function createExecutionRoutes(
     const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 20;
 
     if (isNaN(limit) || limit < 1 || limit > 100) {
-      return c.json(
-        {
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "Query parameter 'limit' must be an integer between 1 and 100.",
-          },
-        },
-        400,
-      );
+      throw new ValidationError("Query parameter 'limit' must be an integer between 1 and 100.");
     }
 
     const executions = executionTracker.getExecutionHistory(pipelineId, limit);
@@ -90,7 +81,7 @@ export function createExecutionRoutes(
     const pipelineId = c.req.param("pipelineId");
     const executionId = c.req.param("executionId");
     if (pipelineId === undefined || executionId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing path parameters." } }, 400);
+      throw new ValidationError("Missing path parameters.");
     }
 
     // Tenant guard: verify the pipeline belongs to this tenant.
@@ -98,27 +89,15 @@ export function createExecutionRoutes(
 
     const status = executionTracker.getExecutionStatus(executionId);
     if (status === null) {
-      return c.json(
-        {
-          error: {
-            code: "EXECUTION_NOT_FOUND",
-            message: `Execution "${executionId}" was not found. It may have expired from the in-memory store.`,
-          },
-        },
-        404,
+      throw new NotFoundError(
+        `Execution "${executionId}" was not found. It may have expired from the in-memory store.`,
       );
     }
 
     // Confirm the execution belongs to the requested pipeline.
     if (status.pipelineId !== pipelineId) {
-      return c.json(
-        {
-          error: {
-            code: "EXECUTION_NOT_FOUND",
-            message: `Execution "${executionId}" does not belong to pipeline "${pipelineId}".`,
-          },
-        },
-        404,
+      throw new NotFoundError(
+        `Execution "${executionId}" does not belong to pipeline "${pipelineId}".`,
       );
     }
 
@@ -149,7 +128,7 @@ export function createExecutionRoutes(
     const pipelineId = c.req.param("pipelineId");
     const executionId = c.req.param("executionId");
     if (pipelineId === undefined || executionId === undefined) {
-      return c.json({ error: { code: "VALIDATION_ERROR", message: "Missing path parameters." } }, 400);
+      throw new ValidationError("Missing path parameters.");
     }
 
     // Tenant guard.
@@ -157,26 +136,14 @@ export function createExecutionRoutes(
 
     const currentStatus = executionTracker.getExecutionStatus(executionId);
     if (currentStatus === null) {
-      return c.json(
-        {
-          error: {
-            code: "EXECUTION_NOT_FOUND",
-            message: `Execution "${executionId}" was not found. It may have expired from the in-memory store.`,
-          },
-        },
-        404,
+      throw new NotFoundError(
+        `Execution "${executionId}" was not found. It may have expired from the in-memory store.`,
       );
     }
 
     if (currentStatus.pipelineId !== pipelineId) {
-      return c.json(
-        {
-          error: {
-            code: "EXECUTION_NOT_FOUND",
-            message: `Execution "${executionId}" does not belong to pipeline "${pipelineId}".`,
-          },
-        },
-        404,
+      throw new NotFoundError(
+        `Execution "${executionId}" does not belong to pipeline "${pipelineId}".`,
       );
     }
 

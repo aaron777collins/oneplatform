@@ -39,22 +39,17 @@ const REQUIRED_METHODS: Record<string, string[]> = {
  */
 const CONDITIONAL_METHODS: Record<string, Record<string, string[]>> = {
   connector: {
-    supportsIncremental: ["fetchIncremental"],
-    supportsWebhook: ["handleWebhook"],
+    supportsRealtime: ["subscribeToEvents"],
   },
-  transformer: {
-    supportsBatch: ["transformBatch"],
-  },
+  transformer: {},
   destination: {
-    supportsBatch: ["writeBatch"],
-    supportsDelete: ["delete"],
+    supportsStreaming: ["writeStream"],
   },
   "auth-provider": {
-    supportsMfa: ["initiateMfa", "verifyMfa"],
+    supportsTokenValidation: ["validateToken"],
+    supportsTokenRefresh: ["refreshToken"],
   },
-  widget: {
-    supportsResize: ["onResize"],
-  },
+  widget: {},
 };
 
 /**

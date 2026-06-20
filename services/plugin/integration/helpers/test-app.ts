@@ -22,7 +22,7 @@ export async function buildTestApp() {
     bundleBucket: "plugin-bundles",
     executionServiceUrl: "http://localhost:13005",
     ingestionServiceUrl: "http://localhost:13002",
-    serviceToken: process.env["OP_SERVICE_TOKEN_SECRET"] ?? "test-service-token",
+    serviceToken: process.env["OP_SERVICE_TOKEN"] ?? "test-service-token",
     retentionDays: 7,
     drainGraceSeconds: 5,
     // Non-existent dir — loadServicePublicKeys() returns {} on ENOENT silently

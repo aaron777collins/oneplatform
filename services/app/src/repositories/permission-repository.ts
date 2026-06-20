@@ -96,10 +96,10 @@ export class PermissionRepository {
     return result.rows[0] ?? null;
   }
 
-  async deleteRole(id: string): Promise<boolean> {
+  async deleteRole(id: string, appId: string): Promise<boolean> {
     const result = await this.pool.query(
-      "DELETE FROM app.roles WHERE id = $1",
-      [id]
+      "DELETE FROM app.roles WHERE id = $1 AND app_id = $2",
+      [id, appId]
     );
     return result.rowCount !== null && result.rowCount > 0;
   }

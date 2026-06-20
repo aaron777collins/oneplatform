@@ -116,6 +116,12 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
   // multi-instance setups do not share state across unrelated instances.
   const drainingPlugins = new Map<string, boolean>();
 
+  // Tracks started_at for in-flight executions so log line DB inserts use the
+  // correct partition date. Log lines may arrive after midnight relative to when
+  // the execution started; using the log line's own timestamp would route those
+  // rows into the wrong co-partitioned range.
+  const executionStartedAt = new Map<string, Date>();
+
   // ---------------------------------------------------------------------------
   // Wire sandbox log line callback — fan out to SSE and DB
   // ---------------------------------------------------------------------------
@@ -137,12 +143,14 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     // Loss on crash is acceptable; SSE ensures real-time delivery to connected clients.
     //
     // execution_date must match the execution's started_at so the log row lands in
-    // the correct co-partitioned range. Using new Date() here would cause rows to
-    // drift into the wrong daily partition whenever the log line arrives after midnight.
+    // the correct co-partitioned range. Using the log line's own timestamp would
+    // cause rows to drift into the wrong daily partition whenever the log line
+    // arrives after midnight relative to when the execution started.
+    const executionDate = executionStartedAt.get(logLine.id) ?? new Date(logLine.timestamp);
     logRepo
       .append({
         execution_id: logLine.id,
-        execution_date: new Date(logLine.timestamp),
+        execution_date: executionDate,
         level: logLine.level,
         message: logLine.message,
         line_number: logLine.line,
@@ -289,6 +297,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     };
 
     const execution = await executionRepo.create(createData);
+    executionStartedAt.set(execution.id, execution.started_at);
 
     await executionRepo.updateStatus(execution.id, { status: "running" });
 
@@ -314,6 +323,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     try {
       result = await executionRouter.route(routeRequest);
     } catch (err) {
+      executionStartedAt.delete(execution.id);
       const errMsg = err instanceof Error ? err.message : String(err);
       await executionRepo.updateStatus(execution.id, {
         status: "error",
@@ -343,6 +353,8 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
         : result.status === "timeout"
           ? "timeout"
           : "error";
+
+    executionStartedAt.delete(execution.id);
 
     await executionRepo.updateStatus(execution.id, {
       status: terminalStatus,
@@ -378,6 +390,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     timeout: number,
     context: RouteRequest["context"],
   ): Promise<void> {
+    executionStartedAt.set(execution.id, execution.started_at);
     try {
       await executionRepo.updateStatus(execution.id, { status: "running" });
 
@@ -445,6 +458,8 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
         .catch(() => undefined);
 
       sseManager.publishError(execution.id, "EXECUTION_SANDBOX_CRASH", errMsg, "error");
+    } finally {
+      executionStartedAt.delete(execution.id);
     }
   }
 

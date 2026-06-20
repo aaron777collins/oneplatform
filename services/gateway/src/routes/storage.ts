@@ -18,8 +18,14 @@ export interface StorageRouteDeps {
   storageService: StorageService;
 }
 
-// Bucket name validation mirrors S3 naming rules (simplified).
-const BUCKET_NAME_RE = /^[a-zA-Z0-9._-]{1,63}$/;
+// Bucket name validation enforces S3 naming rules: lowercase alphanumerics,
+// hyphens, and dots; must start and end with alphanumeric; 3–63 chars.
+// Consecutive dots are rejected separately to keep the regex readable.
+const BUCKET_NAME_RE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+
+function isValidBucketName(name: string): boolean {
+  return BUCKET_NAME_RE.test(name) && !name.includes("..");
+}
 
 /**
  * Verify that a bucket name belongs to the authenticated user's tenant.
@@ -81,11 +87,11 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
     }
 
     const bucket = c.req.param("bucket");
-    if (!bucket || !BUCKET_NAME_RE.test(bucket)) {
+    if (!bucket || !isValidBucketName(bucket)) {
       throw new ValidationError("Invalid bucket name.", [
         {
           code: "invalid_string",
-          message: "Bucket name must be 1–63 alphanumeric characters, dots, hyphens, or underscores.",
+          message: "Bucket name must be 3–63 lowercase alphanumeric characters, hyphens, or dots; must start and end with alphanumeric; no consecutive dots.",
           path: ["bucket"],
         },
       ]);
@@ -138,11 +144,11 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
     }
 
     const bucket = c.req.param("bucket");
-    if (!bucket || !BUCKET_NAME_RE.test(bucket)) {
+    if (!bucket || !isValidBucketName(bucket)) {
       throw new ValidationError("Invalid bucket name.", [
         {
           code: "invalid_string",
-          message: "Bucket name must be 1–63 alphanumeric characters.",
+          message: "Bucket name must be 3–63 lowercase alphanumeric characters, hyphens, or dots; must start and end with alphanumeric; no consecutive dots.",
           path: ["bucket"],
         },
       ]);
@@ -192,11 +198,11 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
     }
 
     const bucket = c.req.param("bucket");
-    if (!bucket || !BUCKET_NAME_RE.test(bucket)) {
+    if (!bucket || !isValidBucketName(bucket)) {
       throw new ValidationError("Invalid bucket name.", [
         {
           code: "invalid_string",
-          message: "Bucket name must be 1–63 alphanumeric characters.",
+          message: "Bucket name must be 3–63 lowercase alphanumeric characters, hyphens, or dots; must start and end with alphanumeric; no consecutive dots.",
           path: ["bucket"],
         },
       ]);
@@ -230,11 +236,11 @@ export function createStorageRoutes(deps: StorageRouteDeps): Hono<{ Variables: A
     }
 
     const bucket = c.req.param("bucket");
-    if (!bucket || !BUCKET_NAME_RE.test(bucket)) {
+    if (!bucket || !isValidBucketName(bucket)) {
       throw new ValidationError("Invalid bucket name.", [
         {
           code: "invalid_string",
-          message: "Bucket name must be 1–63 alphanumeric characters.",
+          message: "Bucket name must be 3–63 lowercase alphanumeric characters, hyphens, or dots; must start and end with alphanumeric; no consecutive dots.",
           path: ["bucket"],
         },
       ]);

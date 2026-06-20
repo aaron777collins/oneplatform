@@ -49,15 +49,38 @@ export function createShadowRegistryRepository(db: pg.Pool): ShadowRegistryRepos
     },
 
     async findUnregisteredShadowTables(olderThanHours) {
+      // information_schema.tables has no creation timestamp. We derive an OID
+      // boundary from the shadow_table_registry itself: find the pg_class OID
+      // of a registered shadow table whose created_at is closest to the cutoff
+      // timestamp, then use that OID as a proxy age gate. Tables with a lower
+      // OID were created before the cutoff and are safe to consider for cleanup.
+      // When no calibration point exists we fall back to all unregistered tables
+      // (conservative: prefer cleanup over leaving orphans indefinitely).
       const result = await db.query<{ table_schema: string; table_name: string }>(
-        `SELECT t.table_schema, t.table_name
+        `WITH oid_anchor AS (
+           SELECT c.oid AS anchor_oid
+           FROM ontology.shadow_table_registry sr
+           JOIN pg_class c ON c.relname = sr.table_name
+           JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = sr.schema_name
+           WHERE sr.created_at <= now() - make_interval(hours => $1)
+           ORDER BY sr.created_at DESC
+           LIMIT 1
+         )
+         SELECT t.table_schema, t.table_name
          FROM information_schema.tables t
+         JOIN pg_class c ON c.relname = t.table_name
+         JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.table_schema
          WHERE t.table_name ~ '^shadow_[a-z][a-z0-9_]*_[a-z0-9]+$'
            AND t.table_schema LIKE 'tenant_%'
+           AND (
+             NOT EXISTS (SELECT 1 FROM oid_anchor)
+             OR c.oid <= (SELECT anchor_oid FROM oid_anchor)
+           )
            AND NOT EXISTS (
              SELECT 1 FROM ontology.shadow_table_registry sr
              WHERE sr.schema_name = t.table_schema AND sr.table_name = t.table_name
            )`,
+        [olderThanHours],
       );
       return result.rows;
     },
