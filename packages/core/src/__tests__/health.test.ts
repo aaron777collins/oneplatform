@@ -59,12 +59,13 @@ describe("readyz", () => {
     expect(body.checks.redis).toBe("ok");
   });
 
-  it("returns 503 with status:not-ready when postgres is down", async () => {
+  it("returns 503 with status:not_ready when postgres is down", async () => {
     const app = await buildTestApp(false, true);
     const res = await app.request("/readyz");
     expect(res.status).toBe(503);
     const body = await res.json();
-    expect(body.status).toBe("not-ready");
+    // "not_ready" uses underscore to match all other services' health routes
+    expect(body.status).toBe("not_ready");
     expect(body.checks.postgres).toBe("error");
     expect(body.checks.redis).toBe("ok");
   });
