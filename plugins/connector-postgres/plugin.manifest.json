@@ -12,7 +12,7 @@
   "tags": ["database", "sql", "postgres", "postgresql"],
   "configSchema": {
     "type": "object",
-    "required": ["proxyUrl", "table"],
+    "required": ["proxyUrl"],
     "properties": {
       "proxyUrl": {
         "type": "string",

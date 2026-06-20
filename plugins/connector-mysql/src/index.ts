@@ -582,8 +582,18 @@ function findHighWaterMark(
       continue;
     }
     const asString = String(value);
-    if (highest === null || asString > highest) {
-      highest = asString;
+    // Numeric column values (MySQL returns numbers for INT/BIGINT/DECIMAL) must
+    // be compared numerically — string ordering breaks for multi-digit integers
+    // (e.g. "9" > "10" lexicographically but 9 < 10 numerically).
+    if (typeof value === "number") {
+      const numericHighest = highest !== null ? parseFloat(highest) : -Infinity;
+      if (parseFloat(asString) > numericHighest) {
+        highest = asString;
+      }
+    } else {
+      if (highest === null || asString > highest) {
+        highest = asString;
+      }
     }
   }
 
@@ -737,16 +747,28 @@ class MySqlConnector implements Connector {
       let hasMore: boolean;
 
       if (isLastPage) {
-        nextCursor = null;
+        // Even on the final batch we must persist the high-water mark so the next
+        // incremental run starts from where this one ended, not from the beginning.
+        const finalSince =
+          meta.incrementalColumn !== null
+            ? findHighWaterMark(rows, meta.incrementalColumn, since)
+            : since;
+
+        // Only emit a cursor when there is meaningful state to carry forward.
+        nextCursor = finalSince !== null ? encodeCursor({ offset: 0, since: finalSince }) : null;
         hasMore = false;
       } else {
-        // Advance the offset. For incremental syncs, propagate the high-water mark
-        // so the next batch filters rows newer than what we just processed.
-        const nextOffset = offset + records.length;
         const nextSince =
           meta.incrementalColumn !== null
             ? findHighWaterMark(rows, meta.incrementalColumn, since)
             : since;
+
+        // Incremental syncs use the WHERE filter (column > lastValue) as the sole
+        // pagination mechanism — the offset always stays 0 so we do not skip rows
+        // when the WHERE clause already narrows the result set. Full syncs (no
+        // incrementalColumn) advance the offset as normal.
+        const nextOffset =
+          meta.incrementalColumn !== null ? 0 : offset + records.length;
 
         nextCursor = encodeCursor({ offset: nextOffset, since: nextSince });
         hasMore = true;

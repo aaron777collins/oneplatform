@@ -70,11 +70,16 @@ interface OffsetCursor {
 interface IncrementalCursor {
   mode: "incremental";
   /**
-   * The last seen value of incrementalColumn. Only rows with a strictly greater
-   * value are returned in the next batch, which prevents re-fetching rows that
-   * were already ingested.
+   * The last seen value of incrementalColumn. Rows with a value >= lastValue are
+   * fetched, and rows with a primary key <= lastId are skipped to avoid
+   * re-ingesting rows that share the same cursor value at a batch boundary.
    */
   lastValue: string;
+  /**
+   * The primary key value of the last row processed. Used as a tiebreaker to
+   * skip already-processed rows when the next batch starts with >= lastValue.
+   */
+  lastId: string;
 }
 
 type ParsedCursor = OffsetCursor | IncrementalCursor;
@@ -273,7 +278,11 @@ function decodeCursor(raw: string): ParsedCursor {
     if (typeof lastValue !== "string") {
       throw new PluginDataError("incremental cursor must contain a string 'lastValue'");
     }
-    return { mode: "incremental", lastValue };
+    // lastId was added to support tiebreaker skipping at batch boundaries.
+    // Cursors written before this change omit lastId; treat absence as empty
+    // string so those cursors remain valid (they will re-fetch the boundary row).
+    const lastId = typeof obj["lastId"] === "string" ? obj["lastId"] : "";
+    return { mode: "incremental", lastValue, lastId };
   }
 
   throw new PluginDataError(`Unknown cursor mode: ${String(mode)}`);
@@ -375,7 +384,7 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
   tags: ["database", "sql", "postgres", "postgresql"],
   configSchema: {
     type: "object",
-    required: ["proxyUrl", "table"],
+    required: ["proxyUrl"],
     properties: {
       proxyUrl: { type: "string", description: "Base URL of the Postgres REST proxy." },
       table: { type: "string" },
@@ -597,28 +606,42 @@ class PostgresConnector implements Connector {
   ): Promise<BatchResult> {
     // On the first call, cursor is null — fetch all rows ordered by the
     // incremental column so the platform stores a meaningful resume point.
-    const lastValue =
-      cursor === null
-        ? null
-        : (() => {
-            const parsed = decodeCursor(cursor);
-            if (parsed.mode !== "incremental") {
-              throw new PluginConfigError(
-                "Cursor mode mismatch: expected 'incremental' but got 'offset'. " +
-                  "Do not remove incrementalColumn after a sync has started.",
-              );
-            }
-            return parsed.lastValue;
-          })();
+    let lastValue: string | null = null;
+    let lastId = "";
+    if (cursor !== null) {
+      const parsed = decodeCursor(cursor);
+      if (parsed.mode !== "incremental") {
+        throw new PluginConfigError(
+          "Cursor mode mismatch: expected 'incremental' but got 'offset'. " +
+            "Do not remove incrementalColumn after a sync has started.",
+        );
+      }
+      lastValue = parsed.lastValue;
+      lastId = parsed.lastId;
+    }
 
+    // Request batchSize + number of same-cursor-value rows we may need to skip.
+    // We over-fetch by asking for more rows when resuming so we can filter out
+    // already-processed rows with the same cursor value before returning a full
+    // batch to the caller. The proxy receives the primary key as an order tiebreaker
+    // so results are deterministic across page boundaries.
     const params: Record<string, string> = {
       table: cfg.table!,
       db_schema: cfg.schema,
       incremental_column: cfg.incrementalColumn!,
+      order_by_tiebreaker: cfg.primaryKey,
       limit: String(cfg.batchSize),
     };
     if (lastValue !== null) {
+      // Use >= so that rows sharing the cursor value with the last processed row
+      // are included. The lastId tiebreaker below filters duplicates already seen.
       params["cursor_value"] = lastValue;
+      params["cursor_inclusive"] = "true";
+    }
+    if (lastId !== "") {
+      // Pass the last seen primary key so the proxy can skip rows with
+      // (incrementalColumn = lastValue AND primaryKey <= lastId).
+      params["cursor_last_id"] = lastId;
     }
 
     const url = buildUrl(cfg.proxyUrl, ROWS_PATH, params);
@@ -631,36 +654,56 @@ class PostgresConnector implements Connector {
     }
 
     const payload = await parseRowsResponse(response, ROWS_PATH);
-    const records = rowsToDataRecords(payload.rows, cfg.primaryKey);
+
+    // Filter out rows that were already processed in the previous batch.
+    // These are rows where incrementalColumn = lastValue AND primaryKey <= lastId.
+    const filteredRows =
+      lastValue !== null && lastId !== ""
+        ? payload.rows.filter((row) => {
+            const colVal = String(row[cfg.incrementalColumn!] ?? "");
+            const pkVal = String(row[cfg.primaryKey] ?? "");
+            // Skip rows at the same cursor position that were already delivered.
+            return !(colVal === lastValue && pkVal <= lastId);
+          })
+        : payload.rows;
+
+    const records = rowsToDataRecords(filteredRows, cfg.primaryKey);
 
     // Advance the cursor to the maximum incrementalColumn value seen in this batch.
-    // This ensures the next call fetches only rows strictly newer than what was processed.
+    // Track lastId so the next batch can skip duplicate-cursor rows already delivered.
     let nextCursor: string | null = null;
     let hasMore = false;
 
     if (records.length > 0) {
-      const lastRow = payload.rows[payload.rows.length - 1];
-      const colValue = lastRow !== undefined ? lastRow[cfg.incrementalColumn!] : undefined;
+      const lastFilteredRow = filteredRows[filteredRows.length - 1];
+      const colValue =
+        lastFilteredRow !== undefined ? lastFilteredRow[cfg.incrementalColumn!] : undefined;
       if (colValue === undefined || colValue === null) {
         throw new PluginDataError(
           `incrementalColumn "${cfg.incrementalColumn}" is absent from the proxy response rows. ` +
             "Verify the column name and that it is included in the SELECT projection.",
-          { availableColumns: Object.keys(lastRow ?? {}).slice(0, 10) },
+          { availableColumns: Object.keys(lastFilteredRow ?? {}).slice(0, 10) },
         );
       }
+      const newLastId = String(lastFilteredRow?.[cfg.primaryKey] ?? "");
       // hasMore is true when the batch is full — a partial batch means we've
       // reached the end of currently available rows.
       hasMore = records.length === cfg.batchSize;
       // Always persist the cursor so a partial (final) batch saves its
       // position.  Without this, restarting after a partial batch would
       // re-fetch rows that were already processed (V5-116).
-      nextCursor = encodeCursor({ mode: "incremental", lastValue: String(colValue) });
+      nextCursor = encodeCursor({
+        mode: "incremental",
+        lastValue: String(colValue),
+        lastId: newLastId,
+      });
     }
 
     context.logger.debug("fetchBatch (incremental)", {
       table: cfg.table,
       incrementalColumn: cfg.incrementalColumn,
       lastValue,
+      lastId,
       returned: records.length,
       hasMore,
     });

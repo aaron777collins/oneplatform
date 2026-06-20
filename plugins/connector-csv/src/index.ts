@@ -36,7 +36,6 @@ interface CsvConfig {
   idColumn: string | undefined;
   batchSize: number;
   maxFileSizeMb: number;
-  bearerToken: string | undefined;
 }
 
 const DEFAULT_DELIMITER = ",";
@@ -173,6 +172,9 @@ function parseRow(text: string, delimiter: string, start: number): RowResult {
       } else if (text[pos] === "\r" && text[pos + 1] === "\n") {
         pos += 2; // consume CRLF, end row
         break;
+      } else if (text[pos] === "\r") {
+        pos += 1; // consume bare CR (old Mac line ending), end row
+        break;
       } else if (text[pos] === "\n") {
         pos += 1; // consume LF, end row
         break;
@@ -266,13 +268,7 @@ function extractConfig(raw: Record<string, unknown>): CsvConfig {
       ? rawMaxFileSizeMb
       : DEFAULT_MAX_FILE_SIZE_MB;
 
-  const rawBearerToken = raw["bearerToken"];
-  const bearerToken =
-    typeof rawBearerToken === "string" && rawBearerToken.trim().length > 0
-      ? rawBearerToken.trim()
-      : undefined;
-
-  return { url: trimmedUrl, delimiter, hasHeader, encoding, idColumn, batchSize, maxFileSizeMb, bearerToken };
+  return { url: trimmedUrl, delimiter, hasHeader, encoding, idColumn, batchSize, maxFileSizeMb };
 }
 
 // ─── Connector Implementation ─────────────────────────────────────────────────
@@ -306,7 +302,6 @@ class CsvConnector implements Connector {
           idColumn: { type: "string" },
           batchSize: { type: "number", default: 500 },
           maxFileSizeMb: { type: "number", default: 100, description: "Maximum file size in MB. Responses exceeding this are rejected." },
-          bearerToken: { type: "string", description: "Optional bearer token included as Authorization header." },
         },
       },
       tags: ["csv", "file", "import", "data-source"],
@@ -330,7 +325,11 @@ class CsvConnector implements Connector {
     // If HEAD fails or the server returns an error, we surface it immediately
     // rather than deferring to the first fetchBatch call.
     try {
-      const headers = buildRequestHeaders(context, cfg.bearerToken);
+      const availableCredentials = await context.credentials.list();
+      const bearerToken = availableCredentials.includes("bearerToken")
+        ? await context.credentials.get("bearerToken")
+        : undefined;
+      const headers = buildRequestHeaders(context, bearerToken);
       const response = await context.fetch.fetch(cfg.url, { method: "HEAD", headers });
       if (!response.ok) {
         throw new PluginConfigError(
@@ -362,7 +361,6 @@ class CsvConnector implements Connector {
         idColumn: cfg.idColumn ?? null,
         batchSize: cfg.batchSize,
         maxFileSizeMb: cfg.maxFileSizeMb,
-        bearerToken: cfg.bearerToken ?? null,
       },
     };
   }
@@ -379,7 +377,10 @@ class CsvConnector implements Connector {
     const idColumn = (meta["idColumn"] as string | null) ?? undefined;
     const batchSize = meta["batchSize"] as number;
     const maxFileSizeMb = (meta["maxFileSizeMb"] as number | undefined) ?? DEFAULT_MAX_FILE_SIZE_MB;
-    const bearerToken = (meta["bearerToken"] as string | null) ?? undefined;
+    const availableCredentials = await context.credentials.list();
+    const bearerToken = availableCredentials.includes("bearerToken")
+      ? await context.credentials.get("bearerToken")
+      : undefined;
 
     const cacheKey = rowsCacheKey(handle.connectionId);
 

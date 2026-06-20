@@ -180,6 +180,12 @@ export function createExecutionRoutes(
       );
     }
 
+    // Capture the abort signal before entering the ReadableStream constructor so
+    // it is accessible inside the cancel callback closure.
+    const abortSignal = c.req.raw.signal;
+
+    let unsubscribe: (() => void) | undefined;
+
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
@@ -204,28 +210,35 @@ export function createExecutionRoutes(
         sendEvent("execution:snapshot", currentStatus);
 
         // Subscribe to live events.
-        const unsubscribe = executionTracker.subscribe(executionId, (event) => {
+        unsubscribe = executionTracker.subscribe(executionId, (event) => {
           sendEvent(event.type, event);
 
           // Close the stream after the execution finishes.
           if (event.type === "execution:complete") {
-            unsubscribe();
+            unsubscribe?.();
             controller.close();
           }
         });
 
-        // The ReadableStream cancel callback is invoked when the client disconnects.
-        // We store the unsubscribe ref on the controller via a closure rather than
-        // returning from start(), because ReadableStream.cancel is not available in
-        // the standard start() callback. The stream will be garbage collected after
-        // the client disconnects and the emitter fires no more events.
-        //
-        // For a production system with many long-running pipelines, you would hook
-        // into the request AbortSignal here:
-        //   c.req.raw.signal.addEventListener("abort", unsubscribe, { once: true });
-        // Hono does not expose the raw AbortSignal in all environments, so we rely
-        // on execution:complete as the natural close boundary.
-        void unsubscribe; // referenced in the subscribe closure above
+        // Release the subscription immediately if the request was already aborted
+        // before we finished setting up (race condition guard).
+        if (abortSignal.aborted) {
+          unsubscribe();
+          unsubscribe = undefined;
+        } else {
+          abortSignal.addEventListener("abort", () => {
+            unsubscribe?.();
+            unsubscribe = undefined;
+          }, { once: true });
+        }
+      },
+
+      cancel() {
+        // Called when the client disconnects before the execution:complete event
+        // is emitted. Releasing the subscription prevents the tracker from holding
+        // a reference to the closed controller indefinitely.
+        unsubscribe?.();
+        unsubscribe = undefined;
       },
     });
 

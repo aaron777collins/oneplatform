@@ -93,12 +93,18 @@ const BLOCKED_URL_PATTERNS = [
   // localhost
   /^https?:\/\/localhost(:\d+)?(\/|$)/i,
   /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
+  // Unspecified IPv4 address (0.0.0.0/8)
+  /^https?:\/\/0\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
   // RFC 1918 ranges
   /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
   /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
   // Link-local (IPv4 and cloud metadata endpoint)
   /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
+  // IPv6 loopback, unspecified, and IPv4-mapped IPv6
+  /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
+  /^https?:\/\/\[::\](:\d+)?(\/|$)/,
+  /^https?:\/\/\[::ffff:[^\]]*\](:\d+)?(\/|$)/i,
   // Internal service hostnames (*.service:*)
   /^https?:\/\/[^/]*\.service(:\d+)?(\/|$)/i,
   // Non-HTTP/HTTPS schemes
@@ -111,6 +117,7 @@ const BLOCKED_URL_PATTERNS = [
 // and as prefix-matched strings for IPv6. These mirror the regex patterns above
 // but operate on resolved IP addresses to defeat DNS rebinding attacks.
 const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
+  [0x00000000, 0xff000000], // 0.0.0.0/8     — unspecified / this-network
   [0x7f000000, 0xff000000], // 127.0.0.0/8   — loopback
   [0x0a000000, 0xff000000], // 10.0.0.0/8    — RFC 1918
   [0xac100000, 0xfff00000], // 172.16.0.0/12 — RFC 1918
@@ -119,7 +126,7 @@ const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
 ];
 
 const BLOCKED_IPV6_PREFIXES = [
-  "::1",         // loopback
+  "::",          // unspecified (::) and loopback (::1) and IPv4-mapped (::ffff:)
   "fe80:",       // link-local (fe80::/10)
   "fd",          // ULA (fd00::/8)
   "fc",          // ULA (fc00::/7 covers fc and fd)
@@ -157,9 +164,28 @@ async function assertHostnameResolvesToPublicIp(
 ): Promise<void> {
   const { hostname } = url;
 
-  // Bare IP literals pass through the regex checks above; no DNS lookup needed.
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return;
-  if (hostname.startsWith("[") || hostname.includes(":")) return; // IPv6 literal
+  // Bare IPv4 literals — no DNS lookup needed, but must still pass the CIDR check.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    if (isIpv4Blocked(hostname)) {
+      throw {
+        code: "EXECUTION_FETCH_BLOCKED",
+        message: `Fetch to IP address '${hostname}' is blocked.`,
+      };
+    }
+    return;
+  }
+
+  // Bare IPv6 literals — extract the address from brackets and check blocklist.
+  if (hostname.startsWith("[") || hostname.includes(":")) {
+    const ipv6 = hostname.replace(/^\[|\]$/g, "");
+    if (isIpv6Blocked(ipv6)) {
+      throw {
+        code: "EXECUTION_FETCH_BLOCKED",
+        message: `Fetch to IPv6 address '${hostname}' is blocked.`,
+      };
+    }
+    return;
+  }
 
   let ipv4Addresses: string[] = [];
   let ipv6Addresses: string[] = [];

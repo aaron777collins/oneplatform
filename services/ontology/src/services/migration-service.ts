@@ -185,13 +185,20 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
       const entity = await entityRepo.findById(migration.tenant_id, migration.entity_id);
       if (!entity) throw new MigrationNotFoundError("Entity no longer exists.");
 
+      // Use a dedicated connection for the advisory lock so it is acquired and
+      // released on the same connection. The lock is transaction-scoped
+      // (pg_try_advisory_xact_lock) so it is automatically released when the
+      // transaction ends, preventing leaks if the process crashes mid-migration.
       const client = await db.connect();
       try {
-        const lockResult = await client.query<{ pg_try_advisory_lock: boolean }>(
-          `SELECT pg_try_advisory_lock(hashtext($1))`,
+        await client.query("BEGIN");
+
+        const lockResult = await client.query<{ pg_try_advisory_xact_lock: boolean }>(
+          `SELECT pg_try_advisory_xact_lock(hashtext($1))`,
           [migration.entity_id],
         );
-        if (!lockResult.rows[0]?.["pg_try_advisory_lock"]) {
+        if (!lockResult.rows[0]?.["pg_try_advisory_xact_lock"]) {
+          await client.query("ROLLBACK");
           throw new MigrationInProgressError("Another migration is already running for this entity.");
         }
 
@@ -206,6 +213,8 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
 
         await migrationRepo.setRunning(migrationId, viewName);
 
+        await client.query("COMMIT");
+
         logger.info(`Migration ${migrationId} started for entity ${entity.slug}`);
         await redis.publish("ontology:migration:started", JSON.stringify({
           tenantId: migration.tenant_id,
@@ -217,7 +226,7 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
 
         return confirmed;
       } catch (err) {
-        await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [migration.entity_id]).catch(() => {});
+        await client.query("ROLLBACK").catch(() => {});
         throw err;
       } finally {
         client.release();
@@ -238,13 +247,6 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
 
       await migrationRepo.setComplete(migrationId);
       await entityRepo.bumpVersion(migration.entity_id);
-
-      const client = await db.connect();
-      try {
-        await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [migration.entity_id]);
-      } finally {
-        client.release();
-      }
 
       await redis.publish("ontology:changed", JSON.stringify({
         tenantId: migration.tenant_id,
@@ -270,15 +272,6 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
       }
 
       await migrationRepo.setFailed(migrationId, error);
-
-      const client = await db.connect();
-      try {
-        await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [migration.entity_id]);
-      } catch {
-        // lock may already be released
-      } finally {
-        client.release();
-      }
 
       const entity = await entityRepo.findById(migration.tenant_id, migration.entity_id);
       await redis.publish("ontology:migration:failed", JSON.stringify({
@@ -356,15 +349,6 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
       }
 
       await migrationRepo.setRolledBack(migrationId);
-
-      const lockClient = await db.connect();
-      try {
-        await lockClient.query(`SELECT pg_advisory_unlock(hashtext($1))`, [migration.entity_id]);
-      } catch {
-        // lock may already be released
-      } finally {
-        lockClient.release();
-      }
 
       logger.info(`Migration ${migrationId} rolled back for entity ${entity.slug}`);
     },

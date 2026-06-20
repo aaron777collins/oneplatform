@@ -566,6 +566,12 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
       // XSS injection when the config is interpolated inside a <script> tag.
       const configJson = configJsonRaw.replace(/</g, '\\u003c');
 
+      // Generate a per-request nonce for the inline config script so the CSP
+      // script-src directive can whitelist exactly this script without 'unsafe-inline'.
+      const nonce = createHash("sha256")
+        .update(`${tenantApp.id}:${buildId}:${Date.now()}`)
+        .digest("base64");
+
       // W11: escape the app name to prevent XSS via injected HTML in the title tag
       const html = [
         `<!DOCTYPE html>`,
@@ -577,7 +583,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
         `</head>`,
         `<body>`,
         `  <div id="app"></div>`,
-        `  <script>`,
+        `  <script nonce="${nonce}">`,
         `    window.__OP_APP_CONFIG__ = ${configJson};`,
         `  </script>`,
         `  <script type="module" src="/apps/${slug}/bundle.js?v=${buildId}"></script>`,
@@ -588,7 +594,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
       return c.html(html, 200, {
         "Cache-Control":           "no-cache, must-revalidate",
         "X-Content-Type-Options":  "nosniff",
-        "Content-Security-Policy": "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'",
+        "Content-Security-Policy": `default-src 'self'; script-src 'self' 'nonce-${nonce}'; connect-src 'self'; style-src 'self' 'unsafe-inline'`,
       });
     }
 
@@ -730,10 +736,10 @@ async function main(): Promise<void> {
     authServiceUrl:     process.env["AUTH_SERVICE_URL"]      ?? "http://auth-service:3001",
     executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
     baseUrl:            process.env["OP_BASE_URL"]           ?? "http://localhost:3000",
-    minioEndpoint:      process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000",
-    minioAccessKey:     process.env["MINIO_ACCESS_KEY"] ?? "minioadmin",
-    minioSecretKey:     process.env["MINIO_SECRET_KEY"] ?? "minioadmin",
-    minioRegion:        process.env["MINIO_REGION"]     ?? "us-east-1",
+    minioEndpoint:      process.env["OP_MINIO_ENDPOINT"]    ?? process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000",
+    minioAccessKey:     process.env["OP_MINIO_ACCESS_KEY"]  ?? process.env["MINIO_ACCESS_KEY"] ?? "minioadmin",
+    minioSecretKey:     process.env["OP_MINIO_SECRET_KEY"]  ?? process.env["MINIO_SECRET_KEY"] ?? "minioadmin",
+    minioRegion:        process.env["OP_MINIO_REGION"]      ?? process.env["MINIO_REGION"]     ?? "us-east-1",
     buildRetentionCount: parseInt(process.env["APP_BUILD_RETENTION_COUNT"] ?? "20", 10),
     serviceKeysDir:     process.env["SERVICE_KEYS_DIR"] ?? "/data/service-keys",
     startWorkers:       true,

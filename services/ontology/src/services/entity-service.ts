@@ -413,19 +413,20 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
         await client.query("BEGIN");
 
         // Update entity metadata
-        const updateData: Record<string, unknown> = {};
-        if (input.name !== undefined) updateData["name"] = input.name;
-        if (input.description !== undefined) updateData["description"] = input.description;
-        if (input.isPublic !== undefined) updateData["is_public"] = input.isPublic;
-
-        const updated = await entityRepo.updateOptimistic(
-          entity.id, tenantId, entity.version,
-          {
-            ...(input.name !== undefined ? { name: input.name } : {}),
-            ...(input.description !== undefined ? { description: input.description } : {}),
-            ...(input.isPublic !== undefined ? { is_public: input.isPublic } : {}),
-          },
+        const entitySets: string[] = ["updated_at = now()", "version = version + 1"];
+        const entityValues: unknown[] = [];
+        let entityParamIdx = 1;
+        if (input.name !== undefined) { entityValues.push(input.name); entitySets.push(`name = $${entityParamIdx++}`); }
+        if (input.description !== undefined) { entityValues.push(input.description); entitySets.push(`description = $${entityParamIdx++}`); }
+        if (input.isPublic !== undefined) { entityValues.push(input.isPublic); entitySets.push(`is_public = $${entityParamIdx++}`); }
+        entityValues.push(entity.id, tenantId, entity.version);
+        const entityUpdateResult = await client.query<EntityRow>(
+          `UPDATE ontology.entities SET ${entitySets.join(", ")}
+           WHERE id = $${entityParamIdx++} AND tenant_id = $${entityParamIdx++} AND version = $${entityParamIdx++} AND deleted_at IS NULL
+           RETURNING *`,
+          entityValues,
         );
+        const updated = entityUpdateResult.rows[0] ?? null;
         if (!updated) {
           throw new ConflictError("Entity was modified since you last fetched it. Fetch the latest version and retry.");
         }
@@ -471,13 +472,20 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
             const field = existingFields.find((f) => f.slug === uf.slug);
             if (!field) continue;
 
-            await fieldRepo.update(field.id, {
-              ...(uf.name !== undefined ? { name: uf.name } : {}),
-              ...(uf.validationRules ? { validation_rules: uf.validationRules as FieldRow["validation_rules"] } : {}),
-              ...(uf.isIndexed !== undefined ? { is_indexed: uf.isIndexed } : {}),
-              ...(uf.isUnique !== undefined ? { is_unique: uf.isUnique } : {}),
-              ...(uf.defaultValue !== undefined ? { default_value: uf.defaultValue } : {}),
-            });
+            const fieldSets: string[] = ["updated_at = now()"];
+            const fieldValues: unknown[] = [];
+            let fieldIdx = 1;
+            if (uf.name !== undefined) { fieldValues.push(uf.name); fieldSets.push(`name = $${fieldIdx++}`); }
+            if (uf.validationRules !== undefined) { fieldValues.push(JSON.stringify(uf.validationRules)); fieldSets.push(`validation_rules = $${fieldIdx++}`); }
+            if (uf.isIndexed !== undefined) { fieldValues.push(uf.isIndexed); fieldSets.push(`is_indexed = $${fieldIdx++}`); }
+            if (uf.isUnique !== undefined) { fieldValues.push(uf.isUnique); fieldSets.push(`is_unique = $${fieldIdx++}`); }
+            if (uf.defaultValue !== undefined) { fieldValues.push(JSON.stringify(uf.defaultValue)); fieldSets.push(`default_value = $${fieldIdx++}`); }
+            fieldValues.push(field.id);
+            await client.query(
+              `UPDATE ontology.fields SET ${fieldSets.join(", ")}
+               WHERE id = $${fieldIdx} AND deleted_at IS NULL`,
+              fieldValues,
+            );
           }
         }
 

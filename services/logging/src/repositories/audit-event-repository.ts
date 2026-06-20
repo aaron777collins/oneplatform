@@ -130,7 +130,8 @@ export class AuditEventRepository {
     if (params.cursor !== undefined) {
       const raw = await decodeCursor(params.cursor, getCursorSecret());
       const cursor = CursorPayloadSchema.parse(raw);
-      cursorClause = `AND (created_at, id) < ($${n++}::timestamptz, $${n++}::uuid)`;
+      const keyword = conditions.length > 0 ? "AND" : "WHERE";
+      cursorClause = `${keyword} (created_at, id) < ($${n++}::timestamptz, $${n++}::uuid)`;
       args.push(cursor.createdAt, cursor.id);
     }
 

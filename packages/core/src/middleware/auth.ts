@@ -56,6 +56,7 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
   const secretBytes = new TextEncoder().encode(config.jwtSecret);
   const exactPublicRoutes = new Set<string>();
   const prefixPublicRoutes: string[] = [];
+  const wildcardPublicRoutes: RegExp[] = [];
 
   // Pre-parse the Ed25519 public key once at middleware-creation time so we
   // pay the PEM-parse cost on startup, not on every request.
@@ -77,7 +78,12 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
     const normalized = route.endsWith("/") && route.length > 1
       ? route.slice(0, -1)
       : route;
-    if (normalized.includes(":")) {
+    if (normalized.includes("*")) {
+      // Convert glob wildcard to a regex: escape special chars, then replace *
+      // with .* so /api/v1/auth/* matches any path under that prefix.
+      const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+      wildcardPublicRoutes.push(new RegExp("^" + escaped.replace(/\*/g, ".*") + "$"));
+    } else if (normalized.includes(":")) {
       // Strip the trailing `/:paramName` segment(s) to get the prefix.
       const prefix = normalized.replace(/\/:[^/]+/g, "");
       prefixPublicRoutes.push(prefix);
@@ -93,6 +99,9 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
     if (exactPublicRoutes.has(path)) return true;
     for (const prefix of prefixPublicRoutes) {
       if (path === prefix || path.startsWith(prefix + "/")) return true;
+    }
+    for (const pattern of wildcardPublicRoutes) {
+      if (pattern.test(path)) return true;
     }
     return false;
   }

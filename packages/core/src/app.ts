@@ -83,6 +83,12 @@ export interface CreateAppConfig {
   // Auth middleware dependencies
   /** HS256 secret used to verify and sign JWTs (`OP_JWT_SECRET`). */
   jwtSecret: string;
+  /**
+   * Ed25519 public key for verifying EdDSA-signed tokens.
+   * Provide as a base64-encoded SPKI PEM string (exported via `OP_JWT_PUBLIC_KEY`).
+   * When absent, EdDSA tokens are rejected with 401.
+   */
+  jwtPublicKey?: string;
   /** Redis client used by the auth middleware for token blocklist lookups. */
   redis: Redis;
   /**
@@ -186,6 +192,7 @@ export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariabl
     "*",
     authMiddleware({
       jwtSecret: config.jwtSecret,
+      ...(config.jwtPublicKey !== undefined ? { jwtPublicKey: config.jwtPublicKey } : {}),
       redis: config.redis,
       validateApiKey: config.validateApiKey,
       publicRoutes: config.publicRoutes,

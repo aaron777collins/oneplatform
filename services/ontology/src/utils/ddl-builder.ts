@@ -75,7 +75,11 @@ function formatDefaultValue(value: unknown, fieldType: FieldType): string {
     return value ? "true" : "false";
   }
   if (fieldType === "number") {
-    return String(value);
+    const num = Number(value);
+    if (!isFinite(num)) {
+      throw new Error(`Invalid number default value: ${String(value)}`);
+    }
+    return String(num);
   }
   return escapeSqlString(String(value));
 }

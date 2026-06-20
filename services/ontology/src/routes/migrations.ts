@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { ForbiddenError } from "@oneplatform/core";
+import { ForbiddenError, NotFoundError } from "@oneplatform/core";
 import type { MigrationService } from "../services/migration-service.js";
 import type { MigrationRepository } from "../repositories/migration-repository.js";
 import { listMigrationsQuery } from "../schemas/index.js";
@@ -81,6 +81,11 @@ export function createMigrationRoutes(deps: MigrationRouteDeps): Hono<{ Variable
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    const migration = await migrationRepo.findById(c.req.param("id"));
+    if (!migration || migration.tenant_id !== user.tenantId) {
+      throw new NotFoundError("Migration not found.");
+    }
+
     const confirmed = await migrationService.confirmMigration(c.req.param("id"), user.userId);
     return c.json({
       migrationId: confirmed.id,
@@ -93,6 +98,11 @@ export function createMigrationRoutes(deps: MigrationRouteDeps): Hono<{ Variable
     const user = c.var.user;
     if (!user.scopes.includes(REQUIRED_WRITE_SCOPE) && !user.scopes.includes("admin")) {
       throw new ForbiddenError("ontology:write scope is required.");
+    }
+
+    const migration = await migrationRepo.findById(c.req.param("id"));
+    if (!migration || migration.tenant_id !== user.tenantId) {
+      throw new NotFoundError("Migration not found.");
     }
 
     await migrationService.rollbackMigration(c.req.param("id"));

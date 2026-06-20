@@ -118,6 +118,13 @@ export function createPermissionService(deps: PermissionServiceDeps): Permission
   ): Promise<AppRoleRow> {
     await assertAppAccess(tenantId, appId);
 
+    // Verify the role belongs to this app before modifying it — prevents
+    // cross-app role modification when a caller supplies a foreign roleId.
+    const existing = await permRepo.findRoleByAppAndId(appId, roleId);
+    if (existing === null) {
+      throw new AppNotFoundError(`Role "${roleId}" not found.`, { roleId, appId });
+    }
+
     const updated = await permRepo.updateRole(roleId, input);
     if (updated === null) {
       throw new AppNotFoundError(`Role "${roleId}" not found.`, { roleId, appId });
@@ -127,6 +134,14 @@ export function createPermissionService(deps: PermissionServiceDeps): Permission
 
   async function deleteRole(tenantId: string, appId: string, roleId: string): Promise<void> {
     await assertAppAccess(tenantId, appId);
+
+    // Verify the role belongs to this app before deleting — prevents cross-app
+    // role deletion when a caller supplies a foreign roleId.
+    const existing = await permRepo.findRoleByAppAndId(appId, roleId);
+    if (existing === null) {
+      throw new AppNotFoundError(`Role "${roleId}" not found.`, { roleId, appId });
+    }
+
     await permRepo.deleteRole(roleId);
     logger.info("App role deleted", { tenantId, appId, roleId });
   }

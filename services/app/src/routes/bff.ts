@@ -231,7 +231,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
 
     const queryParams = new URLSearchParams(c.req.query()).toString();
-    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}${queryParams ? `?${queryParams}` : ""}`;
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}${queryParams ? `?${queryParams}` : ""}`;
 
     // W3: include service token on inter-service calls
     const resp = await fetch(upstreamUrl, {

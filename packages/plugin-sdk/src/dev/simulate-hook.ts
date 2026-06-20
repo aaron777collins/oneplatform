@@ -201,8 +201,14 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
     },
   };
 
-  // Read the bundle source and execute in a vm.Script context
-  const bundleSource = fs.readFileSync(bundlePath, "utf-8");
+  // Read the bundle source and execute in a vm.Script context.
+  // Plugins are built as ESM (--format=esm) by default; vm.Script only accepts
+  // CommonJS-style source, so ESM bundles must be transpiled to CJS first.
+  let bundleSource = fs.readFileSync(bundlePath, "utf-8");
+
+  if (isEsmSource(bundleSource)) {
+    bundleSource = await transpileEsmToCjs(bundleSource, bundlePath);
+  }
 
   const startMs = performance.now();
   let result: HookResult | undefined;
@@ -318,6 +324,42 @@ export async function runSimulateHook(args: SimulateHookCliArgs): Promise<void> 
   process.stderr.write(
     `[simulate-hook] ${args.stage} — ${duration_ms}ms, ${output.logs.length} log(s), ${output.spans.length} span(s)\n`,
   );
+}
+
+/**
+ * Returns true when the source string contains top-level ESM syntax.
+ * vm.Script cannot execute ESM source directly — the bundle must be
+ * converted to CJS before being wrapped in the IIFE shim below.
+ */
+function isEsmSource(source: string): boolean {
+  // Match top-level export/import statements that are characteristic of ESM output.
+  // esbuild ESM output always starts with import/export declarations.
+  return /^\s*(export\s|import\s)/m.test(source);
+}
+
+/**
+ * Transpile an ESM bundle to CJS using esbuild's transform API so it can run
+ * inside a vm.Script context that relies on the exports/module.exports shim.
+ * Mirrors the toBundleCjs helper in pack.ts.
+ */
+async function transpileEsmToCjs(esmSource: string, bundlePath: string): Promise<string> {
+  let transform: (source: string, opts: Record<string, unknown>) => Promise<{ code: string }>;
+  try {
+    const esbuild = await import("esbuild");
+    transform = esbuild.transform as typeof transform;
+  } catch {
+    throw new Error(
+      `Bundle at "${bundlePath}" is an ESM module but esbuild is not available to convert it.\n` +
+      `Install esbuild in the plugin project: npm install --save-dev esbuild`,
+    );
+  }
+
+  const result = await transform(esmSource, {
+    format: "cjs",
+    platform: "node",
+    target: "node20",
+  });
+  return result.code;
 }
 
 function buildErrorInfo(err: unknown): SimulateHookOutput["error"] {

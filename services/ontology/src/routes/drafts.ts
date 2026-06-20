@@ -62,6 +62,11 @@ export function createDraftRoutes(deps: DraftRouteDeps): Hono<{ Variables: AppVa
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    const draft = await draftRepo.findById(c.req.param("id"));
+    if (!draft || draft.tenant_id !== user.tenantId) {
+      throw new NotFoundError("Draft not found or already processed.");
+    }
+
     const confirmed = await draftRepo.confirm(c.req.param("id"), user.userId);
     if (!confirmed) throw new NotFoundError("Draft not found or already processed.");
 
@@ -76,6 +81,11 @@ export function createDraftRoutes(deps: DraftRouteDeps): Hono<{ Variables: AppVa
     const user = c.var.user;
     if (!user.scopes.includes(REQUIRED_WRITE_SCOPE) && !user.scopes.includes("admin")) {
       throw new ForbiddenError("ontology:write scope is required.");
+    }
+
+    const draft = await draftRepo.findById(c.req.param("id"));
+    if (!draft || draft.tenant_id !== user.tenantId) {
+      throw new NotFoundError("Draft not found or already processed.");
     }
 
     const rejected = await draftRepo.reject(c.req.param("id"));

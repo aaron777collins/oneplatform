@@ -205,9 +205,17 @@ function topologicalSort(graph: PipelineGraph, entryId: string): GraphNode[] {
     inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
   }
 
-  // Seed with entry node first for deterministic ordering
-  const queue: string[] = [entryId];
-  const visited = new Set<string>([entryId]);
+  // Seed with zero-in-degree nodes; entry node goes first for deterministic ordering
+  const queue: string[] = [];
+  if ((inDegree.get(entryId) ?? 0) === 0) {
+    queue.push(entryId);
+  }
+  for (const node of graph.nodes) {
+    if (node.id !== entryId && (inDegree.get(node.id) ?? 0) === 0) {
+      queue.push(node.id);
+    }
+  }
+
   const result: GraphNode[] = [];
 
   while (queue.length > 0) {
@@ -217,16 +225,18 @@ function topologicalSort(graph: PipelineGraph, entryId: string): GraphNode[] {
 
     const neighbors = adjList.get(current) ?? [];
     for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        visited.add(neighbor);
+      const remaining = (inDegree.get(neighbor) ?? 0) - 1;
+      inDegree.set(neighbor, remaining);
+      if (remaining === 0) {
         queue.push(neighbor);
       }
     }
   }
 
-  // Append any disconnected nodes (not reachable from entry)
+  // Append any nodes not emitted (cycle members or disconnected)
+  const emitted = new Set(result.map((n) => n.id));
   for (const node of graph.nodes) {
-    if (!visited.has(node.id)) result.push(node);
+    if (!emitted.has(node.id)) result.push(node);
   }
 
   return result;

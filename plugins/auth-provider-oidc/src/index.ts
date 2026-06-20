@@ -526,9 +526,8 @@ class OidcAuthProvider implements AuthProvider {
     // Keep the in-memory endpoint current on discovery cache refresh
     this.authorizationEndpoint = discovery.authorization_endpoint;
 
-    // Read the pre-cached client secret written by initialize().
-    const clientSecret = await context.cache.get<string>(CLIENT_SECRET_CACHE_KEY);
-    if (clientSecret === null) {
+    const clientSecret = await context.credentials.get("clientSecret");
+    if (clientSecret === null || clientSecret === "") {
       throw new PluginAuthError(
         "OIDC client secret not available — ensure initialize() completed before the first login",
       );
