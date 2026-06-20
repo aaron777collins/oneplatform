@@ -243,10 +243,19 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       }
     }
 
-    const updated = await userRepository.update(id, {
-      ...(parsed.data.displayName !== undefined ? { display_name: parsed.data.displayName } : {}),
-      ...(parsed.data.roles !== undefined ? { roles: parsed.data.roles } : {}),
-    });
+    // Only call update() when there are catalog fields to change — the method
+    // throws if the update set is empty (which happens when only isActive is
+    // provided). isActive is handled below via dedicated activate/deactivate
+    // methods, so we can safely skip the update() call in that case.
+    const hasFieldUpdates =
+      parsed.data.displayName !== undefined || parsed.data.roles !== undefined;
+
+    let updated = hasFieldUpdates
+      ? await userRepository.update(id, {
+          ...(parsed.data.displayName !== undefined ? { display_name: parsed.data.displayName } : {}),
+          ...(parsed.data.roles !== undefined ? { roles: parsed.data.roles } : {}),
+        })
+      : existing;
 
     // isActive changes go through separate activate/deactivate paths in the
     // repository since they are distinct column updates with side effects.

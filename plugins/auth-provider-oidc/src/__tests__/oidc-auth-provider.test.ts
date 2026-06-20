@@ -224,10 +224,10 @@ describe("initialize()", () => {
     expect(discoveryCall).toBeDefined();
   });
 
-  it("caches the client secret after initialization", async () => {
+  it("does not cache the client secret (uses CredentialAccessor on demand)", async () => {
     const ctx = await initializeProvider();
     const cached = await ctx.cache.get<string>("oidc:clientSecret");
-    expect(cached).toBe(CLIENT_SECRET);
+    expect(cached).toBeNull();
   });
 
   it("throws PluginConfigError when issuerUrl is missing", async () => {

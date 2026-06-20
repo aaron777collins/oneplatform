@@ -527,17 +527,24 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
       ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
     });
 
-    // Render the template files and write them to VFS
     const files = template.render(parsed.data.name, parsed.data.slug);
     for (const [filePath, content] of Object.entries(files)) {
       const contentHash = sha256hex(content);
-      await fileRepo.create({
+      const created = await fileRepo.create({
         app_id:       app.id,
         path:         filePath,
         content,
         content_hash: contentHash,
         updated_by:   user.userId,
       });
+      if (created === null) {
+        await fileRepo.updateWithVersionCheck(app.id, filePath, {
+          content,
+          content_hash: contentHash,
+          updated_by:   user.userId,
+          file_version: 1,
+        });
+      }
     }
 
     return c.json({ data: formatAppDetail(app) }, 201);

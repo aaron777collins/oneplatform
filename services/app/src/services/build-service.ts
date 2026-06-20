@@ -381,6 +381,8 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
       versionNumber: build.version_number,
     });
 
+    let buildTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
     try {
       // Mark building
       await buildRepo.update(build.id, { status: "building" });
@@ -451,25 +453,21 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
       // Abort the request if the full stream is not consumed within BUILD_TIMEOUT_MS
       // to prevent builds from running forever.
       const abortController = new AbortController();
-      const buildTimeoutHandle = setTimeout(() => {
+      buildTimeoutHandle = setTimeout(() => {
         abortController.abort(new Error(`Build exceeded timeout of ${BUILD_TIMEOUT_MS}ms`));
       }, BUILD_TIMEOUT_MS);
 
       let response: Response;
-      try {
-        const signedToken = await serviceTokenSigner.sign();
-        response = await fetch(`${executionServiceUrl}/internal/execution/execute`, {
-          method:  "POST",
-          headers: {
-            "Content-Type":    "application/json",
-            "X-Service-Token": signedToken,
-          },
-          body:   JSON.stringify(payload),
-          signal: abortController.signal,
-        });
-      } finally {
-        clearTimeout(buildTimeoutHandle);
-      }
+      const signedToken = await serviceTokenSigner.sign();
+      response = await fetch(`${executionServiceUrl}/internal/execution/execute`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":    "application/json",
+          "X-Service-Token": signedToken,
+        },
+        body:   JSON.stringify(payload),
+        signal: abortController.signal,
+      });
 
       if (!response.ok || response.body === null) {
         throw new Error(`Execution Service returned ${response.status}`);
@@ -515,6 +513,8 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
           }
         }
       }
+
+      clearTimeout(buildTimeoutHandle);
 
       if (resultLine === undefined) {
         throw new Error("Execution Service stream ended without a result line");
@@ -582,6 +582,7 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
         });
       }
     } catch (err) {
+      if (buildTimeoutHandle !== undefined) clearTimeout(buildTimeoutHandle);
       await buildRepo.update(build.id, {
         status:        "failed",
         error_message: err instanceof Error ? err.message : String(err),

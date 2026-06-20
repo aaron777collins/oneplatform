@@ -71,15 +71,28 @@ function applyCssVariables(
  * The element is identified by a stable ID so repeated calls replace the tag
  * rather than accumulating duplicates.
  */
+function sanitizeCss(css: string): string {
+  let sanitized = css;
+  sanitized = sanitized.replace(/@import\b[^;]*;?/gi, "");
+  sanitized = sanitized.replace(/expression\s*\([^)]*\)/gi, "");
+  sanitized = sanitized.replace(
+    /url\s*\(\s*(?:['"]?\s*(?!(?:data:|https:))[a-z][a-z0-9+.-]*:)[^)]*\)/gi,
+    "url(about:invalid)",
+  );
+  sanitized = sanitized.replace(/<\/?script[^>]*>/gi, "");
+  sanitized = sanitized.replace(/-moz-binding\s*:[^;}"']*/gi, "");
+  sanitized = sanitized.replace(/behavior\s*:[^;}"']*/gi, "");
+  return sanitized;
+}
+
 function applyCustomCss(css: string | null): void {
-  // Remove any existing branding style tag first — handles resets and updates.
   document.getElementById(BRANDING_STYLE_ID)?.remove();
 
   if (!css) return;
 
   const style = document.createElement("style");
   style.id = BRANDING_STYLE_ID;
-  style.textContent = css;
+  style.textContent = sanitizeCss(css);
   document.head.appendChild(style);
 }
 

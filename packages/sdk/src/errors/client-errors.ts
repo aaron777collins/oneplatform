@@ -18,7 +18,6 @@ export class ClientError extends OnePlatformError {
 
 /** 401 Unauthorized. Invalid or expired credentials. */
 export class AuthError extends ClientError {
-  override readonly statusCode = 401 as const;
 }
 
 /** 403 Forbidden. Authenticated but lacks permission. */

@@ -25,6 +25,7 @@
 
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import {
   loadConfig,
   loggingConfigSchema,
@@ -296,9 +297,16 @@ async function main(): Promise<void> {
             response.status,
             Object.fromEntries(response.headers.entries())
           );
-          void response.arrayBuffer().then((buf: ArrayBuffer) => {
-            res.end(Buffer.from(buf));
-          });
+          // Pipe the response body as a stream rather than buffering it with
+          // arrayBuffer(). This is critical for the streaming export endpoint
+          // (GET /api/v1/logs/export), which can emit millions of rows — loading
+          // the entire body into a single ArrayBuffer would exhaust memory and
+          // crash the process for large exports.
+          if (response.body !== null) {
+            Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+          } else {
+            res.end();
+          }
         };
 
         if (responseOrPromise instanceof Promise) {

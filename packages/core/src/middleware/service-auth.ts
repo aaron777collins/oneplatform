@@ -43,15 +43,28 @@ export function signUserContext(headerValue: string): string {
 /**
  * Constant-time comparison so an attacker cannot learn the expected signature
  * length or prefix through response timing.
+ *
+ * We must guard against invalid hex characters in receivedSig: Buffer.from(str, 'hex')
+ * silently skips non-hex characters and produces a shorter buffer, which causes
+ * timingSafeEqual to throw a RangeError (buffers must have equal byte length).
+ * An attacker can craft a same-length string with invalid hex chars to trigger a 500.
+ * We prevent this by (a) validating the hex alphabet before decoding and
+ * (b) falling back to the expected buffer so timingSafeEqual always compares equal
+ * lengths, while the final length check ensures an invalid sig returns false.
  */
 function verifyUserContextSignature(headerValue: string, receivedSig: string): boolean {
   const expected = signUserContext(headerValue);
-  // Both buffers must be the same byte-length for timingSafeEqual to work.
-  // If lengths differ the signature is already invalid; we still avoid early-exit
-  // to prevent length oracle attacks.
   const expectedBuf = Buffer.from(expected, "hex");
-  const receivedBuf = Buffer.from(receivedSig.length === expected.length ? receivedSig : expected, "hex");
-  return timingSafeEqual(expectedBuf, receivedBuf) && receivedSig.length === expected.length;
+  // Only decode receivedSig when it is a valid hex string of the correct length.
+  // An invalid hex character causes Buffer.from(..., 'hex') to produce a shorter
+  // buffer, which would make timingSafeEqual throw a RangeError (not a 401).
+  const isValidHex = /^[0-9a-fA-F]+$/.test(receivedSig);
+  const receivedBuf = (receivedSig.length === expected.length && isValidHex)
+    ? Buffer.from(receivedSig, "hex")
+    : expectedBuf; // same length ensures timingSafeEqual does not throw
+  // timingSafeEqual always runs (no early exit) to prevent timing oracles.
+  // The final length/hex check ensures we return false for any invalid input.
+  return timingSafeEqual(expectedBuf, receivedBuf) && receivedSig.length === expected.length && isValidHex;
 }
 
 // serviceAuthMiddleware enforces Ed25519 service tokens and the compiled RBAC matrix.

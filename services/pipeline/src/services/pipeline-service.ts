@@ -392,6 +392,8 @@ const SSRF_BLOCKED_PATTERNS = [
   /^https?:\/\/metadata\.google\.internal(:\d+)?(\/|$)/i,
   // Azure metadata
   /^https?:\/\/169\.254\.169\.254(:\d+)?(\/|$)/,
+  // Alibaba cloud metadata
+  /^https?:\/\/100\.100\.100\.200(:\d+)?(\/|$)/,
 ];
 
 function isUrlSsrfBlocked(url: string): boolean {

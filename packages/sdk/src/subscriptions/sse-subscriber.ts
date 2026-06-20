@@ -94,6 +94,10 @@ async function* parseSseStream(
       // Ignore comment lines (starting with ':')
     }
   }
+
+  if (eventData !== '') {
+    yield { type: eventType, data: eventData, id: eventId };
+  }
 }
 
 export function createSseSubscription(

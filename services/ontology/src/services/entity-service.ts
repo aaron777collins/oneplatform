@@ -568,8 +568,10 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
           const tableName = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(entity.slug)}`;
           await client.query(`DROP TABLE IF EXISTS ${tableName}`);
 
-          await fieldRepo.hardDeleteByEntityId(entity.id);
-          await entityRepo.hardDelete(entity.id);
+          // Pass the transaction client so catalog deletes are atomic with the
+          // DROP TABLE above — a partial failure now rolls back everything.
+          await fieldRepo.hardDeleteByEntityId(entity.id, client);
+          await entityRepo.hardDelete(entity.id, client);
 
           await client.query("COMMIT");
           cleaned++;

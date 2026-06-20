@@ -206,6 +206,18 @@ return count`,
       }
     }
 
+    if (!rawToken && !parsed.data.refreshToken && !parsed.data.all) {
+      return c.json(
+        {
+          error: {
+            code: "BAD_REQUEST",
+            message: "No Authorization header or refresh token provided. Nothing to revoke.",
+          },
+        },
+        400,
+      );
+    }
+
     await authService.logout(
       parsed.data.refreshToken,
       accessTokenJti,
@@ -226,8 +238,9 @@ return count`,
   // in the JSON body. The cookie takes precedence when both are present, but
   // in practice only one will be set.
   routes.post("/api/v1/auth/refresh", async (c) => {
-    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim()
+    const ip = c.req.header("cf-connecting-ip")
       ?? c.req.header("x-real-ip")
+      ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim()
       ?? "unknown";
     await checkRefreshRateLimit(ip);
 

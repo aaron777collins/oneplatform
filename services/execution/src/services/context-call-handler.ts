@@ -105,8 +105,12 @@ const BLOCKED_URL_PATTERNS = [
   /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
   /^https?:\/\/\[::\](:\d+)?(\/|$)/,
   /^https?:\/\/\[::ffff:[^\]]*\](:\d+)?(\/|$)/i,
-  // Internal service hostnames (*.service:*)
+  // Internal service hostnames (*.service:*, *-service:*, *.svc:*, *.svc.cluster.local:*, *.internal:*)
   /^https?:\/\/[^/]*\.service(:\d+)?(\/|$)/i,
+  /^https?:\/\/[^/]*-service(:\d+)?(\/|$)/i,
+  /^https?:\/\/[^/]*\.svc(:\d+)?(\/|$)/i,
+  /^https?:\/\/[^/]*\.svc\.cluster\.local(:\d+)?(\/|$)/i,
+  /^https?:\/\/[^/]*\.internal(:\d+)?(\/|$)/i,
   // Non-HTTP/HTTPS schemes
   /^file:\/\//i,
   /^data:/i,
@@ -301,6 +305,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     // attacker controls the DNS record (DNS rebinding attack).
     await assertHostnameResolvesToPublicIp(parsedUrl, dnsResolver);
 
+    const MAX_RESPONSE_BYTES = 50 * 1024 * 1024; // 50 MB
     const init = (args[1] ?? {}) as RequestInit;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
@@ -351,7 +356,15 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
         throw { code: "EXECUTION_FETCH_BLOCKED", message: "Redirect target is blocked." };
       }
 
+      const contentLength = response.headers.get("content-length");
+      if (contentLength !== null && parseInt(contentLength, 10) > MAX_RESPONSE_BYTES) {
+        throw { code: "EXECUTION_FETCH_BLOCKED", message: `Response body exceeds ${MAX_RESPONSE_BYTES} byte limit.` };
+      }
+
       const responseBody = await response.text();
+      if (Buffer.byteLength(responseBody, "utf8") > MAX_RESPONSE_BYTES) {
+        throw { code: "EXECUTION_FETCH_BLOCKED", message: `Response body exceeds ${MAX_RESPONSE_BYTES} byte limit.` };
+      }
       return {
         ok: response.ok,
         status: response.status,

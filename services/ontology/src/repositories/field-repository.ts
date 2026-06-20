@@ -12,7 +12,7 @@ export interface FieldRepository {
   update(id: string, data: UpdateFieldData): Promise<FieldRow | null>;
   softDelete(id: string): Promise<boolean>;
   softDeleteByEntityId(entityId: string): Promise<number>;
-  hardDeleteByEntityId(entityId: string): Promise<number>;
+  hardDeleteByEntityId(entityId: string, client?: pg.PoolClient): Promise<number>;
 }
 
 export function createFieldRepository(db: pg.Pool): FieldRepository {
@@ -152,8 +152,10 @@ export function createFieldRepository(db: pg.Pool): FieldRepository {
       return result.rowCount ?? 0;
     },
 
-    async hardDeleteByEntityId(entityId) {
-      const result = await db.query(
+    async hardDeleteByEntityId(entityId, client) {
+      // Use the provided client when operating inside a transaction so that
+      // the DELETE is atomically bundled with the caller's BEGIN/COMMIT block.
+      const result = await (client ?? db).query(
         `DELETE FROM ontology.fields WHERE entity_id = $1`,
         [entityId],
       );

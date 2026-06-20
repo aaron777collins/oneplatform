@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDataService } from "../grpc/services/data-service.js";
 import type { Entity, ListEntitiesResponse } from "@oneplatform/sdk/grpc-types";
+import type { RpcContext } from "../grpc/service-registry.js";
 
 const INGESTION_URL = "http://ingestion-service:3000";
 
@@ -31,6 +32,18 @@ function mockFetch(response: unknown, status = 200): void {
       json: async () => response,
     }),
   );
+}
+
+// Default RPC context representing an authenticated request from tenant "t1".
+// Tests that need to verify tenant mismatch rejection should override tenantId.
+function makeCtx(overrides: Partial<RpcContext> = {}): RpcContext {
+  return {
+    tenantId: "t1",
+    userId: "user-1",
+    roles: ["viewer"],
+    requestId: "req-test",
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +72,7 @@ describe("DataService.GetEntity", () => {
       entityType: "Product",
       id: "ent-1",
       tenantId: "t1",
-    });
+    }, makeCtx());
 
     expect(result).toEqual(entity);
     const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
@@ -69,7 +82,7 @@ describe("DataService.GetEntity", () => {
   it("throws when entityType is empty", async () => {
     const svc = createDataService({ ingestionServiceUrl: INGESTION_URL });
     await expect(
-      svc.GetEntity({ entityType: "", id: "x", tenantId: "t1" }),
+      svc.GetEntity({ entityType: "", id: "x", tenantId: "t1" }, makeCtx()),
     ).rejects.toThrow(/required/i);
   });
 
@@ -77,8 +90,15 @@ describe("DataService.GetEntity", () => {
     mockFetch({ message: "not found" }, 404);
     const svc = createDataService({ ingestionServiceUrl: INGESTION_URL });
     await expect(
-      svc.GetEntity({ entityType: "Product", id: "missing", tenantId: "t1" }),
+      svc.GetEntity({ entityType: "Product", id: "missing", tenantId: "t1" }, makeCtx()),
     ).rejects.toThrow("not found");
+  });
+
+  it("throws UnauthorizedError when request tenantId does not match ctx", async () => {
+    const svc = createDataService({ ingestionServiceUrl: INGESTION_URL });
+    await expect(
+      svc.GetEntity({ entityType: "Product", id: "x", tenantId: "other-tenant" }, makeCtx({ tenantId: "t1" })),
+    ).rejects.toThrow(/does not match/i);
   });
 });
 
@@ -102,7 +122,7 @@ describe("DataService.ListEntities", () => {
       pageSize: 2,
       pageCursor: "",
       filterJson: "",
-    });
+    }, makeCtx());
 
     expect(result.items).toHaveLength(2);
     expect(result.nextCursor).toBe("cursor-2");
@@ -117,7 +137,7 @@ describe("DataService.ListEntities", () => {
       pageSize: 5,
       pageCursor: "cursor-prev",
       filterJson: "",
-    });
+    }, makeCtx());
 
     const url = vi.mocked(globalThis.fetch).mock.calls[0]?.[0] as string;
     expect(url).toContain("pageSize=5");
@@ -139,7 +159,7 @@ describe("DataService.CreateEntity", () => {
       entityType: "Product",
       tenantId: "t1",
       dataJson: JSON.stringify({ name: "New Product" }),
-    });
+    }, makeCtx());
 
     expect(result.id).toBe("new-1");
     const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
@@ -150,7 +170,7 @@ describe("DataService.CreateEntity", () => {
   it("throws when dataJson is invalid JSON", async () => {
     const svc = createDataService({ ingestionServiceUrl: INGESTION_URL });
     await expect(
-      svc.CreateEntity({ entityType: "Product", tenantId: "t1", dataJson: "not-json" }),
+      svc.CreateEntity({ entityType: "Product", tenantId: "t1", dataJson: "not-json" }, makeCtx()),
     ).rejects.toThrow(/valid JSON/i);
   });
 });
@@ -170,7 +190,7 @@ describe("DataService.UpdateEntity", () => {
       id: "upd-1",
       tenantId: "t1",
       dataJson: JSON.stringify({ name: "Updated" }),
-    });
+    }, makeCtx());
 
     const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/v1/data/Product/upd-1");
@@ -194,7 +214,7 @@ describe("DataService.DeleteEntity", () => {
       entityType: "Product",
       id: "del-1",
       tenantId: "t1",
-    });
+    }, makeCtx());
 
     expect(result.success).toBe(true);
     expect(result.id).toBe("del-1");
@@ -212,7 +232,7 @@ describe("DataService.DeleteEntity", () => {
 
     const svc = createDataService({ ingestionServiceUrl: INGESTION_URL });
     await expect(
-      svc.DeleteEntity({ entityType: "Product", id: "ghost", tenantId: "t1" }),
+      svc.DeleteEntity({ entityType: "Product", id: "ghost", tenantId: "t1" }, makeCtx()),
     ).rejects.toThrow("not found");
   });
 });
@@ -254,7 +274,7 @@ describe("DataService.StreamEntities", () => {
       tenantId: "t1",
       filterJson: "",
       limit: 0,
-    })) {
+    }, makeCtx())) {
       results.push(entity);
     }
 
@@ -277,7 +297,7 @@ describe("DataService.StreamEntities", () => {
       tenantId: "t1",
       filterJson: "",
       limit: 2,
-    })) {
+    }, makeCtx())) {
       results.push(entity);
     }
 
@@ -292,7 +312,7 @@ describe("DataService.StreamEntities", () => {
 describe("DataService.BulkIngest", () => {
   it("returns 0 accepted for an empty stream", async () => {
     const svc = createDataService({ ingestionServiceUrl: INGESTION_URL });
-    const result = await svc.BulkIngest((async function* () {})());
+    const result = await svc.BulkIngest((async function* () {})(), makeCtx());
     expect(result.accepted).toBe(0);
     expect(result.rejected).toBe(0);
   });
@@ -306,7 +326,7 @@ describe("DataService.BulkIngest", () => {
       yield { connectorId: "c1", tenantId: "t1", dataJson: "{}", externalId: "" };
     })();
 
-    const result = await svc.BulkIngest(records);
+    const result = await svc.BulkIngest(records, makeCtx());
     expect(result.accepted).toBe(2);
     expect(result.rejected).toBe(0);
   });
@@ -317,7 +337,7 @@ describe("DataService.BulkIngest", () => {
       yield { connectorId: "c1", tenantId: "t1", dataJson: "BAD JSON", externalId: "" };
     })();
 
-    const result = await svc.BulkIngest(records);
+    const result = await svc.BulkIngest(records, makeCtx());
     expect(result.rejected).toBe(1);
     expect(result.errors[0]?.code).toBe("INVALID_JSON");
   });
@@ -333,7 +353,7 @@ describe("DataService.BulkIngest", () => {
       yield { connectorId: "c1", tenantId: "t1", dataJson: "{}", externalId: "" };
     })();
 
-    await svc.BulkIngest(records);
+    await svc.BulkIngest(records, makeCtx());
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
     expect(headers["x-service-token"]).toBe("svc-token-abc");

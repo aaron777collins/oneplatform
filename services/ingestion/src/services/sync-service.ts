@@ -782,17 +782,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
           // the payload always includes the records.
           const payloadBytes = Buffer.byteLength(JSON.stringify(jobPayload), "utf8");
           if (payloadBytes > 10_485_760) {
-            logger.warn("Batch payload exceeds 10 MB — consider reducing connector batch size or externalizing to a staging store", {
-              syncJobId,
-              connectorId,
-              batchSeqNum,
-              payloadBytes,
-              recordCount: records.length,
-            });
-          }
-
-          if (payloadBytes > 1_048_576) {
-            logger.error("Batch job payload exceeds 1 MB — aborting sync to protect Redis memory", {
+            logger.error("Batch job payload exceeds 10 MB — aborting sync to protect Redis memory", {
               syncJobId,
               connectorId,
               batchSeqNum,
@@ -801,8 +791,18 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             });
             throw new Error(
               `Batch payload too large: ${payloadBytes} bytes (${records.length} records). ` +
-              "Reduce connector batch size to keep BullMQ payloads under 1 MB.",
+              "Reduce connector batch size to keep BullMQ payloads under 10 MB.",
             );
+          }
+
+          if (payloadBytes > 1_048_576) {
+            logger.warn("Batch payload exceeds 1 MB — consider reducing connector batch size or externalizing to a staging store", {
+              syncJobId,
+              connectorId,
+              batchSeqNum,
+              payloadBytes,
+              recordCount: records.length,
+            });
           }
 
           await batchQueue.add("batch", jobPayload);

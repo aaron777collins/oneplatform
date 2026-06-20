@@ -334,14 +334,37 @@ async function verifySignatureWithKeySet(
       // For RSA-PSS we need to specify the salt length at verify time.
       // Per RFC 7518 §3.5, salt length must equal the hash output length.
       const hashSizeBytes: Record<string, number> = { "SHA-256": 32, "SHA-384": 48, "SHA-512": 64 };
-      const verifyAlg =
-        cryptoKey.algorithm.name === "RSA-PSS"
-          ? {
-              name: "RSA-PSS",
-              saltLength:
-                hashSizeBytes[(cryptoKey.algorithm as RsaHashedKeyAlgorithm).hash.name] ?? 32,
-            }
-          : cryptoKey.algorithm;
+
+      // For ECDSA, crypto.subtle.verify() requires EcdsaParams which mandates a
+      // 'hash' property. cryptoKey.algorithm for ECDSA keys is { name: 'ECDSA',
+      // namedCurve: 'P-256' } — it does NOT include 'hash', so using it directly
+      // causes a "hash is required" error that is silently caught, causing all
+      // ECDSA-signed tokens to be rejected. We map the JWT algorithm (from the
+      // header) to the correct hash name per RFC 7518 §3.4.
+      const ecdsaHashByAlg: Record<string, string> = {
+        ES256: "SHA-256",
+        ES384: "SHA-384",
+        ES512: "SHA-512",
+      };
+
+      let verifyAlg: AlgorithmIdentifier | RsaPssParams | EcdsaParams;
+      if (cryptoKey.algorithm.name === "RSA-PSS") {
+        verifyAlg = {
+          name: "RSA-PSS",
+          saltLength:
+            hashSizeBytes[(cryptoKey.algorithm as RsaHashedKeyAlgorithm).hash.name] ?? 32,
+        };
+      } else if (cryptoKey.algorithm.name === "ECDSA") {
+        // alg is the JWT algorithm string (e.g. "ES256") from the parsed header.
+        const ecHash = ecdsaHashByAlg[alg];
+        if (ecHash === undefined) {
+          // Should not happen: importJwk already validated the alg, but be defensive.
+          continue;
+        }
+        verifyAlg = { name: "ECDSA", hash: ecHash };
+      } else {
+        verifyAlg = cryptoKey.algorithm;
+      }
 
       // Web Crypto requires Uint8Array<ArrayBuffer>, not Uint8Array<ArrayBufferLike>.
       // Node.js Buffer.from() returns a Uint8Array whose .buffer property may be a

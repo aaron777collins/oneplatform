@@ -115,25 +115,27 @@ async function deliverBillingWebhook(
   secret: string | null,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const body = JSON.stringify(payload);
+  // Stripe expects the event wrapped under a specific key structure.
+  // Custom endpoints receive the payload as-is.
+  // IMPORTANT: finalBody must be computed BEFORE the HMAC so the signature
+  // covers the exact bytes that are sent over the wire. Computing the HMAC
+  // over the raw payload while sending the wrapped finalBody would cause
+  // the receiving endpoint's verification to always fail.
+  const finalBody = provider === "stripe"
+    ? JSON.stringify({
+        type: "platform.usage_threshold_crossed",
+        data: { object: payload },
+      })
+    : JSON.stringify(payload);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
   if (secret !== null) {
-    const sig = createHmac("sha256", secret).update(body).digest("hex");
+    const sig = createHmac("sha256", secret).update(finalBody).digest("hex");
     headers["X-OnePlatform-Signature"] = `sha256=${sig}`;
   }
-
-  // Stripe expects the event wrapped under a specific key structure.
-  // Custom endpoints receive the payload as-is.
-  const finalBody = provider === "stripe"
-    ? JSON.stringify({
-        type: "platform.usage_threshold_crossed",
-        data: { object: payload },
-      })
-    : body;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BILLING_WEBHOOK_TIMEOUT_MS);

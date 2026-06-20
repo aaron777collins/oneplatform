@@ -312,7 +312,12 @@ async function* grpcServerStreamingCall<TReq, TRes>(
 ): AsyncIterable<TRes> {
   const frame = encodeDataFrame(request);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeout);
+  let timer = setTimeout(() => controller.abort(), opts.timeout);
+
+  function resetIdleTimer(): void {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), opts.timeout);
+  }
 
   try {
     const authHeaders = await opts.authHandler.getHeaders();
@@ -331,6 +336,8 @@ async function* grpcServerStreamingCall<TReq, TRes>(
       throw new GrpcClientError(13, `HTTP ${response.status} from gRPC endpoint`);
     }
 
+    resetIdleTimer();
+
     // Incremental frame parsing: read chunks from the response body stream and
     // yield messages as soon as complete frames arrive, rather than buffering
     // the entire response before decoding.
@@ -342,6 +349,8 @@ async function* grpcServerStreamingCall<TReq, TRes>(
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+
+          resetIdleTimer();
 
           // Concatenate leftover bytes from previous iteration with new chunk
           const chunk = new Uint8Array(value as ArrayBuffer | Uint8Array);

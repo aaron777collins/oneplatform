@@ -247,6 +247,9 @@ export class ConnectorRepository {
       conditions.push("c.is_enabled = FALSE");
     }
 
+    const countWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const countValues = [...values];
+
     if (options.cursor !== undefined) {
       conditions.push(`c.id > $${idx++}`);
       values.push(options.cursor);
@@ -259,11 +262,12 @@ export class ConnectorRepository {
     const orderDir = sortDesc ? "DESC" : "ASC";
 
     // Count total matching rows for pagination metadata.
+    // Uses the conditions WITHOUT the cursor clause so total reflects the full result set.
     const countResult = await this.pool.query<{ count: string }>(
       `SELECT count(*) AS count
          FROM ingestion.connectors c
-         ${whereClause}`,
-      values
+         ${countWhereClause}`,
+      countValues
     );
     const total = countResult.rows[0] !== undefined
       ? parseInt(countResult.rows[0]["count"], 10)

@@ -196,8 +196,8 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
   const table = raw["table"];
   const customQuery = raw["customQuery"];
   if (
-    (table === undefined || table === null || table === "") &&
-    (customQuery === undefined || customQuery === null || customQuery === "")
+    (typeof table !== "string" || table.trim() === "") &&
+    (typeof customQuery !== "string" || customQuery.trim() === "")
   ) {
     throw new PluginConfigError(
       "Either 'table' or 'customQuery' must be provided",
@@ -670,8 +670,17 @@ class PostgresConnector implements Connector {
         ? payload.rows.filter((row) => {
             const colVal = String(row[cfg.incrementalColumn!] ?? "");
             const pkVal = String(row[cfg.primaryKey] ?? "");
+            // Compare primary keys numerically when both values are numeric to
+            // avoid lexicographic ordering bugs (e.g. "9" > "10" as strings).
+            // Falls back to string comparison for non-numeric (UUID, etc.) PKs.
+            const numPk = Number(pkVal);
+            const numLastId = Number(lastId);
+            const pkAlreadySeen =
+              !Number.isNaN(numPk) && !Number.isNaN(numLastId)
+                ? numPk <= numLastId
+                : pkVal <= lastId;
             // Skip rows at the same cursor position that were already delivered.
-            return !(colVal === lastValue && pkVal <= lastId);
+            return !(colVal === lastValue && pkAlreadySeen);
           })
         : payload.rows;
 
@@ -694,9 +703,12 @@ class PostgresConnector implements Connector {
         );
       }
       const newLastId = String(lastFilteredRow?.[cfg.primaryKey] ?? "");
-      // hasMore is true when the batch is full — a partial batch means we've
-      // reached the end of currently available rows.
-      hasMore = records.length === cfg.batchSize;
+      // hasMore is based on the PRE-filter row count from the proxy, not the
+      // post-filter record count. If the proxy returned a full batch, there may
+      // be more rows even if the client-side dedup filter removed some of them.
+      // Using records.length (post-filter) would cause premature termination
+      // whenever the dedup filter removes any rows from a full batch.
+      hasMore = payload.rows.length === cfg.batchSize;
       // Always persist the cursor so a partial (final) batch saves its
       // position.  Without this, restarting after a partial batch would
       // re-fetch rows that were already processed (V5-116).

@@ -54,8 +54,8 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
-    if (!user.scopes.includes("webhooks:read") && !user.scopes.includes("admin")) {
-      throw new ForbiddenError("Insufficient scope: 'webhooks:read' required.");
+    if (!user.scopes.includes("webhooks:manage") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'webhooks:manage' required.");
     }
 
     const query = listWebhooksQuery.safeParse(c.req.query());
@@ -77,8 +77,8 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
-    if (!user.scopes.includes("webhooks:read") && !user.scopes.includes("admin")) {
-      throw new ForbiddenError("Insufficient scope: 'webhooks:read' required.");
+    if (!user.scopes.includes("webhooks:manage") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'webhooks:manage' required.");
     }
 
     const webhook = await webhookService.getWebhook(user.tenantId, c.req.param("webhookId"));
@@ -136,8 +136,8 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
-    if (!user.scopes.includes("webhooks:read") && !user.scopes.includes("admin")) {
-      throw new ForbiddenError("Insufficient scope: 'webhooks:read' required.");
+    if (!user.scopes.includes("webhooks:manage") && !user.scopes.includes("admin")) {
+      throw new ForbiddenError("Insufficient scope: 'webhooks:manage' required.");
     }
 
     await webhookService.getWebhook(user.tenantId, c.req.param("webhookId"));

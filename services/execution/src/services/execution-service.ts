@@ -18,8 +18,8 @@ import type {
 import type { ExecutionRouter, RouteRequest } from "./execution-router.js";
 import type { PluginBundleCache } from "./plugin-cache.js";
 import type { SseManager, SseLogEvent } from "./sse-manager.js";
-import type { ContextCallHandler } from "./context-call-handler.js";
-import type { UnixSocketClient, SandboxLogLine } from "./unix-socket-client.js";
+import type { ContextCallHandler, ExecutionContext } from "./context-call-handler.js";
+import type { UnixSocketClient, SandboxLogLine, SandboxContextCallMessage } from "./unix-socket-client.js";
 import {
   ExecutionNotFoundError,
   ServiceDrainingError,
@@ -105,6 +105,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     executionRouter,
     pluginBundleCache,
     sseManager,
+    contextCallHandler,
     sandboxClient,
     logger,
     serviceBaseUrl,
@@ -121,6 +122,12 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
   // the execution started; using the log line's own timestamp would route those
   // rows into the wrong co-partitioned range.
   const executionStartedAt = new Map<string, Date>();
+
+  // Tracks the ExecutionContext for each in-flight execution so context calls
+  // from the sandbox can be dispatched to the correct handler with the right
+  // tenant/credential/hook context. Entries are added when dispatch begins and
+  // removed when the execution completes or errors.
+  const activeExecutionContexts = new Map<string, ExecutionContext>();
 
   // ---------------------------------------------------------------------------
   // Wire sandbox log line callback — fan out to SSE and DB
@@ -160,6 +167,67 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
         logger.error("ExecutionService: failed to persist log line", {
           executionId: logLine.id,
           error: err instanceof Error ? err.message : String(err),
+        });
+      });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Wire sandbox contextCall callback — dispatch PluginContext API calls
+  //
+  // The sandbox sends a contextCall frame when user code invokes a PluginContext
+  // method (context.fetch(), context.credentials.get(), etc.). We look up the
+  // in-flight ExecutionContext by executionId, dispatch to contextCallHandler,
+  // and write the response back via the `reply` thunk. Without this wiring,
+  // all PluginContext API calls from sandbox user code fail silently (the message
+  // arrives in dispatchMessage but nothing handles the 'contextCall' type).
+  // ---------------------------------------------------------------------------
+
+  sandboxClient.onContextCall((msg: SandboxContextCallMessage, reply: (response: unknown) => void) => {
+    const executionCtx = activeExecutionContexts.get(msg.id);
+    if (executionCtx === undefined) {
+      logger.warn("ExecutionService: received contextCall for unknown execution — discarding", {
+        executionId: msg.id,
+        callId: msg.callId,
+        method: msg.method,
+      });
+      // Reply with an error so the sandbox is not left waiting indefinitely
+      reply({
+        callId: msg.callId,
+        type: "contextCallResponse",
+        error: { code: "EXECUTION_NOT_FOUND", message: "Execution context not found." },
+      });
+      return;
+    }
+
+    // Dispatch asynchronously — contextCallHandler performs I/O (HTTP calls to
+    // downstream services). We must not block the socket receive path.
+    contextCallHandler
+      .handleContextCall(
+        {
+          id: msg.id,
+          callId: msg.callId,
+          type: "contextCall",
+          method: msg.method as Parameters<typeof contextCallHandler.handleContextCall>[0]["method"],
+          args: msg.args,
+        },
+        executionCtx,
+      )
+      .then((response) => {
+        reply(response);
+      })
+      .catch((err) => {
+        logger.error("ExecutionService: contextCallHandler threw unexpectedly", {
+          executionId: msg.id,
+          callId: msg.callId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        reply({
+          callId: msg.callId,
+          type: "contextCallResponse",
+          error: {
+            code: "CONTEXT_CALL_ERROR",
+            message: err instanceof Error ? err.message : String(err),
+          },
         });
       });
   });
@@ -311,21 +379,27 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
 
     await executionRepo.updateStatus(execution.id, { status: "running" });
 
+    const connectorExecutionCtx: ExecutionContext = {
+      executionId: execution.id,
+      tenantId: request.tenantId,
+      hookContext: false,
+      executionType: "connector-run",
+      traceId,
+      pluginId: request.pluginId,
+      credentialBundleId: request.credentialBundleId,
+    };
+
+    // Register context so PluginContext API calls (credentials.get(), cache.*, etc.)
+    // dispatched by the sandbox during this execution can be routed correctly.
+    activeExecutionContexts.set(execution.id, connectorExecutionCtx);
+
     const routeRequest: RouteRequest = {
       executionId: execution.id,
       type: "connector-run",
       language: "js",
       code: bundle.bundleBase64,
       timeout: request.timeout,
-      context: {
-        executionId: execution.id,
-        tenantId: request.tenantId,
-        hookContext: false,
-        executionType: "connector-run",
-        traceId,
-        pluginId: request.pluginId,
-        credentialBundleId: request.credentialBundleId,
-      },
+      context: connectorExecutionCtx,
       pluginBundleBase64: bundle.bundleBase64,
     };
 
@@ -334,6 +408,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
       result = await executionRouter.route(routeRequest);
     } catch (err) {
       executionStartedAt.delete(execution.id);
+      activeExecutionContexts.delete(execution.id);
       const errMsg = err instanceof Error ? err.message : String(err);
       await executionRepo.updateStatus(execution.id, {
         status: "error",
@@ -365,6 +440,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
           : "error";
 
     executionStartedAt.delete(execution.id);
+    activeExecutionContexts.delete(execution.id);
 
     await executionRepo.updateStatus(execution.id, {
       status: terminalStatus,
@@ -401,6 +477,9 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
     context: RouteRequest["context"],
   ): Promise<void> {
     executionStartedAt.set(execution.id, execution.started_at);
+    // Register the context so the onContextCall handler can dispatch PluginContext
+    // API calls back to the correct tenant/credential context for this execution.
+    activeExecutionContexts.set(execution.id, context);
     try {
       await executionRepo.updateStatus(execution.id, { status: "running" });
 
@@ -470,6 +549,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
       sseManager.publishError(execution.id, "EXECUTION_SANDBOX_CRASH", errMsg, "error");
     } finally {
       executionStartedAt.delete(execution.id);
+      activeExecutionContexts.delete(execution.id);
     }
   }
 

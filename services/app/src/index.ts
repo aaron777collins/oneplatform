@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Queue, Worker } from "bullmq";
@@ -568,9 +568,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
       // Generate a per-request nonce for the inline config script so the CSP
       // script-src directive can whitelist exactly this script without 'unsafe-inline'.
-      const nonce = createHash("sha256")
-        .update(`${tenantApp.id}:${buildId}:${Date.now()}`)
-        .digest("base64");
+      const nonce = randomBytes(16).toString("base64");
 
       // W11: escape the app name to prevent XSS via injected HTML in the title tag
       const html = [
@@ -690,15 +688,21 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
     sub.on("error", () => {
       void writer.close();
+      void sub.unsubscribe(channel).catch(() => {});
       void sub.quit();
     });
 
     const keepAlive = setInterval(() => {
-      void writer.write(encoder.encode(": keepalive\n\n"));
+      void writer.write(encoder.encode(": keepalive\n\n")).catch(() => {
+        clearInterval(keepAlive);
+        void sub.unsubscribe(channel).catch(() => {});
+        void sub.quit();
+      });
     }, 30_000);
 
     c.req.raw.signal.addEventListener("abort", () => {
       clearInterval(keepAlive);
+      void sub.unsubscribe(channel).catch(() => {});
       void sub.quit();
       void writer.close();
     });

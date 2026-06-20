@@ -293,6 +293,9 @@ export function createPipelineRoutes(
       ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
       limit: q.limit,
       pipelineId: c.req.param("id"),
+      ...(q["filter[status][eq]"] !== undefined
+        ? { filterStatus: q["filter[status][eq]"] }
+        : {}),
     });
 
     return c.json(result);

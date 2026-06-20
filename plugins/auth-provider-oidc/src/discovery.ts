@@ -199,6 +199,18 @@ export async function fetchDiscoveryDocument(
 
   const document = parseDiscoveryDocument(body, issuerUrl);
 
+  const normalizedConfigured = issuerUrl.endsWith("/") ? issuerUrl.slice(0, -1) : issuerUrl;
+  const normalizedDiscovered = document.issuer.endsWith("/")
+    ? document.issuer.slice(0, -1)
+    : document.issuer;
+  if (normalizedDiscovered !== normalizedConfigured) {
+    throw new PluginConfigError(
+      `OIDC discovery issuer mismatch: configured "${issuerUrl}" but document reports "${document.issuer}". ` +
+        `This may indicate a misconfigured issuerUrl or a man-in-the-middle attack.`,
+      "issuerUrl",
+    );
+  }
+
   logger.info("OIDC discovery document fetched", { issuer: document.issuer });
 
   await cache.set(DISCOVERY_CACHE_KEY, document, cacheTtlSeconds);

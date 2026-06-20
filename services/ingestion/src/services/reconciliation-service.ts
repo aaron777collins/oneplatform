@@ -570,6 +570,7 @@ function redisReportKey(jobId: string): string {
 }
 
 interface ConnectorLike {
+  id: string;
   plugin_id: string;
   instance_id: string;
   config: Record<string, unknown>;
@@ -592,13 +593,15 @@ async function fetchSourceIds(params: FetchSourceIdsParams): Promise<string[]> {
   const { connector, tenantId, credentialFields, executionServiceUrl, idField, logger } = params;
 
   // Try the dedicated reconcileList method first.
+  // credentialBundleId must be the connector's primary key (id) — this is how
+  // the credential vault keys its entries, matching sync-service.ts line 718.
   const listResponse = await callExecution(executionServiceUrl, {
     pluginId: connector.plugin_id,
     instanceId: connector.instance_id,
     tenantId,
     method: "reconcileList",
     config: connector.config,
-    credentialBundleId: connector.instance_id,
+    credentialBundleId: connector.id,
     credentialFields,
   });
 
@@ -626,7 +629,7 @@ async function fetchSourceIds(params: FetchSourceIdsParams): Promise<string[]> {
       tenantId,
       method: "fetchBatch",
       config: connector.config,
-      credentialBundleId: connector.instance_id,
+      credentialBundleId: connector.id,
       credentialFields,
       cursor,
       syncMode: "full",
@@ -677,13 +680,15 @@ async function fetchSourceRecords(params: FetchSourceRecordsParams): Promise<Dat
   const { connector, tenantId, credentialFields, executionServiceUrl, sampleIds, idField, logger } = params;
 
   // Try the targeted fetchRecords method first.
+  // credentialBundleId must be the connector's primary key (id) — this is how
+  // the credential vault keys its entries, matching sync-service.ts line 718.
   const res = await callExecution(executionServiceUrl, {
     pluginId: connector.plugin_id,
     instanceId: connector.instance_id,
     tenantId,
     method: "fetchRecords",
     config: connector.config,
-    credentialBundleId: connector.instance_id,
+    credentialBundleId: connector.id,
     credentialFields,
     recordIds: sampleIds,
     timeoutMs: 60_000,
@@ -715,7 +720,7 @@ async function fetchSourceRecords(params: FetchSourceRecordsParams): Promise<Dat
       tenantId,
       method: "fetchBatch",
       config: connector.config,
-      credentialBundleId: connector.instance_id,
+      credentialBundleId: connector.id,
       credentialFields,
       cursor,
       syncMode: "full",

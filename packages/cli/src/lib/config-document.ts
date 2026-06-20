@@ -203,7 +203,19 @@ export function parseConfigFile(content: string, filePath: string): ConfigDocume
   if (filePath.endsWith(".json")) {
     const data = JSON.parse(content) as unknown;
     if (!Array.isArray(data)) throw new Error("JSON config must be an array of documents.");
-    return data as ConfigDocument[];
+    const docs: ConfigDocument[] = [];
+    for (const item of data) {
+      if (!item || typeof item !== "object") {
+        throw new Error(`Invalid config document: must have 'kind' (string) and 'spec' (object).`);
+      }
+      const d = item as Record<string, unknown>;
+      if (typeof d["kind"] !== "string" || typeof d["spec"] !== "object") {
+        throw new Error(`Invalid config document: must have 'kind' (string) and 'spec' (object).`);
+      }
+      assertValidKind(d["kind"]);
+      docs.push({ kind: d["kind"], spec: d["spec"] as Record<string, unknown> });
+    }
+    return docs;
   }
   return parseConfigDocuments(content);
 }

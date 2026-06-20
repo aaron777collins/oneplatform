@@ -191,7 +191,7 @@ export class PluginDevServer {
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { PluginManifest } from "../manifest/schema.js";
-import type { TransformerExport, DevServerOptions as DevServerOptionsType } from "./types.js";
+import type { TransformerExport, DevServerOptions as DevServerOptionsType, LifecycleTiming } from "./types.js";
 import type { DataRecord } from "../types/primitives.js";
 import type { DevContext } from "./dev-context.js";
 import { performance } from "node:perf_hooks";
@@ -209,7 +209,7 @@ async function runTransformerLifecycle(
   context: DevContext,
   _options: DevServerOptionsType,
 ): Promise<ConnectorRunSummary> {
-  const timings: Array<{ method: string; durationMs: number }> = [];
+  const timings: LifecycleTiming[] = [];
 
   // metadata()
   const metaStart = performance.now();
@@ -276,7 +276,7 @@ async function runTransformerLifecycle(
       fetchedAt: new Date().toISOString(),
     }],
     totalRecords: transformedRecords.length,
-    timings: timings as ConnectorRunSummary["timings"],
+    timings,
     peakHeapUsedBytes: process.memoryUsage().heapUsed,
     logs: context.__logs,
     success: true,

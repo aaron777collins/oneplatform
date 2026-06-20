@@ -12,7 +12,6 @@ import type { SyncService, SyncJobSummary } from "./sync-service.js";
 import type { ConnectorRepository, SyncStateRepository } from "./connector-service.js";
 import { ConnectorNotFoundError } from "./errors.js";
 import type { Logger } from "@oneplatform/core";
-import { ForbiddenError } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -359,9 +358,11 @@ export function createConnectorHealthService(
         { connectorId },
       );
     }
-    // Enforce tenant isolation — the same check the connector service applies.
     if (connector.tenant_id !== tenantId) {
-      throw new ForbiddenError(`You do not have access to connector ${connectorId}.`);
+      throw new ConnectorNotFoundError(
+        `Connector ${connectorId} not found.`,
+        { connectorId },
+      );
     }
 
     const syncState = await syncStateRepo.findByConnectorId(connectorId);

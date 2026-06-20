@@ -31,6 +31,17 @@ export interface AppScaffoldResult {
   files: ScaffoldedFile[];
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // ─── Template builders ────────────────────────────────────────────────────────
 
 function buildPackageJson(opts: AppScaffoldOptions): string {
@@ -104,12 +115,13 @@ function buildTsConfig(): string {
 }
 
 function buildIndexHtml(opts: AppScaffoldOptions): string {
+  const safeName = escapeHtml(opts.name);
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${opts.name}</title>
+    <title>${safeName}</title>
   </head>
   <body>
     <div id="root"></div>
@@ -124,8 +136,7 @@ function buildIndexHtml(opts: AppScaffoldOptions): string {
 }
 
 function buildAppTsx(opts: AppScaffoldOptions): string {
-  // AppProvider handles platform auth, permissions, and WebSocket connection.
-  // useQuery fetches entity data from the platform BFF with full permission checks.
+  const safeName = escapeHtml(opts.name);
   return `import { AppProvider, useQuery } from "@oneplatform/app-sdk";
 
 // Replace "example" with the slug of an entity type from your ontology.
@@ -147,9 +158,9 @@ function ExampleList() {
 
 export default function App() {
   return (
-    <AppProvider loadingFallback={<p>Initialising ${opts.name}…</p>}>
+    <AppProvider loadingFallback={<p>Initialising ${safeName}…</p>}>
       <main style={{ fontFamily: "system-ui, sans-serif", padding: "1rem" }}>
-        <h1>${opts.name}</h1>
+        <h1>${safeName}</h1>
         <ExampleList />
       </main>
     </AppProvider>

@@ -413,6 +413,7 @@ describe("rotateRefreshToken()", () => {
       get: vi.fn().mockResolvedValue(null),
       sadd: vi.fn().mockResolvedValue(1),
       srem: vi.fn().mockResolvedValue(1),
+      expire: vi.fn().mockResolvedValue(1),
     } as unknown as Redis;
 
     const queryImpl = (sql: string) => {

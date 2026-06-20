@@ -73,18 +73,26 @@ export function createMigrationRepository(db: pg.Pool): MigrationRepository {
     },
 
     async updateStatus(id, status, extra) {
+      const ALLOWED_COLUMNS = new Set([
+        "confirmed_by", "confirmed_at", "started_at", "completed_at",
+        "error_details", "union_view_name",
+      ]);
+
       const sets = ["status = $1"];
       const values: unknown[] = [status];
       let idx = 2;
 
       if (extra) {
         for (const [key, value] of Object.entries(extra)) {
+          if (!ALLOWED_COLUMNS.has(key)) {
+            throw new Error(`Invalid column name in migration update: ${key}`);
+          }
           if (key === "error_details") {
             values.push(JSON.stringify(value));
           } else {
             values.push(value);
           }
-          sets.push(`${key} = $${idx++}`);
+          sets.push(`"${key}" = $${idx++}`);
         }
       }
 

@@ -393,7 +393,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
         { error: { code: "RATE_LIMIT_EXCEEDED", message: "Rate limit exceeded. Please slow down and retry." } },
         429,
         {
-          "Retry-After": String(result.resetAt - Math.floor(Date.now() / 1000)),
+          "Retry-After": String(Math.max(0, result.resetAt - Math.floor(Date.now() / 1000))),
           "X-RateLimit-Limit": String(rateLimitPerMinute),
           "X-RateLimit-Remaining": "0",
           "X-RateLimit-Reset": String(result.resetAt),

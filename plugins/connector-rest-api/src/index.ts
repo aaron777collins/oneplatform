@@ -134,11 +134,19 @@ function parseConfig(raw: Record<string, unknown>): RestApiConfig {
   }
 
   // Validate baseUrl is a parseable URL — catches typos before the first network call.
+  let parsedBaseUrl: URL;
   try {
-    new URL(baseUrl);
+    parsedBaseUrl = new URL(baseUrl);
   } catch {
     throw new PluginConfigError(
       `baseUrl is not a valid URL: "${baseUrl}"`,
+      "baseUrl",
+    );
+  }
+
+  if (parsedBaseUrl.username !== "" || parsedBaseUrl.password !== "") {
+    throw new PluginConfigError(
+      "baseUrl must not contain embedded credentials (userinfo) — use the credential system instead",
       "baseUrl",
     );
   }
@@ -291,12 +299,12 @@ function throwForHttpStatus(status: number, url: string, retryAfter: string | nu
 }
 
 function parseRetryAfter(value: string): number | undefined {
-  const seconds = parseInt(value, 10);
-  if (!isNaN(seconds)) return seconds;
   const date = new Date(value);
-  if (!isNaN(date.getTime())) {
+  if (!isNaN(date.getTime()) && !/^\s*\d+\s*$/.test(value)) {
     return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
   }
+  const seconds = parseInt(value, 10);
+  if (!isNaN(seconds)) return Math.max(0, seconds);
   return undefined;
 }
 

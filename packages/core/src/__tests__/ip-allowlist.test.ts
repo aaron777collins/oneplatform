@@ -259,7 +259,7 @@ describe("createIpAllowlistMiddleware", () => {
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string; message: string } };
     expect(body.error.code).toBe("FORBIDDEN");
-    expect(body.error.message).toContain("8.8.8.8");
+    expect(body.error.message).not.toContain("8.8.8.8");
     expect(body.error.message).toContain("tenant allowlist");
   });
 

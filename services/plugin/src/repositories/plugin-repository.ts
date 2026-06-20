@@ -131,7 +131,9 @@ export class PluginRepository {
     const paginatedConditions = [...conditions];
     const paginatedValues = [...values];
     if (options.cursor !== undefined) {
-      paginatedConditions.push(`id > $${idx++}`);
+      // ORDER BY id DESC means the next page contains rows with id < cursor,
+      // not id > cursor (which would travel backwards toward the first page).
+      paginatedConditions.push(`id < $${idx++}`);
       paginatedValues.push(options.cursor);
     }
     paginatedValues.push(options.limit);

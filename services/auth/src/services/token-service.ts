@@ -363,6 +363,7 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // Using a Set avoids a full-keyspace SCAN during replay detection — SMEMBERS
     // is O(n) on the family size only, not the entire Redis keyspace.
     await redis.sadd(`auth:refresh-family:${familyId}`, token);
+    await redis.expire(`auth:refresh-family:${familyId}`, 30 * 24 * 60 * 60);
     // Track active tokens per user for logout-all (SADD has no TTL; cleaned on logout)
     await redis.sadd(`auth:user-sessions:${userId}`, token);
     return { token, jti };
@@ -571,6 +572,7 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // Update family set: remove old token, add new token
     await redis.srem(`auth:refresh-family:${payload.familyId}`, oldToken);
     await redis.sadd(`auth:refresh-family:${payload.familyId}`, newToken);
+    await redis.expire(`auth:refresh-family:${payload.familyId}`, 30 * 24 * 60 * 60);
     // Update user-sessions set: remove old, add new
     await redis.srem(`auth:user-sessions:${payload.userId}`, oldToken);
     await redis.sadd(`auth:user-sessions:${payload.userId}`, newToken);

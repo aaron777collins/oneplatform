@@ -117,13 +117,19 @@ function parseConfig(raw: Record<string, unknown>): OidcConfig {
       : null;
 
   const rawRoleMapping = raw["roleMapping"];
-  const roleMapping: Record<string, string> =
+  const roleMapping: Record<string, string> = {};
+  if (
     rawRoleMapping !== null &&
     rawRoleMapping !== undefined &&
     typeof rawRoleMapping === "object" &&
     !Array.isArray(rawRoleMapping)
-      ? (rawRoleMapping as Record<string, string>)
-      : {};
+  ) {
+    for (const [key, value] of Object.entries(rawRoleMapping as Record<string, unknown>)) {
+      if (typeof value === "string") {
+        roleMapping[key] = value;
+      }
+    }
+  }
 
   const rawCacheTtl = raw["jwksCacheTtlSeconds"];
   const jwksCacheTtlSeconds =
@@ -304,11 +310,6 @@ function hashString(value: string): string {
 // Cache keys
 // ────────────────────────────────────────────────────────────────────────────
 
-// Store the resolved client secret in the plugin-scoped cache so handleCallback
-// and refreshToken (which receive AuthContext, not PluginContext) can access it.
-// TTL of 86400s — rotated at plugin re-enable time via initialize().
-const CLIENT_SECRET_CACHE_KEY = "oidc:clientSecret";
-
 // Cache the authorization endpoint URL so getAuthorizationUrl() (synchronous,
 // no access to FetchProxy) can build a correct URL after the first discovery.
 const AUTH_ENDPOINT_CACHE_KEY = "oidc:authEndpoint";
@@ -432,12 +433,10 @@ class OidcAuthProvider implements AuthProvider {
         this.config.jwksCacheTtlSeconds,
       );
 
-      // Resolve and cache the client secret. AuthContext methods cannot access
-      // credentials directly — they receive a cache-scoped context. We bridge
-      // the gap by caching the resolved secret here under a well-known key.
-      // TTL matches jwksCacheTtlSeconds so both expire and are refreshed together.
-      const clientSecret = await context.credentials.get("clientSecret");
-      await context.cache.set(CLIENT_SECRET_CACHE_KEY, clientSecret, this.config.jwksCacheTtlSeconds);
+      // Verify the client secret credential is accessible at startup time.
+      // We do not cache the value — the CredentialAccessor contract requires
+      // secrets to be retrieved on demand so the platform can rotate them.
+      await context.credentials.get("clientSecret");
 
       context.logger.info("OIDC provider initialized", {
         issuerUrl: this.config.issuerUrl,
@@ -538,10 +537,7 @@ class OidcAuthProvider implements AuthProvider {
     // Keep the in-memory endpoint current on discovery cache refresh
     this.authorizationEndpoint = discovery.authorization_endpoint;
 
-    let clientSecret = await context.cache.get<string>(CLIENT_SECRET_CACHE_KEY);
-    if (clientSecret === null || clientSecret === "") {
-      clientSecret = await context.credentials.get("clientSecret");
-    }
+    const clientSecret = await context.credentials.get("clientSecret");
     if (clientSecret === null || clientSecret === "") {
       throw new PluginAuthError(
         "OIDC client secret not available — ensure initialize() completed before the first login",
@@ -720,10 +716,7 @@ class OidcAuthProvider implements AuthProvider {
         logger: context.logger,
       });
 
-      let clientSecret = await context.cache.get<string>(CLIENT_SECRET_CACHE_KEY);
-      if (clientSecret === null || clientSecret === "") {
-        clientSecret = await context.credentials.get("clientSecret");
-      }
+      const clientSecret = await context.credentials.get("clientSecret");
       if (clientSecret === null || clientSecret === "") {
         throw new PluginAuthError(
           "Client secret not available for token refresh — re-enable the OIDC plugin to re-initialize",

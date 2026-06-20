@@ -110,7 +110,7 @@ export interface DevContextOptions {
 
 /** Timing for a single lifecycle method invocation. */
 export interface LifecycleTiming {
-  method: "metadata" | "connect" | "fetchBatch" | "disconnect";
+  method: "metadata" | "connect" | "fetchBatch" | "disconnect" | "transform";
   durationMs: number;
 }
 

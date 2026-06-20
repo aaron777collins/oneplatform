@@ -9,7 +9,7 @@ export interface EntityRepository {
   updateOptimistic(id: string, tenantId: string, expectedVersion: number, data: UpdateEntityData): Promise<EntityRow | null>;
   bumpVersion(id: string): Promise<EntityRow | null>;
   softDelete(id: string, tenantId: string): Promise<boolean>;
-  hardDelete(id: string): Promise<boolean>;
+  hardDelete(id: string, client?: pg.PoolClient): Promise<boolean>;
   findDeletedOlderThan(tenantId: string, days: number): Promise<EntityRow[]>;
   countDataRows(schemaName: string, entitySlug: string): Promise<number>;
 }
@@ -110,8 +110,10 @@ export function createEntityRepository(db: pg.Pool): EntityRepository {
       return result.rowCount !== null && result.rowCount > 0;
     },
 
-    async hardDelete(id) {
-      const result = await db.query(
+    async hardDelete(id, client) {
+      // Use the provided client when operating inside a transaction so that
+      // the DELETE is atomically bundled with the caller's BEGIN/COMMIT block.
+      const result = await (client ?? db).query(
         `DELETE FROM ontology.entities WHERE id = $1`,
         [id],
       );

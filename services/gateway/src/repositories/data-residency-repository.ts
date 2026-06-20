@@ -31,7 +31,8 @@ export class DataResidencyPolicyRepository {
        ON CONFLICT (tenant_id) DO UPDATE SET
          region = EXCLUDED.region,
          storage_class = EXCLUDED.storage_class,
-         replication_policy = EXCLUDED.replication_policy
+         replication_policy = EXCLUDED.replication_policy,
+         updated_at = NOW()
        RETURNING ${POLICY_COLUMNS}`,
       [data.tenant_id, data.region, storageClass, replicationPolicy],
     );

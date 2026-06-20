@@ -55,6 +55,17 @@ export interface SandboxLogLine {
   timestamp: string;
 }
 
+// ContextCall message from the sandbox — sent when user code calls a PluginContext API
+// (e.g. context.fetch(), context.credentials.get(), context.cache.get()).
+// The sandbox awaits a contextCallResponse frame before unblocking the user code.
+export interface SandboxContextCallMessage {
+  id: string;        // correlation ID of the parent execution request
+  callId: string;    // unique ID for this specific context call (used to route the response)
+  type: "contextCall";
+  method: string;
+  args: unknown[];
+}
+
 // Ping / drain convenience result types
 export interface PingResponse {
   pong: boolean;
@@ -74,6 +85,16 @@ export interface UnixSocketClient {
   connect(socketPath: string): Promise<void>;
   send(request: SandboxRequest): Promise<SandboxResponse>;
   onLogLine(callback: (log: SandboxLogLine) => void): void;
+  /**
+   * Register a callback invoked when the sandbox sends a contextCall message.
+   * The callback receives the message and a `reply` function used to write
+   * the contextCallResponse frame back to the sandbox. Without this wiring,
+   * all PluginContext API calls (context.fetch(), credentials.get(), etc.)
+   * from sandbox user code would be silently discarded.
+   */
+  onContextCall(
+    callback: (msg: SandboxContextCallMessage, reply: (response: unknown) => void) => void,
+  ): void;
   ping(): Promise<PingResponse>;
   drain(): Promise<DrainResponse>;
   close(): void;
@@ -101,6 +122,13 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
   >();
 
   let logLineCallback: ((log: SandboxLogLine) => void) | null = null;
+
+  // Callback invoked for contextCall messages from the sandbox. The second
+  // argument is a reply thunk bound to writeFrame so the caller can send the
+  // contextCallResponse without holding a direct reference to the socket.
+  let contextCallCallback: (
+    (msg: SandboxContextCallMessage, reply: (response: unknown) => void) => void
+  ) | null = null;
 
   // ---------------------------------------------------------------------------
   // Frame parsing — 4-byte big-endian uint32 + JSON body + '\n'
@@ -154,6 +182,33 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
       return;
     }
 
+    // ContextCall message — sandbox user code is awaiting a platform API response.
+    // We must dispatch to the registered handler and write the response back so
+    // the sandbox can unblock the pending user-code await. Without this branch,
+    // all context.fetch() / credentials.get() / cache.* / pipeline.trigger()
+    // calls from user code are silently discarded.
+    if (m["type"] === "contextCall") {
+      const contextMsg = m as unknown as SandboxContextCallMessage;
+      if (contextCallCallback !== null) {
+        contextCallCallback(contextMsg, (response: unknown) => {
+          try {
+            writeFrame(response);
+          } catch (err) {
+            logger.error("UnixSocketClient: failed to write contextCallResponse", {
+              callId: contextMsg.callId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+      } else {
+        logger.warn("UnixSocketClient: received contextCall but no handler registered — discarding", {
+          callId: m["callId"],
+          method: m["method"],
+        });
+      }
+      return;
+    }
+
     // Final response — matched by correlation id
     const id = typeof m["id"] === "string" ? m["id"] : null;
     if (id === null) return;
@@ -192,6 +247,7 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
 
   async function connect(socketPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      readBuffer = Buffer.alloc(0);
       const s = net.createConnection(socketPath);
 
       s.on("connect", () => {
@@ -244,6 +300,12 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
     logLineCallback = callback;
   }
 
+  function onContextCall(
+    callback: (msg: SandboxContextCallMessage, reply: (response: unknown) => void) => void,
+  ): void {
+    contextCallCallback = callback;
+  }
+
   async function ping(): Promise<PingResponse> {
     const req: SandboxRequest = {
       id: randomUUID(),
@@ -283,5 +345,5 @@ export function createUnixSocketClient(deps: UnixSocketClientDeps): UnixSocketCl
     socket = null;
   }
 
-  return { connect, send, onLogLine, ping, drain, close };
+  return { connect, send, onLogLine, onContextCall, ping, drain, close };
 }

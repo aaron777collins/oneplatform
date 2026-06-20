@@ -522,7 +522,7 @@ function makeMinimalContext(): PluginContext {
     ontology: {
       getSchema: async () => {
         notAvailable("ontology", "getSchema");
-        return { entityTypes: [], version: 0 } as any;
+        return { entityTypes: [], version: 0, updatedAt: new Date(0).toISOString() };
       },
       getEntitySchema: async (_entityType: string) => {
         notAvailable("ontology", "getEntitySchema");

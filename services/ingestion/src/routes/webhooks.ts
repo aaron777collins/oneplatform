@@ -124,8 +124,17 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
       throw new UnauthorizedError("Authentication required.");
     }
 
-    const receiver = await webhookManagementService.getReceiver(user.tenantId, c.req.param("id"));
-    return c.json({ data: receiver });
+    try {
+      const receiver = await webhookManagementService.getReceiver(user.tenantId, c.req.param("id"));
+      return c.json({ data: receiver });
+    } catch (err: unknown) {
+      if (err instanceof WebhookReceiverNotFoundError) {
+        return c.json({
+          error: { code: "WEBHOOK_RECEIVER_NOT_FOUND", message: err.message },
+        }, 404);
+      }
+      throw err;
+    }
   });
 
   routes.patch("/inbound/:id", async (c) => {
@@ -153,13 +162,21 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
     if (d.description !== undefined) updates["description"] = d.description;
     if (d.connectorId !== undefined) updates["connectorId"] = d.connectorId;
 
-    const receiver = await webhookManagementService.updateReceiver(
-      user.tenantId,
-      c.req.param("id"),
-      updates as Parameters<WebhookManagementService["updateReceiver"]>[2],
-    );
-
-    return c.json({ data: receiver });
+    try {
+      const receiver = await webhookManagementService.updateReceiver(
+        user.tenantId,
+        c.req.param("id"),
+        updates as Parameters<WebhookManagementService["updateReceiver"]>[2],
+      );
+      return c.json({ data: receiver });
+    } catch (err: unknown) {
+      if (err instanceof WebhookReceiverNotFoundError) {
+        return c.json({
+          error: { code: "WEBHOOK_RECEIVER_NOT_FOUND", message: err.message },
+        }, 404);
+      }
+      throw err;
+    }
   });
 
   routes.delete("/inbound/:id", async (c) => {
@@ -168,8 +185,17 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
       throw new UnauthorizedError("Authentication required.");
     }
 
-    await webhookManagementService.deleteReceiver(user.tenantId, c.req.param("id"));
-    return c.body(null, 204);
+    try {
+      await webhookManagementService.deleteReceiver(user.tenantId, c.req.param("id"));
+      return c.body(null, 204);
+    } catch (err: unknown) {
+      if (err instanceof WebhookReceiverNotFoundError) {
+        return c.json({
+          error: { code: "WEBHOOK_RECEIVER_NOT_FOUND", message: err.message },
+        }, 404);
+      }
+      throw err;
+    }
   });
 
   routes.post("/inbound/:id/rotate-secret", async (c) => {
@@ -186,17 +212,27 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<{ Variables: A
       }, 400);
     }
 
-    // Verify tenant ownership
-    await webhookManagementService.getReceiver(user.tenantId, c.req.param("id"));
+    try {
+      // Verify tenant ownership and fetch secret in one shot via rotateSecret;
+      // getReceiver is called first here to surface a 404 before attempting rotation.
+      await webhookManagementService.getReceiver(user.tenantId, c.req.param("id"));
 
-    const result = await webhookManagementService.rotateSecret(
-      user.tenantId,
-      c.req.param("id"),
-      parsed.data.currentSecret,
-      masterKey,
-    );
+      const result = await webhookManagementService.rotateSecret(
+        user.tenantId,
+        c.req.param("id"),
+        parsed.data.currentSecret,
+        masterKey,
+      );
 
-    return c.json({ data: result });
+      return c.json({ data: result });
+    } catch (err: unknown) {
+      if (err instanceof WebhookReceiverNotFoundError) {
+        return c.json({
+          error: { code: "WEBHOOK_RECEIVER_NOT_FOUND", message: err.message },
+        }, 404);
+      }
+      throw err;
+    }
   });
 
   // --- Delivery log routes (authenticated) ---

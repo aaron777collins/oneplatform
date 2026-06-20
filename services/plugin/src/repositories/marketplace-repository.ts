@@ -135,14 +135,10 @@ export class MarketplaceRepository {
         cursorId = undefined;
       }
 
-      if (cursorId !== undefined) {
-        // Use a compound cursor (sort_col, id) to handle ties in sort_col.
-        // The expression varies per sort mode but the pattern is always:
-        //   (sort_col, id) < (cursor_sort_val, cursor_id)  [for DESC columns]
-        //   (sort_col, id) > (cursor_sort_val, cursor_id)  [for ASC columns]
+      if (cursorId !== undefined && cursorSortVal !== undefined) {
         if (sortBy === "popular") {
           paginatedConditions.push(
-            `(downloads, id) < ($${idx++}, $${idx++}::uuid)`
+            `(downloads, id) < ($${idx++}::bigint, $${idx++}::uuid)`
           );
         } else if (sortBy === "rating") {
           paginatedConditions.push(
@@ -153,12 +149,18 @@ export class MarketplaceRepository {
             `(published_at, id) < ($${idx++}::timestamptz, $${idx++}::uuid)`
           );
         } else {
-          // name ASC — uses >
           paginatedConditions.push(
             `(name, id) > ($${idx++}, $${idx++}::uuid)`
           );
         }
-        paginatedValues.push(cursorSortVal ?? "", cursorId);
+        paginatedValues.push(cursorSortVal, cursorId);
+      } else if (cursorId !== undefined) {
+        if (sortBy === "popular" || sortBy === "rating" || sortBy === "recent") {
+          paginatedConditions.push(`id < $${idx++}::uuid`);
+        } else {
+          paginatedConditions.push(`id > $${idx++}::uuid`);
+        }
+        paginatedValues.push(cursorId);
       }
     }
 

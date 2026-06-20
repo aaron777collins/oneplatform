@@ -41,10 +41,12 @@ function uuidV7(): string {
 // requestIdMiddleware propagates an upstream X-Request-ID or generates a new
 // UUID v7 if none is present. Sets c.var.requestId for the error handler to
 // include in error responses (spec §6 Error Code Registry).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function requestIdMiddleware() {
   return createMiddleware(async (c, next) => {
     const incoming = c.req.header("X-Request-ID");
-    const requestId = incoming ?? uuidV7();
+    const requestId = incoming && UUID_RE.test(incoming) ? incoming : uuidV7();
 
     c.set("requestId", requestId);
     c.header("X-Request-ID", requestId);

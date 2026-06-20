@@ -101,7 +101,7 @@ export function useAppStorage<T>(
         if (!cancelled) {
           // BFF returns { data: { key, value, updatedAt } } envelope; unwrap if present.
           const storageData = (res as { data?: BffStorageGetResponse }).data ?? (res as BffStorageGetResponse);
-          const loaded = storageData.value !== null ? (storageData.value as T) : defaultValue;
+          const loaded = storageData.value != null ? (storageData.value as T) : defaultValue;
           confirmedValueRef.current = loaded;
           setValueState(loaded);
           setIsLoaded(true);

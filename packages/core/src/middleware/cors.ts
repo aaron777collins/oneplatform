@@ -50,11 +50,16 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
     }
 
     if (!allowAll && !originSet.has(origin)) {
+      const safeOrigin = origin.length > 256 ? origin.slice(0, 256) + "..." : origin;
+      const sanitized = safeOrigin.replace(/[&<>"']/g, (ch) => {
+        const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };
+        return map[ch] ?? ch;
+      });
       return c.json(
         {
           error: {
             code: "ORIGIN_NOT_ALLOWED",
-            message: `Origin '${origin}' is not permitted.`,
+            message: `Origin '${sanitized}' is not permitted.`,
             requestId: c.var["requestId"] ?? "",
           },
         },

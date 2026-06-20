@@ -55,11 +55,29 @@ export function responseEnvelopeMiddleware() {
       }
     }
 
-    // StatusCode cast is safe: we already checked the status starts with "2"
-    // and excluded 204, so it must be a valid JSON-bearing 2xx ContentfulStatusCode.
     const status = c.res.status as 200 | 201 | 202 | 203;
-    c.res = c.newResponse(JSON.stringify({ data: body }), status, {
+
+    const preservedHeaders: Record<string, string> = {
       "Content-Type": "application/json",
-    });
+    };
+    const headersToPreserve = [
+      "X-RateLimit-Limit",
+      "X-RateLimit-Remaining",
+      "X-RateLimit-Reset",
+      "Retry-After",
+      "Deprecation",
+      "Sunset",
+      "Link",
+      "X-Request-Id",
+      "X-Correlation-Id",
+    ];
+    for (const name of headersToPreserve) {
+      const value = c.res.headers.get(name);
+      if (value !== null) {
+        preservedHeaders[name] = value;
+      }
+    }
+
+    c.res = c.newResponse(JSON.stringify({ data: body }), status, preservedHeaders);
   });
 }

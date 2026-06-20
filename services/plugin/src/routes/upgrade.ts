@@ -79,7 +79,13 @@ export function createUpgradeRoutes(
       upgradedBy: user.userId,
     });
 
-    return c.json(result, 200);
+    return c.json({
+      manifestId,
+      fromVersion: result.fromVersion,
+      toVersion: result.toVersion,
+      status: "active" as const,
+      upgradedAt: new Date().toISOString(),
+    }, 200);
   });
 
   // POST /api/v1/plugins/:manifestId/rollback — roll back to previous version
@@ -105,7 +111,12 @@ export function createUpgradeRoutes(
       rolledBackBy: user.userId,
     });
 
-    return c.json(result, 200);
+    return c.json({
+      manifestId,
+      rolledBackTo: result.toVersion,
+      status: "active" as const,
+      rolledBackAt: new Date().toISOString(),
+    }, 200);
   });
 
   return routes;

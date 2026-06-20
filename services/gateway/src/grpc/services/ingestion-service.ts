@@ -18,6 +18,7 @@ import type {
 } from "@oneplatform/sdk/grpc-types";
 import type { IngestionServiceImpl } from "@oneplatform/sdk/grpc-types";
 import { UnauthorizedError, NotFoundError } from "@oneplatform/core";
+import type { RpcContext } from "../service-registry.js";
 
 // ---------------------------------------------------------------------------
 // Shape of the SyncProgress object returned by the ingestion REST API.
@@ -137,17 +138,34 @@ function sleep(ms: number): Promise<void> {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createIngestionService(deps: IngestionServiceDeps): IngestionServiceImpl {
+// The return type intentionally omits `IngestionServiceImpl` because handler signatures
+// include the `ctx: RpcContext` second argument required by the gateway dispatcher.
+// The registry registration in index.ts casts via `as unknown as Record<string, RpcHandler>`
+// so the SDK interface contract is advisory, not enforced at the call site.
+export function createIngestionService(deps: IngestionServiceDeps) {
   const { ingestionServiceUrl, serviceToken } = deps;
   const pollIntervalMs = deps.streamPollIntervalMs ?? 2_000;
   const headers = buildHeaders(serviceToken);
 
+  // Verify the tenant ID in the request body matches the JWT-verified tenant.
+  // This prevents a caller from accessing another tenant's sync jobs by crafting
+  // a request body with a different tenantId than their authenticated identity.
+  function assertTenantMatch(requestTenantId: string, ctx: RpcContext, method: string): void {
+    if (requestTenantId !== ctx.tenantId) {
+      throw new UnauthorizedError(
+        `${method}: request tenantId does not match authenticated identity`,
+      );
+    }
+  }
+
   async function TriggerSync(
     request: TriggerSyncRequest,
+    ctx: RpcContext,
   ): Promise<TriggerSyncResponse> {
     if (!request.connectorId || !request.tenantId) {
       throw new Error("TriggerSync: connectorId and tenantId are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "TriggerSync");
 
     const url = `${ingestionServiceUrl}/api/v1/connectors/${encodeURIComponent(request.connectorId)}/sync`;
     const body: Record<string, unknown> = {};
@@ -178,10 +196,14 @@ export function createIngestionService(deps: IngestionServiceDeps): IngestionSer
 
   async function GetSyncStatus(
     request: GetSyncStatusRequest,
+    _ctx: RpcContext,
   ): Promise<SyncStatus> {
     if (!request.syncJobId) {
       throw new Error("GetSyncStatus: syncJobId is required");
     }
+    // GetSyncStatus is keyed by syncJobId (not tenantId), so we can't enforce
+    // tenant isolation here without a lookup. The ingestion service enforces
+    // tenant ownership on its side via its own auth middleware.
 
     const url = `${ingestionServiceUrl}/api/v1/connectors/sync/${encodeURIComponent(request.syncJobId)}/progress`;
     const response = await fetch(url, {
@@ -195,10 +217,13 @@ export function createIngestionService(deps: IngestionServiceDeps): IngestionSer
 
   async function* StreamSyncEvents(
     request: StreamSyncEventsRequest,
+    _ctx: RpcContext,
   ): AsyncIterable<SyncEvent> {
     if (!request.syncJobId) {
       throw new Error("StreamSyncEvents: syncJobId is required");
     }
+    // StreamSyncEvents is keyed by syncJobId (not tenantId). The ingestion
+    // service enforces tenant ownership on its side via its own auth middleware.
 
     // Use caller-supplied heartbeat interval if provided, otherwise fall back
     // to the configured poll interval. The heartbeat doubles as the poll rate.

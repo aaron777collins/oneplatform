@@ -209,13 +209,12 @@ describe("authMiddleware — public routes", () => {
 });
 
 describe("authMiddleware — /internal/* routing", () => {
-  // Security fix: the blanket /internal/* auth bypass was removed. Internal routes
-  // are now protected by serviceAuthMiddleware (Ed25519 JWT) which is wired in
-  // createApp() as a separate layer. authMiddleware itself no longer skips auth
-  // for /internal/* — if Docker network isolation fails, unauthenticated internal
-  // routes would be exposed. Services must explicitly list internal routes in
-  // publicRoutes if they need to bypass user auth (they should rely on serviceAuth instead).
-  it("requires auth for /internal/* paths when not listed in publicRoutes", async () => {
+  // authMiddleware passes /internal/* routes through without demanding a Bearer
+  // token or API key. serviceAuthMiddleware (the next layer in createApp) is
+  // responsible for cryptographic service-to-service auth on these routes via
+  // Ed25519 JWT. Requiring a user Bearer token here in addition would break all
+  // background workers and cron jobs that do not hold user JWTs.
+  it("passes through /internal/* paths without requiring user auth", async () => {
     const redis = makeMockRedis();
     const validateApiKey = makeMockApiKeyValidator("", null);
     const app = new Hono<{ Variables: { user: unknown; requestId: string } }>();
@@ -229,10 +228,11 @@ describe("authMiddleware — /internal/* routing", () => {
     }));
     app.get("/internal/auth/validate", (c) => c.json({ ok: true }));
     const res = await app.request("/internal/auth/validate");
-    // 401 is correct: authMiddleware no longer has a special /internal/* bypass.
-    // serviceAuthMiddleware (the next layer in createApp) is what authenticates
-    // service-to-service calls. This test confirms the blanket bypass is gone.
-    expect(res.status).toBe(401);
+    // authMiddleware must pass through — serviceAuthMiddleware (not present in
+    // this minimal test app) will enforce the Ed25519 service token. Without
+    // this passthrough, all inter-service calls fail with 401 because background
+    // workers and cron jobs do not hold user Bearer tokens.
+    expect(res.status).toBe(200);
   });
 });
 

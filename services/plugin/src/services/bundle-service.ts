@@ -347,8 +347,6 @@ export function createBundleService(config: BundleServiceConfig): BundleService 
 
       const CHECKSUM_TIMEOUT_MS = 30_000;
 
-      // Stream through the hash without buffering the whole file.
-      // Wrap in a timeout so large bundles (up to 50MB) cannot block indefinitely.
       const hashPromise = pipeline(stream, async function* (source) {
         for await (const chunk of source) {
           hash.update(chunk as Buffer);
@@ -364,7 +362,13 @@ export function createBundleService(config: BundleServiceConfig): BundleService 
         hashPromise.finally(() => clearTimeout(timer));
       });
 
-      await Promise.race([hashPromise, timeoutPromise]);
+      try {
+        await Promise.race([hashPromise, timeoutPromise]);
+      } catch (err) {
+        hashPromise.catch(() => {});
+        timeoutPromise.catch(() => {});
+        throw err;
+      }
 
       const actual = hash.digest("hex");
 

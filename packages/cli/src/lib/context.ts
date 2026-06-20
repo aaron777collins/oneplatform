@@ -47,7 +47,7 @@ interface GlobalOpts {
   output?: string;
   yes?: boolean;
   quiet?: boolean;
-  noColor?: boolean;
+  color?: boolean;
   verbose?: boolean;
   timeout?: string;
   platform?: string;
@@ -109,7 +109,7 @@ export async function globalPreActionHook(
   const credentials = await loadCredentials(profileName);
 
   const noColor =
-    opts.noColor === true ||
+    opts.color === false ||
     process.env["NO_COLOR"] !== undefined ||
     process.stdout.isTTY !== true;
 

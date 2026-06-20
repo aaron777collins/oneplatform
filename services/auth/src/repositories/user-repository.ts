@@ -12,6 +12,10 @@ const DEFAULT_LIMIT = 50;
 // Hard cap to prevent runaway queries from callers passing huge limits.
 const MAX_LIMIT = 200;
 
+function escapeIlike(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 export class UserRepository {
   constructor(private readonly pool: pg.Pool) {}
 
@@ -207,7 +211,7 @@ export class UserRepository {
 
     if (filters?.email !== undefined) {
       extraConditions.push(`email ILIKE $${paramIdx++}`);
-      extraValues.push(`%${filters.email}%`);
+      extraValues.push(`%${escapeIlike(filters.email)}%`);
     }
     if (filters?.role !== undefined) {
       extraConditions.push(`$${paramIdx++} = ANY(roles)`);
@@ -268,7 +272,7 @@ export class UserRepository {
 
     if (filters?.email !== undefined) {
       conditions.push(`email ILIKE $${paramIdx++}`);
-      values.push(`%${filters.email}%`);
+      values.push(`%${escapeIlike(filters.email)}%`);
     }
     if (filters?.role !== undefined) {
       conditions.push(`$${paramIdx++} = ANY(roles)`);

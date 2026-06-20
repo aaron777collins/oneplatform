@@ -18,30 +18,54 @@ import type { RpcDescriptor, ServiceDescriptor } from "@oneplatform/sdk/grpc-typ
 export type { RpcDescriptor, ServiceDescriptor };
 
 // ---------------------------------------------------------------------------
+// RpcContext — auth identity injected into every handler by the dispatcher.
+//
+// Defined here (rather than in grpc-web-handler.ts) to avoid a circular import:
+// grpc-web-handler.ts imports ServiceRegistry from this file, so RpcContext
+// must live here and be imported by grpc-web-handler.ts.
+// ---------------------------------------------------------------------------
+
+export interface RpcContext {
+  readonly tenantId: string;
+  readonly userId: string;
+  readonly roles: readonly string[];
+  readonly requestId: string;
+}
+
+// ---------------------------------------------------------------------------
 // Handler types
+//
+// All handler signatures receive RpcContext as the second argument so
+// implementations can enforce tenant isolation using the verified JWT identity
+// rather than trusting the tenant ID embedded in the request body.
 // ---------------------------------------------------------------------------
 
 /**
- * Unary RPC handler: receives a decoded request message and returns a response.
+ * Unary RPC handler: receives a decoded request message and the verified RPC
+ * context, then returns a response.
  */
 export type UnaryHandler<TReq = unknown, TRes = unknown> = (
   request: TReq,
+  ctx: RpcContext,
 ) => Promise<TRes>;
 
 /**
- * Server-streaming RPC handler: receives a decoded request and returns an
- * AsyncIterable that yields response messages until exhausted.
+ * Server-streaming RPC handler: receives a decoded request and the verified
+ * RPC context, then returns an AsyncIterable that yields response messages.
  */
 export type ServerStreamHandler<TReq = unknown, TRes = unknown> = (
   request: TReq,
+  ctx: RpcContext,
 ) => AsyncIterable<TRes>;
 
 /**
  * Client-streaming RPC handler: receives an AsyncIterable of request messages
- * (decoded from the framed HTTP body) and returns a single response.
+ * (decoded from the framed HTTP body) and the verified RPC context, then
+ * returns a single response.
  */
 export type ClientStreamHandler<TReq = unknown, TRes = unknown> = (
   stream: AsyncIterable<TReq>,
+  ctx: RpcContext,
 ) => Promise<TRes>;
 
 /** Union of all supported handler signatures. */

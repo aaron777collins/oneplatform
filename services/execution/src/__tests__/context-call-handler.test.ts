@@ -144,7 +144,7 @@ describe("contextCallHandler — fetch SSRF protection", () => {
       redirected: false,
       url: "http://172.15.0.1/api",
       text: vi.fn().mockResolvedValue("{}"),
-      headers: { entries: vi.fn().mockReturnValue([]) },
+      headers: { get: vi.fn().mockReturnValue(null), entries: vi.fn().mockReturnValue([]) },
     });
 
     const response = await handler.handleContextCall(
@@ -185,7 +185,7 @@ describe("contextCallHandler — fetch SSRF protection", () => {
       redirected: false,
       url: "https://api.github.com/repos",
       text: vi.fn().mockResolvedValue("{}"),
-      headers: { entries: vi.fn().mockReturnValue([]) },
+      headers: { get: vi.fn().mockReturnValue(null), entries: vi.fn().mockReturnValue([]) },
     });
 
     const response = await handler.handleContextCall(
@@ -205,7 +205,7 @@ describe("contextCallHandler — fetch SSRF protection", () => {
       redirected: false,
       url: "http://example.com/api",
       text: vi.fn().mockResolvedValue("data"),
-      headers: { entries: vi.fn().mockReturnValue([]) },
+      headers: { get: vi.fn().mockReturnValue(null), entries: vi.fn().mockReturnValue([]) },
     });
 
     const response = await handler.handleContextCall(
@@ -242,7 +242,7 @@ describe("contextCallHandler — fetch SSRF protection", () => {
       redirected: false,
       url: "https://api.example.com/data",
       text: vi.fn().mockResolvedValue('{"result":"ok"}'),
-      headers: { entries: vi.fn().mockReturnValue([["content-type", "application/json"]]) },
+      headers: { get: vi.fn().mockReturnValue(null), entries: vi.fn().mockReturnValue([["content-type", "application/json"]]) },
     });
 
     const response = await handler.handleContextCall(
@@ -664,7 +664,7 @@ describe("contextCallHandler — response envelope", () => {
       redirected: false,
       url: "https://example.com/api",
       text: vi.fn().mockResolvedValue("ok"),
-      headers: { entries: vi.fn().mockReturnValue([]) },
+      headers: { get: vi.fn().mockReturnValue(null), entries: vi.fn().mockReturnValue([]) },
     });
     vi.stubGlobal("fetch", fetchMock);
 

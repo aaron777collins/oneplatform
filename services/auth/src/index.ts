@@ -266,6 +266,12 @@ export async function createServiceApp(config: AuthConfig): Promise<ServiceApp> 
       // Users clicking email links are not logged in — these must be public.
       "/api/v1/auth/reset-password/*",
       "/api/v1/auth/verify-email/*",
+      // OAuth routes are public: the browser navigates to authorize via redirect
+      // (no Bearer token), and the callback is an unauthenticated redirect from
+      // the provider. Security is provided by the PKCE verifier and state param.
+      "/api/v1/oauth/:provider/authorize",
+      "/api/v1/oauth/:provider/callback",
+      "/api/v1/auth/.well-known/jwks.json",
     ],
     targetService: "auth-service",
     servicePublicKeys,

@@ -220,7 +220,8 @@ export class QueryCache {
    * always puts `entity` first, so the prefix approach is reliable here.
    */
   private keyBelongsToEntity(key: string, entity: string): boolean {
-    return key.startsWith(`{"entity":"${entity}"`);
+    const escapedEntity = JSON.stringify(entity);
+    return key.startsWith(`{"entity":${escapedEntity}`);
   }
 }
 

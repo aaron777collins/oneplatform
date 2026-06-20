@@ -279,7 +279,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     const body = await c.req.json().catch(() => null);
 
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}`;
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}`;
 
     const resp = await fetch(upstreamUrl, {
       method:  "POST",
@@ -339,7 +339,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
 
     const body = await c.req.json().catch(() => null);
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/${encodeURIComponent(itemId)}`;
 
     const resp = await fetch(upstreamUrl, {
       method:  "PATCH",
@@ -388,7 +388,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
 
     const body = await c.req.json().catch(() => null);
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/${encodeURIComponent(itemId)}`;
 
     const resp = await fetch(upstreamUrl, {
       method:  "PUT",
@@ -436,7 +436,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
     await assertEntityPermission(appId, user.roles, entity, "delete");
 
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/${encodeURIComponent(itemId)}`;
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/${encodeURIComponent(itemId)}`;
 
     const resp = await fetch(upstreamUrl, {
       method:  "DELETE",
@@ -482,7 +482,7 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
 
     const body = await c.req.json().catch(() => null);
     const executionServiceUrl = process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005";
-    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${entity}/bulk`;
+    const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}/bulk`;
 
     const resp = await fetch(upstreamUrl, {
       method:  "POST",

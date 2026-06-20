@@ -620,18 +620,17 @@ class LdapAuthProvider implements AuthProvider {
 
     // Build the platform's credential-entry page URL. The Auth Service routes
     // POST /auth/ldap/callback to handleCallback() after the user submits.
-    const params = new URLSearchParams({
-      state,
-      redirect_uri: options.redirectUri,
-      // Identify which LDAP instance this login form is for (multi-instance support)
-      provider: cfg.url,
-    });
+    const params = new URLSearchParams();
 
     if (options.additionalParams !== undefined) {
       for (const [key, value] of Object.entries(options.additionalParams)) {
         params.set(key, value);
       }
     }
+
+    params.set("state", state);
+    params.set("redirect_uri", options.redirectUri);
+    params.set("provider", cfg.url);
 
     // Use the platform's internal LDAP login page. This URL is not external —
     // the Auth Service hosts it to collect username/password before calling back.
@@ -813,8 +812,7 @@ class LdapAuthProvider implements AuthProvider {
         "base",
       );
     } catch (err) {
-      if (err instanceof PluginAuthError) {
-        // User not found or search error — treat as invalid token
+      if (err instanceof PluginAuthError || err instanceof PluginTimeoutError) {
         return { valid: false, error: err.message };
       }
       throw err;
@@ -841,7 +839,7 @@ class LdapAuthProvider implements AuthProvider {
         context.logger,
       );
     } catch (err) {
-      if (err instanceof PluginAuthError) {
+      if (err instanceof PluginAuthError || err instanceof PluginTimeoutError) {
         return { valid: false, error: err.message };
       }
       throw err;

@@ -306,7 +306,11 @@ export function createPluginRoutes(
       uninstalledBy: user.userId,
     });
 
-    return c.json(result);
+    return c.json({
+      uninstalled: true,
+      pluginId: id,
+      manifestId: result.manifestId,
+    });
   });
 
   return routes;

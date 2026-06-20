@@ -159,9 +159,16 @@ function serializeFieldValidator(field: FieldRow): string {
         parts.push("z.string()");
       }
       break;
-    case "array":
-      parts.push(`z.array(z.${field.array_item_type ?? "string"}())`);
+    case "array": {
+      const VALID_ITEM_TYPES = new Set(["string", "number", "boolean"]);
+      const itemType = field.array_item_type ?? "string";
+      if (!VALID_ITEM_TYPES.has(itemType)) {
+        parts.push(`z.array(z.unknown())`);
+      } else {
+        parts.push(`z.array(z.${itemType}())`);
+      }
       break;
+    }
     default:
       parts.push("z.unknown()");
   }

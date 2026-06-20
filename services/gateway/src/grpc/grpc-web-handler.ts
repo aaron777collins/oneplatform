@@ -26,7 +26,7 @@
 import type { Context } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { UnauthorizedError } from "@oneplatform/core";
-import type { ServiceRegistry } from "./service-registry.js";
+import type { ServiceRegistry, RpcContext } from "./service-registry.js";
 import {
   encodeDataFrame,
   encodeTrailerFrame,
@@ -35,6 +35,10 @@ import {
   GrpcStatus,
   toGrpcError,
 } from "./serialization.js";
+
+// Re-export RpcContext so callers can import it from grpc-web-handler.ts,
+// which is the canonical home from the external API perspective.
+export type { RpcContext };
 
 // The gRPC-Web content-type prefix. Both "application/grpc-web" and
 // "application/grpc-web+json" are accepted.
@@ -58,18 +62,6 @@ export interface GrpcWebHandler {
    * allowing the caller to fall through to REST routes.
    */
   handle(c: Context<{ Variables: AppVariables }>): Promise<Response | null>;
-}
-
-// ---------------------------------------------------------------------------
-// Context passed to every RPC handler so implementations can access
-// auth identity without importing Hono internals.
-// ---------------------------------------------------------------------------
-
-export interface RpcContext {
-  readonly tenantId: string;
-  readonly userId: string;
-  readonly roles: readonly string[];
-  readonly requestId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,14 +130,16 @@ async function handleUnaryRpc(
   c: Context<{ Variables: AppVariables }>,
   entry: ReturnType<ServiceRegistry["lookup"]> & object,
   bodyBuffer: Buffer,
-  _ctx: RpcContext,
+  ctx: RpcContext,
 ): Promise<Response> {
   const request = decodeDataFrame(bodyBuffer);
 
   // Type safety: the registry guarantees this is a UnaryHandler when
   // clientStreaming and serverStreaming are both false.
-  const handler = entry.handler as (req: unknown) => Promise<unknown>;
-  const response = await handler(request);
+  // Pass ctx so handlers can enforce tenant isolation using the verified JWT
+  // identity rather than trusting the tenant ID in the request body.
+  const handler = entry.handler as (req: unknown, ctx: RpcContext) => Promise<unknown>;
+  const response = await handler(request, ctx);
 
   const dataFrame = encodeDataFrame(response);
   const trailerFrame = encodeTrailerFrame(GrpcStatus.OK, "");
@@ -160,12 +154,14 @@ async function handleServerStreamingRpc(
   c: Context<{ Variables: AppVariables }>,
   entry: ReturnType<ServiceRegistry["lookup"]> & object,
   bodyBuffer: Buffer,
-  _ctx: RpcContext,
+  ctx: RpcContext,
 ): Promise<Response> {
   const request = decodeDataFrame(bodyBuffer);
 
-  const handler = entry.handler as (req: unknown) => AsyncIterable<unknown>;
-  const stream = handler(request);
+  // Pass ctx so handlers can enforce tenant isolation using the verified JWT
+  // identity rather than trusting the tenant ID in the request body.
+  const handler = entry.handler as (req: unknown, ctx: RpcContext) => AsyncIterable<unknown>;
+  const stream = handler(request, ctx);
 
   // Collect all frames into a single buffer so the HTTP response can include
   // the correct Content-Length. True HTTP/2 streaming would push frames
@@ -186,7 +182,7 @@ async function handleClientStreamingRpc(
   c: Context<{ Variables: AppVariables }>,
   entry: ReturnType<ServiceRegistry["lookup"]> & object,
   bodyBuffer: Buffer,
-  _ctx: RpcContext,
+  ctx: RpcContext,
 ): Promise<Response> {
   const records = decodeAllDataFrames(bodyBuffer);
 
@@ -198,8 +194,10 @@ async function handleClientStreamingRpc(
     }
   })();
 
-  const handler = entry.handler as (s: AsyncIterable<unknown>) => Promise<unknown>;
-  const response = await handler(stream);
+  // Pass ctx so handlers can enforce tenant isolation using the verified JWT
+  // identity rather than trusting the tenant ID in the request body.
+  const handler = entry.handler as (s: AsyncIterable<unknown>, ctx: RpcContext) => Promise<unknown>;
+  const response = await handler(stream, ctx);
 
   const dataFrame = encodeDataFrame(response);
   const trailerFrame = encodeTrailerFrame(GrpcStatus.OK, "");

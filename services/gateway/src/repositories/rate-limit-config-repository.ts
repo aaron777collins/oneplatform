@@ -28,8 +28,6 @@ export class RateLimitConfigRepository {
       Omit<RateLimitConfigRow, "id" | "tenant_id" | "created_at" | "updated_at">
     >
   ): Promise<RateLimitConfigRow> {
-    // Resolve values, falling back to database defaults / EXCLUDED for the
-    // ON CONFLICT update so callers can do partial updates.
     const tierName = data.tier_name ?? "standard";
     const reqPerMinTenant = data.req_per_min_tenant ?? null;
     const reqPerMinApiKey = data.req_per_min_api_key ?? null;
@@ -40,6 +38,22 @@ export class RateLimitConfigRepository {
         ? JSON.stringify(data.api_key_overrides)
         : null;
 
+    const setReqPerMinTenant = "req_per_min_tenant" in data
+      ? "EXCLUDED.req_per_min_tenant"
+      : "COALESCE(EXCLUDED.req_per_min_tenant, gateway.rate_limit_config.req_per_min_tenant)";
+    const setReqPerMinApiKey = "req_per_min_api_key" in data
+      ? "EXCLUDED.req_per_min_api_key"
+      : "COALESCE(EXCLUDED.req_per_min_api_key, gateway.rate_limit_config.req_per_min_api_key)";
+    const setBurstMultiplier = "burst_multiplier" in data
+      ? "EXCLUDED.burst_multiplier"
+      : "COALESCE(EXCLUDED.burst_multiplier, gateway.rate_limit_config.burst_multiplier)";
+    const setBurstDurationSec = "burst_duration_sec" in data
+      ? "EXCLUDED.burst_duration_sec"
+      : "COALESCE(EXCLUDED.burst_duration_sec, gateway.rate_limit_config.burst_duration_sec)";
+    const setApiKeyOverrides = "api_key_overrides" in data
+      ? "EXCLUDED.api_key_overrides"
+      : "COALESCE(EXCLUDED.api_key_overrides, gateway.rate_limit_config.api_key_overrides)";
+
     const result = await this.pool.query<RateLimitConfigRow>(
       `INSERT INTO gateway.rate_limit_config
          (tenant_id, tier_name, req_per_min_tenant, req_per_min_api_key,
@@ -47,11 +61,11 @@ export class RateLimitConfigRepository {
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (tenant_id) DO UPDATE
            SET tier_name         = EXCLUDED.tier_name,
-               req_per_min_tenant  = COALESCE(EXCLUDED.req_per_min_tenant,  gateway.rate_limit_config.req_per_min_tenant),
-               req_per_min_api_key = COALESCE(EXCLUDED.req_per_min_api_key, gateway.rate_limit_config.req_per_min_api_key),
-               burst_multiplier    = COALESCE(EXCLUDED.burst_multiplier,    gateway.rate_limit_config.burst_multiplier),
-               burst_duration_sec  = COALESCE(EXCLUDED.burst_duration_sec,  gateway.rate_limit_config.burst_duration_sec),
-               api_key_overrides   = COALESCE(EXCLUDED.api_key_overrides,   gateway.rate_limit_config.api_key_overrides),
+               req_per_min_tenant  = ${setReqPerMinTenant},
+               req_per_min_api_key = ${setReqPerMinApiKey},
+               burst_multiplier    = ${setBurstMultiplier},
+               burst_duration_sec  = ${setBurstDurationSec},
+               api_key_overrides   = ${setApiKeyOverrides},
                updated_at          = now()
      RETURNING
          id, tenant_id, tier_name,

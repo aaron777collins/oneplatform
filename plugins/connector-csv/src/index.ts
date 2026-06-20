@@ -392,7 +392,7 @@ class CsvConnector implements Connector {
     const hasHeader = meta["hasHeader"] as boolean;
     const encoding = (meta["encoding"] as string | undefined) ?? DEFAULT_ENCODING;
     const idColumn = (meta["idColumn"] as string | null) ?? undefined;
-    const batchSize = meta["batchSize"] as number;
+    const batchSize = (meta["batchSize"] as number | undefined) ?? DEFAULT_BATCH_SIZE;
     const maxFileSizeMb = (meta["maxFileSizeMb"] as number | undefined) ?? DEFAULT_MAX_FILE_SIZE_MB;
     const availableCredentials = await context.credentials.list();
     const bearerToken = availableCredentials.includes("bearerToken")

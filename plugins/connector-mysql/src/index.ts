@@ -102,16 +102,33 @@ function encodeCursor(payload: CursorPayload): string {
 }
 
 function decodeCursor(cursor: string): CursorPayload {
+  let parsed: unknown;
   try {
-    return JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as CursorPayload;
+    parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
   } catch {
-    // Unreadable cursor means the caller passed something invalid. Treat as a
-    // config error (permanent — retrying unchanged cursor produces the same result).
     throw new PluginConfigError(
       `Invalid cursor value — cannot decode pagination state: ${cursor}`,
       "cursor",
     );
   }
+
+  if (
+    parsed === null ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    typeof (parsed as Record<string, unknown>)["offset"] !== "number" ||
+    !(
+      (parsed as Record<string, unknown>)["since"] === null ||
+      typeof (parsed as Record<string, unknown>)["since"] === "string"
+    )
+  ) {
+    throw new PluginConfigError(
+      `Invalid cursor value — unexpected shape: ${cursor}`,
+      "cursor",
+    );
+  }
+
+  return parsed as CursorPayload;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -334,7 +351,8 @@ function throwForProxyStatus(status: number, url: string, retryAfter: string | n
 
 function parseRetryAfterHeader(value: string): number | undefined {
   const seconds = parseInt(value, 10);
-  return isNaN(seconds) ? undefined : seconds;
+  if (isNaN(seconds)) return undefined;
+  return seconds < 0 ? 0 : seconds;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -781,12 +799,16 @@ class MySqlConnector implements Connector {
             ? findHighWaterMark(rows, meta.incrementalColumn, since)
             : since;
 
-        // Incremental syncs use the WHERE filter (column > lastValue) as the sole
-        // pagination mechanism — the offset always stays 0 so we do not skip rows
-        // when the WHERE clause already narrows the result set. Full syncs (no
-        // incrementalColumn) advance the offset as normal.
-        const nextOffset =
-          meta.incrementalColumn !== null ? 0 : offset + records.length;
+        let nextOffset: number;
+        if (meta.incrementalColumn !== null) {
+          if (nextSince !== null && nextSince === since) {
+            nextOffset = offset + records.length;
+          } else {
+            nextOffset = 0;
+          }
+        } else {
+          nextOffset = offset + records.length;
+        }
 
         nextCursor = encodeCursor({ offset: nextOffset, since: nextSince });
         hasMore = true;

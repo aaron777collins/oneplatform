@@ -93,6 +93,7 @@ export function ComponentConfigPanel({
         )}
         {activeTab === "data" && (
           <DataBindingTab
+            key={component.id}
             component={component}
             propSchema={entry?.propSchema ?? []}
             onUpdateDataBinding={onUpdateDataBinding}
@@ -229,7 +230,7 @@ function PropField({ descriptor, value, onChange }: PropFieldProps) {
           id={id}
           type="number"
           value={value === undefined ? "" : Number(value)}
-          onChange={(e) => onChange(e.target.valueAsNumber)}
+          onChange={(e) => onChange(e.target.value === "" ? undefined : e.target.valueAsNumber)}
           className={inputClass}
         />
       </div>
@@ -288,14 +289,18 @@ function DataBindingTab({ component, propSchema, onUpdateDataBinding }: DataBind
     binding?.fieldMap ?? {},
   );
 
-  // Propagate changes immediately
+  const isMountRef = React.useRef(true);
+
   React.useEffect(() => {
+    if (isMountRef.current) {
+      isMountRef.current = false;
+      return;
+    }
     if (entityType === "") {
       onUpdateDataBinding(undefined);
     } else {
       onUpdateDataBinding({ entityType, fieldMap });
     }
-  // Intentionally omitting onUpdateDataBinding — it's a stable callback ref
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, fieldMap]);
 

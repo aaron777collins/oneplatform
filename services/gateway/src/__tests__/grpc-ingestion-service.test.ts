@@ -10,6 +10,7 @@ import type {
   SyncStatus,
   TriggerSyncResponse,
 } from "@oneplatform/sdk/grpc-types";
+import type { RpcContext } from "../grpc/service-registry.js";
 
 const INGESTION_URL = "http://ingestion-service:3000";
 
@@ -45,6 +46,17 @@ function mockFetch(response: unknown, status = 200): void {
   );
 }
 
+// Default RPC context for an authenticated request from tenant "t1".
+function makeCtx(overrides: Partial<RpcContext> = {}): RpcContext {
+  return {
+    tenantId: "t1",
+    userId: "user-1",
+    roles: ["viewer"],
+    requestId: "req-test",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.unstubAllGlobals();
 });
@@ -72,7 +84,7 @@ describe("IngestionService.TriggerSync", () => {
       tenantId: "t1",
       syncMode: "incremental",
       force: false,
-    });
+    }, makeCtx());
 
     expect(result.syncJobId).toBe("job-abc");
     expect(result.status).toBe("queued");
@@ -90,7 +102,7 @@ describe("IngestionService.TriggerSync", () => {
       tenantId: "t1",
       syncMode: "",
       force: true,
-    });
+    }, makeCtx());
 
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
@@ -106,7 +118,7 @@ describe("IngestionService.TriggerSync", () => {
       tenantId: "t1",
       syncMode: "",
       force: false,
-    });
+    }, makeCtx());
 
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
@@ -116,8 +128,18 @@ describe("IngestionService.TriggerSync", () => {
   it("throws when connectorId is missing", async () => {
     const svc = createIngestionService({ ingestionServiceUrl: INGESTION_URL });
     await expect(
-      svc.TriggerSync({ connectorId: "", tenantId: "t1", syncMode: "", force: false }),
+      svc.TriggerSync({ connectorId: "", tenantId: "t1", syncMode: "", force: false }, makeCtx()),
     ).rejects.toThrow(/required/i);
+  });
+
+  it("throws UnauthorizedError when request tenantId does not match ctx", async () => {
+    const svc = createIngestionService({ ingestionServiceUrl: INGESTION_URL });
+    await expect(
+      svc.TriggerSync(
+        { connectorId: "conn-1", tenantId: "other-tenant", syncMode: "", force: false },
+        makeCtx({ tenantId: "t1" }),
+      ),
+    ).rejects.toThrow(/does not match/i);
   });
 });
 
@@ -130,7 +152,7 @@ describe("IngestionService.GetSyncStatus", () => {
     mockFetch({ data: makeSyncProgress("running") });
 
     const svc = createIngestionService({ ingestionServiceUrl: INGESTION_URL });
-    const status: SyncStatus = await svc.GetSyncStatus({ syncJobId: "job-123" });
+    const status: SyncStatus = await svc.GetSyncStatus({ syncJobId: "job-123" }, makeCtx());
 
     expect(status.syncJobId).toBe("job-123");
     expect(status.status).toBe("running");
@@ -140,14 +162,14 @@ describe("IngestionService.GetSyncStatus", () => {
 
   it("throws when syncJobId is empty", async () => {
     const svc = createIngestionService({ ingestionServiceUrl: INGESTION_URL });
-    await expect(svc.GetSyncStatus({ syncJobId: "" })).rejects.toThrow(/required/i);
+    await expect(svc.GetSyncStatus({ syncJobId: "" }, makeCtx())).rejects.toThrow(/required/i);
   });
 
   it("maps null timestamps to empty strings", async () => {
     mockFetch({ data: makeSyncProgress("queued") });
 
     const svc = createIngestionService({ ingestionServiceUrl: INGESTION_URL });
-    const status = await svc.GetSyncStatus({ syncJobId: "job-123" });
+    const status = await svc.GetSyncStatus({ syncJobId: "job-123" }, makeCtx());
 
     // startedAt is null in the raw response for queued jobs
     expect(typeof status.completedAt).toBe("string");
@@ -168,7 +190,7 @@ describe("IngestionService.StreamSyncEvents", () => {
     });
 
     const events = [];
-    for await (const event of svc.StreamSyncEvents({ syncJobId: "job-123", heartbeatIntervalMs: 0 })) {
+    for await (const event of svc.StreamSyncEvents({ syncJobId: "job-123", heartbeatIntervalMs: 0 }, makeCtx())) {
       events.push(event);
     }
 
@@ -194,7 +216,7 @@ describe("IngestionService.StreamSyncEvents", () => {
     });
 
     const events = [];
-    for await (const event of svc.StreamSyncEvents({ syncJobId: "expired-job", heartbeatIntervalMs: 0 })) {
+    for await (const event of svc.StreamSyncEvents({ syncJobId: "expired-job", heartbeatIntervalMs: 0 }, makeCtx())) {
       events.push(event);
     }
 
@@ -227,7 +249,7 @@ describe("IngestionService.StreamSyncEvents", () => {
     });
 
     const events = [];
-    for await (const event of svc.StreamSyncEvents({ syncJobId: "job-123", heartbeatIntervalMs: 0 })) {
+    for await (const event of svc.StreamSyncEvents({ syncJobId: "job-123", heartbeatIntervalMs: 0 }, makeCtx())) {
       events.push(event);
     }
 
@@ -241,7 +263,7 @@ describe("IngestionService.StreamSyncEvents", () => {
 
   it("throws when syncJobId is empty", async () => {
     const svc = createIngestionService({ ingestionServiceUrl: INGESTION_URL });
-    const gen = svc.StreamSyncEvents({ syncJobId: "", heartbeatIntervalMs: 0 });
+    const gen = svc.StreamSyncEvents({ syncJobId: "", heartbeatIntervalMs: 0 }, makeCtx());
 
     await expect(async () => {
       for await (const _ev of gen) { /* drain */ }

@@ -251,7 +251,7 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
                 type="number"
                 placeholder={prop.examples !== undefined && prop.examples.length > 0 ? `e.g. ${String(prop.examples[0])}` : (prop.description ?? label)}
                 {...field}
-                onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                onChange={(e) => field.onChange(e.target.value === "" ? undefined : parseFloat(e.target.value))}
                 value={typeof field.value === "number" ? field.value : ""}
               />
             </FormControl>

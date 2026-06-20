@@ -214,11 +214,21 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
   // Build a parameterized WHERE fragment.
   // params is mutated in-place — each call appends to the parameter list.
   // Returns SQL fragment like: "schema"."table"."field" = $3
+  function pgArrayType(fieldType: string | undefined): string {
+    switch (fieldType) {
+      case "number": return "numeric[]";
+      case "boolean": return "boolean[]";
+      case "date": return "timestamptz[]";
+      default: return "text[]";
+    }
+  }
+
   function buildWhereFragment(
     schemaName: string,
     tableSlug: string,
     clauses: WhereClause[],
     params: unknown[],
+    fieldTypes?: Map<string, string>,
   ): string {
     if (clauses.length === 0) return "";
 
@@ -255,13 +265,14 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
           return `${qField} LIKE $${params.length}`;
         }
         case "in": {
-          // IN ($N) with a PostgreSQL array — cast to text[] for simplicity
           params.push(clause.value);
-          return `${qField} = ANY($${params.length}::text[])`;
+          const inCast = pgArrayType(fieldTypes?.get(clause.field));
+          return `${qField} = ANY($${params.length}::${inCast})`;
         }
         case "not_in": {
           params.push(clause.value);
-          return `NOT (${qField} = ANY($${params.length}::text[]))`;
+          const notInCast = pgArrayType(fieldTypes?.get(clause.field));
+          return `NOT (${qField} = ANY($${params.length}::${notInCast}))`;
         }
         case "is_null":
           return `${qField} IS NULL`;
@@ -283,6 +294,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     schemaName: string,
     tableSlug: string,
     query: StructuredQuery,
+    fieldTypes?: Map<string, string>,
   ): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
 
@@ -297,7 +309,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     let sql = `SELECT ${selectClause} FROM ${qTable}`;
 
     // WHERE
-    const whereFragment = buildWhereFragment(schemaName, tableSlug, query.where ?? [], params);
+    const whereFragment = buildWhereFragment(schemaName, tableSlug, query.where ?? [], params, fieldTypes);
     if (whereFragment) {
       sql += ` WHERE ${whereFragment}`;
     }
@@ -310,7 +322,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
       sql += ` GROUP BY ${groupCols}`;
 
       // HAVING (only meaningful with GROUP BY)
-      const havingFragment = buildWhereFragment(schemaName, tableSlug, query.having ?? [], params);
+      const havingFragment = buildWhereFragment(schemaName, tableSlug, query.having ?? [], params, fieldTypes);
       if (havingFragment) {
         sql += ` HAVING ${havingFragment}`;
       }
@@ -343,13 +355,14 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     schemaName: string,
     tableSlug: string,
     query: StructuredQuery,
+    fieldTypes?: Map<string, string>,
   ): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
     const qTable = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(tableSlug)}`;
 
     let sql = `SELECT COUNT(*) AS total FROM ${qTable}`;
 
-    const whereFragment = buildWhereFragment(schemaName, tableSlug, query.where ?? [], params);
+    const whereFragment = buildWhereFragment(schemaName, tableSlug, query.where ?? [], params, fieldTypes);
     if (whereFragment) {
       sql += ` WHERE ${whereFragment}`;
     }
@@ -403,8 +416,8 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
         );
       }
 
-      const { sql, params } = buildSelectSql(schemaName, tableSlug, query);
-      const { sql: countSql, params: countParams } = buildCountSql(schemaName, tableSlug, query);
+      const { sql, params } = buildSelectSql(schemaName, tableSlug, query, fieldTypes);
+      const { sql: countSql, params: countParams } = buildCountSql(schemaName, tableSlug, query, fieldTypes);
 
       const client = await db.connect();
       try {

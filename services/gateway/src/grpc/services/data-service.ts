@@ -28,6 +28,7 @@ import type {
 } from "@oneplatform/sdk/grpc-types";
 import type { DataServiceImpl } from "@oneplatform/sdk/grpc-types";
 import { UnauthorizedError, NotFoundError } from "@oneplatform/core";
+import type { RpcContext } from "../service-registry.js";
 
 // ---------------------------------------------------------------------------
 // Dependency injection interface — keeps the implementation testable without
@@ -85,14 +86,30 @@ async function expectJson<T>(response: Response, context: string): Promise<T> {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createDataService(deps: DataServiceDeps): DataServiceImpl {
+// The return type intentionally omits `DataServiceImpl` because handler signatures
+// include the `ctx: RpcContext` second argument required by the gateway dispatcher.
+// The registry registration in index.ts casts via `as unknown as Record<string, RpcHandler>`
+// so the SDK interface contract is advisory, not enforced at the call site.
+export function createDataService(deps: DataServiceDeps) {
   const { ingestionServiceUrl, serviceToken } = deps;
   const headers = buildHeaders(serviceToken);
 
-  async function GetEntity(request: GetEntityRequest): Promise<Entity> {
+  // Verify the tenant ID in the request body matches the JWT-verified tenant.
+  // This prevents a caller from accessing another tenant's data by crafting
+  // a request body with a different tenantId than their authenticated identity.
+  function assertTenantMatch(requestTenantId: string, ctx: RpcContext, method: string): void {
+    if (requestTenantId !== ctx.tenantId) {
+      throw new UnauthorizedError(
+        `${method}: request tenantId does not match authenticated identity`,
+      );
+    }
+  }
+
+  async function GetEntity(request: GetEntityRequest, ctx: RpcContext): Promise<Entity> {
     if (!request.entityType || !request.id || !request.tenantId) {
       throw new Error("GetEntity: entityType, id, and tenantId are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "GetEntity");
 
     const url = `${ingestionServiceUrl}/api/v1/data/${encodeURIComponent(request.entityType)}/${encodeURIComponent(request.id)}`;
     const response = await fetch(url, {
@@ -108,10 +125,12 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
 
   async function ListEntities(
     request: ListEntitiesRequest,
+    ctx: RpcContext,
   ): Promise<ListEntitiesResponse> {
     if (!request.entityType || !request.tenantId) {
       throw new Error("ListEntities: entityType and tenantId are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "ListEntities");
 
     const params = new URLSearchParams();
     if (request.pageSize > 0) params.set("pageSize", String(request.pageSize));
@@ -130,10 +149,11 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
     return expectJson<ListEntitiesResponse>(response, "ListEntities");
   }
 
-  async function CreateEntity(request: CreateEntityRequest): Promise<Entity> {
+  async function CreateEntity(request: CreateEntityRequest, ctx: RpcContext): Promise<Entity> {
     if (!request.entityType || !request.tenantId || !request.dataJson) {
       throw new Error("CreateEntity: entityType, tenantId, and dataJson are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "CreateEntity");
 
     let parsedData: unknown;
     try {
@@ -155,10 +175,11 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
     return expectJson<Entity>(response, "CreateEntity");
   }
 
-  async function UpdateEntity(request: UpdateEntityRequest): Promise<Entity> {
+  async function UpdateEntity(request: UpdateEntityRequest, ctx: RpcContext): Promise<Entity> {
     if (!request.entityType || !request.id || !request.tenantId || !request.dataJson) {
       throw new Error("UpdateEntity: entityType, id, tenantId, and dataJson are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "UpdateEntity");
 
     let parsedData: unknown;
     try {
@@ -182,10 +203,12 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
 
   async function DeleteEntity(
     request: DeleteEntityRequest,
+    ctx: RpcContext,
   ): Promise<DeleteEntityResponse> {
     if (!request.entityType || !request.id || !request.tenantId) {
       throw new Error("DeleteEntity: entityType, id, and tenantId are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "DeleteEntity");
 
     const url = `${ingestionServiceUrl}/api/v1/data/${encodeURIComponent(request.entityType)}/${encodeURIComponent(request.id)}`;
     const response = await fetch(url, {
@@ -208,10 +231,12 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
 
   async function* StreamEntities(
     request: StreamEntitiesRequest,
+    ctx: RpcContext,
   ): AsyncIterable<Entity> {
     if (!request.entityType || !request.tenantId) {
       throw new Error("StreamEntities: entityType and tenantId are required");
     }
+    assertTenantMatch(request.tenantId, ctx, "StreamEntities");
 
     const pageSize = 100;
     const limit = request.limit > 0 ? request.limit : Infinity;
@@ -250,6 +275,7 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
 
   async function BulkIngest(
     stream: AsyncIterable<IngestRecord>,
+    ctx: RpcContext,
   ): Promise<BulkIngestResponse> {
     const records: IngestRecord[] = [];
     for await (const record of stream) {
@@ -271,6 +297,7 @@ export function createDataService(deps: DataServiceDeps): DataServiceImpl {
     if (!connectorId || !tenantId) {
       throw new Error("BulkIngest: each IngestRecord must include connectorId and tenantId");
     }
+    assertTenantMatch(tenantId, ctx, "BulkIngest");
 
     const errors: IngestError[] = [];
     let accepted = 0;

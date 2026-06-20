@@ -21,11 +21,11 @@ export const MAX_VERSIONS_PER_APP = 100;
 // ---------------------------------------------------------------------------
 
 export interface AppVersionService {
-  createVersion(appId: string, userId: string, message?: string): Promise<AppVersionRow>;
-  listVersions(appId: string, options: ListVersionsInput): Promise<ListVersionsResult>;
-  getVersion(appId: string, versionNumber: number): Promise<AppVersionRow>;
-  restoreVersion(appId: string, versionNumber: number, userId: string): Promise<RestoreResult>;
-  diffVersions(appId: string, fromVersion: number, toVersion: number): Promise<SnapshotDiff>;
+  createVersion(appId: string, userId: string, message?: string, tenantId?: string): Promise<AppVersionRow>;
+  listVersions(appId: string, options: ListVersionsInput, tenantId?: string): Promise<ListVersionsResult>;
+  getVersion(appId: string, versionNumber: number, tenantId?: string): Promise<AppVersionRow>;
+  restoreVersion(appId: string, versionNumber: number, userId: string, tenantId?: string): Promise<RestoreResult>;
+  diffVersions(appId: string, fromVersion: number, toVersion: number, tenantId?: string): Promise<SnapshotDiff>;
 }
 
 export interface ListVersionsInput {
@@ -60,8 +60,10 @@ export interface AppVersionServiceDeps {
 export function createAppVersionService(deps: AppVersionServiceDeps): AppVersionService {
   const { appVersionRepo, fileRepo, appRepo, logger } = deps;
 
-  async function assertAppExists(appId: string): Promise<void> {
-    const app = await appRepo.findById(appId);
+  async function assertAppExists(appId: string, tenantId?: string): Promise<void> {
+    const app = tenantId
+      ? await appRepo.findByTenantAndId(tenantId, appId)
+      : await appRepo.findById(appId);
     if (app === null) {
       throw new AppNotFoundError(`App "${appId}" not found.`, { appId });
     }
@@ -80,9 +82,10 @@ export function createAppVersionService(deps: AppVersionServiceDeps): AppVersion
   async function createVersion(
     appId: string,
     userId: string,
-    message?: string
+    message?: string,
+    tenantId?: string
   ): Promise<AppVersionRow> {
-    await assertAppExists(appId);
+    await assertAppExists(appId, tenantId);
 
     const snapshot = await snapshotCurrentFiles(appId);
 
@@ -111,9 +114,10 @@ export function createAppVersionService(deps: AppVersionServiceDeps): AppVersion
 
   async function listVersions(
     appId: string,
-    options: ListVersionsInput
+    options: ListVersionsInput,
+    tenantId?: string
   ): Promise<ListVersionsResult> {
-    await assertAppExists(appId);
+    await assertAppExists(appId, tenantId);
 
     const [versions, total] = await Promise.all([
       appVersionRepo.listByApp(appId, {
@@ -132,8 +136,8 @@ export function createAppVersionService(deps: AppVersionServiceDeps): AppVersion
     return { versions, nextCursor, total };
   }
 
-  async function getVersion(appId: string, versionNumber: number): Promise<AppVersionRow> {
-    await assertAppExists(appId);
+  async function getVersion(appId: string, versionNumber: number, tenantId?: string): Promise<AppVersionRow> {
+    await assertAppExists(appId, tenantId);
 
     const version = await appVersionRepo.findByAppAndVersion(appId, versionNumber);
     if (version === null) {
@@ -148,9 +152,10 @@ export function createAppVersionService(deps: AppVersionServiceDeps): AppVersion
   async function restoreVersion(
     appId: string,
     versionNumber: number,
-    userId: string
+    userId: string,
+    tenantId?: string
   ): Promise<RestoreResult> {
-    await assertAppExists(appId);
+    await assertAppExists(appId, tenantId);
 
     const targetVersion = await appVersionRepo.findByAppAndVersion(appId, versionNumber);
     if (targetVersion === null) {
@@ -207,9 +212,10 @@ export function createAppVersionService(deps: AppVersionServiceDeps): AppVersion
   async function diffVersions(
     appId: string,
     fromVersion: number,
-    toVersion: number
+    toVersion: number,
+    tenantId?: string
   ): Promise<SnapshotDiff> {
-    await assertAppExists(appId);
+    await assertAppExists(appId, tenantId);
 
     const [from, to] = await Promise.all([
       appVersionRepo.findByAppAndVersion(appId, fromVersion),

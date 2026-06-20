@@ -1,4 +1,4 @@
-import { Worker, Queue } from "bullmq";
+import { Worker } from "bullmq";
 import { z } from "zod";
 import type { AuditEventRepository } from "../repositories/index.js";
 
@@ -43,20 +43,6 @@ export class AuditService {
   startAuditWorker(redisUrl: string): Worker {
     const concurrency = getWorkerConcurrency();
     const connection = { url: redisUrl };
-
-    // Set retry defaults on the Queue so that jobs added by any producer
-    // inherit exponential backoff. 5 attempts gives ~62 s of total backoff
-    // before the job lands in the failed DLQ set.
-    const queue = new Queue("audit", {
-      connection,
-      defaultJobOptions: {
-        attempts: 5,
-        backoff: { type: "exponential", delay: 2_000 },
-      },
-    });
-    // The queue instance is created only to register default job options;
-    // close it immediately so it does not hold a Redis connection open.
-    queue.close().catch(() => {});
 
     const worker = new Worker<unknown>(
       "audit",

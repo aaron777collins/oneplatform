@@ -28,6 +28,7 @@ function makeClient(overrides: Partial<UnixSocketClient> = {}): UnixSocketClient
     connect: vi.fn().mockResolvedValue(undefined),
     send: vi.fn(),
     onLogLine: vi.fn(),
+    onContextCall: vi.fn(),
     ping: vi.fn().mockResolvedValue({ pong: true, runCount: 0 }),
     drain: vi.fn().mockResolvedValue({ drainedCount: 0, timedOutCount: 0 }),
     close: vi.fn(),

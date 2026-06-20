@@ -344,8 +344,10 @@ export function isOriginAllowed(requestOrigin: string, allowedOrigins: string[])
     if (pattern === requestHostname) return true;
 
     if (pattern.startsWith("*.")) {
-      const suffix = pattern.slice(1);  // ".example.com"
-      if (requestHostname.endsWith(suffix)) return true;
+      const domain = pattern.slice(2);
+      if (requestHostname.endsWith(`.${domain}`) && requestHostname.length > domain.length + 1) {
+        return true;
+      }
     }
   }
   return false;

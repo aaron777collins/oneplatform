@@ -120,7 +120,7 @@ function isValidationMoreRestrictive(
   const existingMap = new Map(existing.map((r) => [r.type, r]));
   for (const rule of updated) {
     const prev = existingMap.get(rule.type);
-    if (!prev) continue;
+    if (!prev) return true;
 
     switch (rule.type) {
       case "minLength":

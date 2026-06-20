@@ -87,6 +87,29 @@ interface DockerCreateBody {
   StdinOnce: boolean;
 }
 
+function decodeChunkedBody(raw: string): string {
+  const parts: string[] = [];
+  let remaining = raw;
+
+  while (remaining.length > 0) {
+    const lineEnd = remaining.indexOf("\r\n");
+    if (lineEnd === -1) break;
+
+    const sizeStr = remaining.slice(0, lineEnd).trim();
+    const chunkSize = parseInt(sizeStr, 16);
+    if (isNaN(chunkSize) || chunkSize === 0) break;
+
+    const chunkStart = lineEnd + 2;
+    const chunkEnd = chunkStart + chunkSize;
+    if (chunkEnd > remaining.length) break;
+
+    parts.push(remaining.slice(chunkStart, chunkEnd));
+    remaining = remaining.slice(chunkEnd + 2);
+  }
+
+  return parts.join("");
+}
+
 function dockerRequest(
   socketPath: string,
   method: string,
@@ -133,6 +156,11 @@ function dockerRequest(
           const match = /HTTP\/1\.\d (\d{3})/.exec(statusLine);
           statusCode = match?.[1] !== undefined ? parseInt(match[1], 10) : 0;
           headerParsed = true;
+
+          const isChunked = headerSection.toLowerCase().includes("transfer-encoding: chunked");
+          if (isChunked) {
+            responseBody = decodeChunkedBody(responseBody);
+          }
         }
       }
       resolve({ status: statusCode, body: responseBody });
@@ -249,10 +277,16 @@ async function waitForDockerContainer(socketPath: string, containerId: string): 
 export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRouter {
   const {
     sandboxManager,
-    contextCallHandler,
+    contextCallHandler: _contextCallHandler,
     logger,
     dockerSocketPath = process.env["OP_DOCKER_SOCKET_PATH"] ?? "/var/run/docker-proxy.sock",
   } = deps;
+
+  // contextCallHandler is passed via deps for dependency-injection purposes but
+  // context call dispatch is handled at the ExecutionService level (not here)
+  // so the sandbox client's onContextCall callback can use the shared activeExecutionContexts
+  // map that tracks in-flight execution contexts across all dispatch paths.
+  void _contextCallHandler;
 
   // ---------------------------------------------------------------------------
   // JS/TS via isolated-vm (op-sandbox-vm Unix socket)

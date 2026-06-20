@@ -154,11 +154,11 @@ export const ${entrypoint}: Connector = {
   metadata(): ConnectorMetadata {
     return {
       type: "connector",
-      id: "${opts.id}",
-      name: "${opts.name}",
+      id: "${escapeJsString(opts.id)}",
+      name: "${escapeJsString(opts.name)}",
       description: "A OnePlatform connector plugin",
       version: "0.1.0",
-      author: "${opts.author}",
+      author: "${escapeJsString(opts.author)}",
       category: "other",
       configSchema: {
         type: "object",
@@ -236,11 +236,11 @@ export const ${entrypoint}: Transformer = {
   metadata(): TransformerMetadata {
     return {
       type: "transformer",
-      id: "${opts.id}",
-      name: "${opts.name}",
+      id: "${escapeJsString(opts.id)}",
+      name: "${escapeJsString(opts.name)}",
       description: "A OnePlatform transformer plugin",
       version: "0.1.0",
-      author: "${opts.author}",
+      author: "${escapeJsString(opts.author)}",
       configSchema: { type: "object", properties: {} },
       idempotent: true,
     };
@@ -277,11 +277,11 @@ export const ${entrypoint}: Destination = {
   metadata(): DestinationMetadata {
     return {
       type: "destination",
-      id: "${opts.id}",
-      name: "${opts.name}",
+      id: "${escapeJsString(opts.id)}",
+      name: "${escapeJsString(opts.name)}",
       description: "A OnePlatform destination plugin",
       version: "0.1.0",
-      author: "${opts.author}",
+      author: "${escapeJsString(opts.author)}",
       configSchema: {
         type: "object",
         required: ["endpointUrl"],
@@ -332,11 +332,11 @@ export const ${entrypoint}: AuthProvider = {
   metadata(): AuthProviderMetadata {
     return {
       type: "auth-provider",
-      id: "${opts.id}",
-      name: "${opts.name}",
+      id: "${escapeJsString(opts.id)}",
+      name: "${escapeJsString(opts.name)}",
       description: "A OnePlatform auth provider plugin",
       version: "0.1.0",
-      author: "${opts.author}",
+      author: "${escapeJsString(opts.author)}",
       configSchema: {
         type: "object",
         required: ["clientId"],
@@ -429,11 +429,11 @@ export const ${entrypoint}: Widget = {
   metadata(): WidgetMetadata {
     return {
       type: "widget",
-      id: "${opts.id}",
-      name: "${opts.name}",
+      id: "${escapeJsString(opts.id)}",
+      name: "${escapeJsString(opts.name)}",
       description: "A OnePlatform widget plugin",
       version: "0.1.0",
-      author: "${opts.author}",
+      author: "${escapeJsString(opts.author)}",
       configSchema: { type: "object", properties: {} },
       minWidth: 3,
       minHeight: 2,
@@ -445,7 +445,7 @@ export const ${entrypoint}: Widget = {
     // Escape all user-controlled values before inserting them into HTML to
     // prevent XSS. Even though the platform applies server-side sanitization,
     // escaping at the source is the correct defence-in-depth pattern.
-    const title = escapeHtml(String(data.config["title"] ?? "${opts.name}"));
+    const title = escapeHtml(String(data.config["title"] ?? "${escapeJsString(opts.name)}"));
     const userId = escapeHtml(String(data.user.id));
     return \`<!DOCTYPE html>
 <html lang="en">
@@ -498,7 +498,7 @@ describe("${entrypoint}", () => {
   it("returns valid connector metadata", () => {
     const meta = ${entrypoint}.metadata();
     expect(meta.type).toBe("connector");
-    expect(meta.id).toBe("${opts.id}");
+    expect(meta.id).toBe("${escapeJsString(opts.id)}");
     expect(meta.supportsIncremental).toBeDefined();
   });
 
@@ -547,7 +547,7 @@ describe("${entrypoint}", () => {
   it("returns valid transformer metadata", () => {
     const meta = ${entrypoint}.metadata();
     expect(meta.type).toBe("transformer");
-    expect(meta.id).toBe("${opts.id}");
+    expect(meta.id).toBe("${escapeJsString(opts.id)}");
     expect(meta.idempotent).toBeDefined();
   });
 
@@ -584,7 +584,7 @@ describe("${entrypoint}", () => {
   it("returns valid destination metadata", () => {
     const meta = ${entrypoint}.metadata();
     expect(meta.type).toBe("destination");
-    expect(meta.id).toBe("${opts.id}");
+    expect(meta.id).toBe("${escapeJsString(opts.id)}");
     expect(meta.deliveryGuarantee).toBeDefined();
   });
 
@@ -619,7 +619,7 @@ describe("${entrypoint}", () => {
   it("returns valid auth-provider metadata", () => {
     const meta = ${entrypoint}.metadata();
     expect(meta.type).toBe("auth-provider");
-    expect(meta.id).toBe("${opts.id}");
+    expect(meta.id).toBe("${escapeJsString(opts.id)}");
     expect(meta.protocol).toBeDefined();
   });
 
@@ -655,7 +655,7 @@ describe("${entrypoint}", () => {
   it("returns valid widget metadata", () => {
     const meta = ${entrypoint}.metadata();
     expect(meta.type).toBe("widget");
-    expect(meta.id).toBe("${opts.id}");
+    expect(meta.id).toBe("${escapeJsString(opts.id)}");
     expect(meta.minWidth).toBeGreaterThan(0);
     expect(meta.minHeight).toBeGreaterThan(0);
   });
@@ -834,6 +834,10 @@ export function generateScaffold(opts: ScaffoldOptions): ScaffoldResult {
 // ────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ────────────────────────────────────────────────────────────────────────────
+
+function escapeJsString(value: string): string {
+  return JSON.stringify(value).slice(1, -1);
+}
 
 function toPascalCase(input: string): string {
   return input

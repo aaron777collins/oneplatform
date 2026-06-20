@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/bundle.js",
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --target=es2022 --format=esm --outfile=dist/bundle.js --external:@oneplatform/plugin-sdk",
     "test": "vitest run"
