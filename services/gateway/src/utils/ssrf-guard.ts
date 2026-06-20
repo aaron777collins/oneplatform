@@ -104,12 +104,14 @@ export function isBlockedIpRange(ip: string): boolean {
  *
  * Blocked patterns:
  * - "localhost" (exact match, case-insensitive)
+ * - "0.0.0.0"  (resolves to localhost on Linux)
  * - "*.local"   (mDNS names used on Docker/LAN networks)
  * - "*-service" (Docker Compose internal service names, e.g. auth-service)
  */
 export function isBlockedHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (lower === "localhost") return true;
+  if (lower === "0.0.0.0") return true;
   if (lower.endsWith(".local")) return true;
   if (lower.endsWith("-service")) return true;
   return false;
