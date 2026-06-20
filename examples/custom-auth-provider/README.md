@@ -273,10 +273,12 @@ expect(ctx.logger.__logs).toContainEqual(
 Run the plugin in development mode with hot reload:
 
 ```bash
-npx op plugin dev
+op plugin dev --watch
 ```
 
-This starts a local dev server that simulates the platform's plugin runtime and provides a test UI for triggering auth flows.
+This starts a local dev server that simulates the platform's plugin lifecycle
+(`metadata() → connect() → fetchBatch() → disconnect()`), watches for source
+changes, and reloads automatically. No running platform instance is required.
 
 ### Debugging
 
