@@ -1,0 +1,30 @@
+{
+  "event_id": "evt_inv_2024_09_15_307",
+  "event_type": "inventory.update",
+  "timestamp": "2024-09-15T16:45:12.019Z",
+  "source": "warehouse-management",
+  "data": {
+    "sku": "LAPTOP-PRO-15",
+    "warehouse_id": "WH-PDX-01",
+    "product_name": "ProBook Laptop 15-inch",
+    "previous_quantity": 142,
+    "quantity_change": -1,
+    "new_quantity": 141,
+    "reason": "order_fulfilled",
+    "reference_id": "ORD-2024-78432",
+    "lot_number": "LOT-2024Q3-0891",
+    "location": {
+      "aisle": "B",
+      "rack": "12",
+      "shelf": "3",
+      "bin": "B12-3-07"
+    },
+    "reorder_threshold": 50,
+    "is_below_threshold": false,
+    "supplier": {
+      "id": "SUP-TECHCORP-001",
+      "name": "TechCorp Manufacturing",
+      "lead_time_days": 14
+    }
+  }
+}

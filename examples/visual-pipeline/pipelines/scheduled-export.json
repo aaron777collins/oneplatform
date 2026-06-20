@@ -1,0 +1,99 @@
+{
+  "name": "scheduled-export",
+  "description": "Run a SQL query every day at 02:00 UTC and export the results as a compressed CSV to an S3 bucket.",
+  "version": "1.0.0",
+  "schedule": "0 2 * * *",
+  "onError": "pause",
+  "steps": [
+    {
+      "id": "pg-query",
+      "type": "source/postgresql",
+      "label": "PostgreSQL Query",
+      "config": {
+        "connectionString": "{{ env.DATABASE_URL }}",
+        "query": "SELECT o.id AS order_id, o.order_number, c.name AS customer_name, c.email AS customer_email, o.total_cents, o.currency, o.status, o.shipping_method, o.shipped_at, o.created_at AS order_date FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.created_at >= '{{ yesterday }}T00:00:00Z' AND o.created_at < '{{ today }}T00:00:00Z' ORDER BY o.created_at ASC",
+        "params": [],
+        "fetchSize": 5000,
+        "timeout": 120000
+      },
+      "position": { "x": 80, "y": 200 }
+    },
+    {
+      "id": "csv-formatter",
+      "type": "transform/format-csv",
+      "label": "Format as CSV",
+      "config": {
+        "delimiter": ",",
+        "includeHeader": true,
+        "quoteAll": false,
+        "quoteChar": "\"",
+        "escapeChar": "\\",
+        "lineEnding": "\n",
+        "columns": [
+          { "name": "order_id", "header": "Order ID" },
+          { "name": "order_number", "header": "Order Number" },
+          { "name": "customer_name", "header": "Customer Name" },
+          { "name": "customer_email", "header": "Customer Email" },
+          { "name": "total_cents", "header": "Total (Cents)" },
+          { "name": "currency", "header": "Currency" },
+          { "name": "status", "header": "Status" },
+          { "name": "shipping_method", "header": "Shipping Method" },
+          { "name": "shipped_at", "header": "Shipped At" },
+          { "name": "order_date", "header": "Order Date" }
+        ],
+        "nullValue": ""
+      },
+      "position": { "x": 360, "y": 200 }
+    },
+    {
+      "id": "gzip-compress",
+      "type": "transform/compress",
+      "label": "Compress (gzip)",
+      "config": {
+        "algorithm": "gzip",
+        "level": 6
+      },
+      "position": { "x": 640, "y": 200 }
+    },
+    {
+      "id": "s3-upload",
+      "type": "destination/s3",
+      "label": "S3 Bucket Upload",
+      "config": {
+        "bucket": "acme-exports",
+        "key": "orders/{{ date }}.csv.gz",
+        "region": "us-east-1",
+        "credentials": {
+          "type": "iam-role",
+          "roleArn": "{{ env.AWS_EXPORT_ROLE_ARN }}"
+        },
+        "contentType": "text/csv",
+        "contentEncoding": "gzip",
+        "storageClass": "STANDARD_IA",
+        "tags": {
+          "pipeline": "scheduled-export",
+          "data-type": "orders",
+          "retention": "90-days"
+        },
+        "serverSideEncryption": "aws:kms",
+        "sseKmsKeyId": "{{ env.AWS_KMS_KEY_ID }}"
+      },
+      "position": { "x": 920, "y": 200 }
+    }
+  ],
+  "connections": [
+    { "from": "pg-query", "to": "csv-formatter", "port": "output" },
+    { "from": "csv-formatter", "to": "gzip-compress", "port": "output" },
+    { "from": "gzip-compress", "to": "s3-upload", "port": "output" }
+  ],
+  "metadata": {
+    "canvas": {
+      "zoom": 1.0,
+      "panX": 0,
+      "panY": 0
+    },
+    "createdAt": "2025-11-15T12:00:00Z",
+    "updatedAt": "2025-11-15T12:00:00Z",
+    "author": "platform-examples"
+  }
+}

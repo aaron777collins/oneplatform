@@ -1,0 +1,40 @@
+[
+  {
+    "id": "tenant_acme_001",
+    "name": "Acme Corp",
+    "slug": "acme-corp",
+    "description": "Global manufacturing and distribution company. Demonstrates multi-department data integration with high-volume ingestion pipelines.",
+    "plan": "enterprise",
+    "settings": {
+      "timezone": "America/New_York",
+      "locale": "en-US",
+      "maxApiKeys": 50,
+      "maxConnectors": 20,
+      "maxPipelines": 50,
+      "maxApps": 10,
+      "retentionDays": 90,
+      "auditLogEnabled": true,
+      "sandboxMemoryLimitMb": 512
+    },
+    "contactEmail": "platform-admin@acmecorp.example.com"
+  },
+  {
+    "id": "tenant_widget_002",
+    "name": "Widget Co",
+    "slug": "widget-co",
+    "description": "Mid-size e-commerce company. Demonstrates real-time event processing, customer analytics, and lightweight app hosting.",
+    "plan": "professional",
+    "settings": {
+      "timezone": "Europe/London",
+      "locale": "en-GB",
+      "maxApiKeys": 20,
+      "maxConnectors": 10,
+      "maxPipelines": 25,
+      "maxApps": 5,
+      "retentionDays": 30,
+      "auditLogEnabled": true,
+      "sandboxMemoryLimitMb": 256
+    },
+    "contactEmail": "tech-lead@widgetco.example.com"
+  }
+]

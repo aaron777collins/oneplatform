@@ -1,0 +1,175 @@
+{
+  "name": "multi-source-merge",
+  "description": "Pull data from PostgreSQL, a REST API, and a CSV file, normalize schemas, merge on customer_id, and load into a unified customer_360 table.",
+  "version": "1.0.0",
+  "schedule": "0 4 * * *",
+  "onError": "pause",
+  "steps": [
+    {
+      "id": "pg-customers",
+      "type": "source/postgresql",
+      "label": "PostgreSQL (Customers)",
+      "config": {
+        "connectionString": "{{ env.DATABASE_URL }}",
+        "query": "SELECT id AS customer_id, name, email, phone, company, plan, mrr_cents, created_at FROM customers WHERE active = true",
+        "fetchSize": 5000,
+        "timeout": 60000
+      },
+      "position": { "x": 80, "y": 100 }
+    },
+    {
+      "id": "api-orders",
+      "type": "source/rest-api",
+      "label": "REST API (Orders)",
+      "config": {
+        "baseUrl": "https://api.internal.acme.com",
+        "path": "/api/v1/orders",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer {{ env.ORDERS_API_KEY }}",
+          "Accept": "application/json"
+        },
+        "queryParams": {
+          "status": "completed",
+          "limit": 500
+        },
+        "pagination": {
+          "type": "offset",
+          "limitParam": "limit",
+          "offsetParam": "offset",
+          "totalPath": "meta.total"
+        },
+        "rateLimit": {
+          "requestsPerSecond": 10
+        },
+        "timeout": 30000,
+        "retries": 3
+      },
+      "position": { "x": 80, "y": 280 }
+    },
+    {
+      "id": "csv-tickets",
+      "type": "source/csv",
+      "label": "CSV File (Support Tickets)",
+      "config": {
+        "filePath": "/data/imports/support_tickets_2024.csv",
+        "delimiter": ",",
+        "hasHeader": true,
+        "encoding": "utf-8",
+        "skipEmptyLines": true
+      },
+      "position": { "x": 80, "y": 460 }
+    },
+    {
+      "id": "normalize-customers",
+      "type": "transform/normalize",
+      "label": "Normalize Customers",
+      "config": {
+        "outputSchema": {
+          "customer_id": { "type": "string", "from": "customer_id", "cast": "string" },
+          "name": { "type": "string", "from": "name", "transform": "trim" },
+          "email": { "type": "string", "from": "email", "transform": "lowercase" },
+          "phone": { "type": "string", "from": "phone" },
+          "company": { "type": "string", "from": "company" },
+          "plan": { "type": "string", "from": "plan" },
+          "mrr_cents": { "type": "integer", "from": "mrr_cents" },
+          "customer_since": { "type": "datetime", "from": "created_at", "format": "iso8601" }
+        },
+        "streamTag": "customers"
+      },
+      "position": { "x": 360, "y": 100 }
+    },
+    {
+      "id": "normalize-orders",
+      "type": "transform/normalize",
+      "label": "Normalize Orders",
+      "config": {
+        "rootPath": "data",
+        "outputSchema": {
+          "customer_id": { "type": "string", "from": "customer_id", "cast": "string" },
+          "total_orders": { "type": "integer", "aggregate": "count" },
+          "total_revenue_cents": { "type": "integer", "from": "total_cents", "aggregate": "sum" },
+          "last_order_date": { "type": "datetime", "from": "created_at", "aggregate": "max" },
+          "avg_order_value_cents": { "type": "integer", "from": "total_cents", "aggregate": "avg" }
+        },
+        "groupBy": "customer_id",
+        "streamTag": "orders"
+      },
+      "position": { "x": 360, "y": 280 }
+    },
+    {
+      "id": "normalize-tickets",
+      "type": "transform/normalize",
+      "label": "Normalize Tickets",
+      "config": {
+        "outputSchema": {
+          "customer_id": { "type": "string", "from": "Customer ID", "cast": "string" },
+          "total_tickets": { "type": "integer", "aggregate": "count" },
+          "open_tickets": { "type": "integer", "from": "Status", "aggregate": "count_where", "condition": { "operator": "eq", "value": "open" } },
+          "avg_resolution_hours": { "type": "float", "from": "Resolution Hours", "aggregate": "avg" },
+          "last_ticket_date": { "type": "datetime", "from": "Created Date", "aggregate": "max", "format": "YYYY-MM-DD" },
+          "csat_score": { "type": "float", "from": "CSAT Score", "aggregate": "avg" }
+        },
+        "groupBy": "Customer ID",
+        "streamTag": "tickets"
+      },
+      "position": { "x": 360, "y": 460 }
+    },
+    {
+      "id": "merge-join",
+      "type": "transform/merge",
+      "label": "Merge on customer_id",
+      "config": {
+        "joinType": "full_outer",
+        "joinKey": "customer_id",
+        "streams": ["customers", "orders", "tickets"],
+        "conflictResolution": "prefer_first",
+        "nullDefaults": {
+          "total_orders": 0,
+          "total_revenue_cents": 0,
+          "total_tickets": 0,
+          "open_tickets": 0,
+          "avg_resolution_hours": null,
+          "csat_score": null
+        }
+      },
+      "position": { "x": 640, "y": 280 }
+    },
+    {
+      "id": "pg-destination",
+      "type": "destination/postgresql",
+      "label": "PostgreSQL (Unified)",
+      "config": {
+        "connectionString": "{{ env.DATABASE_URL }}",
+        "table": "customer_360",
+        "operation": "upsert",
+        "conflictColumns": ["customer_id"],
+        "batchSize": 500,
+        "preStatement": "CREATE TABLE IF NOT EXISTS customer_360 (customer_id TEXT PRIMARY KEY, name TEXT, email TEXT, phone TEXT, company TEXT, plan TEXT, mrr_cents INTEGER, customer_since TIMESTAMPTZ, total_orders INTEGER DEFAULT 0, total_revenue_cents BIGINT DEFAULT 0, last_order_date TIMESTAMPTZ, avg_order_value_cents INTEGER, total_tickets INTEGER DEFAULT 0, open_tickets INTEGER DEFAULT 0, avg_resolution_hours REAL, last_ticket_date TIMESTAMPTZ, csat_score REAL, updated_at TIMESTAMPTZ DEFAULT NOW())",
+        "setOnUpdate": {
+          "updated_at": "NOW()"
+        }
+      },
+      "position": { "x": 920, "y": 280 }
+    }
+  ],
+  "connections": [
+    { "from": "pg-customers", "to": "normalize-customers", "port": "output" },
+    { "from": "api-orders", "to": "normalize-orders", "port": "output" },
+    { "from": "csv-tickets", "to": "normalize-tickets", "port": "output" },
+    { "from": "normalize-customers", "to": "merge-join", "port": "customers" },
+    { "from": "normalize-orders", "to": "merge-join", "port": "orders" },
+    { "from": "normalize-tickets", "to": "merge-join", "port": "tickets" },
+    { "from": "merge-join", "to": "pg-destination", "port": "output" }
+  ],
+  "metadata": {
+    "canvas": {
+      "zoom": 0.9,
+      "panX": 0,
+      "panY": -40
+    },
+    "createdAt": "2025-11-15T12:30:00Z",
+    "updatedAt": "2025-11-15T12:30:00Z",
+    "author": "platform-examples"
+  }
+}

@@ -1,0 +1,432 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/app-config/v1.json",
+  "template": "crud-admin",
+  "appName": "Customer Admin",
+  "slug": "customer-admin",
+  "description": "Full CRUD admin panel for managing Customer records. Includes a searchable data table, detail side panel, create/edit forms, and bulk operations.",
+  "version": "1.0.0",
+
+  "entity": {
+    "$ref": "../shared/entity-schema.json",
+    "slug": "customer"
+  },
+
+  "theme": {
+    "$ref": "../shared/theme.json"
+  },
+
+  "permissions": {
+    "required": [
+      "entity:read",
+      "entity:create",
+      "entity:update",
+      "entity:delete"
+    ],
+    "roles": {
+      "viewer": ["entity:read"],
+      "editor": ["entity:read", "entity:create", "entity:update"],
+      "admin": ["entity:read", "entity:create", "entity:update", "entity:delete"]
+    }
+  },
+
+  "pages": [
+    {
+      "id": "customer-list",
+      "title": "Customers",
+      "path": "/",
+      "layout": {
+        "rows": [
+          {
+            "id": "header-row",
+            "columns": [
+              {
+                "id": "header-col",
+                "width": 12,
+                "component": {
+                  "type": "PageHeader",
+                  "props": {
+                    "title": "Customers",
+                    "description": "Manage your customer accounts, update contact information, and track lifecycle status.",
+                    "actions": [
+                      {
+                        "label": "Add Customer",
+                        "variant": "primary",
+                        "action": "openCreateForm",
+                        "permission": "entity:create"
+                      },
+                      {
+                        "label": "Export CSV",
+                        "variant": "secondary",
+                        "action": "exportCsv"
+                      }
+                    ],
+                    "breadcrumbs": [
+                      { "label": "Home", "href": "/" },
+                      { "label": "Customers" }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "filters-row",
+            "columns": [
+              {
+                "id": "filters-col",
+                "width": 12,
+                "component": {
+                  "type": "FilterBar",
+                  "props": {
+                    "filters": [
+                      {
+                        "key": "search",
+                        "label": "Search",
+                        "type": "text",
+                        "placeholder": "Search by name, email, or company..."
+                      },
+                      {
+                        "key": "status",
+                        "label": "Status",
+                        "type": "select",
+                        "options": [
+                          { "label": "Active", "value": "active" },
+                          { "label": "Inactive", "value": "inactive" },
+                          { "label": "Lead", "value": "lead" },
+                          { "label": "Churned", "value": "churned" }
+                        ]
+                      },
+                      {
+                        "key": "tier",
+                        "label": "Tier",
+                        "type": "select",
+                        "options": [
+                          { "label": "Free", "value": "free" },
+                          { "label": "Starter", "value": "starter" },
+                          { "label": "Professional", "value": "professional" },
+                          { "label": "Enterprise", "value": "enterprise" }
+                        ]
+                      },
+                      {
+                        "key": "createdAt",
+                        "label": "Created",
+                        "type": "date-range"
+                      }
+                    ]
+                  },
+                  "dataBinding": {
+                    "entityType": "customer",
+                    "fieldMap": {
+                      "search": "firstName,lastName,email,company",
+                      "status": "status",
+                      "tier": "tier",
+                      "createdAt": "createdAt"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "table-row",
+            "columns": [
+              {
+                "id": "table-col",
+                "width": 12,
+                "component": {
+                  "type": "DataTable",
+                  "props": {
+                    "pageSize": 25,
+                    "emptyMessage": "No customers match your filters. Try adjusting your search or add a new customer.",
+                    "aria-label": "Customer records",
+                    "columns": [
+                      {
+                        "key": "firstName",
+                        "header": "Name",
+                        "sortable": true,
+                        "render": "fullName"
+                      },
+                      {
+                        "key": "email",
+                        "header": "Email",
+                        "sortable": true
+                      },
+                      {
+                        "key": "company",
+                        "header": "Company",
+                        "sortable": true
+                      },
+                      {
+                        "key": "status",
+                        "header": "Status",
+                        "sortable": true,
+                        "render": "statusBadge"
+                      },
+                      {
+                        "key": "tier",
+                        "header": "Tier",
+                        "sortable": true,
+                        "render": "tierBadge"
+                      },
+                      {
+                        "key": "totalRevenue",
+                        "header": "Revenue",
+                        "sortable": true,
+                        "render": "currency"
+                      },
+                      {
+                        "key": "createdAt",
+                        "header": "Created",
+                        "sortable": true,
+                        "render": "relativeTime"
+                      }
+                    ],
+                    "rowActions": [
+                      {
+                        "label": "View",
+                        "action": "openDetailPanel"
+                      },
+                      {
+                        "label": "Edit",
+                        "action": "openEditForm",
+                        "permission": "entity:update"
+                      },
+                      {
+                        "label": "Delete",
+                        "action": "confirmDelete",
+                        "permission": "entity:delete",
+                        "variant": "danger"
+                      }
+                    ],
+                    "bulkActions": [
+                      {
+                        "label": "Export Selected",
+                        "action": "exportSelected"
+                      },
+                      {
+                        "label": "Delete Selected",
+                        "action": "bulkDelete",
+                        "permission": "entity:delete",
+                        "variant": "danger",
+                        "confirm": "Are you sure you want to delete the selected customers? This action cannot be undone."
+                      }
+                    ]
+                  },
+                  "dataBinding": {
+                    "entityType": "customer",
+                    "fieldMap": {
+                      "data": "records"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+
+  "detailPanel": {
+    "title": "Customer Details",
+    "titleField": "firstName",
+    "subtitleField": "email",
+    "sections": [
+      {
+        "heading": "Contact Information",
+        "fields": [
+          { "label": "First Name", "key": "firstName" },
+          { "label": "Last Name", "key": "lastName" },
+          { "label": "Email", "key": "email", "format": "link" },
+          { "label": "Phone", "key": "phone" },
+          { "label": "Company", "key": "company" }
+        ]
+      },
+      {
+        "heading": "Account",
+        "fields": [
+          { "label": "Status", "key": "status", "format": "badge" },
+          { "label": "Tier", "key": "tier", "format": "badge" },
+          { "label": "Lifetime Revenue", "key": "totalRevenue", "format": "currency" },
+          { "label": "Tags", "key": "tags", "format": "tagList" }
+        ]
+      },
+      {
+        "heading": "Address",
+        "fields": [
+          { "label": "Street", "key": "address.street" },
+          { "label": "City", "key": "address.city" },
+          { "label": "State", "key": "address.state" },
+          { "label": "Postal Code", "key": "address.postalCode" },
+          { "label": "Country", "key": "address.country" }
+        ]
+      },
+      {
+        "heading": "Metadata",
+        "fields": [
+          { "label": "Notes", "key": "notes" },
+          { "label": "Last Contacted", "key": "lastContactedAt", "format": "date" },
+          { "label": "Created", "key": "createdAt", "format": "date" },
+          { "label": "Updated", "key": "updatedAt", "format": "date" }
+        ]
+      }
+    ]
+  },
+
+  "forms": {
+    "create": {
+      "title": "Add New Customer",
+      "submitLabel": "Create Customer",
+      "sections": [
+        {
+          "heading": "Contact Information",
+          "fields": [
+            {
+              "key": "firstName",
+              "label": "First Name",
+              "type": "text",
+              "required": true,
+              "placeholder": "Jane",
+              "validation": { "minLength": 1, "maxLength": 100 }
+            },
+            {
+              "key": "lastName",
+              "label": "Last Name",
+              "type": "text",
+              "required": true,
+              "placeholder": "Doe",
+              "validation": { "minLength": 1, "maxLength": 100 }
+            },
+            {
+              "key": "email",
+              "label": "Email Address",
+              "type": "email",
+              "required": true,
+              "placeholder": "jane.doe@example.com",
+              "validation": { "format": "email" }
+            },
+            {
+              "key": "phone",
+              "label": "Phone Number",
+              "type": "tel",
+              "required": false,
+              "placeholder": "+1 (415) 555-1234"
+            },
+            {
+              "key": "company",
+              "label": "Company",
+              "type": "text",
+              "required": false,
+              "placeholder": "Acme Corp"
+            }
+          ]
+        },
+        {
+          "heading": "Account Settings",
+          "fields": [
+            {
+              "key": "status",
+              "label": "Status",
+              "type": "select",
+              "required": true,
+              "default": "lead",
+              "options": [
+                { "label": "Lead", "value": "lead" },
+                { "label": "Active", "value": "active" },
+                { "label": "Inactive", "value": "inactive" }
+              ]
+            },
+            {
+              "key": "tier",
+              "label": "Subscription Tier",
+              "type": "select",
+              "required": true,
+              "default": "free",
+              "options": [
+                { "label": "Free", "value": "free" },
+                { "label": "Starter", "value": "starter" },
+                { "label": "Professional", "value": "professional" },
+                { "label": "Enterprise", "value": "enterprise" }
+              ]
+            },
+            {
+              "key": "tags",
+              "label": "Tags",
+              "type": "tagInput",
+              "required": false,
+              "placeholder": "Type a tag and press Enter"
+            }
+          ]
+        },
+        {
+          "heading": "Address (Optional)",
+          "collapsible": true,
+          "collapsed": true,
+          "fields": [
+            {
+              "key": "address.street",
+              "label": "Street Address",
+              "type": "text",
+              "placeholder": "123 Main St"
+            },
+            {
+              "key": "address.city",
+              "label": "City",
+              "type": "text",
+              "placeholder": "San Francisco"
+            },
+            {
+              "key": "address.state",
+              "label": "State / Province",
+              "type": "text",
+              "placeholder": "CA"
+            },
+            {
+              "key": "address.postalCode",
+              "label": "Postal Code",
+              "type": "text",
+              "placeholder": "94105"
+            },
+            {
+              "key": "address.country",
+              "label": "Country",
+              "type": "countrySelect",
+              "placeholder": "United States"
+            }
+          ]
+        },
+        {
+          "heading": "Notes",
+          "fields": [
+            {
+              "key": "notes",
+              "label": "Internal Notes",
+              "type": "textarea",
+              "required": false,
+              "placeholder": "Add any relevant notes about this customer...",
+              "validation": { "maxLength": 5000 }
+            }
+          ]
+        }
+      ]
+    },
+    "edit": {
+      "title": "Edit Customer",
+      "submitLabel": "Save Changes",
+      "inheritFrom": "create"
+    }
+  },
+
+  "query": {
+    "defaultSort": ["-createdAt"],
+    "defaultLimit": 25,
+    "maxLimit": 100,
+    "staleTime": 30000
+  },
+
+  "subscription": {
+    "enabled": true,
+    "events": ["created", "updated", "deleted"],
+    "autoInvalidate": true
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/api-keys-config.json",
+  "_comment": "API key configurations for service-to-service authentication. Create keys via: op auth api-keys create --config configs/api-keys.json",
+
+  "keys": [
+    {
+      "name": "ETL Pipeline Service",
+      "description": "API key for the nightly ETL pipeline that ingests data from the data warehouse. Scoped to data and pipeline operations only.",
+      "scopes": [
+        "data:read",
+        "data:write",
+        "pipelines:read",
+        "pipelines:trigger",
+        "ontology:read",
+        "execution:read",
+        "execution:run"
+      ],
+      "expiresAt": "2027-01-01T00:00:00Z",
+      "rotationPolicy": {
+        "autoRotate": true,
+        "rotationIntervalDays": 90,
+        "notifyBeforeExpiryDays": 14,
+        "notifyEmails": ["data-team@acme-corp.com"]
+      }
+    },
+    {
+      "name": "CI/CD Deployment Service",
+      "description": "API key for the CI/CD pipeline that deploys applications and plugins. Scoped to app deployment and plugin management.",
+      "scopes": [
+        "apps:read",
+        "apps:deploy",
+        "plugins:read",
+        "plugins:manage"
+      ],
+      "expiresAt": "2027-06-01T00:00:00Z",
+      "rotationPolicy": {
+        "autoRotate": true,
+        "rotationIntervalDays": 60,
+        "notifyBeforeExpiryDays": 14,
+        "notifyEmails": ["devops@acme-corp.com"]
+      }
+    },
+    {
+      "name": "Monitoring Dashboard Reader",
+      "description": "Read-only API key for the Grafana monitoring dashboard. Queries execution logs and pipeline status for observability panels.",
+      "scopes": [
+        "data:read",
+        "pipelines:read",
+        "logs:read",
+        "execution:read"
+      ],
+      "expiresAt": "2027-12-31T00:00:00Z",
+      "rotationPolicy": {
+        "autoRotate": false,
+        "notifyBeforeExpiryDays": 30,
+        "notifyEmails": ["sre-team@acme-corp.com"]
+      }
+    },
+    {
+      "name": "Audit Export Service",
+      "description": "API key for exporting audit logs to the enterprise SIEM (Splunk). Scoped to audit and log read/export only.",
+      "scopes": [
+        "audit:read",
+        "logs:read",
+        "logs:export"
+      ],
+      "expiresAt": "2027-06-01T00:00:00Z",
+      "rotationPolicy": {
+        "autoRotate": true,
+        "rotationIntervalDays": 30,
+        "notifyBeforeExpiryDays": 7,
+        "notifyEmails": ["security-ops@acme-corp.com"]
+      }
+    },
+    {
+      "name": "Partner Integration (Globex)",
+      "description": "API key for the Globex partner integration. Limited to reading shared datasets. Tenant-scoped to the Globex tenant.",
+      "scopes": [
+        "data:read",
+        "ontology:read"
+      ],
+      "expiresAt": "2026-12-31T00:00:00Z",
+      "rotationPolicy": {
+        "autoRotate": true,
+        "rotationIntervalDays": 45,
+        "notifyBeforeExpiryDays": 14,
+        "notifyEmails": ["partnerships@acme-corp.com", "it-admin@globex.com"]
+      }
+    }
+  ],
+
+  "keyFormat": {
+    "_comment": "Reference documentation for API key format. Not processed by the CLI.",
+    "prefix": "op_live_",
+    "randomBytes": 32,
+    "encoding": "base64url",
+    "totalLength": 51,
+    "lookupPrefixLength": 8,
+    "hashAlgorithm": "bcrypt",
+    "bcryptRounds": 12
+  },
+
+  "bestPractices": {
+    "_comment": "Security guidelines for API key management. Not processed by the CLI.",
+    "rules": [
+      "Never embed API keys in source code or commit them to version control.",
+      "Store API keys in a secrets manager (Vault, AWS Secrets Manager, etc.).",
+      "Use the minimum required scopes for each key (principle of least privilege).",
+      "Set an expiration date on every key. Prefer shorter lifetimes.",
+      "Rotate keys regularly. Use the autoRotate policy for automated rotation.",
+      "Revoke keys immediately when a service is decommissioned.",
+      "Monitor the lastUsedAt field to detect unused keys for cleanup.",
+      "A user cannot create an API key with scopes they do not possess."
+    ]
+  }
+}

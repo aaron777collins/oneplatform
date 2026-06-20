@@ -1,0 +1,22 @@
+{
+  "name": "@oneplatform/example-webhook-event-processing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example: webhook-based event processing with signature verification, event routing, and pipeline triggers using @oneplatform/sdk",
+  "type": "module",
+  "scripts": {
+    "setup": "npx tsx src/setup.ts",
+    "handler": "npx tsx src/event-handler.ts",
+    "test:events": "bash test/send-events.sh"
+  },
+  "dependencies": {
+    "@oneplatform/sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

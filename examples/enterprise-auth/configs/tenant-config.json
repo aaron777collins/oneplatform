@@ -1,0 +1,116 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/tenant-config.json",
+  "_comment": "Multi-tenant configuration for enterprise deployment. Apply with: op tenant create --config configs/tenant-config.json",
+
+  "tenants": [
+    {
+      "name": "Acme Corporation",
+      "slug": "acme-corp",
+      "settings": {
+        "authProviders": ["keycloak-corporate", "corp-active-directory"],
+        "defaultAuthProvider": "keycloak-corporate",
+        "selfRegistration": false,
+        "requireEmailVerification": true,
+        "defaultRoles": ["viewer"],
+        "allowedEmailDomains": ["acme-corp.com", "acme.io"],
+        "session": {
+          "accessTokenTtlSeconds": 900,
+          "refreshTokenTtlSeconds": 604800,
+          "maxConcurrentSessions": 5,
+          "idleTimeoutSeconds": 1800
+        },
+        "branding": {
+          "appName": "Acme Data Platform",
+          "logoUrl": "https://cdn.acme-corp.com/logos/platform-logo.svg",
+          "faviconUrl": "https://cdn.acme-corp.com/logos/favicon.ico",
+          "primaryColor": "#1A56DB",
+          "accentColor": "#7C3AED",
+          "supportEmail": "platform-support@acme-corp.com"
+        },
+        "security": {
+          "passwordPolicy": {
+            "minLength": 14,
+            "requireUppercase": true,
+            "requireLowercase": true,
+            "requireDigit": true,
+            "requireSpecialChar": true,
+            "preventReuse": 12,
+            "maxAgeInDays": 90
+          },
+          "ipAllowlist": [
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "203.0.113.0/24"
+          ],
+          "mfaRequired": true,
+          "mfaMethods": ["totp", "webauthn"]
+        }
+      }
+    },
+    {
+      "name": "Globex Industries",
+      "slug": "globex",
+      "settings": {
+        "authProviders": ["keycloak-corporate"],
+        "defaultAuthProvider": "keycloak-corporate",
+        "selfRegistration": false,
+        "requireEmailVerification": true,
+        "defaultRoles": ["viewer"],
+        "allowedEmailDomains": ["globex.com"],
+        "session": {
+          "accessTokenTtlSeconds": 600,
+          "refreshTokenTtlSeconds": 86400,
+          "maxConcurrentSessions": 3,
+          "idleTimeoutSeconds": 900
+        },
+        "branding": {
+          "appName": "Globex Analytics Hub",
+          "logoUrl": "https://cdn.globex.com/branding/logo.svg",
+          "faviconUrl": "https://cdn.globex.com/branding/favicon.ico",
+          "primaryColor": "#059669",
+          "accentColor": "#D97706",
+          "supportEmail": "it-support@globex.com"
+        },
+        "security": {
+          "passwordPolicy": {
+            "minLength": 16,
+            "requireUppercase": true,
+            "requireLowercase": true,
+            "requireDigit": true,
+            "requireSpecialChar": true,
+            "preventReuse": 24,
+            "maxAgeInDays": 60
+          },
+          "ipAllowlist": [],
+          "mfaRequired": true,
+          "mfaMethods": ["totp"]
+        }
+      }
+    }
+  ],
+
+  "defaultTenantSettings": {
+    "_comment": "These defaults apply when creating a tenant without explicit settings. Override any field per-tenant.",
+    "selfRegistration": false,
+    "requireEmailVerification": true,
+    "defaultRoles": ["viewer"],
+    "session": {
+      "accessTokenTtlSeconds": 900,
+      "refreshTokenTtlSeconds": 604800,
+      "maxConcurrentSessions": 5,
+      "idleTimeoutSeconds": 1800
+    },
+    "security": {
+      "passwordPolicy": {
+        "minLength": 12,
+        "requireUppercase": true,
+        "requireLowercase": true,
+        "requireDigit": true,
+        "requireSpecialChar": true,
+        "preventReuse": 6,
+        "maxAgeInDays": 180
+      },
+      "mfaRequired": false
+    }
+  }
+}

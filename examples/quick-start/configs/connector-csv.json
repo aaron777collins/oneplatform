@@ -1,0 +1,10 @@
+{
+  "name": "customer-csv-import",
+  "type": "csv",
+  "config": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "encoding": "utf-8",
+    "dateFormat": "YYYY-MM-DD"
+  }
+}

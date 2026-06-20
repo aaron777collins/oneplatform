@@ -1,0 +1,38 @@
+{
+  "event_id": "evt_alrt_2024_09_15_089",
+  "event_type": "alert.triggered",
+  "timestamp": "2024-09-15T22:03:47.556Z",
+  "source": "monitoring-service",
+  "data": {
+    "alert_id": "alrt_cpu_web_prod_01",
+    "severity": "warning",
+    "service": "web-api-production",
+    "message": "CPU utilization exceeded 85% for 5 consecutive minutes on web-api-production cluster",
+    "metric_name": "cpu_utilization_percent",
+    "metric_value": 87.3,
+    "threshold": 85.0,
+    "duration_seconds": 300,
+    "evaluation_window": "5m",
+    "affected_instances": [
+      "web-api-prod-us-east-1a-001",
+      "web-api-prod-us-east-1a-002",
+      "web-api-prod-us-east-1b-001"
+    ],
+    "dashboard_url": "https://monitoring.internal.example.com/d/web-api/overview?from=now-15m",
+    "runbook_url": "https://wiki.internal.example.com/runbooks/web-api-high-cpu",
+    "escalation_policy": "platform-engineering-oncall",
+    "tags": {
+      "environment": "production",
+      "region": "us-east-1",
+      "team": "platform-engineering",
+      "tier": "1"
+    },
+    "previous_alerts": [
+      {
+        "alert_id": "alrt_cpu_web_prod_00",
+        "triggered_at": "2024-09-14T18:22:11.000Z",
+        "resolved_at": "2024-09-14T18:35:42.000Z"
+      }
+    ]
+  }
+}

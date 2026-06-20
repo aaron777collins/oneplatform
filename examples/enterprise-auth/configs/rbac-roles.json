@@ -1,0 +1,161 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/rbac-roles-config.json",
+  "_comment": "Role definitions for OnePlatform RBAC. Apply with: op auth roles import --config configs/rbac-roles.json",
+
+  "roles": [
+    {
+      "name": "platform-admin",
+      "description": "Full platform administrator with unrestricted access across all tenants. Can manage tenants, users, plugins, and all platform configuration.",
+      "isPredefined": true,
+      "permissions": ["admin"],
+      "entityPermissions": [
+        {
+          "entityType": "*",
+          "actions": ["admin"],
+          "fieldRestrictions": { "denyRead": [], "denyWrite": [] },
+          "rowFilter": {}
+        }
+      ]
+    },
+    {
+      "name": "tenant-admin",
+      "description": "Tenant administrator with full access within their own tenant. Can manage users, roles, data sources, pipelines, and apps within the tenant.",
+      "isPredefined": true,
+      "permissions": [
+        "data:read",
+        "data:write",
+        "ontology:read",
+        "ontology:write",
+        "pipelines:read",
+        "pipelines:trigger",
+        "pipelines:manage",
+        "apps:read",
+        "apps:deploy",
+        "apps:manage",
+        "plugins:read",
+        "plugins:manage",
+        "users:read",
+        "users:manage",
+        "logs:read",
+        "logs:export",
+        "audit:read",
+        "webhooks:manage",
+        "execution:read",
+        "execution:run"
+      ],
+      "entityPermissions": [
+        {
+          "entityType": "*",
+          "actions": ["admin"],
+          "fieldRestrictions": { "denyRead": [], "denyWrite": [] },
+          "rowFilter": {}
+        }
+      ]
+    },
+    {
+      "name": "data-engineer",
+      "description": "Data engineer role for building and managing data pipelines, connectors, and ontology definitions. Can read and write data, manage pipelines, and deploy plugins.",
+      "isPredefined": false,
+      "permissions": [
+        "data:read",
+        "data:write",
+        "ontology:read",
+        "ontology:write",
+        "pipelines:read",
+        "pipelines:trigger",
+        "pipelines:manage",
+        "plugins:read",
+        "plugins:manage",
+        "execution:read",
+        "execution:run",
+        "logs:read"
+      ],
+      "entityPermissions": [
+        {
+          "entityType": "*",
+          "actions": ["read", "write", "delete"],
+          "fieldRestrictions": { "denyRead": [], "denyWrite": [] },
+          "rowFilter": {}
+        }
+      ]
+    },
+    {
+      "name": "business-analyst",
+      "description": "Business analyst with read access to data and the ability to build and deploy apps and dashboards. Cannot modify ontology or manage pipelines.",
+      "isPredefined": false,
+      "permissions": [
+        "data:read",
+        "ontology:read",
+        "pipelines:read",
+        "apps:read",
+        "apps:deploy",
+        "apps:manage",
+        "plugins:read",
+        "execution:read",
+        "execution:run",
+        "logs:read"
+      ],
+      "entityPermissions": [
+        {
+          "entityType": "*",
+          "actions": ["read"],
+          "fieldRestrictions": {
+            "denyRead": [],
+            "denyWrite": []
+          },
+          "rowFilter": {}
+        }
+      ]
+    },
+    {
+      "name": "viewer",
+      "description": "Read-only viewer role. Can view data, dashboards, and published apps but cannot modify anything. Suitable for stakeholders and external collaborators.",
+      "isPredefined": false,
+      "permissions": [
+        "data:read",
+        "ontology:read",
+        "pipelines:read",
+        "apps:read",
+        "plugins:read",
+        "execution:read",
+        "logs:read"
+      ],
+      "entityPermissions": [
+        {
+          "entityType": "*",
+          "actions": ["read"],
+          "fieldRestrictions": {
+            "denyRead": ["_internal_notes", "_cost_center", "_salary_band"],
+            "denyWrite": []
+          },
+          "rowFilter": {}
+        }
+      ]
+    }
+  ],
+
+  "scopeDefinitions": {
+    "_comment": "Reference of all available scopes. This is for documentation purposes and is not processed by the import command.",
+    "data:read": "Read entity data (records, objects, time series)",
+    "data:write": "Create, update, and delete entity data",
+    "ontology:read": "View entity type definitions, relationships, and schemas",
+    "ontology:write": "Create and modify entity type definitions",
+    "pipelines:read": "View pipeline definitions and execution history",
+    "pipelines:trigger": "Manually trigger pipeline runs",
+    "pipelines:manage": "Create, edit, and delete pipeline definitions",
+    "apps:read": "View published applications and dashboards",
+    "apps:deploy": "Deploy and publish applications",
+    "apps:manage": "Create, edit, and delete application definitions",
+    "plugins:read": "View installed plugins and their configuration",
+    "plugins:manage": "Install, configure, and remove plugins",
+    "users:read": "View user accounts and role assignments",
+    "users:manage": "Create, update, and deactivate user accounts",
+    "logs:read": "View application and pipeline logs",
+    "logs:export": "Export log data for external analysis",
+    "audit:read": "View audit trail entries",
+    "webhooks:manage": "Create and manage webhook subscriptions",
+    "execution:read": "View sandbox execution results",
+    "execution:run": "Execute code in the sandbox runtime",
+    "admin": "Unrestricted access (platform-admin only)"
+  }
+}

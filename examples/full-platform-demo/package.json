@@ -1,0 +1,26 @@
+{
+  "name": "@oneplatform/example-full-platform-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Full platform demo: seeds tenants, users, connectors, entities, pipelines, and apps",
+  "type": "module",
+  "scripts": {
+    "seed": "npx tsx scripts/seed.ts",
+    "cleanup": "bash scripts/cleanup.sh",
+    "demo:up": "docker compose -f ../../docker/docker-compose.yml -f docker-compose.override.yml up -d",
+    "demo:down": "docker compose -f ../../docker/docker-compose.yml -f docker-compose.override.yml down",
+    "demo:logs": "docker compose -f ../../docker/docker-compose.yml -f docker-compose.override.yml logs -f",
+    "demo:seed": "npm run demo:up && npm run seed",
+    "demo:reset": "npm run cleanup && npm run demo:seed"
+  },
+  "dependencies": {
+    "@oneplatform/sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

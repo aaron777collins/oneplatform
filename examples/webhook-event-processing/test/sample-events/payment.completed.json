@@ -1,0 +1,34 @@
+{
+  "event_id": "evt_pay_2024_09_15_118",
+  "event_type": "payment.completed",
+  "timestamp": "2024-09-15T14:32:45.672Z",
+  "source": "payment-gateway",
+  "data": {
+    "payment_id": "pay_3f8a2c9d7e1b",
+    "order_id": "ORD-2024-78432",
+    "amount": 1717.16,
+    "currency": "USD",
+    "payment_method": "credit_card",
+    "card_brand": "visa",
+    "card_last_four": "4242",
+    "status": "succeeded",
+    "processor_response": {
+      "transaction_id": "txn_ch_3Nk8pQ2eZvKYlo2C0R1D",
+      "authorization_code": "AUTH-88291",
+      "risk_score": 12,
+      "risk_level": "low"
+    },
+    "billing_address": {
+      "street": "742 Evergreen Terrace",
+      "city": "Portland",
+      "state": "OR",
+      "zip": "97201",
+      "country": "US"
+    },
+    "metadata": {
+      "customer_id": "cust_8f3k2j1",
+      "ip_address": "203.0.113.42",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+    }
+  }
+}

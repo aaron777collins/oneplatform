@@ -1,0 +1,208 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/audit-policy-config.json",
+  "_comment": "Audit logging policy configuration. Apply with: op audit policy apply --config configs/audit-policy.json",
+
+  "policy": {
+    "enabled": true,
+    "retentionDays": 365,
+    "immutable": true,
+    "compressionEnabled": true,
+    "encryptionAtRest": true
+  },
+
+  "capturedEvents": {
+    "authentication": {
+      "enabled": true,
+      "events": [
+        "auth.login.success",
+        "auth.login.failure",
+        "auth.logout",
+        "auth.token.refresh",
+        "auth.token.revoked",
+        "auth.password.changed",
+        "auth.password.reset.requested",
+        "auth.password.reset.completed",
+        "auth.email.verified",
+        "auth.mfa.enrolled",
+        "auth.mfa.verified",
+        "auth.mfa.failed",
+        "auth.session.expired",
+        "auth.session.revoked"
+      ],
+      "captureFields": ["userId", "tenantId", "ipAddress", "userAgent", "authProvider", "timestamp"]
+    },
+    "apiKeys": {
+      "enabled": true,
+      "events": [
+        "auth.key.created",
+        "auth.key.revoked",
+        "auth.key.rotated",
+        "auth.key.expired",
+        "auth.key.used"
+      ],
+      "captureFields": ["keyId", "userId", "tenantId", "scopes", "ipAddress", "timestamp"]
+    },
+    "userManagement": {
+      "enabled": true,
+      "events": [
+        "auth.user.created",
+        "auth.user.updated",
+        "auth.user.deactivated",
+        "auth.user.reactivated",
+        "auth.user.deleted",
+        "auth.user.roles.changed",
+        "auth.user.invited"
+      ],
+      "captureFields": ["userId", "targetUserId", "tenantId", "changes", "timestamp"]
+    },
+    "roleManagement": {
+      "enabled": true,
+      "events": [
+        "auth.role.created",
+        "auth.role.updated",
+        "auth.role.deleted",
+        "auth.role.permissions.changed"
+      ],
+      "captureFields": ["roleId", "roleName", "tenantId", "changes", "actorId", "timestamp"]
+    },
+    "tenantManagement": {
+      "enabled": true,
+      "events": [
+        "auth.tenant.created",
+        "auth.tenant.updated",
+        "auth.tenant.deleted",
+        "auth.tenant.settings.changed"
+      ],
+      "captureFields": ["tenantId", "tenantName", "changes", "actorId", "timestamp"]
+    },
+    "dataAccess": {
+      "enabled": true,
+      "events": [
+        "data.entity.read",
+        "data.entity.created",
+        "data.entity.updated",
+        "data.entity.deleted",
+        "data.export.initiated",
+        "data.export.completed"
+      ],
+      "captureFields": ["entityType", "entityId", "userId", "tenantId", "action", "timestamp"],
+      "samplingRate": 1.0
+    },
+    "systemAdmin": {
+      "enabled": true,
+      "events": [
+        "system.plugin.installed",
+        "system.plugin.removed",
+        "system.plugin.configured",
+        "system.pipeline.created",
+        "system.pipeline.deleted",
+        "system.config.changed"
+      ],
+      "captureFields": ["resourceType", "resourceId", "actorId", "tenantId", "changes", "timestamp"]
+    }
+  },
+
+  "export": {
+    "siem": {
+      "enabled": true,
+      "type": "syslog",
+      "endpoint": "syslog+tls://siem.corp.example.com:6514",
+      "format": "CEF",
+      "batchSize": 100,
+      "flushIntervalSeconds": 30,
+      "tlsCertPath": "/etc/oneplatform/certs/siem-client.pem",
+      "tlsKeyPath": "/etc/oneplatform/certs/siem-client-key.pem"
+    },
+    "objectStorage": {
+      "enabled": true,
+      "type": "s3",
+      "bucket": "acme-audit-logs",
+      "region": "us-east-1",
+      "prefix": "oneplatform/audit/",
+      "partitionBy": "day",
+      "format": "json-lines",
+      "compression": "gzip",
+      "credentials": {
+        "source": "env",
+        "accessKeyEnvVar": "AUDIT_S3_ACCESS_KEY",
+        "secretKeyEnvVar": "AUDIT_S3_SECRET_KEY"
+      }
+    }
+  },
+
+  "alerts": [
+    {
+      "name": "Repeated Login Failures",
+      "description": "Alerts when a user has more than 5 failed login attempts within 10 minutes.",
+      "event": "auth.login.failure",
+      "condition": {
+        "countThreshold": 5,
+        "windowMinutes": 10,
+        "groupBy": ["userId", "ipAddress"]
+      },
+      "action": {
+        "type": "webhook",
+        "url": "https://your-webhook-endpoint.example.com/alerts",
+        "severity": "high"
+      }
+    },
+    {
+      "name": "Privileged Role Assignment",
+      "description": "Alerts when platform-admin or tenant-admin roles are assigned to a user.",
+      "event": "auth.user.roles.changed",
+      "condition": {
+        "fieldMatch": {
+          "changes.addedRoles": ["platform-admin", "tenant-admin"]
+        }
+      },
+      "action": {
+        "type": "webhook",
+        "url": "https://your-webhook-endpoint.example.com/alerts",
+        "severity": "critical"
+      }
+    },
+    {
+      "name": "API Key Created with Admin Scope",
+      "description": "Alerts when an API key is created with the admin scope.",
+      "event": "auth.key.created",
+      "condition": {
+        "fieldMatch": {
+          "scopes": ["admin"]
+        }
+      },
+      "action": {
+        "type": "webhook",
+        "url": "https://your-webhook-endpoint.example.com/alerts",
+        "severity": "critical"
+      }
+    },
+    {
+      "name": "Tenant Deleted",
+      "description": "Alerts when a tenant is deleted from the platform.",
+      "event": "auth.tenant.deleted",
+      "condition": {
+        "always": true
+      },
+      "action": {
+        "type": "webhook",
+        "url": "https://your-webhook-endpoint.example.com/alerts",
+        "severity": "critical"
+      }
+    },
+    {
+      "name": "Bulk Data Export",
+      "description": "Alerts when a data export is initiated that exceeds 10,000 records.",
+      "event": "data.export.initiated",
+      "condition": {
+        "fieldMatch": {
+          "recordCount": { "$gte": 10000 }
+        }
+      },
+      "action": {
+        "type": "webhook",
+        "url": "https://your-webhook-endpoint.example.com/alerts",
+        "severity": "medium"
+      }
+    }
+  ]
+}

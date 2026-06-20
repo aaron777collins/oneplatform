@@ -1,0 +1,151 @@
+[
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Customer Sync Pipeline",
+    "description": "Syncs customer records from Salesforce into the Customer entity. Runs every 2 hours via the Salesforce CRM connector schedule. Normalizes Salesforce Account fields to the Customer ontology schema.",
+    "connectorName": "Salesforce CRM",
+    "definition": {
+      "version": 1,
+      "entryStepId": "fetch-accounts",
+      "steps": [
+        {
+          "id": "fetch-accounts",
+          "name": "Fetch Salesforce Accounts",
+          "type": "connector",
+          "connectorRef": "Salesforce CRM",
+          "onError": "fail"
+        },
+        {
+          "id": "normalize-customer",
+          "name": "Map Account to Customer",
+          "type": "code",
+          "inputs": {
+            "records": { "from": "step", "stepId": "fetch-accounts", "path": "records" }
+          },
+          "expression": "records.map(r => ({ sourceId: r.sourceId, data: { customerId: r.data.Id, companyName: r.data.Name, contactEmail: r.data.Email || '', phone: r.data.Phone || null, industry: r.data.Industry || null, annualRevenue: Number(r.data.AnnualRevenue) || null, status: 'active', createdAt: r.data.CreatedDate, updatedAt: r.data.LastModifiedDate } }))",
+          "onError": "fail"
+        },
+        {
+          "id": "write-customers",
+          "name": "Upsert Customer Records",
+          "type": "connector",
+          "entityType": "Customer",
+          "writeMode": "upsert",
+          "inputs": {
+            "records": { "from": "step", "stepId": "normalize-customer", "path": "output" }
+          },
+          "onError": "fail"
+        }
+      ],
+      "options": {
+        "allowConcurrentRuns": false,
+        "retainRunsCount": 50,
+        "stepTimeout": 300
+      }
+    },
+    "isActive": true
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Order ETL Pipeline",
+    "description": "Nightly ETL pipeline that extracts order data from the PostgreSQL warehouse, enriches it with customer information, and loads it into the Order entity store. Joins order records with customer IDs for relational integrity.",
+    "connectorName": "PostgreSQL Warehouse",
+    "definition": {
+      "version": 1,
+      "entryStepId": "extract-orders",
+      "steps": [
+        {
+          "id": "extract-orders",
+          "name": "Extract from Warehouse",
+          "type": "connector",
+          "connectorRef": "PostgreSQL Warehouse",
+          "onError": "fail"
+        },
+        {
+          "id": "transform-orders",
+          "name": "Normalize Order Fields",
+          "type": "code",
+          "inputs": {
+            "records": { "from": "step", "stepId": "extract-orders", "path": "records" }
+          },
+          "expression": "records.map(r => ({ sourceId: r.sourceId, data: { orderId: r.data.order_number || r.sourceId, customerId: r.data.customer_account_id, totalAmount: Number(r.data.total_amount_cents) / 100, currency: r.data.currency_code || 'USD', status: r.data.fulfillment_status || 'pending', itemCount: Number(r.data.line_item_count) || 0, shippingAddress: [r.data.ship_street, r.data.ship_city, r.data.ship_state, r.data.ship_zip, r.data.ship_country].filter(Boolean).join(', '), orderedAt: r.data.created_at, updatedAt: r.data.updated_at } }))",
+          "onError": "fail"
+        },
+        {
+          "id": "validate-orders",
+          "name": "Filter Invalid Records",
+          "type": "code",
+          "inputs": {
+            "records": { "from": "step", "stepId": "transform-orders", "path": "output" }
+          },
+          "expression": "records.filter(r => r.data.orderId && r.data.customerId && r.data.totalAmount > 0)",
+          "onError": "skip"
+        },
+        {
+          "id": "load-orders",
+          "name": "Load into Order Store",
+          "type": "connector",
+          "entityType": "Order",
+          "writeMode": "upsert",
+          "inputs": {
+            "records": { "from": "step", "stepId": "validate-orders", "path": "output" }
+          },
+          "onError": "fail"
+        }
+      ],
+      "options": {
+        "allowConcurrentRuns": false,
+        "retainRunsCount": 90,
+        "stepTimeout": 600
+      }
+    },
+    "isActive": true
+  },
+  {
+    "tenantSlug": "widget-co",
+    "name": "Stripe Event Processor",
+    "description": "Real-time event processing pipeline for Stripe webhooks. Receives payment events, classifies them by type, and writes structured records into the Event entity store for analytics and alerting.",
+    "connectorName": "Stripe Payments Webhook",
+    "definition": {
+      "version": 1,
+      "entryStepId": "receive-events",
+      "steps": [
+        {
+          "id": "receive-events",
+          "name": "Receive Stripe Webhook Events",
+          "type": "connector",
+          "connectorRef": "Stripe Payments Webhook",
+          "onError": "fail"
+        },
+        {
+          "id": "classify-event",
+          "name": "Classify and Normalize Event",
+          "type": "code",
+          "inputs": {
+            "records": { "from": "step", "stepId": "receive-events", "path": "records" }
+          },
+          "expression": "records.map(r => { const evt = r.data; const eventType = evt.type.includes('refund') ? 'refund' : evt.type.includes('succeeded') ? 'purchase' : evt.type.includes('failed') ? 'payment_failed' : evt.type.includes('subscription') ? 'subscription_change' : 'other'; return { sourceId: evt.id, data: { eventId: evt.id, eventType: eventType, customerId: evt.data?.object?.customer || null, sessionId: evt.request?.idempotency_key || evt.id, properties: JSON.stringify({ stripeEventType: evt.type, amount: evt.data?.object?.amount, currency: evt.data?.object?.currency, paymentMethodType: evt.data?.object?.payment_method_types?.[0] }), source: 'webhook', occurredAt: new Date(evt.created * 1000).toISOString() } }; })",
+          "onError": "fail"
+        },
+        {
+          "id": "store-events",
+          "name": "Write to Event Store",
+          "type": "connector",
+          "entityType": "Event",
+          "writeMode": "upsert",
+          "inputs": {
+            "records": { "from": "step", "stepId": "classify-event", "path": "output" }
+          },
+          "onError": "fail"
+        }
+      ],
+      "options": {
+        "allowConcurrentRuns": true,
+        "maxConcurrentRuns": 5,
+        "retainRunsCount": 200,
+        "stepTimeout": 30
+      }
+    },
+    "isActive": true
+  }
+]

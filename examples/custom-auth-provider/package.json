@@ -1,0 +1,25 @@
+{
+  "name": "@oneplatform/example-saml-auth-provider",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example: a custom SAML 2.0 auth provider plugin implementing @oneplatform/plugin-sdk",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "validate": "op plugin validate manifest.json",
+    "dev": "op plugin dev"
+  },
+  "dependencies": {
+    "@oneplatform/plugin-sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@oneplatform/cli": "^0.1.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

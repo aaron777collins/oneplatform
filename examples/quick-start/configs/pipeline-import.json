@@ -1,0 +1,11 @@
+{
+  "name": "Import Customers from API",
+  "description": "Fetches customer data from the REST API and stores it in the Customer entity",
+  "trigger": { "type": "manual" },
+  "steps": [
+    { "id": "fetch", "type": "connector-read", "connector": "jsonplaceholder-api", "config": { "endpoint": "/users" } },
+    { "id": "transform", "type": "field-map", "config": { "mappings": [{ "source": "id", "target": "id" }, { "source": "name", "target": "name" }, { "source": "email", "target": "email" }, { "source": "company.name", "target": "company" }] } },
+    { "id": "store", "type": "entity-write", "entity": "customer", "config": { "mode": "upsert", "matchFields": ["id"] } }
+  ],
+  "connections": [{ "from": "fetch", "to": "transform" }, { "from": "transform", "to": "store" }]
+}

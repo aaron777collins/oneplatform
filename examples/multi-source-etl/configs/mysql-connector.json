@@ -1,0 +1,7 @@
+{
+  "proxyUrl": "https://db-proxy.internal.example.com/mysql",
+  "database": "retail_ops",
+  "table": "product_catalog",
+  "incrementalColumn": "last_modified",
+  "batchSize": 1000
+}

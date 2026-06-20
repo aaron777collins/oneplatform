@@ -1,0 +1,59 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/webhook-receiver.json",
+  "receiver": {
+    "name": "External Events Receiver",
+    "description": "Receives webhook events from external systems (e-commerce, payment providers, monitoring) and routes them into OnePlatform pipelines for processing.",
+    "pathSuffix": "external-events",
+    "isEnabled": true,
+    "hmacAlgorithm": "sha256",
+    "headerName": "X-Webhook-Signature",
+    "eventTypes": [
+      "order.created",
+      "user.signup",
+      "payment.completed",
+      "inventory.update",
+      "alert.triggered"
+    ]
+  },
+  "signature": {
+    "algorithm": "HMAC-SHA256",
+    "encoding": "hex",
+    "headerPrefix": "sha256=",
+    "timestampTolerance": 300,
+    "timestampHeader": "X-Webhook-Timestamp"
+  },
+  "delivery": {
+    "timeout": 30000,
+    "retryPolicy": {
+      "maxAttempts": 5,
+      "backoff": "exponential",
+      "initialDelay": 1000,
+      "maxDelay": 60000
+    }
+  },
+  "routing": {
+    "defaultPipeline": "webhook-event-pipeline",
+    "eventRoutes": {
+      "order.created": {
+        "pipeline": "webhook-event-pipeline",
+        "priority": "high"
+      },
+      "user.signup": {
+        "pipeline": "webhook-event-pipeline",
+        "priority": "normal"
+      },
+      "payment.completed": {
+        "pipeline": "webhook-event-pipeline",
+        "priority": "high"
+      },
+      "inventory.update": {
+        "pipeline": "webhook-event-pipeline",
+        "priority": "low"
+      },
+      "alert.triggered": {
+        "pipeline": "webhook-event-pipeline",
+        "priority": "critical"
+      }
+    }
+  }
+}

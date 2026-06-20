@@ -1,0 +1,44 @@
+[
+  {
+    "tenantSlug": "acme-corp",
+    "email": "admin@acmecorp.example.com",
+    "displayName": "Sarah Chen",
+    "roles": ["admin", "ontology:write", "connectors:write", "pipelines:write", "apps:write"]
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "email": "data-eng@acmecorp.example.com",
+    "displayName": "Marcus Rivera",
+    "roles": ["connectors:write", "pipelines:write", "ontology:read", "data:read"]
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "email": "analyst@acmecorp.example.com",
+    "displayName": "Priya Sharma",
+    "roles": ["data:read", "apps:read", "logs:read"]
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "email": "developer@acmecorp.example.com",
+    "displayName": "James O'Brien",
+    "roles": ["apps:write", "data:read", "ontology:read", "pipelines:read"]
+  },
+  {
+    "tenantSlug": "widget-co",
+    "email": "admin@widgetco.example.com",
+    "displayName": "Alex Kim",
+    "roles": ["admin", "ontology:write", "connectors:write", "pipelines:write", "apps:write"]
+  },
+  {
+    "tenantSlug": "widget-co",
+    "email": "ops@widgetco.example.com",
+    "displayName": "Jordan Taylor",
+    "roles": ["connectors:write", "pipelines:write", "logs:read", "data:read"]
+  },
+  {
+    "tenantSlug": "widget-co",
+    "email": "viewer@widgetco.example.com",
+    "displayName": "Casey Morgan",
+    "roles": ["data:read", "apps:read"]
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "proxyUrl": "https://db-proxy.internal.example.com/postgres",
+  "table": "orders",
+  "schema": "ecommerce",
+  "primaryKey": "order_id",
+  "incrementalColumn": "updated_at",
+  "batchSize": 2000
+}

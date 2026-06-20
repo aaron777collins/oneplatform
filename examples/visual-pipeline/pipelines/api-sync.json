@@ -1,0 +1,119 @@
+{
+  "name": "api-sync",
+  "description": "Pull contacts from an external REST API, deduplicate, and upsert into PostgreSQL on a recurring schedule.",
+  "version": "1.0.0",
+  "schedule": "*/15 * * * *",
+  "onError": "skip",
+  "steps": [
+    {
+      "id": "rest-source",
+      "type": "source/rest-api",
+      "label": "REST API Source",
+      "config": {
+        "baseUrl": "https://api.hubspot.com",
+        "path": "/crm/v3/objects/contacts",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer {{ env.HUBSPOT_API_KEY }}",
+          "Content-Type": "application/json"
+        },
+        "queryParams": {
+          "limit": 100,
+          "properties": "firstname,lastname,email,company,phone,lifecyclestage,hs_lead_status",
+          "archived": false
+        },
+        "pagination": {
+          "type": "cursor",
+          "cursorPath": "paging.next.after",
+          "cursorParam": "after",
+          "hasMorePath": "paging.next.after"
+        },
+        "rateLimit": {
+          "requestsPerSecond": 5
+        },
+        "timeout": 30000,
+        "retries": 3
+      },
+      "position": { "x": 80, "y": 200 }
+    },
+    {
+      "id": "flatten-transform",
+      "type": "transform/flatten",
+      "label": "Paginate & Flatten",
+      "config": {
+        "rootPath": "results",
+        "mappings": [
+          { "source": "id", "target": "external_id", "type": "string" },
+          { "source": "properties.firstname", "target": "first_name", "type": "string" },
+          { "source": "properties.lastname", "target": "last_name", "type": "string" },
+          { "source": "properties.email", "target": "email", "type": "string" },
+          { "source": "properties.company", "target": "company", "type": "string" },
+          { "source": "properties.phone", "target": "phone", "type": "string" },
+          { "source": "properties.lifecyclestage", "target": "lifecycle_stage", "type": "string" },
+          { "source": "properties.hs_lead_status", "target": "lead_status", "type": "string" },
+          { "source": "createdAt", "target": "source_created_at", "type": "datetime" },
+          { "source": "updatedAt", "target": "source_updated_at", "type": "datetime" }
+        ]
+      },
+      "position": { "x": 360, "y": 200 }
+    },
+    {
+      "id": "dedup",
+      "type": "transform/deduplicate",
+      "label": "Deduplicate by ID",
+      "config": {
+        "key": "external_id",
+        "strategy": "keep_latest",
+        "sortBy": "source_updated_at",
+        "sortOrder": "desc",
+        "windowSize": 10000
+      },
+      "position": { "x": 640, "y": 200 }
+    },
+    {
+      "id": "pg-upsert",
+      "type": "destination/postgresql",
+      "label": "PostgreSQL Upsert",
+      "config": {
+        "connectionString": "{{ env.DATABASE_URL }}",
+        "table": "crm_contacts",
+        "operation": "upsert",
+        "conflictColumns": ["external_id"],
+        "batchSize": 250,
+        "onConflictUpdate": [
+          "first_name",
+          "last_name",
+          "email",
+          "company",
+          "phone",
+          "lifecycle_stage",
+          "lead_status",
+          "source_updated_at"
+        ],
+        "setOnInsert": {
+          "synced_at": "NOW()",
+          "created_at": "NOW()"
+        },
+        "setOnUpdate": {
+          "synced_at": "NOW()"
+        }
+      },
+      "position": { "x": 920, "y": 200 }
+    }
+  ],
+  "connections": [
+    { "from": "rest-source", "to": "flatten-transform", "port": "output" },
+    { "from": "flatten-transform", "to": "dedup", "port": "output" },
+    { "from": "dedup", "to": "pg-upsert", "port": "output" }
+  ],
+  "metadata": {
+    "canvas": {
+      "zoom": 1.0,
+      "panX": 0,
+      "panY": 0
+    },
+    "createdAt": "2025-11-15T11:00:00Z",
+    "updatedAt": "2025-11-15T11:00:00Z",
+    "author": "platform-examples"
+  }
+}

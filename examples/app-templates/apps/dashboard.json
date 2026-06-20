@@ -1,0 +1,381 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/app-config/v1.json",
+  "template": "dashboard",
+  "appName": "Customer Dashboard",
+  "slug": "customer-dashboard",
+  "description": "Analytics dashboard with KPI cards, charts, and date filters for monitoring customer metrics and revenue trends.",
+  "version": "1.0.0",
+
+  "entity": {
+    "$ref": "../shared/entity-schema.json",
+    "slug": "customer"
+  },
+
+  "theme": {
+    "$ref": "../shared/theme.json"
+  },
+
+  "permissions": {
+    "required": ["entity:read"],
+    "roles": {
+      "viewer": ["entity:read"],
+      "editor": ["entity:read"],
+      "admin": ["entity:read"]
+    }
+  },
+
+  "pages": [
+    {
+      "id": "dashboard-home",
+      "title": "Dashboard",
+      "path": "/",
+      "refreshInterval": 60000,
+      "layout": {
+        "rows": [
+          {
+            "id": "header-row",
+            "columns": [
+              {
+                "id": "header-col",
+                "width": 8,
+                "component": {
+                  "type": "PageHeader",
+                  "props": {
+                    "title": "Dashboard",
+                    "description": "Key performance indicators and trends across your customer base."
+                  }
+                }
+              },
+              {
+                "id": "date-filter-col",
+                "width": 4,
+                "component": {
+                  "type": "DateRangeFilter",
+                  "props": {
+                    "presets": [
+                      { "label": "Last 7 days", "value": "7d" },
+                      { "label": "Last 30 days", "value": "30d" },
+                      { "label": "Last 90 days", "value": "90d" },
+                      { "label": "Last 12 months", "value": "12m" },
+                      { "label": "Year to date", "value": "ytd" },
+                      { "label": "Custom", "value": "custom" }
+                    ],
+                    "default": "30d",
+                    "broadcastTo": ["kpi-cards", "revenue-chart", "tier-chart", "status-chart", "activity-table"]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "kpi-row",
+            "columns": [
+              {
+                "id": "kpi-total-customers",
+                "width": 3,
+                "component": {
+                  "type": "KPICard",
+                  "props": {
+                    "title": "Total Customers",
+                    "icon": "users",
+                    "format": "number",
+                    "trend": true,
+                    "trendLabel": "vs. previous period",
+                    "color": "primary"
+                  },
+                  "dataBinding": {
+                    "id": "kpi-cards",
+                    "entityType": "customer",
+                    "query": {
+                      "aggregate": "count",
+                      "field": "id"
+                    }
+                  }
+                }
+              },
+              {
+                "id": "kpi-mrr",
+                "width": 3,
+                "component": {
+                  "type": "KPICard",
+                  "props": {
+                    "title": "Monthly Recurring Revenue",
+                    "icon": "dollar-sign",
+                    "format": "currency",
+                    "currencyUnit": "cents",
+                    "trend": true,
+                    "trendLabel": "vs. previous period",
+                    "color": "success"
+                  },
+                  "dataBinding": {
+                    "id": "kpi-cards",
+                    "entityType": "customer",
+                    "query": {
+                      "aggregate": "sum",
+                      "field": "totalRevenue",
+                      "filter": { "status": "active" }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "kpi-active",
+                "width": 3,
+                "component": {
+                  "type": "KPICard",
+                  "props": {
+                    "title": "Active Subscriptions",
+                    "icon": "check-circle",
+                    "format": "number",
+                    "trend": true,
+                    "trendLabel": "vs. previous period",
+                    "color": "secondary"
+                  },
+                  "dataBinding": {
+                    "id": "kpi-cards",
+                    "entityType": "customer",
+                    "query": {
+                      "aggregate": "count",
+                      "field": "id",
+                      "filter": { "status": "active" }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "kpi-churn",
+                "width": 3,
+                "component": {
+                  "type": "KPICard",
+                  "props": {
+                    "title": "Churn Rate",
+                    "icon": "trending-down",
+                    "format": "percent",
+                    "decimals": 1,
+                    "trend": true,
+                    "trendInverted": true,
+                    "trendLabel": "vs. previous period",
+                    "color": "danger"
+                  },
+                  "dataBinding": {
+                    "id": "kpi-cards",
+                    "entityType": "customer",
+                    "query": {
+                      "type": "ratio",
+                      "numerator": {
+                        "aggregate": "count",
+                        "filter": { "status": "churned" }
+                      },
+                      "denominator": {
+                        "aggregate": "count"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "charts-row-1",
+            "columns": [
+              {
+                "id": "revenue-chart-col",
+                "width": 8,
+                "component": {
+                  "type": "LineChart",
+                  "props": {
+                    "title": "Revenue Over Time",
+                    "height": 360,
+                    "xAxis": {
+                      "field": "month",
+                      "label": "Month",
+                      "format": "MMM YYYY"
+                    },
+                    "yAxis": {
+                      "label": "Revenue (USD)",
+                      "format": "currency",
+                      "currencyUnit": "cents"
+                    },
+                    "series": [
+                      {
+                        "name": "Revenue",
+                        "field": "totalRevenue",
+                        "color": "#2563eb",
+                        "fill": true,
+                        "fillOpacity": 0.1
+                      }
+                    ],
+                    "tooltip": true,
+                    "legend": false
+                  },
+                  "dataBinding": {
+                    "id": "revenue-chart",
+                    "entityType": "customer",
+                    "query": {
+                      "type": "timeseries",
+                      "aggregate": "sum",
+                      "field": "totalRevenue",
+                      "interval": "month",
+                      "dateField": "createdAt",
+                      "periods": 12
+                    }
+                  }
+                }
+              },
+              {
+                "id": "tier-chart-col",
+                "width": 4,
+                "component": {
+                  "type": "BarChart",
+                  "props": {
+                    "title": "Customers by Tier",
+                    "height": 360,
+                    "orientation": "horizontal",
+                    "xAxis": {
+                      "label": "Count"
+                    },
+                    "yAxis": {
+                      "field": "tier",
+                      "label": "Tier"
+                    },
+                    "series": [
+                      {
+                        "name": "Customers",
+                        "field": "count",
+                        "colors": {
+                          "free": "#94a3b8",
+                          "starter": "#38bdf8",
+                          "professional": "#2563eb",
+                          "enterprise": "#7c3aed"
+                        }
+                      }
+                    ],
+                    "tooltip": true
+                  },
+                  "dataBinding": {
+                    "id": "tier-chart",
+                    "entityType": "customer",
+                    "query": {
+                      "type": "group",
+                      "aggregate": "count",
+                      "groupBy": "tier",
+                      "sort": {
+                        "field": "count",
+                        "direction": "desc"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "charts-row-2",
+            "columns": [
+              {
+                "id": "status-chart-col",
+                "width": 4,
+                "component": {
+                  "type": "PieChart",
+                  "props": {
+                    "title": "Customer Status Distribution",
+                    "height": 320,
+                    "field": "count",
+                    "labelField": "status",
+                    "colors": {
+                      "active": "#16a34a",
+                      "inactive": "#94a3b8",
+                      "lead": "#2563eb",
+                      "churned": "#dc2626"
+                    },
+                    "showLabels": true,
+                    "showPercentage": true,
+                    "innerRadius": 60,
+                    "tooltip": true
+                  },
+                  "dataBinding": {
+                    "id": "status-chart",
+                    "entityType": "customer",
+                    "query": {
+                      "type": "group",
+                      "aggregate": "count",
+                      "groupBy": "status"
+                    }
+                  }
+                }
+              },
+              {
+                "id": "activity-col",
+                "width": 8,
+                "component": {
+                  "type": "DataTable",
+                  "props": {
+                    "title": "Recent Activity",
+                    "pageSize": 10,
+                    "compact": true,
+                    "showPagination": false,
+                    "emptyMessage": "No recent activity.",
+                    "columns": [
+                      {
+                        "key": "firstName",
+                        "header": "Customer",
+                        "render": "fullName"
+                      },
+                      {
+                        "key": "email",
+                        "header": "Email"
+                      },
+                      {
+                        "key": "tier",
+                        "header": "Tier",
+                        "render": "tierBadge"
+                      },
+                      {
+                        "key": "status",
+                        "header": "Status",
+                        "render": "statusBadge"
+                      },
+                      {
+                        "key": "updatedAt",
+                        "header": "Last Updated",
+                        "render": "relativeTime"
+                      }
+                    ],
+                    "rowActions": [
+                      {
+                        "label": "View",
+                        "action": "navigate",
+                        "target": "/customer-admin/{{ row.id }}"
+                      }
+                    ]
+                  },
+                  "dataBinding": {
+                    "id": "activity-table",
+                    "entityType": "customer",
+                    "query": {
+                      "sort": ["-updatedAt"],
+                      "limit": 10
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+
+  "query": {
+    "defaultSort": ["-updatedAt"],
+    "defaultLimit": 100,
+    "maxLimit": 1000,
+    "staleTime": 60000
+  },
+
+  "subscription": {
+    "enabled": true,
+    "events": ["created", "updated", "deleted"],
+    "autoInvalidate": true
+  }
+}

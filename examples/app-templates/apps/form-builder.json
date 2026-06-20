@@ -1,0 +1,353 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/app-config/v1.json",
+  "template": "form-builder",
+  "appName": "Customer Onboarding",
+  "slug": "customer-onboarding",
+  "description": "Multi-step onboarding form with field validation, conditional logic, auto-save, and a review step before submission.",
+  "version": "1.0.0",
+
+  "entity": {
+    "$ref": "../shared/entity-schema.json",
+    "slug": "customer"
+  },
+
+  "theme": {
+    "$ref": "../shared/theme.json"
+  },
+
+  "permissions": {
+    "required": ["entity:create"],
+    "roles": {
+      "editor": ["entity:create"],
+      "admin": ["entity:create"]
+    }
+  },
+
+  "pages": [
+    {
+      "id": "onboarding-form",
+      "title": "New Customer",
+      "path": "/",
+      "layout": {
+        "rows": [
+          {
+            "id": "header-row",
+            "columns": [
+              {
+                "id": "header-col",
+                "width": 12,
+                "component": {
+                  "type": "PageHeader",
+                  "props": {
+                    "title": "Customer Onboarding",
+                    "description": "Complete the form below to add a new customer to the system. All fields marked with * are required.",
+                    "breadcrumbs": [
+                      { "label": "Home", "href": "/" },
+                      { "label": "Customers", "href": "/customer-admin" },
+                      { "label": "New Customer" }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "form-row",
+            "columns": [
+              {
+                "id": "form-col",
+                "width": 8,
+                "offset": 2,
+                "component": {
+                  "type": "MultiStepForm",
+                  "props": {
+                    "autoSave": true,
+                    "autoSaveKey": "customer-onboarding-draft",
+                    "autoSaveInterval": 5000,
+                    "showProgressBar": true,
+                    "showStepNumbers": true,
+                    "allowStepNavigation": false,
+                    "submitAction": "createEntity",
+                    "submitLabel": "Create Customer",
+                    "steps": [
+                      {
+                        "id": "contact-info",
+                        "title": "Contact Information",
+                        "description": "Basic contact details for the customer.",
+                        "fields": [
+                          {
+                            "key": "firstName",
+                            "label": "First Name",
+                            "type": "text",
+                            "required": true,
+                            "placeholder": "Jane",
+                            "validation": {
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "errorMessage": "First name is required and must be under 100 characters."
+                            },
+                            "width": "half"
+                          },
+                          {
+                            "key": "lastName",
+                            "label": "Last Name",
+                            "type": "text",
+                            "required": true,
+                            "placeholder": "Doe",
+                            "validation": {
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "errorMessage": "Last name is required and must be under 100 characters."
+                            },
+                            "width": "half"
+                          },
+                          {
+                            "key": "email",
+                            "label": "Email Address",
+                            "type": "email",
+                            "required": true,
+                            "placeholder": "jane.doe@acme-corp.com",
+                            "helperText": "Must be unique. We will send a welcome email to this address.",
+                            "validation": {
+                              "format": "email",
+                              "unique": true,
+                              "uniqueScope": "customer.email",
+                              "errorMessage": "Please enter a valid email address that is not already in use."
+                            }
+                          },
+                          {
+                            "key": "phone",
+                            "label": "Phone Number",
+                            "type": "tel",
+                            "required": false,
+                            "placeholder": "+1 (415) 555-1234",
+                            "helperText": "Include country code for international numbers.",
+                            "validation": {
+                              "pattern": "^\\+?[0-9\\-\\s()]{7,20}$",
+                              "errorMessage": "Please enter a valid phone number."
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "company-details",
+                        "title": "Company Details",
+                        "description": "Organization and business information.",
+                        "fields": [
+                          {
+                            "key": "company",
+                            "label": "Company Name",
+                            "type": "text",
+                            "required": false,
+                            "placeholder": "Acme Corp",
+                            "validation": {
+                              "maxLength": 200
+                            }
+                          },
+                          {
+                            "key": "address.street",
+                            "label": "Street Address",
+                            "type": "text",
+                            "required": false,
+                            "placeholder": "350 Fifth Avenue"
+                          },
+                          {
+                            "key": "address.city",
+                            "label": "City",
+                            "type": "text",
+                            "required": false,
+                            "placeholder": "New York",
+                            "width": "third"
+                          },
+                          {
+                            "key": "address.state",
+                            "label": "State / Province",
+                            "type": "text",
+                            "required": false,
+                            "placeholder": "NY",
+                            "width": "third"
+                          },
+                          {
+                            "key": "address.postalCode",
+                            "label": "Postal Code",
+                            "type": "text",
+                            "required": false,
+                            "placeholder": "10118",
+                            "width": "third"
+                          },
+                          {
+                            "key": "address.country",
+                            "label": "Country",
+                            "type": "countrySelect",
+                            "required": false,
+                            "default": "US"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "preferences",
+                        "title": "Preferences",
+                        "description": "Subscription and tagging preferences.",
+                        "fields": [
+                          {
+                            "key": "tier",
+                            "label": "Subscription Tier",
+                            "type": "select",
+                            "required": true,
+                            "default": "free",
+                            "options": [
+                              { "label": "Free", "value": "free" },
+                              { "label": "Starter -- $29/mo", "value": "starter" },
+                              { "label": "Professional -- $99/mo", "value": "professional" },
+                              { "label": "Enterprise -- Custom pricing", "value": "enterprise" }
+                            ]
+                          },
+                          {
+                            "key": "status",
+                            "label": "Initial Status",
+                            "type": "radio",
+                            "required": true,
+                            "default": "lead",
+                            "options": [
+                              { "label": "Lead -- not yet converted", "value": "lead" },
+                              { "label": "Active -- paying customer", "value": "active" }
+                            ]
+                          },
+                          {
+                            "key": "tags",
+                            "label": "Tags",
+                            "type": "tagInput",
+                            "required": false,
+                            "placeholder": "Type a tag and press Enter...",
+                            "helperText": "Add labels like 'vip', 'beta-tester', or 'partner'.",
+                            "suggestions": ["vip", "beta-tester", "partner", "referral", "enterprise-pilot", "self-serve"]
+                          },
+                          {
+                            "key": "referralSource",
+                            "label": "How did they hear about us?",
+                            "type": "select",
+                            "required": false,
+                            "options": [
+                              { "label": "Search engine", "value": "search" },
+                              { "label": "Social media", "value": "social" },
+                              { "label": "Referral", "value": "referral" },
+                              { "label": "Conference / event", "value": "event" },
+                              { "label": "Other", "value": "other" }
+                            ]
+                          },
+                          {
+                            "key": "referralSourceOther",
+                            "label": "Please specify",
+                            "type": "text",
+                            "required": false,
+                            "placeholder": "How did they find us?",
+                            "conditional": {
+                              "field": "referralSource",
+                              "operator": "eq",
+                              "value": "other"
+                            }
+                          },
+                          {
+                            "key": "notes",
+                            "label": "Internal Notes",
+                            "type": "textarea",
+                            "required": false,
+                            "placeholder": "Any additional context about this customer...",
+                            "validation": {
+                              "maxLength": 5000
+                            },
+                            "rows": 4
+                          }
+                        ]
+                      },
+                      {
+                        "id": "review",
+                        "title": "Review & Submit",
+                        "description": "Please review the information below before submitting.",
+                        "type": "review",
+                        "reviewSections": [
+                          {
+                            "heading": "Contact Information",
+                            "stepRef": "contact-info",
+                            "fields": ["firstName", "lastName", "email", "phone"]
+                          },
+                          {
+                            "heading": "Company Details",
+                            "stepRef": "company-details",
+                            "fields": ["company", "address.street", "address.city", "address.state", "address.postalCode", "address.country"]
+                          },
+                          {
+                            "heading": "Preferences",
+                            "stepRef": "preferences",
+                            "fields": ["tier", "status", "tags", "referralSource", "notes"]
+                          }
+                        ],
+                        "editAction": "goToStep"
+                      }
+                    ]
+                  },
+                  "dataBinding": {
+                    "entityType": "customer",
+                    "operation": "create"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "success-page",
+      "title": "Customer Created",
+      "path": "/success",
+      "layout": {
+        "rows": [
+          {
+            "id": "success-row",
+            "columns": [
+              {
+                "id": "success-col",
+                "width": 6,
+                "offset": 3,
+                "component": {
+                  "type": "SuccessMessage",
+                  "props": {
+                    "icon": "check-circle",
+                    "title": "Customer Created Successfully",
+                    "message": "The new customer record has been added to the system. A welcome email has been sent to their address.",
+                    "actions": [
+                      {
+                        "label": "View Customer",
+                        "variant": "primary",
+                        "action": "navigate",
+                        "target": "/customer-admin/{{ entity.id }}"
+                      },
+                      {
+                        "label": "Add Another",
+                        "variant": "secondary",
+                        "action": "navigate",
+                        "target": "/customer-onboarding"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+
+  "query": {
+    "defaultSort": ["-createdAt"],
+    "defaultLimit": 25,
+    "maxLimit": 100,
+    "staleTime": 30000
+  },
+
+  "subscription": {
+    "enabled": false
+  }
+}

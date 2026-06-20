@@ -1,0 +1,78 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/branding/v1.json",
+  "branding": {
+    "appName": "Acme CRM",
+    "logoUrl": "/assets/branding/acme-logo.svg",
+    "faviconUrl": "/assets/branding/acme-favicon.png",
+    "supportEmail": "support@acme-corp.example.com",
+    "primaryColor": "#2563eb",
+    "accentColor": "#7c3aed",
+    "customCss": null
+  },
+  "colors": {
+    "background": "#ffffff",
+    "foreground": "#111827",
+    "muted": "#f3f4f6",
+    "mutedForeground": "#6b7280",
+    "border": "#e5e7eb",
+    "ring": "#2563eb",
+    "primary": "#2563eb",
+    "primaryForeground": "#ffffff",
+    "secondary": "#7c3aed",
+    "secondaryForeground": "#ffffff",
+    "success": "#16a34a",
+    "successBackground": "#dcfce7",
+    "warning": "#d97706",
+    "warningBackground": "#fef3c7",
+    "danger": "#dc2626",
+    "dangerBackground": "#fee2e2"
+  },
+  "typography": {
+    "fontFamily": "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+    "fontFamilyMono": "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+    "baseFontSize": "16px",
+    "headings": {
+      "h1": { "fontSize": "1.875rem", "fontWeight": 700, "lineHeight": 1.2 },
+      "h2": { "fontSize": "1.5rem", "fontWeight": 600, "lineHeight": 1.3 },
+      "h3": { "fontSize": "1.25rem", "fontWeight": 600, "lineHeight": 1.4 },
+      "h4": { "fontSize": "1rem", "fontWeight": 600, "lineHeight": 1.5 }
+    }
+  },
+  "spacing": {
+    "page": "24px",
+    "section": "32px",
+    "card": "20px",
+    "compact": "12px"
+  },
+  "borderRadius": {
+    "small": "4px",
+    "medium": "6px",
+    "large": "8px",
+    "full": "9999px"
+  },
+  "shadows": {
+    "card": "0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)",
+    "dropdown": "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)",
+    "modal": "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)"
+  },
+  "darkMode": {
+    "colors": {
+      "background": "#111827",
+      "foreground": "#f9fafb",
+      "muted": "#1f2937",
+      "mutedForeground": "#9ca3af",
+      "border": "#374151",
+      "ring": "#3b82f6",
+      "primary": "#3b82f6",
+      "primaryForeground": "#ffffff",
+      "secondary": "#8b5cf6",
+      "secondaryForeground": "#ffffff",
+      "success": "#22c55e",
+      "successBackground": "#052e16",
+      "warning": "#f59e0b",
+      "warningBackground": "#451a03",
+      "danger": "#ef4444",
+      "dangerBackground": "#450a0a"
+    }
+  }
+}

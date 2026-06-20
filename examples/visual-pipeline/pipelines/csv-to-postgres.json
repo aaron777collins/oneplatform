@@ -1,0 +1,96 @@
+{
+  "name": "csv-to-postgres",
+  "description": "Import rows from a CSV file, validate against a schema, and upsert into a PostgreSQL table.",
+  "version": "1.0.0",
+  "schedule": null,
+  "onError": "pause",
+  "steps": [
+    {
+      "id": "csv-source",
+      "type": "source/csv",
+      "label": "CSV File Source",
+      "config": {
+        "filePath": "/data/imports/customers_export.csv",
+        "delimiter": ",",
+        "hasHeader": true,
+        "encoding": "utf-8",
+        "skipEmptyLines": true,
+        "maxRows": 100000
+      },
+      "position": { "x": 80, "y": 200 }
+    },
+    {
+      "id": "column-mapper",
+      "type": "transform/column-map",
+      "label": "Parse & Map Columns",
+      "config": {
+        "mappings": [
+          { "source": "full_name", "target": "name", "type": "string" },
+          { "source": "email_address", "target": "email", "type": "string", "transform": "lowercase" },
+          { "source": "phone_number", "target": "phone", "type": "string" },
+          { "source": "company_name", "target": "company", "type": "string" },
+          { "source": "signup_date", "target": "created_at", "type": "datetime", "format": "MM/DD/YYYY" },
+          { "source": "plan_type", "target": "plan", "type": "string", "transform": "lowercase" },
+          { "source": "monthly_spend", "target": "mrr_cents", "type": "integer", "transform": "dollars_to_cents" }
+        ],
+        "dropUnmapped": true
+      },
+      "position": { "x": 340, "y": 200 }
+    },
+    {
+      "id": "schema-validator",
+      "type": "transform/validate",
+      "label": "Validate Schema",
+      "config": {
+        "schema": {
+          "name": { "type": "string", "required": true, "minLength": 1, "maxLength": 255 },
+          "email": { "type": "string", "required": true, "format": "email" },
+          "phone": { "type": "string", "required": false, "pattern": "^\\+?[0-9\\-\\s()]+$" },
+          "company": { "type": "string", "required": false, "maxLength": 255 },
+          "created_at": { "type": "datetime", "required": true },
+          "plan": { "type": "string", "required": true, "enum": ["free", "starter", "professional", "enterprise"] },
+          "mrr_cents": { "type": "integer", "required": true, "min": 0 }
+        },
+        "onInvalid": "route",
+        "errorOutput": "validation-errors"
+      },
+      "position": { "x": 600, "y": 200 }
+    },
+    {
+      "id": "pg-upsert",
+      "type": "destination/postgresql",
+      "label": "PostgreSQL Upsert",
+      "config": {
+        "connectionString": "{{ env.DATABASE_URL }}",
+        "table": "customers",
+        "operation": "upsert",
+        "conflictColumns": ["email"],
+        "batchSize": 500,
+        "onConflictUpdate": ["name", "phone", "company", "plan", "mrr_cents"],
+        "setOnInsert": {
+          "created_at": "{{ row.created_at }}",
+          "updated_at": "NOW()"
+        },
+        "setOnUpdate": {
+          "updated_at": "NOW()"
+        }
+      },
+      "position": { "x": 860, "y": 200 }
+    }
+  ],
+  "connections": [
+    { "from": "csv-source", "to": "column-mapper", "port": "output" },
+    { "from": "column-mapper", "to": "schema-validator", "port": "output" },
+    { "from": "schema-validator", "to": "pg-upsert", "port": "valid" }
+  ],
+  "metadata": {
+    "canvas": {
+      "zoom": 1.0,
+      "panX": 0,
+      "panY": 0
+    },
+    "createdAt": "2025-11-15T10:30:00Z",
+    "updatedAt": "2025-11-15T10:30:00Z",
+    "author": "platform-examples"
+  }
+}

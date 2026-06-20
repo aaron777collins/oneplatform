@@ -1,0 +1,347 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/app-config/v1.json",
+  "template": "custom-app",
+  "appName": "Acme CRM",
+  "slug": "acme-crm",
+  "description": "A complete customer relationship management application combining the Dashboard, CRUD Admin, and Form Builder templates with shared navigation and branding.",
+  "version": "1.0.0",
+
+  "entity": {
+    "$ref": "../shared/entity-schema.json",
+    "slug": "customer"
+  },
+
+  "theme": {
+    "$ref": "../shared/theme.json"
+  },
+
+  "permissions": {
+    "required": ["entity:read"],
+    "roles": {
+      "viewer": ["entity:read"],
+      "editor": ["entity:read", "entity:create", "entity:update"],
+      "admin": ["entity:read", "entity:create", "entity:update", "entity:delete"]
+    }
+  },
+
+  "shell": {
+    "topBar": {
+      "logo": {
+        "src": "/assets/logo.svg",
+        "alt": "Acme CRM",
+        "href": "/"
+      },
+      "breadcrumbs": true,
+      "actions": [
+        {
+          "type": "themeToggle",
+          "label": "Toggle dark mode"
+        },
+        {
+          "type": "userMenu",
+          "items": [
+            { "label": "Profile", "action": "navigate", "target": "/settings/profile" },
+            { "label": "Settings", "action": "navigate", "target": "/settings" },
+            { "label": "Sign Out", "action": "signOut", "variant": "danger" }
+          ]
+        }
+      ]
+    },
+    "sidebar": {
+      "width": 240,
+      "collapsible": true,
+      "defaultCollapsed": false,
+      "sections": [
+        {
+          "title": "Main",
+          "items": [
+            {
+              "label": "Dashboard",
+              "icon": "bar-chart-2",
+              "path": "/dashboard",
+              "templateRef": "dashboard",
+              "permission": "entity:read"
+            },
+            {
+              "label": "Customers",
+              "icon": "users",
+              "path": "/customers",
+              "templateRef": "crud-admin",
+              "permission": "entity:read",
+              "badge": {
+                "type": "count",
+                "query": {
+                  "entityType": "customer",
+                  "aggregate": "count",
+                  "filter": { "status": "lead" }
+                },
+                "label": "new leads"
+              },
+              "children": [
+                {
+                  "label": "All Customers",
+                  "path": "/customers",
+                  "filter": {}
+                },
+                {
+                  "label": "Active",
+                  "path": "/customers?status=active",
+                  "filter": { "status": "active" }
+                },
+                {
+                  "label": "Leads",
+                  "path": "/customers?status=lead",
+                  "filter": { "status": "lead" }
+                },
+                {
+                  "label": "Churned",
+                  "path": "/customers?status=churned",
+                  "filter": { "status": "churned" }
+                }
+              ]
+            },
+            {
+              "label": "New Customer",
+              "icon": "user-plus",
+              "path": "/onboarding",
+              "templateRef": "form-builder",
+              "permission": "entity:create"
+            }
+          ]
+        },
+        {
+          "title": "Reports",
+          "items": [
+            {
+              "label": "Revenue",
+              "icon": "dollar-sign",
+              "path": "/reports/revenue",
+              "permission": "entity:read"
+            },
+            {
+              "label": "Growth",
+              "icon": "trending-up",
+              "path": "/reports/growth",
+              "permission": "entity:read"
+            }
+          ]
+        },
+        {
+          "title": "Administration",
+          "permission": "entity:delete",
+          "items": [
+            {
+              "label": "Settings",
+              "icon": "settings",
+              "path": "/settings"
+            },
+            {
+              "label": "Team",
+              "icon": "shield",
+              "path": "/settings/team"
+            },
+            {
+              "label": "Integrations",
+              "icon": "plug",
+              "path": "/settings/integrations"
+            }
+          ]
+        }
+      ]
+    },
+    "footer": {
+      "text": "Acme CRM powered by OnePlatform",
+      "links": [
+        { "label": "Documentation", "href": "https://docs.oneplatform.dev" },
+        { "label": "Support", "href": "mailto:support@acme-corp.example.com" }
+      ]
+    }
+  },
+
+  "routes": [
+    {
+      "path": "/dashboard",
+      "template": "dashboard",
+      "config": {
+        "$ref": "./dashboard.json"
+      }
+    },
+    {
+      "path": "/customers",
+      "template": "crud-admin",
+      "config": {
+        "$ref": "./crud-admin.json"
+      }
+    },
+    {
+      "path": "/customers/:id",
+      "template": "crud-admin",
+      "view": "detail",
+      "config": {
+        "$ref": "./crud-admin.json"
+      }
+    },
+    {
+      "path": "/onboarding",
+      "template": "form-builder",
+      "config": {
+        "$ref": "./form-builder.json"
+      }
+    },
+    {
+      "path": "/onboarding/success",
+      "template": "form-builder",
+      "view": "success",
+      "config": {
+        "$ref": "./form-builder.json"
+      }
+    },
+    {
+      "path": "/reports/revenue",
+      "template": "dashboard",
+      "config": {
+        "overrides": {
+          "title": "Revenue Report",
+          "focusMetric": "totalRevenue"
+        }
+      }
+    },
+    {
+      "path": "/reports/growth",
+      "template": "dashboard",
+      "config": {
+        "overrides": {
+          "title": "Growth Report",
+          "focusMetric": "customerCount"
+        }
+      }
+    }
+  ],
+
+  "sampleData": [
+    {
+      "firstName": "Elena",
+      "lastName": "Rodriguez",
+      "email": "elena.rodriguez@meridian-tech.com",
+      "phone": "+1 (415) 555-0147",
+      "company": "Meridian Technologies",
+      "status": "active",
+      "tier": "enterprise",
+      "totalRevenue": 2450000,
+      "tags": ["vip", "enterprise-pilot"],
+      "address": {
+        "street": "201 Mission Street",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94105",
+        "country": "US"
+      },
+      "notes": "Key account -- direct relationship with VP of Engineering."
+    },
+    {
+      "firstName": "Marcus",
+      "lastName": "Chen",
+      "email": "m.chen@brightpath.io",
+      "phone": "+1 (212) 555-0983",
+      "company": "BrightPath Analytics",
+      "status": "active",
+      "tier": "professional",
+      "totalRevenue": 594000,
+      "tags": ["partner"],
+      "address": {
+        "street": "350 Fifth Avenue",
+        "city": "New York",
+        "state": "NY",
+        "postalCode": "10118",
+        "country": "US"
+      }
+    },
+    {
+      "firstName": "Priya",
+      "lastName": "Sharma",
+      "email": "priya@northwind-labs.co.uk",
+      "phone": "+44 20 7946 0321",
+      "company": "Northwind Laboratories",
+      "status": "active",
+      "tier": "professional",
+      "totalRevenue": 356000,
+      "tags": ["referral"],
+      "address": {
+        "street": "1 Canada Square",
+        "city": "London",
+        "state": "England",
+        "postalCode": "E14 5AB",
+        "country": "GB"
+      }
+    },
+    {
+      "firstName": "David",
+      "lastName": "Okafor",
+      "email": "d.okafor@greenleaf-energy.com",
+      "phone": "+1 (512) 555-0276",
+      "company": "GreenLeaf Energy Solutions",
+      "status": "lead",
+      "tier": "starter",
+      "totalRevenue": 0,
+      "tags": ["beta-tester"],
+      "address": {
+        "street": "401 Congress Avenue",
+        "city": "Austin",
+        "state": "TX",
+        "postalCode": "78701",
+        "country": "US"
+      },
+      "notes": "Met at SaaStr Annual 2025. Interested in the pipeline builder."
+    },
+    {
+      "firstName": "Sarah",
+      "lastName": "Johansson",
+      "email": "sarah.j@cloudvault.se",
+      "phone": "+46 8 555 1234",
+      "company": "CloudVault AB",
+      "status": "churned",
+      "tier": "starter",
+      "totalRevenue": 87000,
+      "tags": [],
+      "address": {
+        "street": "Sveavagen 44",
+        "city": "Stockholm",
+        "state": "Stockholm",
+        "postalCode": "111 34",
+        "country": "SE"
+      },
+      "notes": "Churned 2025-08. Cited pricing as the primary reason."
+    },
+    {
+      "firstName": "Tomoko",
+      "lastName": "Nakamura",
+      "email": "t.nakamura@apex-digital.co.jp",
+      "phone": "+81 3 5555 8901",
+      "company": "Apex Digital Inc.",
+      "status": "active",
+      "tier": "enterprise",
+      "totalRevenue": 1820000,
+      "tags": ["vip", "self-serve"],
+      "address": {
+        "street": "1-1 Marunouchi",
+        "city": "Tokyo",
+        "state": "Tokyo",
+        "postalCode": "100-0005",
+        "country": "JP"
+      }
+    }
+  ],
+
+  "query": {
+    "defaultSort": ["-createdAt"],
+    "defaultLimit": 25,
+    "maxLimit": 100,
+    "staleTime": 30000
+  },
+
+  "subscription": {
+    "enabled": true,
+    "events": ["created", "updated", "deleted"],
+    "autoInvalidate": true
+  }
+}

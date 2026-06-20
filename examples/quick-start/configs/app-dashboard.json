@@ -1,0 +1,13 @@
+{
+  "name": "Customer Dashboard",
+  "slug": "customer-dashboard",
+  "template": "crud-admin",
+  "description": "Manage and view customer data",
+  "config": {
+    "entity": "customer",
+    "title": "Customer Management",
+    "features": { "search": true, "pagination": true, "export": true, "create": true, "edit": true, "delete": true },
+    "columns": ["name", "email", "company", "phone", "created_at"],
+    "defaultSort": { "field": "name", "direction": "asc" }
+  }
+}

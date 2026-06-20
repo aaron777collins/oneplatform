@@ -1,0 +1,143 @@
+{
+  "name": "webhook-processor",
+  "description": "Listen for Stripe webhook events, filter and enrich them, then fan out to PostgreSQL and Slack.",
+  "version": "1.0.0",
+  "schedule": null,
+  "onError": "pause",
+  "steps": [
+    {
+      "id": "webhook-source",
+      "type": "source/webhook",
+      "label": "Webhook Listener",
+      "config": {
+        "path": "/hooks/stripe-events",
+        "method": "POST",
+        "authentication": {
+          "type": "signature",
+          "header": "Stripe-Signature",
+          "secret": "{{ env.STRIPE_WEBHOOK_SECRET }}",
+          "algorithm": "hmac-sha256"
+        },
+        "responseStatus": 200,
+        "responseBody": { "received": true },
+        "timeout": 10000
+      },
+      "position": { "x": 80, "y": 240 }
+    },
+    {
+      "id": "event-filter",
+      "type": "transform/filter",
+      "label": "Filter by Event Type",
+      "config": {
+        "conditions": [
+          {
+            "field": "type",
+            "operator": "in",
+            "values": ["invoice.paid", "charge.succeeded"]
+          }
+        ],
+        "logic": "and",
+        "passthrough": false
+      },
+      "position": { "x": 340, "y": 240 }
+    },
+    {
+      "id": "enrich-lookup",
+      "type": "transform/lookup",
+      "label": "Enrich (Customer Lookup)",
+      "config": {
+        "source": {
+          "type": "postgresql",
+          "connectionString": "{{ env.DATABASE_URL }}",
+          "query": "SELECT id, name, email, plan FROM customers WHERE stripe_customer_id = $1",
+          "params": ["{{ row.data.object.customer }}"]
+        },
+        "joinType": "left",
+        "outputFields": {
+          "customer_name": "name",
+          "customer_email": "email",
+          "customer_plan": "plan",
+          "internal_customer_id": "id"
+        },
+        "cacheResults": true,
+        "cacheTTL": 300
+      },
+      "position": { "x": 600, "y": 240 }
+    },
+    {
+      "id": "pg-insert",
+      "type": "destination/postgresql",
+      "label": "PostgreSQL Insert",
+      "config": {
+        "connectionString": "{{ env.DATABASE_URL }}",
+        "table": "payment_events",
+        "operation": "insert",
+        "columns": {
+          "stripe_event_id": "{{ row.id }}",
+          "event_type": "{{ row.type }}",
+          "stripe_customer_id": "{{ row.data.object.customer }}",
+          "customer_id": "{{ row.internal_customer_id }}",
+          "customer_name": "{{ row.customer_name }}",
+          "amount_cents": "{{ row.data.object.amount }}",
+          "currency": "{{ row.data.object.currency }}",
+          "status": "{{ row.data.object.status }}",
+          "received_at": "NOW()"
+        },
+        "batchSize": 1
+      },
+      "position": { "x": 900, "y": 160 }
+    },
+    {
+      "id": "slack-notify",
+      "type": "destination/slack",
+      "label": "Slack Notification",
+      "config": {
+        "webhookUrl": "{{ env.SLACK_BILLING_WEBHOOK_URL }}",
+        "channel": "#billing-alerts",
+        "condition": {
+          "field": "data.object.amount",
+          "operator": "gte",
+          "value": 50000
+        },
+        "message": {
+          "text": "Payment received from {{ row.customer_name }} ({{ row.customer_email }})",
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "High-Value Payment Received"
+              }
+            },
+            {
+              "type": "section",
+              "fields": [
+                { "type": "mrkdwn", "text": "*Customer:*\n{{ row.customer_name }}" },
+                { "type": "mrkdwn", "text": "*Plan:*\n{{ row.customer_plan }}" },
+                { "type": "mrkdwn", "text": "*Amount:*\n${{ row.data.object.amount | divide:100 | number:2 }}" },
+                { "type": "mrkdwn", "text": "*Event:*\n{{ row.type }}" }
+              ]
+            }
+          ]
+        }
+      },
+      "position": { "x": 900, "y": 340 }
+    }
+  ],
+  "connections": [
+    { "from": "webhook-source", "to": "event-filter", "port": "output" },
+    { "from": "event-filter", "to": "enrich-lookup", "port": "passed" },
+    { "from": "enrich-lookup", "to": "pg-insert", "port": "output" },
+    { "from": "enrich-lookup", "to": "slack-notify", "port": "output" }
+  ],
+  "metadata": {
+    "canvas": {
+      "zoom": 1.0,
+      "panX": 0,
+      "panY": 0
+    },
+    "createdAt": "2025-11-15T11:30:00Z",
+    "updatedAt": "2025-11-15T11:30:00Z",
+    "author": "platform-examples"
+  }
+}

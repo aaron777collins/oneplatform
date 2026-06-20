@@ -1,0 +1,22 @@
+{
+  "name": "@oneplatform/example-multi-source-etl",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example: CLI-driven multi-source ETL pipeline merging PostgreSQL and MySQL data into unified ontology entities",
+  "type": "module",
+  "scripts": {
+    "setup": "npx tsx src/setup.ts",
+    "setup:cli": "bash scripts/setup.sh",
+    "monitor": "bash scripts/monitor.sh"
+  },
+  "dependencies": {
+    "@oneplatform/sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

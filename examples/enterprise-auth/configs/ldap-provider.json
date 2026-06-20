@@ -1,0 +1,72 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/auth-provider-ldap-config.json",
+  "_comment": "LDAP/Active Directory provider configuration. Register this via: op auth provider create --config configs/ldap-provider.json",
+
+  "providerId": "corp-active-directory",
+  "providerType": "ldap",
+  "displayName": "Corporate Active Directory",
+  "enabled": true,
+
+  "config": {
+    "url": "ldaps://dc01.corp.example.com:636",
+    "baseDN": "DC=corp,DC=example,DC=com",
+    "bindDN": "CN=OnePlatform Service,OU=Service Accounts,DC=corp,DC=example,DC=com",
+    "bindCredentialKey": "ldap_bind_password",
+
+    "userSearchBase": "OU=Users",
+    "userSearchFilter": "(&(objectClass=user)(sAMAccountName={{username}})(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+    "userAttributes": [
+      "dn",
+      "sAMAccountName",
+      "cn",
+      "mail",
+      "givenName",
+      "sn",
+      "memberOf",
+      "department",
+      "title",
+      "telephoneNumber"
+    ],
+
+    "groupSearchBase": "OU=Groups",
+    "groupSearchFilter": "(member={{dn}})",
+    "groupNameAttribute": "cn",
+
+    "groupMapping": {
+      "OnePlatform Admins": "platform-admin",
+      "OnePlatform Tenant Admins": "tenant-admin",
+      "Data Engineering": "data-engineer",
+      "Business Analytics": "business-analyst",
+      "OnePlatform Users": "viewer"
+    },
+
+    "useTLS": true,
+    "tlsOptions": {
+      "rejectUnauthorized": true
+    },
+
+    "searchSizeLimit": 200,
+    "connectionTimeoutMs": 5000
+  },
+
+  "credentials": {
+    "ldap_bind_password": {
+      "source": "env",
+      "envVar": "LDAP_BIND_PASSWORD"
+    }
+  },
+
+  "activeDirectoryNotes": {
+    "_comment": "These notes document Active Directory-specific configuration choices. They are not used by OnePlatform.",
+
+    "userAccountControlFilter": "The bitwise filter (userAccountControl:1.2.840.113556.1.4.803:=2) excludes disabled accounts. Bit 2 (0x0002) is the ACCOUNTDISABLE flag in AD.",
+
+    "sAMAccountName": "Used instead of uid because Active Directory does not populate the uid attribute by default. sAMAccountName is the pre-Windows 2000 logon name (e.g., jsmith).",
+
+    "memberOfAttribute": "AD natively populates memberOf on user objects via the linked attribute backlink. This avoids a separate group search when groupSearchBase is null. When groupSearchBase is set, the plugin performs an explicit group search instead.",
+
+    "groupSearchBase": "Set to OU=Groups to limit the group search scope. If your groups are in multiple OUs, set this to the baseDN (DC=corp,DC=example,DC=com) and use a more specific groupSearchFilter.",
+
+    "tlsCertificate": "For production, ensure the AD server's TLS certificate is signed by a CA trusted by the OnePlatform host. Self-signed certificates require adding the CA cert to the system trust store or setting rejectUnauthorized to false (not recommended for production)."
+  }
+}

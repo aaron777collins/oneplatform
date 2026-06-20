@@ -1,0 +1,74 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/auth-provider-oidc-config.json",
+  "_comment": "OIDC provider configuration for Keycloak. Register this via: op auth provider create --config configs/oidc-provider.json",
+
+  "providerId": "keycloak-corporate",
+  "providerType": "oidc",
+  "displayName": "Corporate SSO (Keycloak)",
+  "enabled": true,
+
+  "config": {
+    "issuerUrl": "https://keycloak.corp.example.com/realms/oneplatform",
+    "clientId": "oneplatform-app",
+    "scopes": ["openid", "profile", "email", "offline_access"],
+    "roleClaimPath": "resource_access.oneplatform-app.roles",
+    "roleMapping": {
+      "platform_admin": "platform-admin",
+      "org_admin": "tenant-admin",
+      "data_engineer": "data-engineer",
+      "analyst": "business-analyst",
+      "read_only": "viewer"
+    },
+    "jwksCacheTtlSeconds": 3600
+  },
+
+  "credentials": {
+    "clientSecret": {
+      "source": "env",
+      "envVar": "KEYCLOAK_CLIENT_SECRET"
+    }
+  },
+
+  "discovery": {
+    "_comment": "These are auto-populated from the OIDC discovery document at the issuer URL. Shown here for reference only.",
+    "wellKnownUrl": "https://keycloak.corp.example.com/realms/oneplatform/.well-known/openid-configuration",
+    "authorizationEndpoint": "https://keycloak.corp.example.com/realms/oneplatform/protocol/openid-connect/auth",
+    "tokenEndpoint": "https://keycloak.corp.example.com/realms/oneplatform/protocol/openid-connect/token",
+    "userinfoEndpoint": "https://keycloak.corp.example.com/realms/oneplatform/protocol/openid-connect/userinfo",
+    "jwksUri": "https://keycloak.corp.example.com/realms/oneplatform/protocol/openid-connect/certs",
+    "endSessionEndpoint": "https://keycloak.corp.example.com/realms/oneplatform/protocol/openid-connect/logout"
+  },
+
+  "redirectUris": [
+    "https://app.example.com/auth/callback",
+    "https://staging.app.example.com/auth/callback",
+    "http://localhost:3000/auth/callback"
+  ],
+
+  "keycloakSetup": {
+    "_comment": "Instructions for configuring the Keycloak side. These fields are not used by OnePlatform -- they document the required Keycloak configuration.",
+    "realmName": "oneplatform",
+    "clientProtocol": "openid-connect",
+    "clientAccessType": "confidential",
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "implicitFlowEnabled": false,
+    "serviceAccountsEnabled": false,
+    "clientScopes": ["openid", "profile", "email", "offline_access"],
+    "protocolMappers": [
+      {
+        "name": "realm-roles",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-realm-role-mapper",
+        "config": {
+          "claim.name": "resource_access.oneplatform-app.roles",
+          "jsonType.label": "String",
+          "multivalued": "true",
+          "id.token.claim": "true",
+          "access.token.claim": "true",
+          "userinfo.token.claim": "true"
+        }
+      }
+    ]
+  }
+}

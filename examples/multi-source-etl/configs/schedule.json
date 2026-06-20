@@ -1,0 +1,11 @@
+{
+  "name": "Hourly ETL Sync",
+  "pipelineId": "{{PIPELINE_ID}}",
+  "cronExpr": "0 * * * *",
+  "timezone": "UTC",
+  "enabled": true,
+  "inputTemplate": {
+    "syncMode": "incremental",
+    "notifyOnFailure": true
+  }
+}

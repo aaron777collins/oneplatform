@@ -1,0 +1,90 @@
+{
+  "name": "Order",
+  "displayName": "Unified Order",
+  "fields": [
+    {
+      "name": "orderId",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Unique order identifier from the source system (prefixed with source name for deduplication)"
+    },
+    {
+      "name": "customerId",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Customer identifier from the originating system"
+    },
+    {
+      "name": "customerEmail",
+      "type": "string",
+      "required": false,
+      "indexed": true,
+      "description": "Customer email address for cross-system matching"
+    },
+    {
+      "name": "orderDate",
+      "type": "datetime",
+      "required": true,
+      "indexed": true,
+      "description": "Timestamp when the order was placed (ISO 8601)"
+    },
+    {
+      "name": "totalAmount",
+      "type": "number",
+      "required": true,
+      "indexed": true,
+      "description": "Total order value in USD"
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "required": true,
+      "indexed": false,
+      "description": "ISO 4217 currency code (e.g. USD, EUR, GBP)"
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Normalized order status: pending | confirmed | shipped | delivered | cancelled | refunded"
+    },
+    {
+      "name": "shippingAddress",
+      "type": "string",
+      "required": false,
+      "indexed": false,
+      "description": "Full shipping address as a single line"
+    },
+    {
+      "name": "lineItemCount",
+      "type": "number",
+      "required": false,
+      "indexed": false,
+      "description": "Number of distinct line items in the order"
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Originating data source: postgres-ecommerce | mysql-retail"
+    },
+    {
+      "name": "updatedAt",
+      "type": "datetime",
+      "required": false,
+      "indexed": true,
+      "description": "Last modification timestamp from the source system"
+    }
+  ],
+  "relationships": [
+    {
+      "name": "products",
+      "targetEntity": "Product",
+      "cardinality": "many"
+    }
+  ]
+}

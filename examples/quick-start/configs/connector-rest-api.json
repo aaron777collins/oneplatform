@@ -1,0 +1,22 @@
+{
+  "name": "jsonplaceholder-api",
+  "type": "rest-api",
+  "config": {
+    "baseUrl": "https://jsonplaceholder.typicode.com",
+    "auth": {
+      "type": "none"
+    },
+    "endpoints": [
+      {
+        "path": "/users",
+        "method": "GET",
+        "responseMapping": {
+          "id": "$.id",
+          "name": "$.name",
+          "email": "$.email",
+          "company": "$.company.name"
+        }
+      }
+    ]
+  }
+}

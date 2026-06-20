@@ -1,0 +1,21 @@
+id,name,email,company,phone,created_at
+1,Sarah Chen,sarah.chen@techcorp.io,TechCorp Inc,+1-555-0101,2024-01-15
+2,Marcus Johnson,marcus.j@innovate.co,Innovate Labs,+1-555-0102,2024-01-22
+3,Elena Rodriguez,elena.r@globalfin.com,GlobalFin Partners,+1-555-0103,2024-02-01
+4,James Wilson,james.w@buildright.io,BuildRight Solutions,+1-555-0104,2024-02-10
+5,Aisha Patel,aisha.p@dataflow.ai,DataFlow Analytics,+1-555-0105,2024-02-15
+6,Thomas Berg,thomas.b@nordictech.se,NordicTech AB,+46-555-0106,2024-02-28
+7,Lisa Nakamura,lisa.n@pixelcraft.jp,PixelCraft Studios,+81-555-0107,2024-03-05
+8,David Kim,david.k@cloudnine.kr,CloudNine Systems,+82-555-0108,2024-03-12
+9,Maria Santos,maria.s@greenleaf.br,GreenLeaf Eco,+55-555-0109,2024-03-20
+10,Robert Taylor,robert.t@steelworks.uk,Steelworks Ltd,+44-555-0110,2024-03-25
+11,Fatima Al-Hassan,fatima.h@desertrose.ae,Desert Rose Trading,+971-555-0111,2024-04-01
+12,Chen Wei,chen.w@dragontech.cn,DragonTech Solutions,+86-555-0112,2024-04-08
+13,Sophie Dubois,sophie.d@lumiere.fr,Lumiere Design,+33-555-0113,2024-04-15
+14,Miguel Fernandez,miguel.f@solaris.es,Solaris Energy,+34-555-0114,2024-04-22
+15,Olga Petrov,olga.p@arcticnet.ru,ArcticNet Systems,+7-555-0115,2024-05-01
+16,John O'Brien,john.ob@emerald.ie,Emerald Software,+353-555-0116,2024-05-10
+17,Priya Sharma,priya.s@monsoon.in,Monsoon Analytics,+91-555-0117,2024-05-18
+18,Lucas Mueller,lucas.m@alphaworks.de,AlphaWorks GmbH,+49-555-0118,2024-05-25
+19,Grace Okafor,grace.o@sunriseit.ng,Sunrise IT Solutions,+234-555-0119,2024-06-01
+20,Henrik Larsson,henrik.l@polaris.no,Polaris Data AS,+47-555-0120,2024-06-08

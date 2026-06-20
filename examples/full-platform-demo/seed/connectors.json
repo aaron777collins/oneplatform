@@ -1,0 +1,116 @@
+[
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Salesforce CRM",
+    "pluginId": "com.oneplatform.connectors.rest-api",
+    "config": {
+      "baseUrl": "https://acme.my.salesforce.com",
+      "path": "/services/data/v59.0/query",
+      "method": "GET",
+      "paginationStrategy": "cursor",
+      "cursorField": "nextRecordsUrl",
+      "credentialName": "salesforce_oauth_token",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "schedule": "0 */2 * * *",
+      "queryParams": {
+        "q": "SELECT Id, Name, Email, Phone, Industry, AnnualRevenue, CreatedDate, LastModifiedDate FROM Account"
+      }
+    },
+    "syncMode": "incremental",
+    "isEnabled": true,
+    "scheduleCron": "0 */2 * * *",
+    "description": "Pulls Account records from Salesforce every 2 hours using the REST Query API."
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "name": "PostgreSQL Warehouse",
+    "pluginId": "com.oneplatform.connectors.database",
+    "config": {
+      "driver": "postgres",
+      "host": "warehouse.acmecorp.example.com",
+      "port": 5432,
+      "database": "analytics",
+      "schema": "public",
+      "tables": ["orders", "order_items", "shipments"],
+      "credentialName": "warehouse_pg_credentials",
+      "schedule": "30 1 * * *",
+      "incrementalColumn": "updated_at",
+      "batchSize": 5000
+    },
+    "syncMode": "incremental",
+    "isEnabled": true,
+    "scheduleCron": "30 1 * * *",
+    "description": "Nightly incremental sync of order data from the PostgreSQL analytics warehouse."
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Product Catalog API",
+    "pluginId": "com.oneplatform.connectors.rest-api",
+    "config": {
+      "baseUrl": "https://api.acmecorp.example.com",
+      "path": "/v2/products",
+      "method": "GET",
+      "paginationStrategy": "offset",
+      "pageSizeParam": "limit",
+      "offsetParam": "offset",
+      "pageSize": 100,
+      "credentialName": "product_api_key",
+      "schedule": "0 * * * *"
+    },
+    "syncMode": "full",
+    "isEnabled": true,
+    "scheduleCron": "0 * * * *",
+    "description": "Hourly full sync of the product catalog from the internal REST API."
+  },
+  {
+    "tenantSlug": "widget-co",
+    "name": "Shopify Store",
+    "pluginId": "com.oneplatform.connectors.rest-api",
+    "config": {
+      "baseUrl": "https://widget-co.myshopify.com",
+      "path": "/admin/api/2024-01/orders.json",
+      "method": "GET",
+      "paginationStrategy": "link-header",
+      "credentialName": "shopify_access_token",
+      "headers": {
+        "X-Shopify-Access-Token": "{{credential:shopify_access_token}}"
+      },
+      "schedule": "*/15 * * * *",
+      "queryParams": {
+        "status": "any",
+        "limit": "250"
+      }
+    },
+    "syncMode": "incremental",
+    "isEnabled": true,
+    "scheduleCron": "*/15 * * * *",
+    "description": "Pulls Shopify orders every 15 minutes using the REST Admin API with link-header pagination."
+  },
+  {
+    "tenantSlug": "widget-co",
+    "name": "Stripe Payments Webhook",
+    "pluginId": "com.oneplatform.connectors.webhook",
+    "config": {
+      "webhookPath": "/ingest/stripe-events",
+      "secretHeaderName": "Stripe-Signature",
+      "credentialName": "stripe_webhook_secret",
+      "eventTypes": [
+        "payment_intent.succeeded",
+        "payment_intent.payment_failed",
+        "charge.refunded",
+        "customer.subscription.created",
+        "customer.subscription.deleted"
+      ],
+      "retryPolicy": {
+        "maxRetries": 3,
+        "backoffMs": 1000
+      }
+    },
+    "syncMode": "incremental",
+    "isEnabled": true,
+    "scheduleCron": null,
+    "description": "Receives Stripe payment events via webhook. No scheduled sync — data arrives in real time."
+  }
+]

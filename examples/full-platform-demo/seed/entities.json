@@ -1,0 +1,402 @@
+[
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Customer",
+    "displayName": "Customer",
+    "fields": [
+      {
+        "name": "customerId",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Unique customer identifier from Salesforce (Account ID)"
+      },
+      {
+        "name": "companyName",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Legal company name"
+      },
+      {
+        "name": "contactEmail",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Primary contact email address"
+      },
+      {
+        "name": "phone",
+        "type": "string",
+        "required": false,
+        "indexed": false,
+        "description": "Primary phone number in E.164 format"
+      },
+      {
+        "name": "industry",
+        "type": "string",
+        "required": false,
+        "indexed": true,
+        "description": "Industry vertical classification"
+      },
+      {
+        "name": "annualRevenue",
+        "type": "number",
+        "required": false,
+        "indexed": true,
+        "description": "Annual revenue in USD"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Account status: active | churned | prospect | suspended"
+      },
+      {
+        "name": "createdAt",
+        "type": "datetime",
+        "required": true,
+        "indexed": true,
+        "description": "Record creation timestamp"
+      },
+      {
+        "name": "updatedAt",
+        "type": "datetime",
+        "required": false,
+        "indexed": true,
+        "description": "Last modification timestamp"
+      }
+    ],
+    "relationships": [
+      {
+        "name": "orders",
+        "targetEntity": "Order",
+        "cardinality": "many"
+      }
+    ],
+    "sampleRecords": [
+      {
+        "customerId": "ACCT-001",
+        "companyName": "Northwind Traders",
+        "contactEmail": "procurement@northwind.example.com",
+        "phone": "+14155551234",
+        "industry": "Wholesale Distribution",
+        "annualRevenue": 12500000,
+        "status": "active",
+        "createdAt": "2024-01-15T09:30:00Z"
+      },
+      {
+        "customerId": "ACCT-002",
+        "companyName": "Contoso Electronics",
+        "contactEmail": "purchasing@contoso.example.com",
+        "phone": "+442071234567",
+        "industry": "Consumer Electronics",
+        "annualRevenue": 45000000,
+        "status": "active",
+        "createdAt": "2024-02-20T14:15:00Z"
+      },
+      {
+        "customerId": "ACCT-003",
+        "companyName": "Fabrikam Industries",
+        "contactEmail": "supply-chain@fabrikam.example.com",
+        "phone": "+14085559876",
+        "industry": "Manufacturing",
+        "annualRevenue": 8700000,
+        "status": "prospect",
+        "createdAt": "2024-06-01T11:00:00Z"
+      }
+    ]
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Order",
+    "displayName": "Order",
+    "fields": [
+      {
+        "name": "orderId",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Unique order number"
+      },
+      {
+        "name": "customerId",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Foreign key to Customer entity"
+      },
+      {
+        "name": "totalAmount",
+        "type": "number",
+        "required": true,
+        "indexed": true,
+        "description": "Order total in USD including tax and shipping"
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": true,
+        "indexed": false,
+        "description": "ISO 4217 currency code"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Order status: pending | confirmed | shipped | delivered | cancelled | refunded"
+      },
+      {
+        "name": "itemCount",
+        "type": "number",
+        "required": true,
+        "indexed": false,
+        "description": "Number of line items in the order"
+      },
+      {
+        "name": "shippingAddress",
+        "type": "string",
+        "required": false,
+        "indexed": false,
+        "description": "Full shipping address as a single formatted string"
+      },
+      {
+        "name": "orderedAt",
+        "type": "datetime",
+        "required": true,
+        "indexed": true,
+        "description": "Timestamp when the order was placed"
+      },
+      {
+        "name": "updatedAt",
+        "type": "datetime",
+        "required": false,
+        "indexed": true,
+        "description": "Last modification timestamp"
+      }
+    ],
+    "relationships": [
+      {
+        "name": "customer",
+        "targetEntity": "Customer",
+        "cardinality": "one"
+      }
+    ],
+    "sampleRecords": [
+      {
+        "orderId": "ORD-2024-00142",
+        "customerId": "ACCT-001",
+        "totalAmount": 3249.99,
+        "currency": "USD",
+        "status": "delivered",
+        "itemCount": 5,
+        "shippingAddress": "123 Trade St, Suite 400, San Francisco, CA 94105",
+        "orderedAt": "2024-03-10T16:45:00Z"
+      },
+      {
+        "orderId": "ORD-2024-00287",
+        "customerId": "ACCT-002",
+        "totalAmount": 18750.00,
+        "currency": "USD",
+        "status": "shipped",
+        "itemCount": 12,
+        "shippingAddress": "45 Innovation Way, Reading, RG1 2PQ, United Kingdom",
+        "orderedAt": "2024-05-22T10:30:00Z"
+      },
+      {
+        "orderId": "ORD-2024-00301",
+        "customerId": "ACCT-001",
+        "totalAmount": 875.50,
+        "currency": "USD",
+        "status": "pending",
+        "itemCount": 2,
+        "shippingAddress": "123 Trade St, Suite 400, San Francisco, CA 94105",
+        "orderedAt": "2024-07-01T08:20:00Z"
+      }
+    ]
+  },
+  {
+    "tenantSlug": "acme-corp",
+    "name": "Product",
+    "displayName": "Product",
+    "fields": [
+      {
+        "name": "sku",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Stock keeping unit — unique product identifier"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Human-readable product name"
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Top-level product category"
+      },
+      {
+        "name": "price",
+        "type": "number",
+        "required": true,
+        "indexed": true,
+        "description": "Unit price in USD"
+      },
+      {
+        "name": "stockQuantity",
+        "type": "number",
+        "required": true,
+        "indexed": false,
+        "description": "Current inventory count across all warehouses"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Product lifecycle state: active | discontinued | draft"
+      },
+      {
+        "name": "weight",
+        "type": "number",
+        "required": false,
+        "indexed": false,
+        "description": "Product weight in kilograms"
+      },
+      {
+        "name": "updatedAt",
+        "type": "datetime",
+        "required": false,
+        "indexed": true,
+        "description": "Last modification timestamp"
+      }
+    ],
+    "relationships": [],
+    "sampleRecords": [
+      {
+        "sku": "ACM-BOLT-1024",
+        "name": "Industrial Grade Hex Bolt M10x40",
+        "category": "Fasteners",
+        "price": 0.45,
+        "stockQuantity": 125000,
+        "status": "active",
+        "weight": 0.035,
+        "updatedAt": "2024-06-15T12:00:00Z"
+      },
+      {
+        "sku": "ACM-GEAR-2048",
+        "name": "Precision Spur Gear 32DP",
+        "category": "Power Transmission",
+        "price": 24.99,
+        "stockQuantity": 3400,
+        "status": "active",
+        "weight": 0.280,
+        "updatedAt": "2024-06-10T09:30:00Z"
+      },
+      {
+        "sku": "ACM-SEAL-4096",
+        "name": "Nitrile O-Ring 50mm ID",
+        "category": "Seals & Gaskets",
+        "price": 1.75,
+        "stockQuantity": 87000,
+        "status": "active",
+        "weight": 0.008,
+        "updatedAt": "2024-05-28T15:45:00Z"
+      }
+    ]
+  },
+  {
+    "tenantSlug": "widget-co",
+    "name": "Event",
+    "displayName": "Customer Event",
+    "fields": [
+      {
+        "name": "eventId",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Unique event identifier (UUID)"
+      },
+      {
+        "name": "eventType",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Event classification: page_view | add_to_cart | purchase | refund | signup | support_ticket"
+      },
+      {
+        "name": "customerId",
+        "type": "string",
+        "required": false,
+        "indexed": true,
+        "description": "Customer ID if the event is attributable to a known user"
+      },
+      {
+        "name": "sessionId",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Browser or device session identifier"
+      },
+      {
+        "name": "properties",
+        "type": "string",
+        "required": false,
+        "indexed": false,
+        "description": "JSON-encoded event properties (product ID, page URL, amount, etc.)"
+      },
+      {
+        "name": "source",
+        "type": "string",
+        "required": true,
+        "indexed": true,
+        "description": "Event source: web | mobile | api | webhook"
+      },
+      {
+        "name": "occurredAt",
+        "type": "datetime",
+        "required": true,
+        "indexed": true,
+        "description": "Timestamp when the event occurred on the client"
+      }
+    ],
+    "relationships": [],
+    "sampleRecords": [
+      {
+        "eventId": "evt_a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "eventType": "purchase",
+        "customerId": "cust_widget_001",
+        "sessionId": "sess_x9y8z7",
+        "properties": "{\"orderId\":\"WC-2024-0589\",\"amount\":129.99,\"currency\":\"GBP\",\"items\":3}",
+        "source": "web",
+        "occurredAt": "2024-07-01T14:32:00Z"
+      },
+      {
+        "eventId": "evt_f6e5d4c3-b2a1-4f6e-9d8c-7b6a5f4e3d2c",
+        "eventType": "add_to_cart",
+        "customerId": "cust_widget_002",
+        "sessionId": "sess_m3n4o5",
+        "properties": "{\"productId\":\"WDG-LAMP-100\",\"quantity\":1,\"price\":45.00}",
+        "source": "mobile",
+        "occurredAt": "2024-07-01T15:10:00Z"
+      },
+      {
+        "eventId": "evt_1a2b3c4d-5e6f-4a1b-2c3d-4e5f6a7b8c9d",
+        "eventType": "page_view",
+        "customerId": null,
+        "sessionId": "sess_p6q7r8",
+        "properties": "{\"url\":\"/products/widgets\",\"referrer\":\"https://google.com\",\"duration_ms\":4200}",
+        "source": "web",
+        "occurredAt": "2024-07-01T15:22:00Z"
+      }
+    ]
+  }
+]

@@ -1,0 +1,90 @@
+{
+  "name": "Product",
+  "displayName": "Unified Product",
+  "fields": [
+    {
+      "name": "sku",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Stock keeping unit — the canonical product identifier across all systems"
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "indexed": false,
+      "description": "Product display name"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "indexed": false,
+      "description": "Long-form product description"
+    },
+    {
+      "name": "category",
+      "type": "string",
+      "required": false,
+      "indexed": true,
+      "description": "Product category (e.g. Electronics, Apparel, Home & Kitchen)"
+    },
+    {
+      "name": "unitPrice",
+      "type": "number",
+      "required": true,
+      "indexed": true,
+      "description": "Current retail unit price in USD"
+    },
+    {
+      "name": "costPrice",
+      "type": "number",
+      "required": false,
+      "indexed": false,
+      "description": "Wholesale or cost price in USD (from operations system)"
+    },
+    {
+      "name": "stockQuantity",
+      "type": "number",
+      "required": false,
+      "indexed": true,
+      "description": "Current available inventory count"
+    },
+    {
+      "name": "weight",
+      "type": "number",
+      "required": false,
+      "indexed": false,
+      "description": "Product weight in kilograms for shipping calculations"
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Lifecycle state: active | discontinued | out_of_stock | draft"
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "required": true,
+      "indexed": true,
+      "description": "Originating data source: postgres-ecommerce | mysql-retail"
+    },
+    {
+      "name": "updatedAt",
+      "type": "datetime",
+      "required": false,
+      "indexed": true,
+      "description": "Last modification timestamp from the source system"
+    }
+  ],
+  "relationships": [
+    {
+      "name": "orders",
+      "targetEntity": "Order",
+      "cardinality": "many"
+    }
+  ]
+}

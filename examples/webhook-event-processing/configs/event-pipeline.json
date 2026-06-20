@@ -1,0 +1,161 @@
+{
+  "$schema": "https://oneplatform.dev/schemas/pipeline-definition.json",
+  "pipeline": {
+    "name": "Webhook Event Pipeline",
+    "slug": "webhook-event-pipeline",
+    "description": "Processes inbound webhook events through validation, enrichment, type-based branching, storage, and notification steps.",
+    "isActive": true,
+    "definition": {
+      "version": 1,
+      "entryStepId": "receive-event",
+      "steps": [
+        {
+          "id": "receive-event",
+          "name": "Receive Webhook Event",
+          "type": "webhook",
+          "description": "Entry point for inbound webhook payloads. Extracts the raw event body and metadata from the HTTP request.",
+          "inputs": {
+            "payload": { "from": "pipeline.input", "path": "body" },
+            "headers": { "from": "pipeline.input", "path": "headers" },
+            "eventType": { "from": "pipeline.input", "path": "eventType" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "validate-payload",
+          "name": "Validate Payload Schema",
+          "type": "code",
+          "description": "Validates the incoming payload against expected field requirements for each event type. Rejects malformed events before further processing.",
+          "inputs": {
+            "event": { "from": "step", "stepId": "receive-event", "path": "output" }
+          },
+          "expression": "(() => { const e = event; const required = ['event_id', 'event_type', 'timestamp', 'data']; const missing = required.filter(f => !e[f]); if (missing.length > 0) throw new Error('Missing required fields: ' + missing.join(', ')); return { ...e, validated: true }; })()",
+          "onError": "fail"
+        },
+        {
+          "id": "enrich-event",
+          "name": "Enrich Event Data",
+          "type": "code",
+          "description": "Adds platform metadata to the event: processing timestamps, source identification, correlation IDs, and normalized field names.",
+          "inputs": {
+            "event": { "from": "step", "stepId": "validate-payload", "path": "output" }
+          },
+          "expression": "(() => { const e = event; return { ...e, enriched: { processedAt: new Date().toISOString(), source: 'webhook-receiver', correlationId: e.event_id + '-' + Date.now(), normalizedType: e.event_type.replace('.', '_').toUpperCase() } }; })()",
+          "onError": "fail"
+        },
+        {
+          "id": "branch-by-type",
+          "name": "Branch by Event Type",
+          "type": "conditional",
+          "description": "Routes events to type-specific processing logic based on the event_type field. Orders, payments, and alerts get priority handling; other types follow the default path.",
+          "inputs": {
+            "event": { "from": "step", "stepId": "enrich-event", "path": "output" }
+          },
+          "conditions": [
+            {
+              "expression": "event.event_type === 'order.created'",
+              "targetStepId": "process-order"
+            },
+            {
+              "expression": "event.event_type === 'payment.completed'",
+              "targetStepId": "process-payment"
+            },
+            {
+              "expression": "event.event_type === 'user.signup'",
+              "targetStepId": "process-user"
+            },
+            {
+              "expression": "event.event_type === 'inventory.update'",
+              "targetStepId": "process-inventory"
+            },
+            {
+              "expression": "event.event_type === 'alert.triggered'",
+              "targetStepId": "process-alert"
+            }
+          ],
+          "defaultTargetStepId": "store-event",
+          "onError": "fail"
+        },
+        {
+          "id": "process-order",
+          "name": "Process Order Event",
+          "type": "code",
+          "expression": "(() => { const d = event.data; return { ...event, processed: { entityType: 'Order', entityId: d.order_id, customerEmail: d.customer_email, totalAmount: d.total, currency: d.currency } }; })()",
+          "inputs": {
+            "event": { "from": "step", "stepId": "branch-by-type", "path": "output" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "process-payment",
+          "name": "Process Payment Event",
+          "type": "code",
+          "expression": "(() => { const d = event.data; return { ...event, processed: { entityType: 'Payment', entityId: d.payment_id, orderId: d.order_id, amount: d.amount, method: d.payment_method, status: d.status } }; })()",
+          "inputs": {
+            "event": { "from": "step", "stepId": "branch-by-type", "path": "output" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "process-user",
+          "name": "Process User Signup Event",
+          "type": "code",
+          "expression": "(() => { const d = event.data; return { ...event, processed: { entityType: 'User', entityId: d.user_id, email: d.email, plan: d.plan || 'free', signupSource: d.source || 'direct' } }; })()",
+          "inputs": {
+            "event": { "from": "step", "stepId": "branch-by-type", "path": "output" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "process-inventory",
+          "name": "Process Inventory Update Event",
+          "type": "code",
+          "expression": "(() => { const d = event.data; return { ...event, processed: { entityType: 'InventoryItem', entityId: d.sku, warehouseId: d.warehouse_id, quantityChange: d.quantity_change, newQuantity: d.new_quantity } }; })()",
+          "inputs": {
+            "event": { "from": "step", "stepId": "branch-by-type", "path": "output" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "process-alert",
+          "name": "Process Alert Event",
+          "type": "code",
+          "expression": "(() => { const d = event.data; return { ...event, processed: { entityType: 'Alert', entityId: d.alert_id, severity: d.severity, service: d.service, message: d.message, metricValue: d.metric_value } }; })()",
+          "inputs": {
+            "event": { "from": "step", "stepId": "branch-by-type", "path": "output" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "store-event",
+          "name": "Store Processed Event",
+          "type": "connector",
+          "description": "Writes the validated, enriched, and processed event to the platform entity store using upsert semantics.",
+          "entityType": "WebhookEvent",
+          "writeMode": "upsert",
+          "inputs": {
+            "records": { "from": "step", "stepId": "branch-by-type", "path": "output" }
+          },
+          "onError": "fail"
+        },
+        {
+          "id": "notify",
+          "name": "Send Notification",
+          "type": "code",
+          "description": "Emits a platform event so downstream subscribers (dashboards, alerting, integrations) are notified that a webhook event has been fully processed.",
+          "inputs": {
+            "event": { "from": "step", "stepId": "store-event", "path": "output" }
+          },
+          "expression": "(() => { return { notified: true, eventType: event.event_type, entityType: event.processed?.entityType || 'Unknown', entityId: event.processed?.entityId || event.event_id, processedAt: event.enriched?.processedAt }; })()",
+          "onError": "skip"
+        }
+      ],
+      "options": {
+        "allowConcurrentRuns": true,
+        "maxConcurrentRuns": 10,
+        "stepTimeout": 30000,
+        "retainRunsCount": 500
+      }
+    }
+  }
+}
