@@ -484,26 +484,33 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
   // Refresh token rotation (L2 design §6.4)
   // -------------------------------------------------------------------------
 
+  // Lua script that atomically reads and deletes a refresh token in a single
+  // round-trip to Redis. A plain pipeline GET+DEL is not atomic: two concurrent
+  // rotation requests can both read the payload before either DEL executes,
+  // allowing double-use of the same refresh token. The Lua script runs inside
+  // Redis's single-threaded interpreter, so the check-then-delete is guaranteed
+  // to be seen by only one caller.
+  const ATOMIC_GET_DEL_SCRIPT = `
+local v = redis.call('GET', KEYS[1])
+if v then redis.call('DEL', KEYS[1]) end
+return v
+`;
+
   async function rotateRefreshToken(oldToken: string): Promise<{
     accessToken: string;
     refreshToken: string;
     expiresIn: number;
   }> {
-    // Step 1: Atomic DEL — only one concurrent rotation wins
-    const pipeline = redis.pipeline();
-    pipeline.get(`auth:refresh:${oldToken}`);
-    pipeline.del(`auth:refresh:${oldToken}`);
-    const results = await pipeline.exec();
+    // Step 1: Atomically read and consume the refresh token in one Lua call.
+    // Only the first concurrent rotation request will receive the payload;
+    // subsequent requests get nil and are rejected as replays.
+    const rawPayload = (await redis.eval(
+      ATOMIC_GET_DEL_SCRIPT,
+      1,
+      `auth:refresh:${oldToken}`
+    )) as string | null;
 
-    if (!results) {
-      throw new UnauthorizedError("Token rotation pipeline failed.");
-    }
-
-    const [getResult, delResult] = results;
-    const rawPayload = getResult?.[1] as string | null;
-    const delCount = delResult?.[1] as number;
-
-    if (rawPayload === null || delCount === 0) {
+    if (rawPayload === null) {
       // Token not in Redis — check if this is a replay (old token for a
       // session whose family is still alive but the token was already rotated)
       await detectAndHandleReplay(oldToken);

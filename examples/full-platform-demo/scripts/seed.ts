@@ -23,6 +23,7 @@ import { createClient } from "@oneplatform/sdk";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -163,6 +164,20 @@ async function seedTenants(
   }
 }
 
+// Sentinel value written in users.json to make clear the field is a placeholder.
+// The seed script replaces it with a cryptographically random password at
+// runtime so no real credentials ever land in source control.
+const GENERATED_PASSWORD_SENTINEL = "<GENERATED_BY_SEED_SCRIPT>";
+
+function resolveUserPassword(rawPassword: string): string {
+  if (rawPassword === GENERATED_PASSWORD_SENTINEL) {
+    // 16 random bytes → 32 lowercase hex chars. Long enough for any password
+    // policy while being easy to copy-paste from seed output.
+    return randomBytes(16).toString("hex");
+  }
+  return rawPassword;
+}
+
 async function seedUsers(
   client: ReturnType<typeof createClient>,
   users: UserSeed[]
@@ -171,10 +186,11 @@ async function seedUsers(
 
   for (const user of users) {
     try {
+      const password = resolveUserPassword(user.password);
       await client.users.create({
         email: user.email,
         displayName: user.displayName,
-        password: user.password,
+        password,
         role: user.role,
         tenantId: user.tenantId,
         metadata: {
@@ -184,6 +200,9 @@ async function seedUsers(
         active: user.active,
       });
       log("users", `  Created: ${user.displayName} (${user.email}) -> ${user.role}`);
+      if (user.password === GENERATED_PASSWORD_SENTINEL) {
+        log("users", `    Generated password: ${password}  (save this — it will not be shown again)`);
+      }
     } catch (error: unknown) {
       if (error instanceof Error && error.message.includes("409")) {
         log("users", `  Already exists: ${user.displayName} (${user.email})`);

@@ -106,6 +106,13 @@ Two tenants demonstrate different platform configurations:
 
 ### Users
 
+User passwords are **generated at seed time** — the `seed/users.json` file contains
+the placeholder `"<GENERATED_BY_SEED_SCRIPT>"` for every password field rather than
+literal credentials. When the seed script runs, it calls `crypto.randomBytes(16)` to
+produce a unique 32-character hex password for each user and prints it to stdout.
+Copy those passwords from the seed output; they are not stored anywhere after the
+script exits.
+
 Each user has a realistic name, email, and role assignment:
 
 | User | Tenant | Role | Purpose |
