@@ -217,6 +217,18 @@ export interface PipelineStepData {
 }
 
 /**
+ * Data available just before a pipeline run completes.
+ * Available to `before:pipeline.complete` only — at this point all steps have
+ * been dispatched but the final run record has not been persisted yet.
+ * `status`, `duration`, and `stepResults` are not available because the run
+ * has not actually finished; use `after:pipeline.complete` for those fields.
+ */
+export interface PipelineBeforeCompleteData {
+  pipelineId: string;
+  pipelineRunId: string;
+}
+
+/**
  * Data available when a pipeline run finishes.
  * Available to `after:pipeline.complete` only — at this point all steps have
  * either succeeded or failed.
@@ -390,7 +402,9 @@ export interface HookPayloadDataMap {
   "after:pipeline.trigger":    PipelineTriggerData;
   "before:pipeline.step":      PipelineStepData;
   "after:pipeline.step":       PipelineStepData;
-  "before:pipeline.complete":  PipelineCompleteData;
+  // before:pipeline.complete fires before the run record is persisted; status/duration/
+  // stepResults are not yet available — use PipelineBeforeCompleteData, not PipelineCompleteData.
+  "before:pipeline.complete":  PipelineBeforeCompleteData;
   "after:pipeline.complete":   PipelineCompleteData;
   // Execution Service
   "before:execution.setup":    ExecutionSetupData;

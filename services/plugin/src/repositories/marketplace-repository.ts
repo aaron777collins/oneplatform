@@ -288,11 +288,16 @@ export class MarketplaceRepository {
     cursor?: string
   ): Promise<PluginRatingRow[]> {
     if (cursor !== undefined) {
+      // ORDER BY created_at DESC, id DESC means newer rows come first.
+      // For forward pagination in descending order the cursor condition must use
+      // '<' (less than) to retrieve the next page of older rows. Using '>' would
+      // return rows with a higher id than the cursor, moving backwards through
+      // the result set and producing incorrect pages.
       const result = await this.pool.query<PluginRatingRow>(
         `SELECT ${RATING_COLUMNS}
            FROM plugin.plugin_ratings
           WHERE marketplace_plugin_id = $1
-            AND id > $2
+            AND id < $2
           ORDER BY created_at DESC, id DESC
           LIMIT $3`,
         [pluginId, cursor, limit]

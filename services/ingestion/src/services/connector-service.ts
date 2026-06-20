@@ -1,5 +1,4 @@
 import type { Logger } from "@oneplatform/core";
-import { NotFoundError, ForbiddenError } from "@oneplatform/core";
 import type { CredentialService } from "./credential-service.js";
 import {
   ConnectorNotFoundError,
@@ -265,9 +264,13 @@ export function createConnectorService(
     }
     // Tenant isolation: enforce ownership in the service layer in addition to
     // the DB-level RLS policy so we always fail loudly on cross-tenant access.
+    // Throw a NotFoundError (404) rather than ForbiddenError (403) when the
+    // connector belongs to a different tenant — leaking the 403 vs 404
+    // distinction would allow callers to enumerate connector IDs across tenants.
     if (tenantId !== "*" && connector.tenant_id !== tenantId) {
-      throw new ForbiddenError(
-        `You do not have access to connector ${id}.`,
+      throw new ConnectorNotFoundError(
+        `Connector ${id} not found.`,
+        { connectorId: id },
       );
     }
     return connector;

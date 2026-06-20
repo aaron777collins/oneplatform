@@ -102,15 +102,27 @@ export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariab
           cursor = entry.id;
         }
 
-        if (!follow || TERMINAL.has(run.status)) {
-          if (TERMINAL.has(run.status)) {
+        // Re-fetch the run status rather than relying on the snapshot fetched
+        // before log retrieval — the run may have transitioned to terminal
+        // between the initial getRun call and the log fetch completing.
+        let currentRunForCheck = run;
+        try {
+          const freshResult = await runService.getRun(user.tenantId, runId);
+          currentRunForCheck = freshResult.run;
+        } catch {
+          // If we cannot refresh, fall back to the initial snapshot.
+          // The polling loop will pick up the terminal status on the next tick.
+        }
+
+        if (!follow || TERMINAL.has(currentRunForCheck.status)) {
+          if (TERMINAL.has(currentRunForCheck.status)) {
             const durationMs =
-              run.started_at !== null && run.completed_at !== null
-                ? run.completed_at.getTime() - run.started_at.getTime()
+              currentRunForCheck.started_at !== null && currentRunForCheck.completed_at !== null
+                ? currentRunForCheck.completed_at.getTime() - currentRunForCheck.started_at.getTime()
                 : null;
             sendEvent(cursor, "done", {
               runId,
-              status: run.status,
+              status: currentRunForCheck.status,
               ...(durationMs !== null ? { durationMs } : {}),
             });
           }

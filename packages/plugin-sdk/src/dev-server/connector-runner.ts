@@ -152,6 +152,9 @@ interface TimedCallResult<T> {
  *
  * Returns a union result so the caller decides whether to continue or abort.
  * We never throw from timedCall — all errors are captured in result.
+ *
+ * The timeout handle is always cleared when fn() settles first, preventing
+ * accumulation of dangling timers across up to maxBatches=100 fetchBatch calls.
  */
 async function timedCall<T>(
   method: LifecycleTiming["method"],
@@ -159,40 +162,39 @@ async function timedCall<T>(
   timeoutMs: number,
 ): Promise<TimedCallResult<T>> {
   const start = performance.now();
+  let timeoutHandle: NodeJS.Timeout | undefined;
+
   try {
-    const result = await Promise.race([
-      fn(),
-      timeoutPromise(method, timeoutMs),
-    ]);
+    const result = await new Promise<T>((resolve, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(
+          new Error(
+            `connector.${method}() timed out after ${timeoutMs}ms. ` +
+              `Increase callTimeoutMs or check the plugin for network hangs.`,
+          ),
+        );
+      }, timeoutMs);
+
+      // Prevent the timer from keeping the process alive when everything else finishes.
+      // unref() is a Node.js-specific method on Timeout objects.
+      if (typeof (timeoutHandle as NodeJS.Timeout).unref === "function") {
+        (timeoutHandle as NodeJS.Timeout).unref();
+      }
+
+      fn().then(resolve, reject);
+    });
+
+    // fn() resolved before the timeout — clear the timer so it does not fire later.
+    clearTimeout(timeoutHandle);
     const durationMs = Math.round(performance.now() - start);
     return { result, timing: { method, durationMs } };
   } catch (err) {
+    // fn() rejected or the timeout fired — either way, clear the handle to be safe.
+    clearTimeout(timeoutHandle);
     const durationMs = Math.round(performance.now() - start);
     const error = err instanceof Error ? err : new Error(String(err));
     return { result: error, timing: { method, durationMs } };
   }
-}
-
-/**
- * Resolves to a rejection after timeoutMs with a clear timeout error.
- * Typed as Promise<never> so it is compatible with any Promise.race() partner.
- */
-function timeoutPromise(method: string, timeoutMs: number): Promise<never> {
-  return new Promise<never>((_, reject) => {
-    const handle = setTimeout(() => {
-      reject(
-        new Error(
-          `connector.${method}() timed out after ${timeoutMs}ms. ` +
-            `Increase callTimeoutMs or check the plugin for network hangs.`,
-        ),
-      );
-    }, timeoutMs);
-    // Prevent the timer from keeping the process alive if everything else finishes.
-    // unref() is a Node.js-specific method on Timeout objects.
-    if (typeof (handle as NodeJS.Timeout).unref === "function") {
-      (handle as NodeJS.Timeout).unref();
-    }
-  });
 }
 
 /**

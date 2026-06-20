@@ -311,8 +311,11 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
       ): Promise<void> {
         rowsParsed += 1;
 
-        // Infer schema from the first SCHEMA_INFERENCE_ROWS records.
-        if (!schemaInferred && rowsParsed === SCHEMA_INFERENCE_ROWS) {
+        // Infer schema once we have enough rows. Use >= so files with fewer
+        // than SCHEMA_INFERENCE_ROWS records still get schema inference at
+        // end-of-file rather than never (the === condition would never trigger
+        // for small files, leaving inferredSchema permanently null).
+        if (!schemaInferred && rowsParsed >= SCHEMA_INFERENCE_ROWS) {
           inferredSchema = inferSchemaFromSample([...batch.map((r) => r.data), data]);
           schemaInferred = true;
 
@@ -359,6 +362,17 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
       } else {
         // NDJSON / JSON Lines / text/tab-separated-values
         await processNdjsonStream(objectStream, onRecord, onParseError);
+      }
+
+      // For files with fewer than SCHEMA_INFERENCE_ROWS records the in-loop
+      // threshold may not trigger. Infer from the final batch before flushing
+      // so small files are not left with null inferredSchema.
+      if (!schemaInferred && batch.length > 0) {
+        inferredSchema = inferSchemaFromSample(batch.map((r) => r.data));
+        schemaInferred = true;
+        await uploadJobRepo.updateProgress(uploadJobId, {
+          inferred_schema: inferredSchema,
+        });
       }
 
       // Flush any remaining records.

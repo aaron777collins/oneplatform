@@ -21,6 +21,7 @@ import type {
   PluginContext,
 } from "@oneplatform/plugin-sdk";
 import {
+  PluginAuthError,
   PluginConfigError,
   PluginDataError,
   PluginTimeoutError,
@@ -244,9 +245,18 @@ function extractConfig(raw: Record<string, unknown>): CsvConfig {
     );
   }
 
+  const rawDelimiter = raw["delimiter"];
+  if (typeof rawDelimiter === "string" && rawDelimiter.length > 1) {
+    // The parser compares text[pos] (a single character) against the delimiter,
+    // so a multi-character delimiter would never match, silently corrupting every row.
+    throw new PluginConfigError(
+      `config.delimiter must be exactly one character. Received: "${rawDelimiter}"`,
+      "delimiter",
+    );
+  }
   const delimiter =
-    typeof raw["delimiter"] === "string" && raw["delimiter"].length > 0
-      ? raw["delimiter"]
+    typeof rawDelimiter === "string" && rawDelimiter.length === 1
+      ? rawDelimiter
       : DEFAULT_DELIMITER;
 
   const hasHeader =
@@ -407,6 +417,12 @@ class CsvConnector implements Connector {
       try {
         response = await context.fetch.fetch(url, { method: "GET", headers });
       } catch (err) {
+        // Re-throw permanent plugin errors (e.g. PluginAuthError for disallowed URLs)
+        // as-is so the platform does not pointlessly retry them. Only transient
+        // network failures (timeouts, connection resets) are wrapped as retryable.
+        if (err instanceof PluginAuthError || err instanceof PluginConfigError) {
+          throw err;
+        }
         const message = err instanceof Error ? err.message : String(err);
         throw new PluginTimeoutError(`CSV fetch failed: ${message}`);
       }

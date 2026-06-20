@@ -76,9 +76,21 @@ export interface ApiKeyService {
 export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
   const { db, redis, logger, events } = deps;
 
+  // Minimum of 10 matches password-service.ts and bcrypt recommendations.
+  const MIN_BCRYPT_ROUNDS = 10;
+  const DEFAULT_BCRYPT_ROUNDS = 12;
+
   function getBcryptRounds(): number {
     const raw = process.env["OP_BCRYPT_ROUNDS"];
-    return raw !== undefined ? parseInt(raw, 10) : 12;
+    if (raw === undefined) return DEFAULT_BCRYPT_ROUNDS;
+    const parsed = parseInt(raw, 10);
+    // Guard against NaN (non-numeric env var) or values below the security
+    // threshold. bcrypt.hash(key, NaN) produces unpredictable results depending
+    // on the library version — always fall back to the safe default instead.
+    if (isNaN(parsed) || parsed < MIN_BCRYPT_ROUNDS) {
+      return DEFAULT_BCRYPT_ROUNDS;
+    }
+    return parsed;
   }
 
   // -------------------------------------------------------------------------

@@ -241,13 +241,20 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
   // never throws — callers can safely construct the client and then decide
   // whether/when to process the callback.
   const urlParams = new URLSearchParams(window.location.search);
-  const callbackCode = urlParams.get('code');
-  const callbackState = urlParams.get('state');
+  const capturedCode = urlParams.get('code');
+  const capturedState = urlParams.get('state');
 
-  if (callbackCode !== null && callbackState !== null) {
-    // Strip the query params from the URL so back/forward navigation and
-    // React strict-mode double invocations do not reuse the code.
-    const cleanUrl = window.location.pathname + window.location.hash;
+  if (capturedCode !== null && capturedState !== null) {
+    // Strip only the OAuth callback params (code, state) from the URL, preserving
+    // any other query params the application may have set (e.g. tab=settings, view=dashboard).
+    // Dropping all params would break application routing that relies on other query state.
+    const cleanedParams = new URLSearchParams(urlParams);
+    cleanedParams.delete('code');
+    cleanedParams.delete('state');
+    const queryString = cleanedParams.toString();
+    const cleanUrl = window.location.pathname +
+      (queryString ? `?${queryString}` : '') +
+      window.location.hash;
     window.history.replaceState(null, '', cleanUrl);
   }
   // No auto-redirect here. Callers check isAuthenticated() and call login()
@@ -292,8 +299,13 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
 
     async handleCallback(callbackUrl: string): Promise<void> {
       const url = new URL(callbackUrl);
-      const code = url.searchParams.get('code');
-      const state = url.searchParams.get('state');
+      // Use the URL's code/state if present; fall back to the params captured at
+      // construction time. The constructor strips code+state from the browser URL
+      // immediately on construction to prevent reuse on navigation — so if the
+      // caller passes window.location.href after creating the client, the params
+      // will already be gone. The captured values bridge this gap.
+      const code = url.searchParams.get('code') ?? capturedCode;
+      const state = url.searchParams.get('state') ?? capturedState;
 
       if (code === null || state === null) {
         throw new ConfigurationError(

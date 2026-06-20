@@ -108,8 +108,11 @@ function decodeCursor(cursor: string): CursorPayload {
   } catch {
     // An unreadable cursor means the caller passed something invalid; treat as
     // a config error (permanent failure — no point retrying unchanged cursor).
+    // Do NOT include the raw cursor value in the error message — cursor tokens
+    // may contain sensitive information (session tokens, internal IDs, encoded
+    // query parameters) that should not be exposed in logs.
     throw new PluginConfigError(
-      `Invalid cursor value — cannot decode pagination state: ${cursor}`,
+      "Invalid cursor value — cannot decode pagination state",
       "cursor",
     );
   }
@@ -562,11 +565,34 @@ class RestApiConnector implements Connector {
 
       context.logger.debug("Fetching REST API batch", { url, method: meta.method });
 
+      // For POST requests, send pagination/filter parameters as a JSON body instead
+      // of query string params. Many REST APIs that use POST for querying (e.g.,
+      // Elasticsearch _search, GraphQL) expect parameters in the request body.
+      // The URL was built with query params for GET; for POST we rebuild the URL
+      // without those params and send them as the body instead.
+      let fetchUrl = url;
+      let fetchBody: string | undefined;
+      if (meta.method === "POST") {
+        const parsedUrl = new URL(url);
+        const bodyParams: Record<string, string> = {};
+        for (const [key, value] of parsedUrl.searchParams.entries()) {
+          bodyParams[key] = value;
+        }
+        // Clear query params from the URL — they belong in the body for POST.
+        parsedUrl.search = "";
+        fetchUrl = parsedUrl.toString();
+        if (Object.keys(bodyParams).length > 0) {
+          fetchBody = JSON.stringify(bodyParams);
+          headers["Content-Type"] = "application/json";
+        }
+      }
+
       let response: Response;
       try {
-        response = await context.fetch.fetch(url, {
+        response = await context.fetch.fetch(fetchUrl, {
           method: meta.method,
           headers,
+          ...(fetchBody !== undefined ? { body: fetchBody } : {}),
         });
       } catch (err) {
         // Network-level errors (DNS failure, TCP reset, AbortError) are transient.

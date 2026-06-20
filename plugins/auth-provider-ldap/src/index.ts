@@ -527,7 +527,9 @@ class LdapAuthProvider implements AuthProvider {
       tags: ["ldap", "active-directory", "ad", "sso", "enterprise", "directory"],
       configSchema: {
         type: "object",
-        required: ["url", "baseDN", "bindDN", "bindCredentialKey", "userSearchBase"],
+        // bindCredentialKey is omitted from required: parseConfig applies a default
+        // of 'ldap_bind_password' when the field is absent, making it optional.
+        required: ["url", "baseDN", "bindDN", "userSearchBase"],
         properties: {
           url: { type: "string", format: "uri" },
           baseDN: { type: "string" },
@@ -677,9 +679,10 @@ class LdapAuthProvider implements AuthProvider {
       throw new PluginAuthError("LDAP login requires a non-empty username");
     }
 
-    if (password === "") {
-      // Empty-string binds succeed on many LDAP servers (anonymous bind fallback).
-      // Reject explicitly to prevent credential bypass.
+    if (password.trim() === "") {
+      // Many LDAP servers treat whitespace-only passwords identically to empty
+      // passwords, performing an anonymous bind that succeeds without credential
+      // verification. Trim before checking to close this bypass.
       throw new PluginAuthError("LDAP login requires a non-empty password");
     }
 

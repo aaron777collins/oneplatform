@@ -38,13 +38,15 @@ declare const __OP_DEV__: boolean | undefined;
 
 // ─── Retry helper ─────────────────────────────────────────────────────────────
 
+// BFF_MAX_RETRIES is the total number of attempts (initial call + retries).
+// Backoff delays: 500ms, 1000ms (one delay between each pair of attempts).
 const BFF_MAX_RETRIES = 3;
-const BFF_RETRY_BASE_MS = 500; // 500ms → 1000ms → 2000ms
+const BFF_RETRY_BASE_MS = 500; // 500ms → 1000ms
 
 /**
- * Calls `fn` up to BFF_MAX_RETRIES times with exponential backoff between
- * attempts. Returns the resolved value on the first success. Throws the last
- * error if all attempts fail.
+ * Calls `fn` up to BFF_MAX_RETRIES times total with exponential backoff
+ * between attempts. Returns the resolved value on the first success. Throws
+ * the last error if all attempts fail.
  *
  * Retry is appropriate here because the BFF seed calls (me + permissions) are
  * idempotent GETs and transient network blips should not permanently brick the
@@ -52,12 +54,15 @@ const BFF_RETRY_BASE_MS = 500; // 500ms → 1000ms → 2000ms
  */
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt <= BFF_MAX_RETRIES; attempt++) {
+  // attempt 0 = initial call; attempts 1..(BFF_MAX_RETRIES-1) = retries.
+  // Total attempts = BFF_MAX_RETRIES (not BFF_MAX_RETRIES + 1).
+  for (let attempt = 0; attempt < BFF_MAX_RETRIES; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (attempt < BFF_MAX_RETRIES) {
+      // Only delay if there is a subsequent retry to make.
+      if (attempt < BFF_MAX_RETRIES - 1) {
         await new Promise<void>((resolve) =>
           setTimeout(resolve, BFF_RETRY_BASE_MS * Math.pow(2, attempt)),
         );

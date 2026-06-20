@@ -64,4 +64,15 @@ for PGBUSER in pgbouncer_admin pgbouncer_stats; do
   fi
 done
 
+# ── Postgres superuser password ─────────────────────────────────────────────
+# The POSTGRES_PASSWORD env var used during container initialisation may have
+# been left at the dev default ("dev_postgres_superuser"). Overwrite it with the
+# op-init generated password so the superuser is always protected by a strong
+# credential after first boot, regardless of what POSTGRES_PASSWORD was set to.
+SUPER_PW=$(read_password "$INIT_DIR/db_password_postgres_superuser.txt")
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+  -v "safe_pw=$SUPER_PW" \
+  -c "ALTER ROLE ${POSTGRES_USER} WITH PASSWORD :'safe_pw';"
+echo "[postgres-init] Postgres superuser password reset to op-init generated value."
+
 echo "[postgres-init] All service role passwords applied successfully."

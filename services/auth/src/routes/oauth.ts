@@ -56,11 +56,20 @@ export function createOAuthRoutes(deps: OAuthRouteDeps): Hono<{ Variables: AppVa
 
     // Provider-side denial (e.g. user clicked "Cancel") is an explicit error path.
     // We convert it to an OAuthStateInvalidError so the error handler returns a
-    // consistent JSON response.
+    // consistent JSON response. Per RFC 6749 §4.1.2.1, providers set ?error=...
+    // without a code parameter when denying consent.
     if (parsed.data.error !== undefined) {
       throw new OAuthStateInvalidError(
         `OAuth provider returned an error: ${parsed.data.error}`,
       );
+    }
+
+    // code is required for the happy path — if absent without an error param,
+    // the callback is malformed (not a standard OAuth 2.0 response).
+    if (parsed.data.code === undefined) {
+      throw new ValidationError("Invalid OAuth callback query", [
+        { code: "custom", path: ["code"], message: "code is required when error is not present" },
+      ]);
     }
 
     const result = await oauthService.handleCallback(

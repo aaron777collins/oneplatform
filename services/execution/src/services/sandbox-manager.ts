@@ -261,6 +261,17 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
   }
 
   function recordRun(executionId: string): void {
+    // Guard against a race where getPrimary() succeeded (state was ACTIVE) but
+    // triggerRecycle() ran between that check and this call (e.g., the recycle
+    // timer fired). Adding to inflightIds while a drain is in progress causes
+    // waitForInflightDrain to wait for or force-kill this freshly dispatched
+    // execution, producing unexpected execution failures.
+    if (primary.state === "DRAINING_OLD") {
+      throw new ExecutionSandboxUnavailableError(
+        "Sandbox transitioned to DRAINING_OLD between getPrimary() and recordRun() — retry the execution.",
+      );
+    }
+
     primary.inflightIds.add(executionId);
     primary.runCount++;
 

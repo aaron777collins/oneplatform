@@ -33,11 +33,26 @@ export function responseEnvelopeMiddleware() {
     }
 
     // Do not wrap responses that are already enveloped — i.e. the route (or an
-    // upstream service proxied through the Gateway) already returned { data: T }.
+    // upstream service proxied through the Gateway) already returned { data: T }
+    // or { data: T, pagination: P } (the canonical paginated envelope shape).
     // Without this check, the middleware would produce { data: { data: T } },
     // which breaks frontend consumers that expect a single envelope layer.
-    if (body !== null && typeof body === "object" && "data" in (body as object)) {
-      return;
+    //
+    // We restrict the skip-wrapping condition to the two known envelope shapes
+    // rather than any response that merely contains a "data" key. A naive
+    // presence check would skip wrapping for domain objects that naturally carry
+    // a "data" field alongside other domain-specific keys (e.g.
+    // { data: 'csv text', format: 'csv', filename: 'report.csv' }), causing the
+    // frontend to receive an unwrapped domain object instead of the expected
+    // { data: { data: 'csv text', format: 'csv', ... } } envelope.
+    if (body !== null && typeof body === "object") {
+      const keys = Object.keys(body as object);
+      const isPlainEnvelope = keys.length === 1 && keys[0] === "data";
+      const isPaginatedEnvelope =
+        keys.length === 2 && "data" in (body as object) && "pagination" in (body as object);
+      if (isPlainEnvelope || isPaginatedEnvelope) {
+        return;
+      }
     }
 
     // StatusCode cast is safe: we already checked the status starts with "2"

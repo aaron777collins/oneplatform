@@ -318,8 +318,11 @@ This document tracks the current state of development. Read this FIRST when resu
   - 7 CRITICAL: tenant isolation (ontology), cross-app role (app), CSV infinite loop, auth wildcard glob
   - 24 HIGH: SSRF bypass, SQL injection, CSP nonce, credential handling, transaction fixes, SSE leaks
   - Commit: `68fc3dc`
-- [ ] MEDIUM fixes: 127 bugs across 24 components (IN PROGRESS — workflow wf_3c5d2b2c-935)
-- [ ] LOW fixes: 47 bugs across components (pending)
+- [x] MEDIUM fixes: 122 bugs fixed, 3 skipped across 23 components (all builds + tests pass)
+  - 23 developer agents covering all 9 services, 7 packages, 7 plugins, docker
+  - Key fixes: atomic rate limiting, algorithm confusion prevention, SSE cleanup, origin matching, timer leaks, token refresh races, filter builder injection, connection pool limits
+  - Commit: `4219d83`
+- [ ] LOW fixes: 56 bugs across 21 components (IN PROGRESS — workflow wf_807668c6-018)
 - [ ] Re-analysis cycle until clean
 - [ ] Example projects with all features and all user personas
 - [ ] Final quality gates

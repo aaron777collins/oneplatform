@@ -161,13 +161,19 @@ export class QueryCache {
   /**
    * Removes all cache entries for an entity, causing the next useQuery render
    * to trigger a fresh fetch. Called by useMutation after any successful write.
+   *
+   * Keys are collected before deletion to avoid mutating the Map while iterating
+   * over it — the ES2015 spec guarantees safety for the current key, but this
+   * explicit two-phase approach is immune to future refactoring to other
+   * collection types that may not share that guarantee.
    */
   invalidate(entity: string): void {
-    for (const key of this.entries.keys()) {
-      if (this.keyBelongsToEntity(key, entity)) {
-        this.entries.delete(key);
-        this.notifyListeners(key);
-      }
+    const keysToDelete = Array.from(this.entries.keys()).filter((key) =>
+      this.keyBelongsToEntity(key, entity),
+    );
+    for (const key of keysToDelete) {
+      this.entries.delete(key);
+      this.notifyListeners(key);
     }
   }
 

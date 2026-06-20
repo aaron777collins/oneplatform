@@ -240,6 +240,16 @@ export function createInternalRoutes(
     const pluginId = c.req.param("pluginId");
     const key = c.req.param("key");
 
+    // Apply the same key validation used by GET and PUT — consistency prevents
+    // malformed keys from being injected into the Redis key string
+    // (plugin:cache:{tenantId}:{pluginId}:{key}).
+    if (key.length > 256 || !/^[\w\-.:]+$/.test(key)) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "key must be max 256 URL-safe chars.", requestId: c.var.requestId } },
+        400
+      );
+    }
+
     await cacheRepo.delete(tenantId, pluginId, key);
     return c.json({ deleted: true });
   });

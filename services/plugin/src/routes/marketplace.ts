@@ -43,6 +43,11 @@ interface TokenBucket {
   lastRefill: number;
 }
 
+// Maximum number of unique user keys tracked per rate limiter before the
+// least-recently-used entry is evicted. This bounds the Map's memory footprint
+// to O(MAX_BUCKET_ENTRIES) regardless of how many distinct users call the API.
+const MAX_BUCKET_ENTRIES = 10_000;
+
 function createRateLimiter(maxTokens: number, refillPerMs: number) {
   const buckets = new Map<string, TokenBucket>();
 
@@ -51,7 +56,19 @@ function createRateLimiter(maxTokens: number, refillPerMs: number) {
     let bucket = buckets.get(key);
 
     if (bucket === undefined) {
+      // Evict the oldest entry when the map is full. Map iteration order is
+      // insertion order, so the first entry is always the oldest.
+      if (buckets.size >= MAX_BUCKET_ENTRIES) {
+        const oldest = buckets.keys().next();
+        if (!oldest.done) {
+          buckets.delete(oldest.value);
+        }
+      }
       bucket = { tokens: maxTokens, lastRefill: now };
+      buckets.set(key, bucket);
+    } else {
+      // Move the accessed entry to the end so it is not the next to be evicted.
+      buckets.delete(key);
       buckets.set(key, bucket);
     }
 

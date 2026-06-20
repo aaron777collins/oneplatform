@@ -36,7 +36,7 @@ function makeContext(overrides: Partial<ResolverContext> = {}): ResolverContext 
     tenantId: "tenant-1",
     userId: "user-1",
     roles: ["member"],
-    scopes: ["read", "write"],
+    scopes: ["read", "data:write"],
     serviceToken: "svc-token",
     ontologyServiceUrl: "http://ontology",
     ingestionServiceUrl: "http://ingestion",

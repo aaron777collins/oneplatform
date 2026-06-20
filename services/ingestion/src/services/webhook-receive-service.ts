@@ -268,6 +268,14 @@ export function createWebhookReceiveService(
       .update(rawBody)
       .digest("hex");
 
+    // Validate that the incoming signature is a well-formed hex string before
+    // decoding. Buffer.from(str, 'hex') silently ignores non-hex characters,
+    // so 'abcdzz' (6 chars) decodes to only 2 bytes. An attacker could craft a
+    // hex string with the correct length (matching expectedHmac.length) but with
+    // invalid trailing hex characters that get ignored during decode, causing the
+    // length check below to pass while the decoded buffer is shorter than expected.
+    const isValidHex = /^[0-9a-f]*$/.test(incomingHex);
+
     // timingSafeEqual requires same-length buffers. If the incoming value is
     // wrong length, the comparison still runs against a dummy buffer to prevent
     // timing differences that could leak "wrong length" information to an attacker.
@@ -276,6 +284,7 @@ export function createWebhookReceiveService(
     Buffer.from(incomingHex, "hex").copy(incomingBuf);
 
     const hmacValid =
+      isValidHex &&
       timingSafeEqual(expectedBuf, incomingBuf) &&
       incomingHex.length === expectedHmac.length;
 

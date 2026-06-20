@@ -56,7 +56,20 @@ async function loginAction(opts: LoginOpts, ctx: CommandContext): Promise<void> 
     // Auth service login returns { accessToken, user: { email } } — not apiKey.
     // Some gateway configurations may also return { token } or { access_token },
     // so we defensively extract the token from whichever field is present.
-    const resp = await ctx.http.post<Record<string, unknown>>(
+    //
+    // Use a temporary HTTP client built from the resolved platformUrl rather than
+    // ctx.http. ctx.http is constructed by the preAction hook before the login
+    // subcommand's --platform option is parsed, so it may point at the wrong URL
+    // when the user provides a login-specific --platform override.
+    const { createHttpClient } = await import("../../lib/http-client.js");
+    const loginClient = createHttpClient({
+      platformUrl,
+      apiKey: null,
+      timeout: ctx.config.timeout,
+      insecureTls: ctx.config.insecureTls,
+      verbose: ctx.config.verbose,
+    });
+    const resp = await loginClient.post<Record<string, unknown>>(
       "/api/v1/auth/login",
       { email, password: pass },
     );

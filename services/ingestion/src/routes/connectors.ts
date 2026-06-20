@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
 import { UnauthorizedError, ValidationError } from "@oneplatform/core";
 import type {
@@ -20,6 +21,18 @@ export interface ConnectorRouteDeps {
   syncService: SyncService;
   masterKey: Buffer;
   schemaDriftService?: SchemaDriftService;
+}
+
+// UUID schema used to validate path parameters before hitting the database.
+// Passing a non-UUID id to the pg driver produces a raw PostgreSQL error
+// ('invalid input syntax for type uuid') instead of a clean 400 response.
+const uuidSchema = z.string().uuid("id must be a valid UUID");
+
+function requireValidId(id: string): void {
+  const result = uuidSchema.safeParse(id);
+  if (!result.success) {
+    throw new ValidationError("Invalid connector id: must be a valid UUID.", result.error.issues);
+  }
 }
 
 export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variables: AppVariables }> {
@@ -83,6 +96,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     const connector = await connectorService.getConnector(user.tenantId, c.req.param("id"));
     return c.json({ data: connector });
   });
@@ -93,6 +107,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     const body = await c.req.json();
     const parsed = patchConnectorRequest.safeParse(body);
     if (!parsed.success) {
@@ -127,6 +142,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     const connectorId = c.req.param("id");
 
     // Cancel any in-flight or queued sync job before deleting the connector so
@@ -155,6 +171,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     let overrides: { config?: Record<string, unknown>; credentials?: Record<string, string> } | undefined;
     try {
       const body = await c.req.json();
@@ -178,6 +195,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     let options: { mode?: "full" | "incremental"; force?: boolean } | undefined;
     try {
       const body = await c.req.json();
@@ -202,6 +220,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     // Verify tenant ownership
     await connectorService.getConnector(user.tenantId, c.req.param("id"));
 
@@ -227,6 +246,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     // Verify tenant ownership
     await connectorService.getConnector(user.tenantId, c.req.param("id"));
 
@@ -243,6 +263,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       throw new UnauthorizedError("Authentication required.");
     }
 
+    requireValidId(c.req.param("id"));
     // Ownership check — throws ConnectorNotFoundError (404) for unknown or
     // cross-tenant connector IDs, matching the pattern used by other endpoints.
     await connectorService.getConnector(user.tenantId, c.req.param("id"));

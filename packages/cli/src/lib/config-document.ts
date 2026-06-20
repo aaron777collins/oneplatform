@@ -27,6 +27,19 @@ export function resourceKey(doc: ConfigDocument): string {
   return `${doc.kind}:${name}`;
 }
 
+const VALID_RESOURCE_KINDS = new Set<ResourceKind>([
+  "Role", "Ontology", "Connector", "Pipeline", "App", "Webhook",
+]);
+
+function assertValidKind(kind: string): asserts kind is ResourceKind {
+  if (!VALID_RESOURCE_KINDS.has(kind as ResourceKind)) {
+    throw new Error(
+      `Invalid resource kind '${kind}'. ` +
+        `Valid kinds are: ${[...VALID_RESOURCE_KINDS].join(", ")}.`,
+    );
+  }
+}
+
 /** Parse a YAML multi-document string into ConfigDocument[]. */
 export function parseConfigDocuments(yaml: string): ConfigDocument[] {
   const docs: ConfigDocument[] = [];
@@ -36,7 +49,11 @@ export function parseConfigDocuments(yaml: string): ConfigDocument[] {
       if (typeof d["kind"] !== "string" || typeof d["spec"] !== "object") {
         throw new Error(`Invalid config document: must have 'kind' (string) and 'spec' (object).`);
       }
-      docs.push({ kind: d["kind"] as ResourceKind, spec: d["spec"] as Record<string, unknown> });
+      // Validate kind before casting — unknown kinds would silently produce wrong
+      // dependency edges and incorrect topological sort priority (defaulting to 99),
+      // only failing later with a confusing server error.
+      assertValidKind(d["kind"]);
+      docs.push({ kind: d["kind"], spec: d["spec"] as Record<string, unknown> });
     }
   });
   return docs;

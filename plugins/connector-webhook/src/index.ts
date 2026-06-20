@@ -607,16 +607,24 @@ const webhookConnector: Connector = {
       }
 
       // Remove processed IDs from the index and their individual cache entries.
-      if (processedIds.length > 0) {
-        const processedSet = new Set(processedIds);
-        const remainingIds = allIds.filter((id) => !processedSet.has(id));
-        await context.cache.set<PendingIndex>(pendingIndexKey(instanceId), { ids: remainingIds });
+      // Compute remainingIds unconditionally so that hasMore and estimatedTotal
+      // reflect the true post-batch state even when all records in the page were
+      // skipped (failed HMAC or TTL-expired). Without this, hasMore could be true
+      // while nextCursor is null (violating the BatchResult contract) whenever every
+      // record in a page is skipped but more IDs remain beyond the page window.
+      const processedSet = new Set(processedIds);
+      const remainingIds = allIds.filter((id) => !processedSet.has(id));
 
+      if (processedIds.length > 0) {
+        await context.cache.set<PendingIndex>(pendingIndexKey(instanceId), { ids: remainingIds });
         await Promise.all(processedIds.map((id) => context.cache.delete(pendingPayloadKey(instanceId, id))));
       }
 
-      const remainingAfterPage = allIds.length - startIndex - pageIds.length;
-      const hasMore = remainingAfterPage > 0;
+      // hasMore is true iff there are IDs left to process after this batch.
+      // Using remainingIds.length (post-processing) rather than the raw page-window
+      // arithmetic ensures nextCursor is always non-null when hasMore is true,
+      // satisfying the BatchResult invariant documented in connector.ts line 40.
+      const hasMore = remainingIds.length > 0;
       // Use a sentinel cursor rather than a payload ID. Since processed IDs are
       // removed from the index within fetchBatch, a payload-ID cursor would always
       // resolve to indexOf==-1 on the next call. The sentinel "continue" signals
@@ -638,7 +646,9 @@ const webhookConnector: Connector = {
         nextCursor,
         hasMore,
         fetchedAt: new Date().toISOString(),
-        estimatedTotal: allIds.length,
+        // Use remainingIds.length so the UI shows the count of payloads still
+        // waiting, not the stale snapshot count from before this batch ran.
+        estimatedTotal: remainingIds.length,
       };
     } finally {
       span.end();

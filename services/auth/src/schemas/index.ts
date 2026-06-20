@@ -280,10 +280,16 @@ export const oauthAuthorizeQuery = z.object({
   redirectUri: z.string().url().optional(),
 });
 
+// OAuth callback query follows RFC 6749 §4.1.2 / §4.1.2.1.
+// When the provider denies consent it redirects with ?error=access_denied
+// (and optional error_description / error_uri) WITHOUT a code parameter.
+// Making code optional here lets the route handler reach its error-handling
+// logic (which produces a meaningful "OAuth provider returned an error"
+// response) instead of failing with a generic schema validation error.
 export const oauthCallbackQuery = z.object({
-  code: z.string(),
+  code: z.string().optional(),
   state: z.string(),
-  // Set by provider when the user denies permission
+  // Set by provider when the user denies permission or an error occurs
   error: z.string().optional(),
 });
 

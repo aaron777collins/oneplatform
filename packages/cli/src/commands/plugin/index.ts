@@ -123,10 +123,11 @@ async function installAction(source: string, opts: InstallOpts, ctx: CommandCont
         "Dev-mode installation active: scoped to your tenant, expires in 7 days. " +
           "Re-run `op plugin install --dev` to renew.",
       );
-    } else if (ctx.yes) {
-      ctx.renderer.warn("Auto-approving plugin installation (--yes). This is logged to audit.");
     } else {
-      await confirmDestructive(`Install plugin '${resp.name}'?`, false);
+      if (ctx.yes) {
+        ctx.renderer.warn("Auto-approving plugin installation (--yes). This is logged to audit.");
+      }
+      await confirmDestructive(`Install plugin '${resp.name}'?`, ctx.yes);
     }
 
     ctx.renderer.success(`Plugin '${resp.name}' v${resp.version} installed (ID: ${resp.id}).`);
@@ -173,9 +174,7 @@ async function upgradeAction(source: string, opts: UpgradeOpts, ctx: CommandCont
     form.append("upgrade", "true");
     if (opts.tenant) form.append("tenantId", opts.tenant);
 
-    if (!ctx.yes) {
-      await confirmDestructive("Upgrade plugin? This will replace the active version.", false);
-    }
+    await confirmDestructive("Upgrade plugin? This will replace the active version.", ctx.yes);
 
     const resp = await ctx.http.postMultipart<{
       id: string; name: string; version: string;
@@ -189,13 +188,11 @@ async function upgradeAction(source: string, opts: UpgradeOpts, ctx: CommandCont
   }
 }
 
-async function rollbackAction(pluginId: string, opts: RollbackOpts, ctx: CommandContext): Promise<void> {
-  if (!ctx.yes) {
-    await confirmDestructive(
-      `Roll back plugin '${pluginId}' to the previous version?`,
-      false,
-    );
-  }
+async function rollbackAction(pluginId: string, _opts: RollbackOpts, ctx: CommandContext): Promise<void> {
+  await confirmDestructive(
+    `Roll back plugin '${pluginId}' to the previous version?`,
+    ctx.yes,
+  );
 
   const resp = await ctx.http.post<{ manifestId: string; fromVersion: string; toVersion: string }>(
     `/api/v1/plugins/${encodeURIComponent(pluginId)}/rollback`,

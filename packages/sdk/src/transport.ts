@@ -25,10 +25,16 @@ import {
   NetworkError,
   RateLimitError,
 } from './errors/index.js';
-import { withRetry, resolveRetryPolicy } from './retry/index.js';
+import { withRetry, resolveRetryPolicy, DEFAULT_RETRY_POLICY } from './retry/index.js';
 
 // SDK version injected at build time. Fallback ensures the constant is always defined.
 const SDK_VERSION = '0.1.0';
+
+// Sentinel status code used for NetworkError in retry decisions.
+// NetworkError has no HTTP statusCode (request never reached the server), but
+// it is always retryable. We map it to 503 so withRetry treats it the same
+// as a transient server-side failure.
+const DEFAULT_RETRYABLE_NETWORK_STATUS = 503;
 
 function generateRequestId(): string {
   // UUID v4 using crypto.randomUUID() (Node 14.17+ and all modern browsers)
@@ -236,7 +242,15 @@ export class Transport {
 
     const result = await withRetry(
       () => this.executeRequest<T>(method, url, serializedBody, false, idempotencyKey),
-      (err) => (err instanceof OnePlatformError ? err.statusCode : undefined),
+      (err) => {
+        if (err instanceof NetworkError) {
+          // NetworkError has no HTTP statusCode (the request never reached the server).
+          // Return a retryable sentinel status so withRetry does not skip these errors.
+          // Timeouts and connection failures are transient and should be retried.
+          return DEFAULT_RETRYABLE_NETWORK_STATUS;
+        }
+        return err instanceof OnePlatformError ? err.statusCode : undefined;
+      },
       (err) =>
         err instanceof RateLimitError
           ? err.response?.headers.get('Retry-After') ?? undefined
@@ -342,9 +356,12 @@ export class Transport {
         });
       }
 
-      // Unwrap the { data: T } envelope, consistent with request()
+      // Unwrap the { data: T } envelope, consistent with request().
+      // Check for a 'data' key with strict undefined check — null is a valid "no result"
+      // value returned by the server (e.g. empty lookup) and should be returned as-is,
+      // not cause the entire envelope object to be returned as type T.
       const envelope = parsed as { data?: T | null };
-      if (envelope.data !== undefined && envelope.data !== null) return envelope.data;
+      if ('data' in (envelope as object)) return envelope.data as T;
       return parsed as T;
     } finally {
       this.activeControllers.delete(controller);
@@ -465,11 +482,12 @@ export class Transport {
       }
 
       // Unwrap the { data: T } envelope.
-      // Check for both undefined and null — some server responses set data: null
-      // to indicate "no result" (e.g. empty search results wrapped in an envelope).
+      // Use 'in' operator to distinguish between {data: null} (server says "no result")
+      // and a non-enveloped response (no 'data' key at all). If the key exists, return
+      // the value even when null — returning the whole envelope as T would be wrong.
       const envelope = parsed as { data?: T | null };
-      if (envelope.data !== undefined && envelope.data !== null) {
-        return envelope.data;
+      if ('data' in (envelope as object)) {
+        return envelope.data as T;
       }
 
       // Some endpoints return the result directly (e.g., non-standard 2xx)

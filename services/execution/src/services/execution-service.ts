@@ -283,6 +283,16 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
       "latest",
     );
 
+    // Fail fast with a specific error when the bundle is unavailable. Proceeding
+    // with an empty string would send a no-op payload to the sandbox and produce
+    // a cryptic execution error rather than a clear "plugin not found" message.
+    if (bundle === null) {
+      throw new Error(
+        `Plugin bundle not found for plugin '${request.pluginId}' (tenant: ${request.tenantId}). ` +
+        "Ensure the plugin is published and the bundle cache is populated before running connector executions.",
+      );
+    }
+
     const traceId = request.traceId;
     const createData: CreateExecutionData = {
       tenant_id: request.tenantId,
@@ -305,7 +315,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
       executionId: execution.id,
       type: "connector-run",
       language: "js",
-      code: bundle?.bundleBase64 ?? "",
+      code: bundle.bundleBase64,
       timeout: request.timeout,
       context: {
         executionId: execution.id,
@@ -316,7 +326,7 @@ export function createExecutionService(deps: ExecutionServiceDeps): ExecutionSer
         pluginId: request.pluginId,
         credentialBundleId: request.credentialBundleId,
       },
-      ...(bundle !== null ? { pluginBundleBase64: bundle.bundleBase64 } : {}),
+      pluginBundleBase64: bundle.bundleBase64,
     };
 
     let result: Awaited<ReturnType<typeof executionRouter.route>>;

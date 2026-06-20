@@ -235,8 +235,22 @@ async function decryptEntry(
       const key = Buffer.from(encKey, "base64");
       return { encryptedApiKey: decrypt(entry.apiKey, key), derivation: "keychain" };
     }
+    // Keychain entry is missing — this credential cannot be decrypted with machine-id
+    // because it was encrypted with a random 32-byte key that only the keychain holds.
+    // Warn loudly: a missing keychain entry indicates credential theft or machine transfer,
+    // not a recoverable fallback.
+    process.stderr.write(
+      `WARNING: Credential for profile '${profileName}' was stored using the system keychain, ` +
+        `but the keychain entry is no longer present.\n` +
+        `This may indicate the credentials file was copied from another machine or the keychain was cleared.\n` +
+        `Run 'op auth login' to re-authenticate.\n`,
+    );
+    throw new Error(
+      `Keychain entry missing for profile '${profileName}'. Cannot decrypt credentials. ` +
+        `Run 'op auth login' to re-authenticate.`,
+    );
   }
-  // Fall through to machine-id derivation
+  // Machine-id derivation: used only when credential was originally stored with machine-id
   const key = deriveMachineKey();
   return { encryptedApiKey: decrypt(entry.apiKey, key), derivation: "machine-id" };
 }

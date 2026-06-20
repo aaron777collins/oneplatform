@@ -108,11 +108,22 @@ function describeCron(cron: string): string {
 
   if (month === "*" && dayOfWeek === "*" && dayOfMonth !== "*" && minute !== "*" && hour !== "*") {
     const h = `${hour?.padStart(2, "0")}:${minute?.padStart(2, "0")}`;
-    const ordinal =
-      dayOfMonth === "1" ? "1st" :
-      dayOfMonth === "2" ? "2nd" :
-      dayOfMonth === "3" ? "3rd" :
-      `${dayOfMonth}th`;
+    // Standard English ordinal rules:
+    //   - 11th, 12th, 13th are exceptions (teen numbers always use "th")
+    //   - otherwise: 1→st, 2→nd, 3→rd, all others→th
+    const n = parseInt(dayOfMonth ?? "", 10);
+    const teenException = n >= 11 && n <= 13;
+    const lastDigit = n % 10;
+    const suffix = teenException
+      ? "th"
+      : lastDigit === 1
+        ? "st"
+        : lastDigit === 2
+          ? "nd"
+          : lastDigit === 3
+            ? "rd"
+            : "th";
+    const ordinal = `${dayOfMonth}${suffix}`;
     return `Runs on the ${ordinal} of every month at ${h}`;
   }
 

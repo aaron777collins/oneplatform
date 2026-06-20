@@ -225,12 +225,30 @@ export interface DataNamespace {
 export function createDataNamespace(transport: Transport): DataNamespace {
   const cache = new Map<string, EntityResource<Record<string, unknown>>>();
 
+  // Built-in JavaScript property names that must not be treated as entity type names.
+  // '.then' is particularly critical: a thenable Proxy causes `await client.data` to
+  // attempt to call client.data.then() as a function, producing a confusing error.
+  // Constructor, toJSON, toString etc. are included to avoid breaking debugging tools.
+  const RESERVED_PROPERTIES = new Set([
+    'then', 'catch', 'finally',              // Promise protocol — must not be thenables
+    'constructor', 'toString', 'toJSON',     // Object built-ins
+    'valueOf', 'toLocaleString', 'hasOwnProperty',
+    'isPrototypeOf', 'propertyIsEnumerable',
+    Symbol.toPrimitive, Symbol.toStringTag, Symbol.iterator,
+  ]);
+
   // Use a Proxy so that `client.data.Product` routes through the same factory as
   // `client.data.entity('Product')` without requiring code generation.
   const handler: ProxyHandler<DataNamespace> = {
     get(target, prop: string | symbol): unknown {
       if (prop === 'entity') {
         return target.entity;
+      }
+      // Pass through reserved built-in properties to avoid breaking Promise semantics,
+      // debugging tools, and JSON serialization. Without this guard, `await client.data`
+      // would try to call client.data.then() as a function and throw a type error.
+      if (RESERVED_PROPERTIES.has(prop)) {
+        return (target as unknown as Record<string | symbol, unknown>)[prop];
       }
       if (typeof prop !== 'string') return undefined;
       // Return the entity resource for any string property access

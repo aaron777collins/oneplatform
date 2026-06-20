@@ -110,10 +110,30 @@ export function validateFilePath(path: string): void {
   if (/[\x00-\x1f\x7f]/.test(path)) {
     throw new AppFileInvalidPathError("File path must contain only printable ASCII characters");
   }
-  const ext = path.slice(path.lastIndexOf("."));
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
+  // Extract the filename (last path segment) to scope extension matching to the
+  // filename only, avoiding false matches on dots in directory names.
+  const filename = path.slice(path.lastIndexOf("/") + 1);
+  const firstDotInFilename = filename.indexOf(".");
+
+  // Check for compound extensions (e.g. ".env.example") before falling back to
+  // the single-segment extension. lastIndexOf('.') alone cannot match ".env.example"
+  // because it only captures ".example" — the final dot-delimited segment.
+  const compoundExt =
+    firstDotInFilename !== -1 ? filename.slice(firstDotInFilename) : "";
+  const simpleExt =
+    filename.lastIndexOf(".") !== -1 ? filename.slice(filename.lastIndexOf(".")) : "";
+
+  // Accept either the full compound extension or the simple extension so that
+  // ordinary files (.ts, .json) and dotfile variants (.env.example) both match.
+  const extMatched =
+    (compoundExt !== "" && ALLOWED_EXTENSIONS.has(compoundExt)) ||
+    (simpleExt !== "" && ALLOWED_EXTENSIONS.has(simpleExt));
+
+  if (!extMatched) {
+    // Report the compound extension in the error to make it clear what was seen.
+    const displayExt = compoundExt !== "" ? compoundExt : simpleExt;
     throw new AppFileInvalidPathError(
-      `File extension "${ext}" is not allowed. Allowed: ${[...ALLOWED_EXTENSIONS].join(", ")}`
+      `File extension "${displayExt}" is not allowed. Allowed: ${[...ALLOWED_EXTENSIONS].join(", ")}`
     );
   }
 }

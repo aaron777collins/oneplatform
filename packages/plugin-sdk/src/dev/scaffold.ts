@@ -411,6 +411,20 @@ function buildWidgetSource(opts: ScaffoldOptions, entrypoint: string): string {
   DataQuery,
 } from "@oneplatform/plugin-sdk";
 
+/**
+ * Escape HTML special characters to prevent XSS when interpolating user-
+ * controlled values (config fields, user IDs, etc.) into HTML markup.
+ * Always call this before inserting any string into an HTML context.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 export const ${entrypoint}: Widget = {
   metadata(): WidgetMetadata {
     return {
@@ -428,7 +442,11 @@ export const ${entrypoint}: Widget = {
   },
 
   render(data: WidgetData): string {
-    const title = String(data.config["title"] ?? "${opts.name}");
+    // Escape all user-controlled values before inserting them into HTML to
+    // prevent XSS. Even though the platform applies server-side sanitization,
+    // escaping at the source is the correct defence-in-depth pattern.
+    const title = escapeHtml(String(data.config["title"] ?? "${opts.name}"));
+    const userId = escapeHtml(String(data.user.id));
     return \`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -442,7 +460,7 @@ export const ${entrypoint}: Widget = {
 </head>
 <body>
   <h1>\${title}</h1>
-  <p>Hello, \${data.user.id}!</p>
+  <p>Hello, \${userId}!</p>
 </body>
 </html>\`;
   },

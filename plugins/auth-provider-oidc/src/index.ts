@@ -292,11 +292,12 @@ function decodeJwtPayloadUnsafe(token: string): Record<string, unknown> {
 function hashString(value: string): string {
   let hash = 5381;
   for (let i = 0; i < value.length; i++) {
-    // djb2 algorithm
-    hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
+    // djb2 algorithm: apply >>> 0 at each step to stay in unsigned 32-bit range
+    // throughout computation, matching the canonical djb2 distribution.
+    hash = (((hash << 5) >>> 0) + hash + value.charCodeAt(i)) >>> 0;
   }
-  // Convert to unsigned 32-bit hex to keep keys short and URL-safe
-  return (hash >>> 0).toString(16);
+  // Already unsigned — toString(16) produces a short, URL-safe hex key.
+  return hash.toString(16);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -469,21 +470,25 @@ class OidcAuthProvider implements AuthProvider {
     const authEndpoint =
       this.authorizationEndpoint ?? this.buildFallbackAuthEndpoint(cfg.issuerUrl);
 
-    const params = new URLSearchParams({
-      response_type: "code",
-      response_mode: "query",
-      client_id: cfg.clientId,
-      redirect_uri: options.redirectUri,
-      scope: this.mergeScopes(cfg.scopes, options.scopes).join(" "),
-      state,
-    });
-
-    // Pass through provider-specific params (login_hint, prompt, acr_values, etc.)
+    // Apply provider-specific params first so they cannot silently override
+    // security-critical parameters (response_type, client_id, redirect_uri, state)
+    // that are set unconditionally below. URLSearchParams.set() replaces existing
+    // keys, so insertion order determines which value wins for duplicate keys.
+    const params = new URLSearchParams();
     if (options.additionalParams !== undefined) {
       for (const [key, value] of Object.entries(options.additionalParams)) {
         params.set(key, value);
       }
     }
+
+    // These security-critical parameters always overwrite any same-named entries
+    // from additionalParams — callers cannot override them.
+    params.set("response_type", "code");
+    params.set("response_mode", "query");
+    params.set("client_id", cfg.clientId);
+    params.set("redirect_uri", options.redirectUri);
+    params.set("scope", this.mergeScopes(cfg.scopes, options.scopes).join(" "));
+    params.set("state", state);
 
     // Cache the redirect_uri keyed by state so handleCallback() can retrieve the
     // exact URI that was used in this authorization request. This avoids the

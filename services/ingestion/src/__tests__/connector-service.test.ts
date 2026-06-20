@@ -4,7 +4,6 @@
 // tenant isolation, masterKey handling, and sync state initialization.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ForbiddenError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import {
   createConnectorService,
@@ -252,9 +251,11 @@ describe("getConnector", () => {
     );
   });
 
-  it("throws ForbiddenError when connector belongs to a different tenant", async () => {
+  it("throws ConnectorNotFoundError when connector belongs to a different tenant", async () => {
+    // We return NotFound rather than Forbidden to avoid leaking that the
+    // connector exists to callers from a different tenant.
     await expect(bundle.service.getConnector(TENANT_B, CONNECTOR_ID)).rejects.toBeInstanceOf(
-      ForbiddenError,
+      ConnectorNotFoundError,
     );
   });
 
@@ -310,10 +311,10 @@ describe("updateConnector", () => {
     expect(bundle.credentialService.storeCredentials.mock.calls).toHaveLength(0);
   });
 
-  it("throws ForbiddenError when tenantId does not own the connector", async () => {
+  it("throws ConnectorNotFoundError when tenantId does not own the connector", async () => {
     await expect(
       bundle.service.updateConnector(TENANT_B, CONNECTOR_ID, { name: "Hack" }),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    ).rejects.toBeInstanceOf(ConnectorNotFoundError);
   });
 
   it("throws ConnectorNotFoundError when connector does not exist", async () => {
@@ -365,9 +366,9 @@ describe("deleteConnector", () => {
     expect(bundle.credentialService.deleteByConnectorId.mock.calls[0]?.[0]).toBe(CONNECTOR_ID);
   });
 
-  it("throws ForbiddenError when connector belongs to different tenant", async () => {
+  it("throws ConnectorNotFoundError when connector belongs to different tenant", async () => {
     await expect(bundle.service.deleteConnector(TENANT_B, CONNECTOR_ID)).rejects.toBeInstanceOf(
-      ForbiddenError,
+      ConnectorNotFoundError,
     );
   });
 
@@ -408,10 +409,10 @@ describe("testConnector", () => {
     ).rejects.toBeInstanceOf(ConnectorDisabledError);
   });
 
-  it("throws ForbiddenError when connector belongs to different tenant", async () => {
+  it("throws ConnectorNotFoundError when connector belongs to different tenant", async () => {
     await expect(
       bundle.service.testConnector(TENANT_B, CONNECTOR_ID),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    ).rejects.toBeInstanceOf(ConnectorNotFoundError);
   });
 
   it("returns success result when execution service responds 200", async () => {

@@ -7,6 +7,19 @@
 # service containers (UID 1001) and postgres (UID 70) can read them. The volume
 # is mounted :ro in docker-compose.yml, preventing writes regardless of mode.
 #
+# SECURITY NOTE — file permissions:
+#   All secret files are written 0444 (world-readable within a container) because
+#   Docker named volumes do not provide a guaranteed shared GID across containers
+#   with different UIDs (postgres=70, app services=1001). A compromised service
+#   container that mounts this volume could read secrets intended for other services.
+#   Mitigations in place:
+#     1. The init-data volume is mounted :ro — services cannot modify or delete secrets.
+#     2. Each service only reads the specific files its service-entrypoint.sh names;
+#        the platform does not expose raw secret paths via API.
+#     3. For production deployments with stronger isolation requirements, replace
+#        this volume approach with Docker Swarm Secrets or Kubernetes Secrets, which
+#        provide per-service secret scoping at the orchestration layer.
+#
 # Ref spec §2 "Startup Sequence" step 1 and §4 "First-Run Bootstrap".
 
 set -e

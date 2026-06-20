@@ -254,17 +254,28 @@ function buildRootType(
 // ---------------------------------------------------------------------------
 
 /**
- * Returns true if the parsed document is a pure introspection query that
- * only selects __schema or __type. Used to short-circuit normal resolver
- * execution and return the pre-built introspection result.
+ * Returns true only if every field selection in every query operation is an
+ * introspection field (__schema or __type). Mixed queries that combine
+ * introspection with data fields (e.g. { __schema { types { name } } users { id } })
+ * must NOT be routed to the introspection handler — the data fields would be
+ * silently dropped and the caller would receive incomplete results.
  */
 export function isIntrospectionQuery(doc: import("./types.js").GraphQLDocument): boolean {
+  let hasQueryOperation = false;
+
   for (const op of doc.operations) {
     if (op.kind !== "query") continue;
+    hasQueryOperation = true;
+
     for (const sel of op.selectionSet.selections) {
       if (sel.kind === "FragmentSpread" || sel.kind === "InlineFragment") continue;
-      if (sel.name === "__schema" || sel.name === "__type") return true;
+      // If any field in this operation is NOT an introspection field, the query
+      // is mixed and must go through the normal resolver path.
+      if (sel.name !== "__schema" && sel.name !== "__type") {
+        return false;
+      }
     }
   }
-  return false;
+
+  return hasQueryOperation;
 }

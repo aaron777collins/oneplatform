@@ -52,7 +52,10 @@ export function readyz(config: ReadyzConfig) {
     ]);
 
     const allHealthy = Object.values(checks).every((v) => v === "ok");
-    const status = allHealthy ? "ready" : "not-ready";
+    // Use "not_ready" (underscore) to match the value returned by all custom
+    // health routes in the other services. Monitoring tools and orchestrators
+    // parse this value and must receive a consistent string across all services.
+    const status = allHealthy ? "ready" : "not_ready";
     const httpStatus = allHealthy ? 200 : 503;
 
     const body = {

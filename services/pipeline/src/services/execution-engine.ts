@@ -186,15 +186,35 @@ async function releaseAdvisoryLock(
 const JSONATA_WEBHOOK_TIMEOUT_MS = 5_000;
 
 function evaluateWithTimeout(expr: ReturnType<typeof jsonata>, data: unknown): Promise<unknown> {
-  return Promise.race([
-    expr.evaluate(data),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`JSONata expression timed out after ${JSONATA_WEBHOOK_TIMEOUT_MS}ms`)),
-        JSONATA_WEBHOOK_TIMEOUT_MS,
-      ),
-    ),
-  ]);
+  // The timeout handle must be cleared when the evaluation resolves before the
+  // deadline, otherwise the dangling timer fires after the promise settles and
+  // accumulates across hundreds of pipeline runs.
+  return new Promise<unknown>((resolve, reject) => {
+    let settled = false;
+    const timeoutHandle = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`JSONata expression timed out after ${JSONATA_WEBHOOK_TIMEOUT_MS}ms`));
+      }
+    }, JSONATA_WEBHOOK_TIMEOUT_MS);
+
+    expr.evaluate(data).then(
+      (result) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutHandle);
+          resolve(result);
+        }
+      },
+      (err: unknown) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutHandle);
+          reject(err);
+        }
+      },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
-import { UnauthorizedError } from "@oneplatform/core";
+import { UnauthorizedError, ForbiddenError } from "@oneplatform/core";
 import { validateWebhookUrl } from "../utils/ssrf-guard.js";
 import type { BillingWebhookConfigRepository } from "../repositories/usage-event-repository.js";
 
@@ -40,6 +40,12 @@ export function createBillingRoutes(deps: BillingRouteDeps): Hono<{ Variables: A
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
+    // Billing webhook configuration is an admin-only operation — it controls
+    // where internal usage data is sent, matching the protection level of other
+    // sensitive admin operations (rate limits, data residency, transfer rules).
+    if (!user.scopes?.includes("admin")) {
+      throw new ForbiddenError("Admin scope required to manage billing webhook configuration.");
+    }
 
     const body = await c.req.json();
     const parsed = upsertBillingWebhookConfigRequest.safeParse(body);
@@ -77,6 +83,9 @@ export function createBillingRoutes(deps: BillingRouteDeps): Hono<{ Variables: A
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
+    if (!user.scopes?.includes("admin")) {
+      throw new ForbiddenError("Admin scope required to manage billing webhook configuration.");
+    }
 
     const config = await billingWebhookConfigRepo.findByTenantId(user.tenantId);
     if (config === null) {
@@ -95,6 +104,9 @@ export function createBillingRoutes(deps: BillingRouteDeps): Hono<{ Variables: A
     const user = c.var.user;
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
+    }
+    if (!user.scopes?.includes("admin")) {
+      throw new ForbiddenError("Admin scope required to manage billing webhook configuration.");
     }
 
     await billingWebhookConfigRepo.delete(user.tenantId);

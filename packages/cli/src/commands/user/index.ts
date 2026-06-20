@@ -41,7 +41,10 @@ async function inviteAction(opts: InviteOpts, ctx: CommandContext): Promise<void
 
 async function getAction(id: string, _opts: Record<string, never>, ctx: CommandContext): Promise<void> {
   const user = await ctx.http.get<unknown>(`/api/v1/users/${encodeURIComponent(id)}`);
-  ctx.renderer.render(user, USER_COLUMNS);
+  // render() checks Array.isArray(data) to choose table/tsv vs JSON output.
+  // Wrapping in an array ensures -o table and -o tsv work correctly, consistent
+  // with connectors and pipelines get commands.
+  ctx.renderer.render([user], USER_COLUMNS);
 }
 
 async function updateAction(id: string, opts: UpdateOpts, ctx: CommandContext): Promise<void> {

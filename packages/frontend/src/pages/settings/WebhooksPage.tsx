@@ -111,8 +111,12 @@ const webhookSchema = z.object({
   url: z
     .string()
     .url("Enter a valid HTTPS URL")
+    // Positively require https:// rather than merely rejecting http://.
+    // A negative check would silently accept other non-http schemes (ftp://,
+    // file://, custom schemes) that would fail at delivery time with no
+    // user-facing explanation.
     .refine(
-      (val) => !val.startsWith("http://"),
+      (val) => val.startsWith("https://"),
       "Webhook URLs must use HTTPS. Plain HTTP endpoints are insecure and may expose your signing secret.",
     ),
   secret: z.string().optional(),

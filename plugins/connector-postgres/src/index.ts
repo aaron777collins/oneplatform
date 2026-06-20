@@ -818,12 +818,18 @@ function handleToConfig(handle: ConnectorHandle): RehydratedConfig {
       "Handle metadata is missing proxyUrl -- the connector handle may be corrupted",
     );
   }
+  // Use nullish coalescing as a first pass, then guard against 0 (which ?? passes through
+  // because 0 is not null/undefined). A batchSize of 0 would send limit=0 to the proxy,
+  // either returning no rows (silent data loss) or an unbounded result set.
+  const rawBatchSize = (m["batchSize"] as number) ?? DEFAULT_BATCH_SIZE;
+  const batchSize = rawBatchSize > 0 ? rawBatchSize : DEFAULT_BATCH_SIZE;
+
   return {
     proxyUrl,
     table: (m["table"] as string | null) ?? null,
     schema: (m["schema"] as string) ?? DEFAULT_SCHEMA,
     incrementalColumn: (m["incrementalColumn"] as string | null) ?? null,
-    batchSize: (m["batchSize"] as number) ?? DEFAULT_BATCH_SIZE,
+    batchSize,
     customQuery: (m["customQuery"] as string | null) ?? null,
     primaryKey: (m["primaryKey"] as string) ?? DEFAULT_PRIMARY_KEY,
   };

@@ -453,30 +453,38 @@ function collectAllStepIds(steps: Step[]): Set<string> {
 function buildAdjacencyMap(steps: Step[]): Map<string, string[]> {
   const adj = new Map<string, string[]>();
 
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    if (!step) continue;
-    const neighbors: string[] = [];
+  function addSteps(stepList: Step[]): void {
+    for (let i = 0; i < stepList.length; i++) {
+      const step = stepList[i];
+      if (!step) continue;
+      const neighbors: string[] = [];
 
-    if (step.type === "conditional") {
-      neighbors.push(step.thenStepId);
-      if (step.elseStepId !== undefined) {
-        neighbors.push(step.elseStepId);
+      if (step.type === "conditional") {
+        neighbors.push(step.thenStepId);
+        if (step.elseStepId !== undefined) {
+          neighbors.push(step.elseStepId);
+        }
+      } else if (step.type === "parallel") {
+        for (const branch of step.branches) {
+          neighbors.push(branch.entryStepId);
+          // Recurse into branch steps so cycles within parallel branches are detected.
+          // Without recursion a cycle inside a branch (e.g. a conditional in a branch
+          // pointing back to the parallel step) is invisible to hasCycle.
+          addSteps(branch.steps);
+        }
+        // Sequential next after the parallel step
+        const next = stepList[i + 1];
+        if (next) neighbors.push(next.id);
+      } else {
+        const next = stepList[i + 1];
+        if (next) neighbors.push(next.id);
       }
-    } else if (step.type === "parallel") {
-      for (const branch of step.branches) {
-        neighbors.push(branch.entryStepId);
-      }
-      // Sequential next
-      const next = steps[i + 1];
-      if (next) neighbors.push(next.id);
-    } else {
-      const next = steps[i + 1];
-      if (next) neighbors.push(next.id);
+
+      adj.set(step.id, neighbors);
     }
-
-    adj.set(step.id, neighbors);
   }
+
+  addSteps(steps);
 
   return adj;
 }

@@ -167,38 +167,51 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
     // The unique partial index ensures only one version can be active per manifest_id.
     await client.query("BEGIN");
 
-    // Activate new version.
-    await client.query(
-      `UPDATE plugin.plugins SET status = 'active' WHERE id = $1`,
-      [newPlugin.id]
-    );
+    try {
+      // Activate new version.
+      await client.query(
+        `UPDATE plugin.plugins SET status = 'active' WHERE id = $1`,
+        [newPlugin.id]
+      );
 
-    // Deactivate old version.
-    await client.query(
-      `UPDATE plugin.plugins SET status = 'disabled' WHERE id = $1`,
-      [oldPlugin.id]
-    );
+      // Deactivate old version.
+      await client.query(
+        `UPDATE plugin.plugins SET status = 'disabled' WHERE id = $1`,
+        [oldPlugin.id]
+      );
 
-    // Activate new hooks (staged → active).
-    await hookRepo.updateStateByPluginAndCurrentState(
-      client,
-      newPlugin.id,
-      "staged",
-      "active"
-    );
+      // Activate new hooks (staged → active).
+      await hookRepo.updateStateByPluginAndCurrentState(
+        client,
+        newPlugin.id,
+        "staged",
+        "active"
+      );
 
-    // Deactivate old hooks (active → disabled).
-    await hookRepo.updateStateByPluginAndCurrentState(
-      client,
-      oldPlugin.id,
-      "active",
-      "disabled"
-    );
+      // Deactivate old hooks (active → disabled).
+      await hookRepo.updateStateByPluginAndCurrentState(
+        client,
+        oldPlugin.id,
+        "active",
+        "disabled"
+      );
 
-    // Update all instances to reference new plugin version.
-    await instanceRepo.updatePluginIdForManifest(client, manifestId, newPlugin.id);
+      // Update all instances to reference new plugin version.
+      await instanceRepo.updatePluginIdForManifest(client, manifestId, newPlugin.id);
 
-    await client.query("COMMIT");
+      await client.query("COMMIT");
+    } catch (err) {
+      // Explicit ROLLBACK on failure so the partial transaction is not left
+      // open until the pool releases the client. While pg.Pool issues an
+      // implicit ROLLBACK on client.release() with a pending transaction,
+      // relying on that implicit behavior is fragile. An explicit ROLLBACK
+      // here makes the failure mode unambiguous and matches codebase conventions.
+      await client.query("ROLLBACK").catch(() => {
+        // Ignore ROLLBACK errors — the client will be released anyway and the
+        // pool will handle cleanup. Swallowing here prevents masking the original error.
+      });
+      throw err;
+    }
   }
 
   return {

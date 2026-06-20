@@ -72,6 +72,7 @@ export type {
   PipelineTriggerData,
   PipelineStepData,
   PipelineExecuteData, // @deprecated: use PipelineStepData
+  PipelineBeforeCompleteData,
   PipelineCompleteData,
   ExecutionSetupData,
   ExecutionTeardownData,

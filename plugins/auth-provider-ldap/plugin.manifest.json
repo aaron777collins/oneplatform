@@ -12,7 +12,7 @@
   "tags": ["ldap", "active-directory", "ad", "sso", "enterprise", "directory"],
   "configSchema": {
     "type": "object",
-    "required": ["url", "baseDN", "bindDN", "bindCredentialKey", "userSearchBase"],
+    "required": ["url", "baseDN", "bindDN", "userSearchBase"],
     "properties": {
       "url": {
         "type": "string",

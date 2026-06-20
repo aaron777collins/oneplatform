@@ -20,7 +20,10 @@ import type { GraphQLField, GraphQLDocument, GraphQLValue } from "./types.js";
 // ---------------------------------------------------------------------------
 
 // Scopes that allow write operations. Any of these grants mutation access.
-const WRITE_SCOPES = new Set(["write", "admin"]);
+// The platform uses 'domain:action' scope naming (e.g. 'data:write'), so
+// 'data:write' is the correct scope for GraphQL mutations. 'admin' is kept
+// as a catch-all for platform administrators.
+const WRITE_SCOPES = new Set(["data:write", "admin"]);
 
 function assertReadPermission(context: ResolverContext, entitySlug: string): void {
   // Authenticated tenants can read their own data. Public entities are
@@ -40,7 +43,7 @@ function assertWritePermission(context: ResolverContext, entitySlug: string): vo
   const hasWriteScope = context.scopes.some((s) => WRITE_SCOPES.has(s));
   if (!hasWriteScope) {
     throw new GraphQLResolverError(
-      `Write access denied for entity '${entitySlug}'. Missing 'write' or 'admin' scope.`,
+      `Write access denied for entity '${entitySlug}'. Missing 'data:write' or 'admin' scope.`,
       "FORBIDDEN",
     );
   }

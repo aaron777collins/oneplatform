@@ -157,13 +157,17 @@ function isPrivateNetworkHttp(urlString: string): boolean {
   // IPv4 private ranges
   const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
   if (ipv4Match) {
-    const [, a, b] = ipv4Match.map(Number);
+    // Skip index 0 (full match string); indices 1-4 are the four octets.
+    // All four capture groups always exist when the regex matches, so
+    // a and b are always numbers (never undefined or NaN given \d+ pattern).
+    const a = Number(ipv4Match[1]);
+    const b = Number(ipv4Match[2]);
     // 127.x.x.x — loopback
     if (a === 127) return true;
     // 10.x.x.x — Class A private
     if (a === 10) return true;
     // 172.16.0.0 – 172.31.255.255 — Class B private
-    if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
     // 192.168.x.x — Class C private
     if (a === 192 && b === 168) return true;
   }
