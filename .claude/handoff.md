@@ -1,115 +1,71 @@
-# OnePlatform Session Handoff — 2026-06-19 (Phase 16 COMPLETE)
+# OnePlatform Session Handoff — 2026-06-19 (Phase 17 IN PROGRESS)
+
+## IMPORTANT: Read These Docs After Every Compaction
+1. `DEVELOPMENT-PROCESS.md` — Full dev pipeline, agent types, prompt requirements, SOLID, UX standards
+2. `docs/SYSTEM-ANALYSIS-PROTOCOL.md` — Analysis protocol, quality gates, user personas, compaction recovery
+3. `docs/WORKING-STATE.md` — Current development state
+4. This file (`.claude/handoff.md`) — Session continuity
 
 ## Current State
-**Phase 16 complete — V6 friction point analysis identified 213 findings; all fixed.**
-**Combined with Phases 10-15, all friction point analyses (V2-V6) and all 127 gap analysis items are closed.**
+**Phase 17 in progress — Full system analysis, fix all issues, comprehensive example projects.**
 
-All 17+ packages build clean. All 48 turbo tasks pass. 7,194+ tests verified.
+### Key Directives (from user)
+- **Agents and sub-agents for EVERYTHING** — main context coordinates, agents do the work
+- **Full dev flow** — Propose → Review → Test (theoretical + practical) → loop
+- **Detailed plans and todos** — TaskCreate/TaskUpdate, always up to date
+- **Detailed prompts and responses** — context, task, constraints, references, format, quality criteria
+- **Commit often, push often** — after each logical unit of work
+- **Keep docs up to date** — WORKING-STATE.md, handoff.md, design docs, alongside code changes
+- **Write handoff docs often** — always include what was done, what's next, file references
+- **No compromise** — super robust, amazing to use, no issues
+- **Low-code/no-code first** — usable by non-coders, with power-user extensibility
+- **Both non-coders AND devs should love it**
+- **Autonomous operation** — make smart decisions, don't stop for every small choice
+- **Agent-managed workflows** — delegate orchestration to protect main context
+- **References survive compaction** — every doc must be self-contained with file paths
 
-## What Was Done This Session (Phase 16 — V6 Friction Point Analysis & Fixes)
+### Task Pipeline (Phase 17)
+| Task | Status | Description |
+|------|--------|-------------|
+| 17.1 | IN PROGRESS | Full codebase analysis — 24+ agent workflow running (wf_86c1e33e-749) |
+| 17.2 | BLOCKED on 17.1 | Fix ALL issues found in analysis |
+| 17.3 | BLOCKED on 17.2 | Re-analyze after fixes — cycle until clean |
+| 17.4 | BLOCKED on 17.3 | Create comprehensive example projects |
+| 17.5 | BLOCKED on 17.4 | Verify all user persona flows work end-to-end |
+| 17.6 | BLOCKED on 17.5 | Final quality gates — build, test, docs, review |
 
-### V6 Analysis
-- 206+ agent workflow: 11 persona analysts (added Low-Code/Drag-and-Drop UI User) + adversarial verification + cross-cutting synthesis
-- 213 net-new findings across 11 personas: 25 CRITICAL, 69 HIGH, 85 MEDIUM, 34 LOW
-- 14 false positives removed, 13 escalated, 12 downgraded during adversarial verification
+## What Was Done This Session
 
-### CRITICAL Fixes (25)
-- Visual pipeline editor set as default view for low-code users
-- Schedule builder UI for human-friendly cron configuration
-- Tag input components replacing raw text fields for list entry
-- Error classification and categorization improvements
-- Timezone validation fix (UTC not in Intl.supportedValuesOf)
-- gRPC streaming types and exports added to SDK
-- Redis atomic rate limiting implementation
-- Trivy container scanning integration
-- Plus additional critical security and correctness fixes
+### Protocol Documents Created/Updated
+- Created `docs/SYSTEM-ANALYSIS-PROTOCOL.md` — comprehensive protocol for analysis, example projects, quality gates
+- Updated `DEVELOPMENT-PROCESS.md` — added UX standards (§1.3), process principles (§1.4), compaction recovery (§1.5)
+- Both docs now contain: no-code-first UX, agent-managed workflows, autonomous operation, compaction recovery, detailed process standards
 
-### HIGH Fixes (69)
-- Frontend, backend, SDK, CLI, and ops improvements across all services
-- Storage tenant isolation and data residency enforcement in gateway
-- Auth, pipeline, execution, and ontology service enhancements
+### Analysis Launched
+- Full codebase analysis workflow running: 24+ agents across all 9 services, 7 packages, 7 plugins
+- Cross-cutting security audit + consistency audit
+- Adversarial verification of all CRITICAL/HIGH findings
+- Build verified: 24/24 turbo tasks pass
+- Tests verified: 28/28 turbo test tasks pass
 
-### MEDIUM Fixes (85)
-- Broad fixes across all categories and services
-- API consistency, error handling, validation improvements
-
-### LOW Fixes (34)
-- Final polish batch — documentation, defaults, minor UX improvements
-
-### Code Review
-- 4 RED blockers resolved
-- 7 YELLOW warnings resolved
-
-### Build & Test Fixes
-- Auth service tests updated for V6 changes
-- Gateway tests updated for storage tenant isolation and data residency
-- Frontend component tests updated
-- CLI tests and ontology service build failures resolved
-- Vitest dist/ exclusion applied across all services
-- Expression evaluator infinite loop fix
-- Webhook connector supportsIncremental flag corrected
-- SDK gRPC-types subpath export added
-
-### Commits This Session (Phase 16 — all on main)
+### Commits This Session
 | Hash | Description |
 |------|-------------|
-| `91aee42` | docs: V6 friction point analysis — 213 findings across 11 personas |
-| `7330964` | fix: resolve all 25 CRITICAL V6 friction points |
-| `07a64cc` | fix: resolve all 69 HIGH V6 friction points across all areas |
-| `978d3dc` | fix: resolve 85 MEDIUM V6 friction points across all categories |
-| `51dd50e` | fix: resolve build failures in CLI tests and ontology-service |
-| `11b235d` | fix: resolve auth-service and frontend build failures |
-| `1fae0a0` | fix: resolve 34 LOW V6 friction points — final batch |
-| `9f23c48` | fix: add grpc-types subpath export to SDK package.json |
-| `4b13025` | fix: webhook connector incorrectly declared supportsIncremental |
-| `6e9adba` | fix: update tests for V6 component changes |
-| `8a96ee5` | fix: update gateway tests for V6 storage tenant isolation and data residency |
-| `84b0917` | fix: update auth service tests for V6 changes |
-| `46a3a54` | fix: allow UTC in timezone validation (not in Intl.supportedValuesOf) |
-| `56ac95c` | fix: exclude dist/ from vitest in all services + fix expression evaluator infinite loop |
-| `24d2a8e` | fix: resolve code review blockers and warnings |
-
-## Cumulative Statistics
-- Total phases completed: 0-16
-- Total architecture decisions: 36 ADRs
-- Total tests: ~9,608+ (7,194+ verified in latest run)
-- Total gap analysis items: 127 (all closed)
-- Total friction point analyses: V2 (85), V3 (53), V4 (148), V5 (135), V6 (213) — all resolved
-- Total friction points resolved: 634
-- Total services: 9 microservices
-- Total packages: 7+ shared packages
-- Total connector plugins: 5 built-in + marketplace
-- Total auth providers: 3 (local, OIDC, LDAP)
-- Total personas covered: 11 (added Low-Code/Drag-and-Drop UI User in V6)
+| `87e4780` | docs: add System Analysis & Development Protocol for Phase 17+ |
+| `5bdaba4` | docs: add UX standards, agent workflows, compaction recovery to both protocol docs |
 
 ## What's Next
+1. Wait for analysis workflow to complete
+2. Triage findings — fix CRITICAL → HIGH → MEDIUM → LOW
+3. Re-analyze until clean
+4. Create example projects with all features, all personas
+5. Verify every user flow works end-to-end
+6. Final quality gates
 
-### Phase 17+ (Planning Required)
-- Full end-to-end integration testing with Docker Compose
-- Production hardening (load testing, chaos engineering)
-- Performance optimization based on benchmark baselines
-- Security audit / penetration testing
-- Documentation site deployment
-- Beta release preparation
-
-### No Known Blockers
-- All P1/P2/P3/P4 gaps are closed
-- All V2-V6 friction points are resolved
-- All packages build clean
-- All 48 turbo tasks pass
-- CI/CD pipeline is active
-
-## Key Architecture References
-- 36 ADRs: `docs/decisions/001-architecture-decisions.md`
-- L2 designs: `docs/designs/*.md` (25,535 lines)
-- Gap analysis: `docs/GAP-ANALYSIS.md` (all 127 gaps closed)
-- V6 analysis: `docs/USER-STORIES-ANALYSIS-V6.md` (213 findings, all fixed)
-- Dev process: `DEVELOPMENT-PROCESS.md` (20 sections)
-- Plugin SDK types: `packages/plugin-sdk/src/types/`
-- Core middleware: `packages/core/src/middleware/`
-- Helm chart: `deploy/helm/oneplatform/`
-- Grafana dashboards: `docker/grafana/`
-- Benchmarks: `tests/benchmarks/`
-
-## Pre-existing Issues (unchanged)
-- Ingestion: BullMQ mock issues in 2 test files (sync-service, retention-service) — tests pass despite warnings
+## Pre-existing State
+- Phases 0-16 complete (see WORKING-STATE.md for full history)
+- 9 services, 7 packages, 7 plugins, ~9,600 tests
+- All 127 gap analysis items closed
+- All 634 friction points (V2-V6) resolved
+- 36 ADRs documented
+- All packages build clean, all tests pass
