@@ -183,7 +183,20 @@ export function serviceAuthMiddleware(config: ServiceAuthConfig) {
       }
       try {
         const userJson = Buffer.from(userContextHeader, "base64").toString("utf8");
-        const userCtx = JSON.parse(userJson) as UserContext;
+        const parsed = JSON.parse(userJson) as Record<string, unknown>;
+        // Runtime validation: ensure critical UserContext fields are present
+        // so downstream code does not operate on a structurally invalid context.
+        if (
+          typeof parsed.userId !== "string" ||
+          typeof parsed.tenantId !== "string" ||
+          !Array.isArray(parsed.roles)
+        ) {
+          return c.json(
+            { error: { code: "UNAUTHORIZED", message: "X-User-Context is missing required fields (userId, tenantId, roles).", requestId } },
+            401
+          );
+        }
+        const userCtx = parsed as unknown as UserContext;
         c.set("user", userCtx);
       } catch {
         return c.json(

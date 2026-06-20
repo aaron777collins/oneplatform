@@ -616,13 +616,21 @@ class RestApiConnector implements Connector {
         throwForHttpStatus(response.status, url, retryAfter);
       }
 
+      const contentType = response.headers.get("Content-Type") ?? "";
+      if (contentType && !contentType.includes("json") && !contentType.includes("*/*")) {
+        throw new PluginDataError(
+          `REST API response Content-Type is not JSON: "${contentType}"`,
+          { url, contentType },
+        );
+      }
+
       let body: unknown;
       try {
         body = await response.json();
       } catch {
         throw new PluginDataError(
           "REST API response is not valid JSON",
-          { url, contentType: response.headers.get("Content-Type") },
+          { url, contentType },
         );
       }
 

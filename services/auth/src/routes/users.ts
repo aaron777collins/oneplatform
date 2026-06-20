@@ -262,53 +262,80 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
     if (parsed.data.isActive === true) {
       await userRepository.activate(id);
     } else if (parsed.data.isActive === false) {
-      // V6-039: Guard — prevent a user from deactivating themselves if they are
-      // the last active tenant-admin (or platform-admin). Losing the last admin
-      // would lock the tenant out of user management permanently.
-      if (isSelf) {
-        const adminRoles = ["platform-admin", "tenant-admin"];
-        const userAdminRoles = existing.roles.filter((r: string) => adminRoles.includes(r));
-        if (userAdminRoles.length > 0) {
-          // Check if there is at least one OTHER active user with an admin role
-          const otherAdminsResult = await db.query<{ count: string }>(
+      // V6-039: Guard — prevent deactivating the last admin for the tenant.
+      // The count check and deactivation are wrapped in a SERIALIZABLE
+      // transaction to prevent a TOCTOU race where two concurrent requests
+      // both pass the "other admins exist" check and then both deactivate,
+      // leaving zero admins. SELECT ... FOR UPDATE locks the relevant rows
+      // so concurrent deactivations are serialised.
+      const txClient = await db.connect();
+      try {
+        await txClient.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+
+        if (isSelf) {
+          const adminRoles = ["platform-admin", "tenant-admin"];
+          const userAdminRoles = existing.roles.filter((r: string) => adminRoles.includes(r));
+          if (userAdminRoles.length > 0) {
+            // Lock and count other active admins within the transaction
+            const otherAdminsResult = await txClient.query<{ count: string }>(
+              `SELECT count(*) AS count FROM auth.users
+               WHERE tenant_id = $1
+                 AND is_active = true
+                 AND id != $2
+                 AND (
+                   'platform-admin' = ANY(roles)
+                   OR 'tenant-admin' = ANY(roles)
+                 )
+               FOR UPDATE`,
+              [user.tenantId, id],
+            );
+            const otherAdminCount = parseInt(otherAdminsResult.rows[0]?.count ?? "0", 10);
+            if (otherAdminCount === 0) {
+              await txClient.query("ROLLBACK");
+              txClient.release();
+              throw new ForbiddenError(
+                "Cannot deactivate yourself — you are the last active admin for this tenant."
+              );
+            }
+          }
+        }
+
+        // Guard: prevent deactivating the last platform admin. If the target user
+        // holds the platform-admin role, verify at least one other active admin
+        // exists before proceeding (within the same transaction).
+        if (existing.roles.includes("platform-admin")) {
+          const otherAdminsResult = await txClient.query<{ count: string }>(
             `SELECT count(*) AS count FROM auth.users
              WHERE tenant_id = $1
+               AND 'platform-admin' = ANY(roles)
                AND is_active = true
                AND id != $2
-               AND (
-                 'platform-admin' = ANY(roles)
-                 OR 'tenant-admin' = ANY(roles)
-               )`,
+             FOR UPDATE`,
             [user.tenantId, id],
           );
           const otherAdminCount = parseInt(otherAdminsResult.rows[0]?.count ?? "0", 10);
           if (otherAdminCount === 0) {
-            throw new ForbiddenError(
-              "Cannot deactivate yourself — you are the last active admin for this tenant."
-            );
+            await txClient.query("ROLLBACK");
+            txClient.release();
+            throw new ForbiddenError("Cannot deactivate the last platform admin.");
           }
         }
-      }
 
-      // Guard: prevent deactivating the last platform admin. If the target user
-      // holds the platform-admin role, verify at least one other active admin
-      // exists before proceeding.
-      if (existing.roles.includes("platform-admin")) {
-        const otherAdminsResult = await db.query<{ count: string }>(
-          `SELECT count(*) AS count FROM auth.users
-           WHERE tenant_id = $1
-             AND 'platform-admin' = ANY(roles)
-             AND is_active = true
-             AND id != $2`,
-          [user.tenantId, id],
+        // Deactivate within the same transaction so the check-and-set is atomic
+        await txClient.query(
+          `UPDATE auth.users SET is_active = false, updated_at = now() WHERE id = $1`,
+          [id],
         );
-        const otherAdminCount = parseInt(otherAdminsResult.rows[0]?.count ?? "0", 10);
-        if (otherAdminCount === 0) {
-          throw new ForbiddenError("Cannot deactivate the last platform admin.");
-        }
-      }
 
-      await userRepository.deactivate(id);
+        await txClient.query("COMMIT");
+      } catch (err) {
+        // Rollback on any unexpected error (ForbiddenError is re-thrown above
+        // after explicit ROLLBACK + release, so this catches only unexpected failures)
+        try { await txClient.query("ROLLBACK"); } catch { /* ignore rollback errors */ }
+        throw err;
+      } finally {
+        txClient.release();
+      }
 
       // Revoke all active sessions immediately so the deactivated user cannot
       // continue using previously-issued tokens. Access tokens are short-lived

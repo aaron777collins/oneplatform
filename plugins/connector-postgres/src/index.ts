@@ -357,8 +357,13 @@ function handleProxyError(status: number, path: string, body: string): never {
         "Consider reducing batchSize or adding indexes to the incrementalColumn.",
     );
   }
+  if (status === 503) {
+    throw new PluginTimeoutError(
+      `Postgres proxy returned 503 (pool exhaustion or service unavailable) for ${path}. ` +
+        "The connection pool may be exhausted — retry with backoff.",
+    );
+  }
   if (status >= 500) {
-    // 5xx from the proxy is retryable — it may be a transient proxy or DB issue.
     throw new PluginDataError(
       `Postgres proxy returned server error ${status} for ${path}: ${body.slice(0, 500)}`,
     );
@@ -576,7 +581,10 @@ class PostgresConnector implements Connector {
     });
 
     const headers = context.tracing.injectHeaders({ "Accept": "application/json" });
-    const response = await context.fetch.fetch(url, { method: "GET", headers });
+    const response = await fetchWithRetry(
+      () => context.fetch.fetch(url, { method: "GET", headers }),
+      ROWS_PATH,
+    );
 
     if (!response.ok) {
       const body = await response.text();
@@ -654,7 +662,10 @@ class PostgresConnector implements Connector {
 
     const url = buildUrl(cfg.proxyUrl, ROWS_PATH, params);
     const headers = context.tracing.injectHeaders({ "Accept": "application/json" });
-    const response = await context.fetch.fetch(url, { method: "GET", headers });
+    const response = await fetchWithRetry(
+      () => context.fetch.fetch(url, { method: "GET", headers }),
+      ROWS_PATH,
+    );
 
     if (!response.ok) {
       const body = await response.text();
@@ -770,11 +781,14 @@ class PostgresConnector implements Connector {
       params: { limit: cfg.batchSize, offset },
     });
 
-    const response = await context.fetch.fetch(url, {
-      method: "POST",
-      headers,
-      body,
-    });
+    const response = await fetchWithRetry(
+      () => context.fetch.fetch(url, {
+        method: "POST",
+        headers,
+        body,
+      }),
+      QUERY_PATH,
+    );
 
     if (!response.ok) {
       const responseBody = await response.text();
@@ -845,6 +859,37 @@ function handleToConfig(handle: ConnectorHandle): RehydratedConfig {
     customQuery: (m["customQuery"] as string | null) ?? null,
     primaryKey: (m["primaryKey"] as string) ?? DEFAULT_PRIMARY_KEY,
   };
+}
+
+// ─── Retry with backoff ──────────────────────────────────────────────────────
+
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 500;
+
+async function fetchWithRetry(
+  fetchFn: () => Promise<Response>,
+  path: string,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetchFn();
+      if (response.status === 503 && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+    }
+  }
+  throw lastError;
 }
 
 // ─── URL builder ─────────────────────────────────────────────────────────────

@@ -24,7 +24,14 @@ export function responseEnvelopeMiddleware() {
     if (c.res.status === 204) return;
     if (!String(c.res.status).startsWith("2")) return;
 
-    const body: unknown = await c.res.clone().json();
+    let body: unknown;
+    try {
+      body = await c.res.clone().json();
+    } catch {
+      // Response has application/json Content-Type but body is not valid JSON.
+      // Leave the response untouched rather than crashing the middleware chain.
+      return;
+    }
 
     // Do not wrap error-shaped responses (these come from thrown AppErrors
     // serialized by the error handler, or from inline c.json({error:...}) calls)

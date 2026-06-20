@@ -42,14 +42,18 @@ export async function decodeCursor(
     throw new InvalidCursorError("Cursor format is invalid");
   }
 
-  // Constant-time comparison prevents timing attacks on the HMAC
+  // Constant-time comparison prevents timing attacks on the HMAC.
+  // Always call timingSafeEqual with equal-length buffers to avoid
+  // leaking length information via an early exit.
   const expectedSig = sign(body, secret);
-  const sigBuffer = Buffer.from(sig);
   const expectedBuffer = Buffer.from(expectedSig);
+  const sigBuffer = sig.length === expectedSig.length
+    ? Buffer.from(sig)
+    : expectedBuffer; // same length ensures timingSafeEqual does not throw
 
   if (
-    sigBuffer.length !== expectedBuffer.length ||
-    !timingSafeEqual(sigBuffer, expectedBuffer)
+    !timingSafeEqual(sigBuffer, expectedBuffer) ||
+    sig.length !== expectedSig.length
   ) {
     throw new InvalidCursorError("Cursor signature is invalid");
   }

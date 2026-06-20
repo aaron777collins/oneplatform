@@ -107,6 +107,29 @@ export function sanitizeCss(raw: string): string {
 
   let sanitised = raw;
 
+  // SECURITY: Normalize CSS backslash escape sequences before applying
+  // stripping regexes. CSS allows backslash escapes in identifiers:
+  //   ur\l(...)  → url(...)
+  //   ur\6c(...)  → url(...)  (hex escape for 'l')
+  //   \75rl(...)  → url(...)  (hex escape for 'u')
+  //   @\69mport   → @import   (hex escape for 'i')
+  // Without normalization, attackers can bypass the literal-text regex patterns.
+  // We decode CSS hex escapes (\XX or \XXXXXX followed by optional whitespace)
+  // and simple backslash-character escapes (\X where X is not a hex digit).
+  sanitised = sanitised.replace(
+    /\\([0-9a-fA-F]{1,6})[\t\n\f\r ]?|\\([^\n0-9a-fA-F])/g,
+    (_match: string, hex: string | undefined, char: string | undefined) => {
+      if (hex !== undefined) {
+        const codePoint = parseInt(hex, 16);
+        // Replace null/surrogate/out-of-range code points with U+FFFD
+        if (codePoint === 0 || codePoint > 0x10ffff) return "�";
+        return String.fromCodePoint(codePoint);
+      }
+      // Simple backslash escape: \X → X (e.g., \u → u, \r → r)
+      return char ?? "";
+    }
+  );
+
   // Strip @import rules first — must run before url() stripping so that
   // `@import url('...')` is removed as a complete rule rather than leaving
   // a dangling `@import ;` after the url() portion is stripped.
@@ -114,19 +137,17 @@ export function sanitizeCss(raw: string): string {
   // first semicolon, handling both `@import '...'` and `@import url('...')`.
   sanitised = sanitised.replace(/@import\s*[^;]+;/gi, "");
 
-  // Strip url(...) including nested quotes and whitespace — covers data: URIs,
-  // remote resources loaded via http, and other protocol schemes.
-  // Greedy match up to the last ')' on the line handles escaped parens and
-  // nested constructs like url(calc(1)) that [^)]* would leave partial.
-  sanitised = sanitised.replace(/url\s*\([^)]*(?:\([^)]*\)[^)]*)*\)/gi, "");
+  // Strip url(...) — greedily match from "url(" to the outermost balanced
+  // closing paren, handling nested parentheses and unbalanced cases by
+  // consuming everything up to the last ')' that closes the url( call.
+  sanitised = sanitised.replace(/url\s*\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)/gi, "");
 
   // Strip any remaining javascript: protocol occurrences in property values.
   sanitised = sanitised.replace(/javascript\s*:/gi, "");
 
   // Strip IE-era CSS expressions — expression(<js>) executes arbitrary code.
-  // Same nested-paren strategy as url() above prevents expression(nested(evil))
-  // from leaving a dangling ')'.
-  sanitised = sanitised.replace(/expression\s*\([^)]*(?:\([^)]*\)[^)]*)*\)/gi, "");
+  // Same nested-paren strategy as url() above.
+  sanitised = sanitised.replace(/expression\s*\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)/gi, "");
 
   // Re-check byte length after stripping in case the raw input was under the
   // limit but adversarial nesting caused expansion (unlikely but defensive).

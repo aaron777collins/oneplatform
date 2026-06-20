@@ -12,6 +12,7 @@ import { colorizeLogLevel } from "../../lib/output.js";
 import { startLocalWatcher, applyRemoteChange, type ConflictResolution } from "../../lib/file-sync.js";
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { generateAppScaffold, toKebabCase } from "../../lib/app-scaffold.js";
 
@@ -104,8 +105,10 @@ async function deployAction(slug: string, opts: DeployOpts, ctx: CommandContext)
 
   if (opts.file) {
     const content = readFileSync(opts.file);
+    const checksum = createHash("sha256").update(content).digest("hex");
     const form = new FormData();
     form.append("bundle", new Blob([content]), opts.file.split("/").pop() ?? "bundle");
+    form.append("checksum", `sha256:${checksum}`);
     if (opts.env) form.append("env", opts.env);
     resp = await ctx.http.postMultipart<typeof resp>(
       `/api/v1/apps/${encodeURIComponent(slug)}/deploy`,

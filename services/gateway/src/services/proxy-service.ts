@@ -200,8 +200,11 @@ export function createProxyService(): ProxyService {
 
     // Set x-forwarded-for from the actual TCP connection, not from client-supplied headers.
     // Client-supplied x-forwarded-for is already stripped via HEADERS_TO_STRIP.
-    const remoteAddress = (c.req.raw as unknown as { socket?: { remoteAddress?: string } })
-      .socket?.remoteAddress ?? "unknown";
+    // The Node.js HTTP adapter injects x-real-ip from req.socket.remoteAddress
+    // into the Fetch Request headers (see index.ts). We read it here before it
+    // is stripped from the outbound set. c.req.raw is a Fetch API Request and
+    // has no .socket property, so the previous raw cast always yielded "unknown".
+    const remoteAddress = c.req.header("x-real-ip") ?? "unknown";
     outboundHeaders.set("x-forwarded-for", remoteAddress);
 
     // Detect actual protocol from the inbound request instead of hardcoding https

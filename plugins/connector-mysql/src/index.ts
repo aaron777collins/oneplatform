@@ -107,7 +107,7 @@ function decodeCursor(cursor: string): CursorPayload {
     parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
   } catch {
     throw new PluginConfigError(
-      `Invalid cursor value — cannot decode pagination state: ${cursor}`,
+      "Invalid cursor value — cannot decode pagination state",
       "cursor",
     );
   }
@@ -123,7 +123,7 @@ function decodeCursor(cursor: string): CursorPayload {
     )
   ) {
     throw new PluginConfigError(
-      `Invalid cursor value — unexpected shape: ${cursor}`,
+      "Invalid cursor value — unexpected shape",
       "cursor",
     );
   }
@@ -478,7 +478,21 @@ async function discoverPrimaryKey(
   }
 
   const columnName = firstRow["COLUMN_NAME"];
-  return typeof columnName === "string" ? columnName : null;
+  if (typeof columnName !== "string") {
+    return null;
+  }
+
+  // Validate the discovered column name against the same safe identifier regex
+  // used for user-supplied identifiers. Column names from INFORMATION_SCHEMA
+  // should always be safe, but a corrupted or adversarial source database could
+  // return a name containing backtick characters that would break SQL quoting
+  // in buildTableQuery.
+  const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+  if (!SAFE_IDENTIFIER.test(columnName)) {
+    return null;
+  }
+
+  return columnName;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -494,6 +508,10 @@ interface QueryAndParams {
   params: unknown[];
 }
 
+function escapeBacktickIdentifier(name: string): string {
+  return name.replace(/`/g, "``");
+}
+
 function buildTableQuery(
   handle: HandleMetadata,
   offset: number,
@@ -501,25 +519,19 @@ function buildTableQuery(
 ): QueryAndParams {
   const params: unknown[] = [];
 
-  // Start with the base projection. Backtick-quoting the database and table
-  // names is MySQL's standard identifier quoting (equivalent to "" in PostgreSQL).
-  let query = `SELECT * FROM \`${handle.database}\`.\`${handle.table}\``;
+  const db = escapeBacktickIdentifier(handle.database);
+  const tbl = escapeBacktickIdentifier(handle.table);
+  let query = `SELECT * FROM \`${db}\`.\`${tbl}\``;
 
-  // Append the incremental filter when we have a cursor from a previous run.
-  // We only filter on subsequent calls — the first call (since === null) always
-  // fetches all rows so we get a complete baseline.
   if (handle.incrementalColumn !== null && since !== null) {
-    query += ` WHERE \`${handle.incrementalColumn}\` > ?`;
+    query += ` WHERE \`${escapeBacktickIdentifier(handle.incrementalColumn)}\` > ?`;
     params.push(since);
   }
 
-  // Always order by the incremental column (if configured) so the cursor's
-  // "highest seen value" is deterministic. Fall back to primary key order
-  // so results are stable across retries even without an incremental column.
   if (handle.incrementalColumn !== null) {
-    query += ` ORDER BY \`${handle.incrementalColumn}\` ASC`;
+    query += ` ORDER BY \`${escapeBacktickIdentifier(handle.incrementalColumn)}\` ASC`;
   } else if (handle.primaryKeyColumn !== null) {
-    query += ` ORDER BY \`${handle.primaryKeyColumn}\` ASC`;
+    query += ` ORDER BY \`${escapeBacktickIdentifier(handle.primaryKeyColumn)}\` ASC`;
   }
 
   query += ` LIMIT ? OFFSET ?`;

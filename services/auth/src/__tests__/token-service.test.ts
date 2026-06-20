@@ -386,6 +386,10 @@ describe("rotateRefreshToken()", () => {
     return {
       get: vi.fn().mockReturnThis(),
       del: vi.fn().mockReturnThis(),
+      set: vi.fn().mockReturnThis(),
+      srem: vi.fn().mockReturnThis(),
+      sadd: vi.fn().mockReturnThis(),
+      expire: vi.fn().mockReturnThis(),
       exec: vi.fn().mockResolvedValue(execResult),
     };
   }

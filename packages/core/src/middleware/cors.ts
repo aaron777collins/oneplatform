@@ -26,6 +26,7 @@ const MAX_AGE = "86400";
  */
 export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
   const allowAll = config.allowedOrigins.includes("*");
+  const rejectAll = config.allowedOrigins.length === 0;
   const originSet = new Set(config.allowedOrigins);
 
   function setCorsHeaders(origin: string, headers: Headers): void {
@@ -49,7 +50,7 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
       return;
     }
 
-    if (!allowAll && !originSet.has(origin)) {
+    if (rejectAll || (!allowAll && !originSet.has(origin))) {
       const safeOrigin = origin.length > 256 ? origin.slice(0, 256) + "..." : origin;
       const sanitized = safeOrigin.replace(/[&<>"']/g, (ch) => {
         const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };

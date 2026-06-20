@@ -376,6 +376,9 @@ async function main(): Promise<void> {
 
         const responseOrPromise = app.fetch(fetchRequest);
         const handleResponse = (response: Response): void => {
+          // Preserve multi-value headers (e.g. Set-Cookie) by iterating
+          // with forEach which yields each header value separately, rather
+          // than using Object.fromEntries which collapses duplicates.
           const outHeaders: [string, string][] = [];
           response.headers.forEach((value, key) => {
             outHeaders.push([key, value]);
@@ -383,11 +386,25 @@ async function main(): Promise<void> {
           res.writeHead(response.status, outHeaders);
           void response.arrayBuffer().then((buf: ArrayBuffer) => {
             res.end(Buffer.from(buf));
+          }).catch((err: unknown) => {
+            console.error("Error reading response body:", err);
+            if (!res.headersSent) {
+              res.writeHead(500);
+            }
+            res.end();
           });
         };
 
+        const handleError = (err: unknown): void => {
+          console.error("Unhandled error in app.fetch:", err);
+          if (!res.headersSent) {
+            res.writeHead(500);
+          }
+          res.end();
+        };
+
         if (responseOrPromise instanceof Promise) {
-          void responseOrPromise.then(handleResponse);
+          void responseOrPromise.then(handleResponse).catch(handleError);
         } else {
           handleResponse(responseOrPromise);
         }

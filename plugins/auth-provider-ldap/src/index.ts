@@ -780,14 +780,19 @@ class LdapAuthProvider implements AuthProvider {
 
     // For LDAP, the "token" is the user's DN (set by handleCallback).
     // Verify the DN still exists by searching for it.
+
+    // Defense-in-depth: verify the token DN falls within the configured baseDN.
+    // A compromised session store or token forgery could contain an arbitrary DN
+    // that the service account has access to, allowing information disclosure of
+    // directory entries outside the intended search scope.
+    const searchBase = token.trim();
+    if (!searchBase.toLowerCase().endsWith(cfg.baseDN.toLowerCase())) {
+      return { valid: false, error: "Token DN is outside the configured base DN" };
+    }
+
     const proxyUrl = await this.requireProxyUrl(context);
     const bindPassword = await this.requireBindPassword(context);
     const connection = this.buildConnectionParams(bindPassword);
-
-    // Search for the DN directly — a DN-scoped search with scope=base is the
-    // most efficient way to check existence. We use a general object search filter
-    // and scope='base' to avoid an expensive subtree scan.
-    const searchBase = token.trim();
     const filter = "(objectClass=*)";
 
     let entries: LdapEntry[];
@@ -1118,10 +1123,16 @@ class LdapAuthProvider implements AuthProvider {
       // Always extract the value of the first RDN regardless of groupNameAttribute, since
       // groupNameAttribute refers to the attribute fetched from group entries during explicit
       // group search and is not applicable to DN parsing here.
-      const firstRDN = dn.split(",")[0] ?? "";
+      //
+      // Per RFC 4514 section 3, commas within RDN values are escaped with a
+      // backslash (e.g., "cn=Finance\, Legal,ou=groups,dc=example,dc=com").
+      // We must split on unescaped commas only to correctly handle group names
+      // that contain commas.
+      const firstRDN = splitOnUnescapedComma(dn)[0] ?? "";
       const eqIndex = firstRDN.indexOf("=");
       if (eqIndex !== -1) {
-        const name = firstRDN.slice(eqIndex + 1).trim();
+        // Unescape RFC 4514 backslash-escaped characters in the RDN value.
+        const name = firstRDN.slice(eqIndex + 1).replace(/\\(.)/g, "$1").trim();
         if (name !== "") {
           groupNames.push(name);
         }

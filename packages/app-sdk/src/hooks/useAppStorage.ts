@@ -155,12 +155,22 @@ export function useAppStorage<T>(
           method: "PUT",
           body: { value: newValue },
         });
-        // Only update the confirmed ref after the server acknowledges the write.
         confirmedValueRef.current = newValue;
       } catch (err) {
-        // Revert the optimistic update on failure so the UI stays consistent
-        // with the persisted server state.
         setValueState(rollbackValue);
+        if (
+          err instanceof DOMException && err.name === "QuotaExceededError" ||
+          (err instanceof Error && err.message.includes("quota"))
+        ) {
+          const quotaError: AppSDKError = {
+            code: "STORAGE_QUOTA_EXCEEDED",
+            message: `Storage quota exceeded while saving key "${key}". The value was not persisted.`,
+            statusCode: 0,
+            isRetryable: false,
+            requestId: "",
+          };
+          throw quotaError;
+        }
         throw err;
       }
     },

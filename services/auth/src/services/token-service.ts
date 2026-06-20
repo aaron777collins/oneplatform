@@ -350,22 +350,18 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       jti,
       familyId,
     };
-    await redis.set(
+    const issuePipeline = redis.pipeline();
+    issuePipeline.set(
       `auth:refresh:${token}`,
       JSON.stringify(payload),
       "EX",
       ttl
     );
-    // Secondary index: token → familyId for replay detection.
-    // Same TTL as the refresh token so it expires naturally.
-    await redis.set(`auth:token-family:${token}`, familyId, "EX", ttl);
-    // Family membership set: familyId → Set of token keys.
-    // Using a Set avoids a full-keyspace SCAN during replay detection — SMEMBERS
-    // is O(n) on the family size only, not the entire Redis keyspace.
-    await redis.sadd(`auth:refresh-family:${familyId}`, token);
-    await redis.expire(`auth:refresh-family:${familyId}`, 30 * 24 * 60 * 60);
-    // Track active tokens per user for logout-all (SADD has no TTL; cleaned on logout)
-    await redis.sadd(`auth:user-sessions:${userId}`, token);
+    issuePipeline.set(`auth:token-family:${token}`, familyId, "EX", ttl);
+    issuePipeline.sadd(`auth:refresh-family:${familyId}`, token);
+    issuePipeline.expire(`auth:refresh-family:${familyId}`, 30 * 24 * 60 * 60);
+    issuePipeline.sadd(`auth:user-sessions:${userId}`, token);
+    await issuePipeline.exec();
     return { token, jti };
   }
 
@@ -560,22 +556,26 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
       client.release();
     }
 
-    // Write new refresh token to Redis AFTER DB commit
-    await redis.set(
+    // Write new refresh token to Redis AFTER DB commit.
+    // All Redis operations are batched in a single pipeline so they execute
+    // atomically (no partial state if the process crashes mid-way).
+    const rotationPipeline = redis.pipeline();
+    rotationPipeline.set(
       `auth:refresh:${newToken}`,
       JSON.stringify(newPayload),
       "EX",
       remainingSeconds
     );
     // Secondary index for replay detection
-    await redis.set(`auth:token-family:${newToken}`, payload.familyId, "EX", remainingSeconds);
+    rotationPipeline.set(`auth:token-family:${newToken}`, payload.familyId, "EX", remainingSeconds);
     // Update family set: remove old token, add new token
-    await redis.srem(`auth:refresh-family:${payload.familyId}`, oldToken);
-    await redis.sadd(`auth:refresh-family:${payload.familyId}`, newToken);
-    await redis.expire(`auth:refresh-family:${payload.familyId}`, 30 * 24 * 60 * 60);
+    rotationPipeline.srem(`auth:refresh-family:${payload.familyId}`, oldToken);
+    rotationPipeline.sadd(`auth:refresh-family:${payload.familyId}`, newToken);
+    rotationPipeline.expire(`auth:refresh-family:${payload.familyId}`, 30 * 24 * 60 * 60);
     // Update user-sessions set: remove old, add new
-    await redis.srem(`auth:user-sessions:${payload.userId}`, oldToken);
-    await redis.sadd(`auth:user-sessions:${payload.userId}`, newToken);
+    rotationPipeline.srem(`auth:user-sessions:${payload.userId}`, oldToken);
+    rotationPipeline.sadd(`auth:user-sessions:${payload.userId}`, newToken);
+    await rotationPipeline.exec();
 
     // Step 5: Fetch user for token issuance
     const userResult = await db.query<{
@@ -643,11 +643,17 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     // deployments (SCAN iterates every key in Redis regardless of pattern).
     const familySetKey = `auth:refresh-family:${familyId}`;
     const familyTokens = await redis.smembers(familySetKey);
-    for (const token of familyTokens) {
-      await redis.del(`auth:refresh:${token}`);
-      await redis.del(`auth:token-family:${token}`);
+    if (familyTokens.length > 0) {
+      const cleanupPipeline = redis.pipeline();
+      for (const token of familyTokens) {
+        cleanupPipeline.del(`auth:refresh:${token}`);
+        cleanupPipeline.del(`auth:token-family:${token}`);
+      }
+      cleanupPipeline.del(familySetKey);
+      await cleanupPipeline.exec();
+    } else {
+      await redis.del(familySetKey);
     }
-    await redis.del(familySetKey);
 
     if (sessionsResult.rowCount !== null && sessionsResult.rowCount > 0) {
       throw new TokenReplayDetectedError(

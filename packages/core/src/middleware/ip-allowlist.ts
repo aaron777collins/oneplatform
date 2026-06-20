@@ -19,6 +19,31 @@ import type { Context } from "hono";
 // ---------------------------------------------------------------------------
 
 /**
+ * Strip port suffix from an IP address string.
+ * Handles IPv4 with port (e.g., "192.168.1.1:12345" -> "192.168.1.1"),
+ * bracketed IPv6 with port (e.g., "[::1]:8080" -> "::1"),
+ * and leaves bare IPv6 addresses (e.g., "::1") unchanged.
+ */
+function stripPortSuffix(ip: string): string {
+  // Bracketed IPv6 with port: [::1]:8080 -> ::1
+  if (ip.startsWith("[")) {
+    const bracketEnd = ip.indexOf("]");
+    if (bracketEnd !== -1) {
+      return ip.slice(1, bracketEnd);
+    }
+  }
+
+  // IPv4 with port: only strip if there's exactly one colon (not IPv6)
+  const colonCount = ip.split(":").length - 1;
+  if (colonCount === 1) {
+    return ip.slice(0, ip.indexOf(":"));
+  }
+
+  // Bare IPv6 or already clean — return as-is
+  return ip;
+}
+
+/**
  * Extract the client IP from a Hono context, preferring the most authoritative
  * source available. The order is:
  *   1. X-Real-IP — set by Caddy/nginx reverse proxy (our infrastructure).
@@ -42,7 +67,7 @@ export function parseIpFromRequest(c: Context): string {
     // X-Forwarded-For: <client>, <proxy1>, <proxy2>
     // Take only the leftmost value; strip any port suffix.
     const first = forwarded.split(",")[0]?.trim() ?? "";
-    return first;
+    return stripPortSuffix(first);
   }
 
   return "";
