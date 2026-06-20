@@ -378,10 +378,18 @@ describe("rotateRefreshToken()", () => {
     });
   }
 
-  function makePipelineMock(rawPayload: string | null, delCount: number) {
-    const execResult: [[null, string | null], [null, number]] = [
-      [null, rawPayload],
-      [null, delCount],
+  // makePipelineMock now only covers the rotation write-back pipeline (set/srem/sadd/expire).
+  // The initial atomic GET+DEL is handled by redis.eval() in the implementation, so
+  // rawPayload is supplied via makeEvalMock() on the redis object itself.
+  function makePipelineMock() {
+    const execResult: [[null, string], [null, number], [null, number], [null, number], [null, number], [null, number], [null, number]] = [
+      [null, "OK"],
+      [null, 1],
+      [null, 1],
+      [null, 1],
+      [null, 1],
+      [null, 1],
+      [null, 1],
     ];
     return {
       get: vi.fn().mockReturnThis(),
@@ -392,6 +400,12 @@ describe("rotateRefreshToken()", () => {
       expire: vi.fn().mockReturnThis(),
       exec: vi.fn().mockResolvedValue(execResult),
     };
+  }
+
+  // Returns the raw JSON payload string that redis.eval() (the atomic GET+DEL Lua
+  // script) would return, or null to simulate a missing/already-consumed token.
+  function makeEvalMock(rawPayload: string | null) {
+    return vi.fn().mockResolvedValue(rawPayload);
   }
 
   function makeSessionQueryResult(overrides: Partial<{
@@ -410,8 +424,9 @@ describe("rotateRefreshToken()", () => {
   it("returns new accessToken and refreshToken on successful rotation", async () => {
     const { createTokenService } = await import("../services/token-service.js");
 
-    const pipelineMock = makePipelineMock(makeRefreshPayload(), 1);
+    const pipelineMock = makePipelineMock();
     const redis = {
+      eval: makeEvalMock(makeRefreshPayload()),
       pipeline: vi.fn().mockReturnValue(pipelineMock),
       set: vi.fn().mockResolvedValue("OK"),
       get: vi.fn().mockResolvedValue(null),
@@ -467,10 +482,9 @@ describe("rotateRefreshToken()", () => {
     const { createTokenService } = await import("../services/token-service.js");
     const { UnauthorizedError } = await import("@oneplatform/core");
 
-    // Redis pipeline returns null payload (token not found)
-    const pipelineMock = makePipelineMock(null, 0);
+    // redis.eval returns null — the Lua script found no key (token already consumed)
     const redis = {
-      pipeline: vi.fn().mockReturnValue(pipelineMock),
+      eval: makeEvalMock(null),
       get: vi.fn().mockResolvedValue(null),
     } as unknown as Redis;
 
@@ -482,8 +496,9 @@ describe("rotateRefreshToken()", () => {
     const { createTokenService } = await import("../services/token-service.js");
     const { SessionRevokedError } = await import("../services/token-service.js");
 
-    const pipelineMock = makePipelineMock(makeRefreshPayload(), 1);
+    const pipelineMock = makePipelineMock();
     const redis = {
+      eval: makeEvalMock(makeRefreshPayload()),
       pipeline: vi.fn().mockReturnValue(pipelineMock),
       set: vi.fn().mockResolvedValue("OK"),
     } as unknown as Redis;
@@ -510,8 +525,9 @@ describe("rotateRefreshToken()", () => {
     const { createTokenService } = await import("../services/token-service.js");
     const { UnauthorizedError } = await import("@oneplatform/core");
 
-    const pipelineMock = makePipelineMock(makeRefreshPayload(), 1);
+    const pipelineMock = makePipelineMock();
     const redis = {
+      eval: makeEvalMock(makeRefreshPayload()),
       pipeline: vi.fn().mockReturnValue(pipelineMock),
       set: vi.fn().mockResolvedValue("OK"),
     } as unknown as Redis;
@@ -538,8 +554,9 @@ describe("rotateRefreshToken()", () => {
     const { createTokenService } = await import("../services/token-service.js");
     const { UnauthorizedError } = await import("@oneplatform/core");
 
-    const pipelineMock = makePipelineMock(makeRefreshPayload(), 1);
+    const pipelineMock = makePipelineMock();
     const redis = {
+      eval: makeEvalMock(makeRefreshPayload()),
       pipeline: vi.fn().mockReturnValue(pipelineMock),
     } as unknown as Redis;
 
