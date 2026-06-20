@@ -1,0 +1,1035 @@
+[
+  {
+    "name": "docker",
+    "count": 1,
+    "fixes": [
+      {
+        "file": "docker/docker-compose.yml",
+        "line": 700,
+        "title": "Grafana admin password defaults to 'admin' with no production override",
+        "desc": "The Grafana container uses GF_SECURITY_ADMIN_PASSWORD: ${OP_GRAFANA_PASSWORD:-admin}, defaulting to 'admin'. The docker-compose.prod.yml file does NOT override or enforce a strong Grafana password (it",
+        "fix": "Add a grafana section to docker-compose.prod.yml that requires OP_GRAFANA_PASSWORD with the ${OP_GRAFANA_PASSWORD:?Must set OP_GRAFANA_PASSWORD} syntax, similar to how POSTGRES_PASSWORD is handled. Al"
+      }
+    ]
+  },
+  {
+    "name": "packages/app-sdk",
+    "count": 5,
+    "fixes": [
+      {
+        "file": "packages/app-sdk/src/hooks/useAppStorage.ts",
+        "line": 140,
+        "title": "Optimistic rollback uses stale previousValue after rapid successive writes",
+        "desc": "The setValue callback captures the current 'value' state as 'previousValue' for rollback on failure. When multiple setValue calls are made in rapid succession, the second call's previousValue is the o",
+        "fix": "Store the last server-confirmed value in a separate ref (e.g., confirmedValueRef) and update it only after a successful PUT. On rollback, revert to confirmedValueRef.current instead of the potentially"
+      },
+      {
+        "file": "packages/app-sdk/src/providers/BrandingProvider.tsx",
+        "line": 99,
+        "title": "faviconUrl set without URL protocol validation",
+        "desc": "The applyFavicon function sets link.href = faviconUrl with no validation that the URL uses a safe protocol (http: or https:). While BffClient validates its bffBaseUrl protocol, the branding fetch resp",
+        "fix": "Validate that faviconUrl and logoUrl use http: or https: protocols before applying them. Reject data: URIs, blob: URIs, and javascript: URIs. Example: const parsed = new URL(faviconUrl); if (parsed.pr"
+      },
+      {
+        "file": "packages/app-sdk/src/hooks/useSubscription.ts",
+        "line": 86,
+        "title": "Subscription registration reads filter/events only at mount time, silently ignoring dynamic changes",
+        "desc": "When useSubscription registers with WebSocketManager, it reads optionsRef.current.filter and optionsRef.current.events at the time the effect runs (on [id, entity, wsManager] changes only). If the cal",
+        "fix": "Either (a) include a serialized representation of filter and events in the effect's dependency array so the subscription is re-registered when they change, or (b) emit a console.warn in development mo"
+      },
+      {
+        "file": "packages/app-sdk/src/client/BffClient.ts",
+        "line": 219,
+        "title": "204 No Content returns undefined cast as T, hiding type errors for non-void callers",
+        "desc": "When the BFF responds with 204 No Content, the request() method returns 'undefined as T'. This is correct for callers that expect void (like useMutation's remove()), but any caller that requests a con",
+        "fix": "Consider adding a generic constraint or overload that makes the 204 case type-safe. For example, add a separate requestVoid() method for endpoints that return no body, or use a conditional return type"
+      },
+      {
+        "file": "packages/app-sdk/src/provider/AppProvider.tsx",
+        "line": 241,
+        "title": "AppProvider cleanup destroys WebSocketManager and PermissionCache but refs remain stale on remount",
+        "desc": "The useEffect cleanup calls wsManager.destroy() and permissionCache.destroy(), which set internal 'destroyed' flags to true. However, the useProviderSingletons hook uses useRef to hold these instances",
+        "fix": "Either (a) reset the 'destroyed' flag in connect()/seed() methods so destroyed instances can be reused, or (b) set the refs to null in the cleanup function so useProviderSingletons creates fresh insta"
+      }
+    ]
+  },
+  {
+    "name": "packages/cli",
+    "count": 9,
+    "fixes": [
+      {
+        "file": "packages/cli/src/lib/credentials.ts",
+        "line": 188,
+        "title": "Insecure file permission check allows overly-permissive credentials files",
+        "desc": "checkCredentialsPermissions() uses `mode > SECURE_MODE` (numeric comparison: `mode > 0o600`) to determine if the file is insecurely permissive. This is a numeric comparison on the raw permission bits,",
+        "fix": "Replace `if (mode > SECURE_MODE)` with `if ((mode & 0o177) !== 0)` to correctly detect any permissions granted to group or others (any bits beyond owner rw)."
+      },
+      {
+        "file": "packages/cli/src/lib/file-sync.ts",
+        "line": 71,
+        "title": "Path traversal vulnerability in applyRemoteChange allows writing files outside localDir",
+        "desc": "applyRemoteChange() constructs the local file path by joining localDir with event.path (received from the server via SSE). If event.path contains path traversal sequences like '../../.bashrc', join() ",
+        "fix": "After computing localPath, resolve both paths and verify containment: `const resolved = resolve(localPath); if (!resolved.startsWith(resolve(localDir) + sep) && resolved !== resolve(localDir)) throw n"
+      },
+      {
+        "file": "packages/cli/src/lib/streaming.ts",
+        "line": 34,
+        "title": "SSE parser loses multi-line data fields -- only keeps the last data line",
+        "desc": "Per the SSE specification (W3C EventSource), when multiple 'data:' lines appear before an empty line, their values should be concatenated with newlines. The current parser overwrites current.data on e",
+        "fix": "Concatenate data lines per the SSE spec: `current.data = current.data !== undefined ? current.data + '\\n' + line.slice(5).trimStart() : line.slice(5).trimStart();`"
+      },
+      {
+        "file": "packages/cli/src/lib/http-client.ts",
+        "line": 31,
+        "title": "URL construction silently drops path components from platformUrl",
+        "desc": "buildUrl() uses `new URL(path, base)` where base is the platformUrl. The URL constructor's behavior when the base has a path component is counterintuitive: `new URL('/api/v1/data', 'https://example.co",
+        "fix": "Concatenate the base path and the request path before constructing the URL: `const baseUrl = new URL(base.endsWith('/') ? base : base + '/'); const url = new URL(path.startsWith('/') ? path.slice(1) :"
+      },
+      {
+        "file": "packages/cli/src/commands/ontology/index.ts",
+        "line": 127,
+        "title": "Division by zero crash in migration progress display when total is 0",
+        "desc": "In migrateAction(), the progress display computes `Math.round(status.progress / status.total * 100)`. If the server returns total=0 (empty entity type or edge case), this produces NaN or Infinity, whi",
+        "fix": "Guard against zero total: `const pct = status.total > 0 ? Math.round(status.progress / status.total * 100) : 0;` and use `pct` in the display string."
+      },
+      {
+        "file": "packages/cli/src/commands/config/index.ts",
+        "line": 94,
+        "title": "Passphrase exposed in process memory after being passed on command line",
+        "desc": "When --include-credentials is used and --passphrase is not provided, promptPassphrase() interactively collects the passphrase. However, if --passphrase is provided on the command line, the passphrase ",
+        "fix": "Add a note in the help text that the passphrase will be prompted interactively if omitted, and recommend omitting it for security. Consider additionally reading from an env var (e.g., OP_CONFIG_PASSPH"
+      },
+      {
+        "file": "packages/cli/src/commands/schedule/index.ts",
+        "line": 55,
+        "title": "Schedule 'get' subcommand missing from bash/zsh completion scripts",
+        "desc": "The schedule command group registers a 'get' subcommand (line 119 of schedule/index.ts), but the bash completion script at completion/index.ts line 57 lists schedule subcommands as 'list create pause ",
+        "fix": "Update the schedule completion lists in all three shell scripts (bash, zsh, fish) to include 'get' and 'update': 'list get create update pause resume delete'."
+      },
+      {
+        "file": "packages/cli/src/commands/mapping/index.ts",
+        "line": 183,
+        "title": "Mapping 'import' subcommand missing from completion scripts",
+        "desc": "The mapping command group registers an 'import' subcommand (mapping/index.ts line 381), but the completion scripts at completion/index.ts list mapping subcommands as only 'list create update delete pr",
+        "fix": "Add 'import' to the mapping completion lists in all three shell scripts: 'list create update delete preview import'."
+      },
+      {
+        "file": "packages/cli/src/commands/dlq/index.ts",
+        "line": 59,
+        "title": "DLQ replay-all subcommand missing from completion scripts",
+        "desc": "The dlq command group registers 'replay-all' (dlq/index.ts line 114), but completion scripts list dlq subcommands as 'list replay discard' -- missing 'replay-all'. Tab completion will not suggest this",
+        "fix": "Add 'replay-all' to the dlq completion lists in all three shell scripts: 'list replay replay-all discard'."
+      }
+    ]
+  },
+  {
+    "name": "packages/core",
+    "count": 6,
+    "fixes": [
+      {
+        "file": "packages/core/src/db.ts",
+        "line": 49,
+        "title": "setTenantContext uses parameterized SET LOCAL which PostgreSQL does not support",
+        "desc": "The function executes `SET LOCAL app.tenant_id = $1` with a parameterized value. PostgreSQL's SET command does not support parameterized queries ($1 placeholders). The pg driver sends this as a prepar",
+        "fix": "Use PostgreSQL's set_config function which supports parameterized queries:\n\nawait client.query(\"SELECT set_config('app.tenant_id', $1, true)\", [tenantId]);\n\nThe third argument 'true' to set_config mak"
+      },
+      {
+        "file": "packages/core/src/middleware/cors.ts",
+        "line": 51,
+        "title": "CORS middleware treats wildcard '*' origin as a literal string, silently breaking dev environments",
+        "desc": "The CORS middleware does a strict Set lookup (originSet.has(origin)) against configured origins. When OP_ALLOWED_ORIGINS contains '*', the middleware treats it as a literal origin string 'http://*' or",
+        "fix": "Add an explicit check for the wildcard origin before the Set lookup:\n\nconst allowAll = config.allowedOrigins.includes('*');\n// ...\nif (!allowAll && !originSet.has(origin)) {\n  return c.json({ error: ."
+      },
+      {
+        "file": "packages/core/src/middleware/auth.ts",
+        "line": 80,
+        "title": "Public route prefix extraction strips all param segments, creating overly broad path matches",
+        "desc": "When a publicRoute contains ':', the regex `normalized.replace(/\\/:[^/]+/g, '')` strips ALL colon-prefixed segments, not just trailing ones. For a route like '/api/v1/users/:userId/profile/:section', ",
+        "fix": "For routes with mid-path parameters, convert the pattern into a regex that matches any segment in param positions, rather than stripping them. For example:\n\nconst regexStr = normalized\n  .split('/')\n "
+      },
+      {
+        "file": "packages/core/src/middleware/service-auth.ts",
+        "line": 100,
+        "title": "Service token callerService extracted from unverified JWT payload before signature check",
+        "desc": "The serviceAuthMiddleware extracts callerService from the JWT payload (line 104) before verifying the token signature (line 131-132). The callerService value is then used to look up the public key and",
+        "fix": "Sanitize callerService before including it in the error response. Either truncate and strip non-alphanumeric characters, or use a generic message that does not reflect the untrusted input:\n\nreturn c.j"
+      },
+      {
+        "file": "packages/core/src/app.ts",
+        "line": 186,
+        "title": "EdDSA JWT public key (jwtPublicKey) is never passed to authMiddleware by createApp",
+        "desc": "The authMiddleware supports EdDSA token verification when jwtPublicKey is provided, but the createApp function's CreateAppConfig interface does not include a jwtPublicKey field, and createApp never pa",
+        "fix": "Add jwtPublicKey as an optional field to CreateAppConfig and pass it through to authMiddleware. Services should load the JWT Ed25519 public key and include it in the createApp config."
+      },
+      {
+        "file": "packages/core/src/service-rbac.ts",
+        "line": 19,
+        "title": "Gateway service has unrestricted wildcard RBAC permissions to all internal endpoints",
+        "desc": "The service RBAC matrix grants gateway-service a blanket wildcard rule: { target: \"*\", method: \"*\", pathPattern: \"*\" }. This means the gateway can call any internal endpoint on any service with any HT",
+        "fix": "Replace the wildcard rule with an explicit allowlist of the specific internal endpoints the gateway actually needs to call, such as /internal/auth/validate-api-key. This limits the blast radius of a g"
+      }
+    ]
+  },
+  {
+    "name": "packages/frontend",
+    "count": 6,
+    "fixes": [
+      {
+        "file": "packages/frontend/src/lib/api-client.ts",
+        "line": 127,
+        "title": "Retry-After header parsed as integer fails for HTTP-date format, causing immediate retry with no delay",
+        "desc": "The HTTP Retry-After header has two valid formats: a number of seconds (e.g. '120') or an HTTP-date (e.g. 'Wed, 21 Oct 2015 07:28:00 GMT'). The code uses parseInt(retryAfterHeader, 10) which returns N",
+        "fix": "After parseInt, check for NaN and fall back to the default: const parsed = parseInt(retryAfterHeader, 10); const retryAfterMs = !isNaN(parsed) ? parsed * 1000 : 1000; -- optionally also handle the HTT"
+      },
+      {
+        "file": "packages/frontend/src/lib/utils.ts",
+        "line": 73,
+        "title": "formatBytes crashes with NaN output for negative byte values",
+        "desc": "formatBytes(bytes) only guards against bytes === 0 but not negative values. Math.log(negative) returns NaN, so Math.floor(NaN) is NaN, and sizes[NaN] is undefined. The function returns 'NaN undefined'",
+        "fix": "Add a guard for negative values at the top of the function: if (bytes < 0) return `-${formatBytes(-bytes, decimals)}`; -- or if negative values should not occur, add: if (bytes < 0) return '0 B';"
+      },
+      {
+        "file": "packages/frontend/src/components/shared/ErrorBoundary.tsx",
+        "line": 179,
+        "title": "ErrorBoundary 'Sign in' button navigates to non-existent route /auth/login instead of /login",
+        "desc": "When the ErrorBoundary classifies an error as a permission error, the 'Sign in' button navigates to '/auth/login'. However, the router defines the login route at '/login' (router.tsx line 49). The '/a",
+        "fix": "Change the URL to '/login': onClick={() => { window.location.href = \"/login\"; }}"
+      },
+      {
+        "file": "packages/frontend/src/components/pipeline-editor/graph-converter.ts",
+        "line": 270,
+        "title": "Auto-layout BFS assigns incorrect layer to nodes reachable from multiple paths",
+        "desc": "The applyAutoLayout function uses BFS to assign layers but adds nodes with visited-check. The comment on line 285 says 'use the maximum layer to avoid overlaps' but the code uses a visited set that pr",
+        "fix": "Instead of using a visited set, allow re-processing nodes when a longer path is found. Replace the visited guard with a comparison: if the new layer is greater than the existing layer, update and re-e"
+      },
+      {
+        "file": "packages/frontend/src/hooks/use-platform-events.ts",
+        "line": 89,
+        "title": "JSON.stringify(eventFilter) in useCallback deps causes re-creation on every render when caller provides inline array",
+        "desc": "The useCallback for onEvent includes JSON.stringify(eventFilter) in its dependency array. If the caller passes an inline array literal like ['pipeline.*'], a new array reference is created every rende",
+        "fix": "Memoize the eventFilter in the caller or use useRef for the filter, or move eventFilter to a useRef inside the hook and compare via JSON.stringify outside the deps array, similar to how onEventRef is "
+      },
+      {
+        "file": "packages/frontend/src/components/editor/AppEditor.tsx",
+        "line": 115,
+        "title": "Debounced auto-save closes over stale editorStore and client references",
+        "desc": "The debouncedSave is memoized with [appId] as the only dependency. However, it captures `client` and `editorStore` from the render scope closure. Since useEditorStore() returns a new object reference ",
+        "fix": "Use refs for client and editorStore to avoid stale closures: const clientRef = useRef(client); clientRef.current = client; const storeRef = useRef(editorStore); storeRef.current = editorStore; Then us"
+      }
+    ]
+  },
+  {
+    "name": "packages/plugin-sdk",
+    "count": 2,
+    "fixes": [
+      {
+        "file": "packages/plugin-sdk/src/testing/assertions.ts",
+        "line": 40,
+        "title": "CONDITIONAL_METHODS map references feature flags and methods that do not exist in SDK interfaces",
+        "desc": "The CONDITIONAL_METHODS map checks for feature flags like `supportsWebhook`, `supportsBatch`, `supportsDelete`, `supportsMfa`, `supportsResize` and expects methods like `fetchIncremental`, `handleWebh",
+        "fix": "Update the CONDITIONAL_METHODS map to reference actual SDK interface names. For connector: `supportsRealtime` should check for `subscribeToEvents`. For transformer: remove `supportsBatch` (there is no"
+      },
+      {
+        "file": "packages/plugin-sdk/src/dev/scaffold.ts",
+        "line": 349,
+        "title": "Scaffolded auth-provider getAuthorizationUrl signature does not match AuthProvider interface",
+        "desc": "The scaffold generates `getAuthorizationUrl(state: string, options: AuthOptions, config?: Record<string, unknown>): string` with 3 parameters, but the actual AuthProvider interface in types/auth-provi",
+        "fix": "Change the scaffold to generate `getAuthorizationUrl(state: string, options: AuthOptions): string` matching the actual interface. The clientId should be retrieved from the plugin instance configuratio"
+      }
+    ]
+  },
+  {
+    "name": "packages/sdk",
+    "count": 7,
+    "fixes": [
+      {
+        "file": "packages/sdk/src/auth/api-key.ts",
+        "line": 27,
+        "title": "API key prefix leaked in error message",
+        "desc": "When an invalid API key is provided, the error message exposes the first 8 characters of the key: `apiKey.slice(0, 8)`. Since valid keys start with 'op_live_' or 'op_test_' (exactly 8 characters), the",
+        "fix": "Remove the key prefix from the error message entirely, or only show the first 3-4 characters, or only show the characters if they match an expected prefix pattern. For example: `Received key starting "
+      },
+      {
+        "file": "packages/sdk/src/auth/token-manager.ts",
+        "line": 37,
+        "title": "Token refresh race: concurrent callers may use stale token after refresh",
+        "desc": "The `refresh()` method correctly deduplicates concurrent refresh calls by sharing `refreshInFlight`. However, when two requests fail with 401 simultaneously and both call `refresh()`, the first call s",
+        "fix": "Move the `this.refreshInFlight = null` cleanup to after `this.currentToken` has been updated. Replace the `.finally()` approach with a try/finally inside the refresh method that clears the in-flight p"
+      },
+      {
+        "file": "packages/sdk/src/client.ts",
+        "line": 288,
+        "title": "destroy() mutates Set while iterating, then calls clear() on subscriptions that already removed themselves",
+        "desc": "In the `destroy()` method, the code iterates over `activeSubscriptions` with a for-of loop and calls `sub.unsubscribe()` on each. But `unsubscribe()` was wrapped at line 257-259 to call `activeSubscri",
+        "fix": "Wrap each unsubscribe call in a try-catch to ensure all subscriptions are cleaned up even if one throws: `for (const sub of activeSubscriptions) { try { sub.unsubscribe(); } catch { /* ignore */ } } a"
+      },
+      {
+        "file": "packages/sdk/src/subscriptions/sse-subscriber.ts",
+        "line": 84,
+        "title": "SSE parser uses trimStart() on data lines, corrupting data with leading whitespace",
+        "desc": "At line 88, after extracting the data portion with `line.slice(5)`, the code calls `.trimStart()` which strips all leading whitespace. Per the SSE specification (W3C EventSource), the data field value",
+        "fix": "Follow the SSE spec: remove exactly one leading space if present. Replace `.trimStart()` with a conditional slice: `const raw = line.slice(5); const chunk = raw.startsWith(' ') ? raw.slice(1) : raw;`"
+      },
+      {
+        "file": "packages/sdk/src/subscriptions/sse-subscriber.ts",
+        "line": 68,
+        "title": "SSE parser splits on \\n only, missing \\r\\n and bare \\r line endings",
+        "desc": "The SSE specification (W3C section 6) requires parsers to handle all three line ending styles: LF (\\n), CR LF (\\r\\n), and bare CR (\\r). The parser at line 72 only splits on '\\n'. While most modern ser",
+        "fix": "Split on all SSE-valid line endings. Replace `buffer.split('\\n')` with a regex split that handles all three: `buffer.split(/\\r\\n|\\r|\\n/)`. This matches the SSE specification and handles all server lin"
+      },
+      {
+        "file": "packages/sdk/src/filter-builder/filter-builder.ts",
+        "line": 72,
+        "title": "Filter builder silently overwrites duplicate field+operator conditions",
+        "desc": "The `toParams()` method builds a Record<string, string> using `params[key] = condition.value`. If the same field+operator combination is added multiple times (e.g., `filter('status').eq('active').and(",
+        "fix": "Either throw a ValidationError when a duplicate field+operator is detected in toParams(), or support multiple values for the same key by returning Record<string, string | string[]> and appending to an"
+      },
+      {
+        "file": "packages/sdk/src/grpc-types/data.ts",
+        "line": 30,
+        "title": "parseEntityData mutates supposedly-readonly Entity by caching parsed data on it",
+        "desc": "The `parseEntityData` function caches the parsed JSON result by writing a `__parsedData` property directly onto the Entity instance via `entityAny[cacheKey] = parsed`. The Entity interface declares al",
+        "fix": "Use a WeakMap<Entity, unknown> for caching instead of mutating the entity object: `const parseCache = new WeakMap<Entity, unknown>(); export function parseEntityData<T>(entity: Entity): T { const cach"
+      }
+    ]
+  },
+  {
+    "name": "plugins/auth-provider-ldap",
+    "count": 5,
+    "fixes": [
+      {
+        "file": "plugins/auth-provider-ldap/src/index.ts",
+        "line": 827,
+        "title": "Unhandled PluginAuthError from getGroupMembership in validateToken causes 500 instead of valid=false",
+        "desc": "The validateToken method wraps the initial proxySearch call in a try/catch that converts PluginAuthError to {valid: false}, but the subsequent call to this.getGroupMembership (line 827) is NOT wrapped",
+        "fix": "Wrap the getGroupMembership call (and the rest of the post-search logic) in the same try/catch block, or add a separate try/catch around getGroupMembership that returns {valid: false, error: err.messa"
+      },
+      {
+        "file": "plugins/auth-provider-ldap/src/index.ts",
+        "line": 250,
+        "title": "buildSearchBase false-positive detection of full DNs causes incorrect search base construction",
+        "desc": "buildSearchBase checks if the searchBase contains 'dc=', 'o=', or 'c=' (case-insensitive) to decide whether it is already a full DN. This heuristic produces false positives for legitimate OU names tha",
+        "fix": "Use a regex that matches these as RDN components (preceded by start-of-string or comma) rather than substring matching. For example: /(?:^|,)\\s*(dc|o|c)\\s*=/i.test(searchBase). This ensures that 'ou=p"
+      },
+      {
+        "file": "plugins/auth-provider-ldap/src/index.ts",
+        "line": 183,
+        "title": "groupMapping values not validated -- non-string values cause silent type corruption",
+        "desc": "The groupMapping config is validated as an object (not null, not array) but is then cast to Record<string, string> without verifying that all values are actually strings. If a tenant admin provides gr",
+        "fix": "Iterate over the object entries and filter/validate that every value is a string. For example: Object.fromEntries(Object.entries(rawGroupMapping).filter(([_, v]) => typeof v === 'string')). Alternativ"
+      },
+      {
+        "file": "plugins/auth-provider-ldap/src/index.ts",
+        "line": 1113,
+        "title": "extractMemberOfGroups ignores groups where the first RDN attribute does not match groupNameAttribute",
+        "desc": "The extractMemberOfGroups method only extracts a group name when the FIRST RDN component of the memberOf DN matches the groupNameAttribute. In Active Directory, group DNs typically start with 'cn=' (e",
+        "fix": "When using the memberOf fallback path, always extract from the first RDN (typically 'cn=') regardless of groupNameAttribute, since the DN's first RDN attribute is fixed by the directory schema and is "
+      },
+      {
+        "file": "plugins/auth-provider-ldap/src/index.ts",
+        "line": 348,
+        "title": "Service-account bind DN and error reason logged and included in error details on bind failure",
+        "desc": "When proxyBind fails, the PluginAuthError is thrown with the bindDN and failure reason included both in the error message string and in the structured details object: `throw new PluginAuthError('LDAP ",
+        "fix": "Avoid including the full bindDN in the error message. Use a generic message like 'LDAP service account bind failed' and move the bindDN to debug-level logging only (which is already done on line 349)."
+      }
+    ]
+  },
+  {
+    "name": "plugins/auth-provider-oidc",
+    "count": 6,
+    "fixes": [
+      {
+        "file": "plugins/auth-provider-oidc/src/index.ts",
+        "line": 432,
+        "title": "Client secret cached with same TTL as JWKS, becomes unavailable during long sessions",
+        "desc": "The client secret is cached in initialize() with a TTL of jwksCacheTtlSeconds (default 3600 seconds / 1 hour). After this TTL expires, handleCallback() and refreshToken() will fail with 'OIDC client s",
+        "fix": "Either set the client secret cache TTL to the maximum allowed value (86400 seconds) independent of jwksCacheTtlSeconds, or implement a re-initialization mechanism. Alternatively, since AuthContext act"
+      },
+      {
+        "file": "plugins/auth-provider-oidc/src/index.ts",
+        "line": 688,
+        "title": "Concurrent refresh cache key is not user-scoped, causing cross-user token leakage",
+        "desc": "When a concurrent refresh request finds the lock held, it falls back to reading a cached TokenPair from the key 'oidc:refreshed:token' (line 688). However, this cache key is global to the plugin insta",
+        "fix": "Scope the cached refresh result key to include the refresh token hash, e.g., `oidc:refreshed:token:${hashString(refreshToken)}`. This ensures the fallback cache lookup only returns a result for the sa"
+      },
+      {
+        "file": "plugins/auth-provider-oidc/src/jwks.ts",
+        "line": 328,
+        "title": "RSA-PSS salt length is hardcoded to 32 for all PS variants, incorrect for PS384 and PS512",
+        "desc": "The RSA-PSS salt length is hardcoded to 32 bytes for all PS256/PS384/PS512 algorithms. Per RFC 7518 Section 3.5, the salt length MUST equal the hash output length: 32 bytes for PS256 (SHA-256), 48 byt",
+        "fix": "Derive the salt length from the algorithm's hash. For example: `const hashSize = { 'SHA-256': 32, 'SHA-384': 48, 'SHA-512': 64 }; const saltLength = hashSize[(cryptoKey.algorithm as RsaHashedKeyAlgori"
+      },
+      {
+        "file": "plugins/auth-provider-oidc/src/jwks.ts",
+        "line": 208,
+        "title": "Default algorithm inference for EC keys always assumes ES256, incorrect for P-384 and P-521 curves",
+        "desc": "When a JWK lacks an 'alg' field, the code defaults EC keys to 'ES256' regardless of the actual curve. If the key uses curve P-384 (should be ES384) or P-521 (should be ES512), importJwk will attempt t",
+        "fix": "Derive the algorithm from the curve when the alg field is absent: `const alg = jwk.alg ?? (jwk.kty === 'EC' ? (jwk.crv === 'P-384' ? 'ES384' : jwk.crv === 'P-521' ? 'ES512' : 'ES256') : 'RS256');`"
+      },
+      {
+        "file": "plugins/auth-provider-oidc/src/index.ts",
+        "line": 265,
+        "title": "atob-based base64url decoding silently produces corrupt output for multi-byte UTF-8 characters",
+        "desc": "In the decodeJwtPayloadUnsafe function's atob() fallback path (used when Buffer is unavailable), the decoded binary string from atob() is not processed through a TextDecoder. For JWT payloads containi",
+        "fix": "Apply TextDecoder to the atob output to correctly handle multi-byte UTF-8: `const binaryString = atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/')); const bytes = new Uint8Array(binaryString.leng"
+      },
+      {
+        "file": "plugins/auth-provider-oidc/src/index.ts",
+        "line": 484,
+        "title": "In-memory redirectUriByState Map is not safe across horizontally scaled instances",
+        "desc": "The redirect_uri is stored in an in-memory Map keyed by the OAuth state parameter during getAuthorizationUrl(). When handleCallback() runs, it looks up the state in this same Map. In a horizontally sc",
+        "fix": "Use the distributed cache (context.cache) to store the redirect_uri keyed by state, instead of an in-memory Map. Since getAuthorizationUrl() is synchronous and cannot use async cache, either make it a"
+      }
+    ]
+  },
+  {
+    "name": "plugins/connector-csv",
+    "count": 4,
+    "fixes": [
+      {
+        "file": "plugins/connector-csv/src/index.ts",
+        "line": 365,
+        "title": "Bearer token persisted in plaintext in ConnectorHandle metadata",
+        "desc": "The bearer token is stored in handle.metadata at line 365. The ConnectorHandle interface explicitly states that metadata 'Must be JSON-serializable (the platform may checkpoint this between calls)'. T",
+        "fix": "Do not store the bearer token in handle.metadata. Instead, fetch it from context.credentials.get('bearerToken') in each fetchBatch call. The credential accessor caches within an execution, so repeated"
+      },
+      {
+        "file": "plugins/connector-csv/src/index.ts",
+        "line": 232,
+        "title": "Config validation accepts http:// URLs that the FetchProxy will always reject",
+        "desc": "extractConfig() allows URLs starting with http:// (line 232), and the code comment (line 11-12) says 'http:// URLs are supported in config (user intent)'. However, the manifest's requiredExternalUrls ",
+        "fix": "Either (a) reject http:// URLs in extractConfig with a clear error message: 'Only https:// URLs are supported. The platform does not allow unencrypted HTTP connections.' or (b) add 'http://**' to requ"
+      },
+      {
+        "file": "plugins/connector-csv/src/index.ts",
+        "line": 247,
+        "title": "Encoding config is accepted but never applied; non-UTF-8 files will produce garbled data",
+        "desc": "The encoding config option is extracted (line 247-249), stored in CsvConfig and handle.metadata, and documented in the configSchema (line 305). However, it is never actually used when decoding the res",
+        "fix": "Either (a) use response.arrayBuffer() and decode with new TextDecoder(encoding) to honor the config: const buf = await response.arrayBuffer(); const text = new TextDecoder(encoding).decode(buf); or (b"
+      },
+      {
+        "file": "plugins/connector-csv/src/index.ts",
+        "line": 513,
+        "title": "disconnect() does not clear cached parsed CSV data; up to 100MB can remain in cache for 24 hours",
+        "desc": "The comment on line 458 claims 'the cache is cleared on disconnect via key expiry' but disconnect() (line 513-520) does not call context.cache.delete(). The parsed CSV data (which for a 100MB file can",
+        "fix": "Add cache cleanup in disconnect(): try { await context.cache.delete(rowsCacheKey(_handle.connectionId)); } catch (err) { context.logger.warn('Failed to clear CSV cache', { error: err instanceof Error "
+      }
+    ]
+  },
+  {
+    "name": "plugins/connector-mysql",
+    "count": 4,
+    "fixes": [
+      {
+        "file": "plugins/connector-mysql/plugin.manifest.json",
+        "line": 56,
+        "title": "Empty requiredExternalUrls will block all fetch calls to the MySQL proxy in production",
+        "desc": "The manifest declares 'requiredExternalUrls: []' (empty array). The FetchProxy interface documentation states: 'Only URLs declared in manifest.requiredExternalUrls are permitted.' The proxyUrl is a us",
+        "fix": "Either add a glob/wildcard pattern to requiredExternalUrls that matches allowed proxy hosts (e.g., 'https://*.internal.example.com/*'), or document that the platform admin must configure the URL allow"
+      },
+      {
+        "file": "plugins/connector-mysql/src/index.ts",
+        "line": 230,
+        "title": "customQuery ignores table and incrementalColumn without warning, leading to silent misconfiguration",
+        "desc": "When customQuery is provided, the connector silently ignores the table and incrementalColumn settings. The manifest description mentions 'Ignored when customQuery is set' for the table field, but the ",
+        "fix": "Reject the configuration when both customQuery and incrementalColumn are set, similar to the Postgres connector (line 225): 'incrementalColumn cannot be used together with customQuery'. Alternatively,"
+      },
+      {
+        "file": "plugins/connector-mysql/src/index.ts",
+        "line": 470,
+        "title": "Database and table names interpolated into SQL string despite backtick quoting can be bypassed",
+        "desc": "The parseConfig function rejects backtick characters in database and table names (line 198), but this check is insufficient. MySQL identifiers quoted with backticks can be broken with other character ",
+        "fix": "Use a stricter allowlist for identifiers. Validate that database, table, and incrementalColumn names match a safe pattern like /^[a-zA-Z_][a-zA-Z0-9_]*$/ which matches valid MySQL unquoted identifier "
+      },
+      {
+        "file": "plugins/connector-mysql/src/index.ts",
+        "line": 616,
+        "title": "configSchema in metadata() does not list proxyUrl as required, contradicting runtime validation",
+        "desc": "The configSchema returned by metadata() lists 'required: [\"database\", \"table\"]' but omits 'proxyUrl'. However, parseConfig() throws PluginConfigError if proxyUrl is missing (line 250-254). This means ",
+        "fix": "Add 'proxyUrl' to the required array in both the metadata() configSchema and the plugin.manifest.json:\n\nrequired: [\"database\", \"table\", \"proxyUrl\"]"
+      }
+    ]
+  },
+  {
+    "name": "plugins/connector-postgres",
+    "count": 2,
+    "fixes": [
+      {
+        "file": "plugins/connector-postgres/src/index.ts",
+        "line": 796,
+        "title": "Unguarded response.json() throws untyped SyntaxError on non-JSON proxy responses",
+        "desc": "In parseRowsResponse (line 796) and fetchTableSchema (line 518), response.json() is called without a try-catch. If the proxy returns a 200 status with a non-JSON body (e.g., an HTML error page from a ",
+        "fix": "Wrap response.json() in a try-catch and throw a PluginDataError on parse failure, including a truncated snippet of the response body for debugging. For example: try { json = await response.json(); } c"
+      },
+      {
+        "file": "plugins/connector-postgres/src/index.ts",
+        "line": 765,
+        "title": "handleToConfig lacks validation for proxyUrl, producing cryptic TypeError on corrupted metadata",
+        "desc": "In handleToConfig (line 765), proxyUrl is extracted with a bare type assertion: 'm[\"proxyUrl\"] as string'. Unlike every other field in the function, it has no nullish coalescing fallback. If handle.me",
+        "fix": "Add a validation guard after rehydration: if typeof proxyUrl is not 'string' or proxyUrl is empty, throw a PluginConfigError('Handle metadata is missing proxyUrl -- the connector handle may be corrupt"
+      }
+    ]
+  },
+  {
+    "name": "plugins/connector-rest-api",
+    "count": 7,
+    "fixes": [
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 509,
+        "title": "Auth credentials stored in plain text in serializable handle metadata",
+        "desc": "The connect() method stores the raw auth header value (bearer token, API key, or base64-encoded username:password) directly in ConnectorHandle.metadata. The ConnectorHandle interface's JSDoc states 't",
+        "fix": "Do not store credentials in handle metadata. Instead, re-resolve credentials from context.credentials.get() at the start of each fetchBatch() call. The credentials accessor is available on every Plugi"
+      },
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 662,
+        "title": "Link-header pagination follows arbitrary URLs without origin validation (SSRF vector)",
+        "desc": "When paginationType is 'link', the connector blindly follows the URL extracted from the Link header on subsequent requests. The cursor.nextUrl is used directly as the fetch URL without validating that",
+        "fix": "Before using cursor.nextUrl, validate that its origin (protocol + hostname + port) matches the configured baseUrl origin. For example: `const nextOrigin = new URL(cursor.nextUrl).origin; const baseOri"
+      },
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 632,
+        "title": "Incremental sync 'since' parameter is lost across pagination within the same run",
+        "desc": "When incrementalField is configured along with offset or cursor pagination, the 'since' value from the decoded cursor is only set on the first fetchBatch call that has it. However, the computeNextCurs",
+        "fix": "Preserve the 'since' value when encoding the next cursor. For offset pagination: `encodeCursor({ offset: nextOffset, since: previousCursor?.since })`. Apply the same fix in the cursor pagination case:"
+      },
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 145,
+        "title": "User-supplied headers object values not validated, enabling header injection",
+        "desc": "The parseConfig function casts rawHeaders to Record<string, string> without validating that every value is actually a string. If a tenant passes headers with non-string values (e.g., `{ \"Authorization",
+        "fix": "Iterate over the entries of rawHeaders and validate that every value is a string, filtering or throwing on non-string values. Also consider rejecting or warning when static headers contain 'Authorizat"
+      },
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 770,
+        "title": "Unsafe property access on potentially non-object values in extractCursorToken crashes the host",
+        "desc": "In extractCursorToken(), lines 770-772 access nested properties like `(obj[\"meta\"] as Record<string, unknown> | undefined)?.next_cursor`. If obj[\"meta\"] is a non-null primitive (e.g., a number or stri",
+        "fix": "Add a typeof guard before accessing nested properties: `const meta = obj[\"meta\"]; const metaCursor = (meta && typeof meta === \"object\" && !Array.isArray(meta)) ? (meta as Record<string, unknown>)[\"nex"
+      },
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 272,
+        "title": "Retry-After header with HTTP-date format is silently ignored",
+        "desc": "The parseRetryAfter function only handles the integer-seconds format of the Retry-After header. Per RFC 7231, the Retry-After header can also contain an HTTP-date (e.g., 'Wed, 21 Oct 2015 07:28:00 GMT",
+        "fix": "Parse the HTTP-date format as a fallback: `const seconds = parseInt(value, 10); if (!isNaN(seconds)) return seconds; const date = new Date(value); if (!isNaN(date.getTime())) { const delta = Math.max("
+      },
+      {
+        "file": "plugins/connector-rest-api/src/index.ts",
+        "line": 373,
+        "title": "Link header parser breaks on URLs containing commas",
+        "desc": "The parseNextLinkHeader function splits the Link header on commas (line 374). However, RFC 8288 allows the URL portion to contain commas (e.g., `<https://api.example.com/items?filter=a,b>; rel=\"next\"`",
+        "fix": "Use a regex-based parser that handles commas inside angle brackets. For example: `const linkRegex = /<([^>]*)>\\s*;\\s*rel=[\"']?([^\"',;]*)[\"']?/g; let match; while ((match = linkRegex.exec(linkHeader)) "
+      }
+    ]
+  },
+  {
+    "name": "plugins/connector-webhook",
+    "count": 4,
+    "fixes": [
+      {
+        "file": "plugins/connector-webhook/src/index.ts",
+        "line": 519,
+        "title": "Cursor-based pagination is broken because processed IDs are removed from the index",
+        "desc": "The pagination design is fundamentally inconsistent. fetchBatch removes processed IDs from the index (line 605) after each batch, but uses the cursor (a payload ID) to find its position in the index v",
+        "fix": "Choose one pagination strategy and implement it consistently. Option A: Keep cursor-based pagination but do NOT remove processed IDs from the index during fetchBatch. Instead, let the caller manage in"
+      },
+      {
+        "file": "plugins/connector-webhook/src/index.ts",
+        "line": 594,
+        "title": "Mapping failure throws PluginDataError halting entire batch, inconsistent with skip-on-error design",
+        "desc": "When mapPayloadToRecord throws (lines 594-599), the error is caught and re-thrown as PluginDataError, which is a non-retryable error that halts the entire batch and routes to the DLQ. This is inconsis",
+        "fix": "Handle mapping errors the same way as signature verification errors -- log a warning, add the payloadId to processedIds, and continue processing the remaining payloads. For example:\ncatch (err) {\n  co"
+      },
+      {
+        "file": "plugins/connector-webhook/src/index.ts",
+        "line": 604,
+        "title": "O(n*m) filtering of processed IDs using Array.includes on unsorted list",
+        "desc": "On line 604, remainingIds is computed by filtering allIds against processedIds using Array.prototype.includes, which is O(m) per element where m is the number of processed IDs. With allIds of length n",
+        "fix": "Convert processedIds to a Set for O(1) lookup: 'const processedSet = new Set(processedIds); const remainingIds = allIds.filter(id => !processedSet.has(id));'. For the sequential deletes, use Promise.a"
+      },
+      {
+        "file": "plugins/connector-webhook/src/index.ts",
+        "line": 211,
+        "title": "timingSafeEqual leaks length information via early return on length mismatch",
+        "desc": "The timingSafeEqual function returns false immediately when the two strings have different lengths (line 212). While HMAC hex digests for a given algorithm always have a fixed length (64 chars for SHA",
+        "fix": "Normalize the received signature before comparison. Lowercase and trim the received signature value, and handle common prefix variations (e.g., case-insensitive prefix matching). For the length check,"
+      }
+    ]
+  },
+  {
+    "name": "services/app",
+    "count": 8,
+    "fixes": [
+      {
+        "file": "services/app/src/services/embed-service.ts",
+        "line": 330,
+        "title": "isOriginAllowed never matches because Origin header includes scheme but patterns do not",
+        "desc": "The isOriginAllowed function compares the raw HTTP Origin header (e.g., 'https://example.com') against allowedOrigins patterns that are bare hostnames (e.g., 'example.com'). The schema validation (ori",
+        "fix": "Parse the requestOrigin to extract the hostname (new URL(requestOrigin).hostname) before comparing against the allowedOrigins patterns, or store allowedOrigins with scheme prefixes and compare against"
+      },
+      {
+        "file": "services/app/src/services/build-service.ts",
+        "line": 243,
+        "title": "Build service independently reads wrong MinIO env vars with hardcoded 'minioadmin' fallback",
+        "desc": "The build-service.ts independently reads MINIO_ACCESS_KEY and MINIO_SECRET_KEY (lines 243-244) with a fallback to 'minioadmin'. This is a second code path (separate from index.ts) that uses the wrong ",
+        "fix": "Change to use OP_MINIO_USER / OP_MINIO_PASSWORD env vars to match docker-compose.yml, or accept the credentials as constructor parameters passed from index.ts rather than reading env vars independentl"
+      },
+      {
+        "file": "services/app/src/index.ts",
+        "line": 738,
+        "title": "App service uses SERVICE_KEYS_DIR (no OP_ prefix) while all other services use OP_SERVICE_KEYS_DIR",
+        "desc": "The app service reads process.env[\"SERVICE_KEYS_DIR\"] for the service keys directory, while execution, ontology, pipeline, and plugin services all read process.env[\"OP_SERVICE_KEYS_DIR\"]. Docker Compo",
+        "fix": "Change to process.env[\"OP_SERVICE_KEYS_DIR\"] to match all other services."
+      },
+      {
+        "file": "services/app/src/routes/apps.ts",
+        "line": 291,
+        "title": "Rename file route validates toPath but not fromPath, allowing path traversal in source path",
+        "desc": "In the POST /:id/files/rename route, validateFilePath() is called on parsed.data.toPath but not on parsed.data.fromPath. While the fromPath is used in a WHERE clause (so SQL injection is not a concern",
+        "fix": "Add validateFilePath(parsed.data.fromPath) before the rename operation, consistent with how all other file path inputs are validated."
+      },
+      {
+        "file": "services/app/src/routes/embed.ts",
+        "line": 58,
+        "title": "In-memory rate limit Map grows unboundedly as unique users accumulate",
+        "desc": "The rateLimitBuckets Map stores one entry per userId that ever calls the embed token generation endpoint. When a bucket expires (now >= resetAt), it is replaced on next access, but buckets for users w",
+        "fix": "Add a periodic cleanup that removes expired buckets (e.g., via setInterval every 5 minutes), or switch to a Redis-backed implementation as the comment suggests. Alternatively use a bounded LRU cache."
+      },
+      {
+        "file": "services/app/src/repositories/app-version-repository.ts",
+        "line": 23,
+        "title": "Concurrent version creation can cause unique constraint violation resulting in unhandled 500 error",
+        "desc": "The AppVersionRepository.create() method computes version_number via SELECT MAX(version_number) + 1 inside the INSERT statement. Two concurrent createVersion calls for the same app can both read the s",
+        "fix": "Either: (1) use a Postgres advisory lock on the app_id before inserting (same pattern as build triggers), (2) wrap the insert in a retry loop that catches unique violation errors and re-attempts with "
+      },
+      {
+        "file": "services/app/src/index.ts",
+        "line": 657,
+        "title": "Preview reload SSE stream only works for public apps, fails silently for platform-user apps",
+        "desc": "The /apps/:slug/preview/reload-stream endpoint only looks up apps via appRepo.findPublicBySlug(slug), which filters by access_mode = 'public'. Platform-user apps (the default access mode) are never fo",
+        "fix": "Add logic to also check for platform-user apps when a user session is available (same pattern as the main /apps/:slug/* route), and add auth checks for non-public apps to prevent unauthorized access t"
+      },
+      {
+        "file": "services/app/src/services/permission-service.ts",
+        "line": 128,
+        "title": "deleteRole does not verify role belongs to specified app - cross-app role deletion",
+        "desc": "Same issue as updateRole: deleteRole calls assertAppAccess(tenantId, appId) then permRepo.deleteRole(roleId) where deleteRole SQL is 'DELETE FROM app.roles WHERE id = $1' without filtering by app_id. ",
+        "fix": "Change permRepo.deleteRole to accept both roleId and appId, and modify the SQL to: DELETE FROM app.roles WHERE id = $1 AND app_id = $2"
+      }
+    ]
+  },
+  {
+    "name": "services/audit-service.ts",
+    "count": 1,
+    "fixes": [
+      {
+        "file": "services/logging/src/services/audit-service.ts",
+        "line": 50,
+        "title": "BullMQ Queue defaultJobOptions have no effect - created and immediately closed",
+        "desc": "A BullMQ Queue instance is created with defaultJobOptions (attempts: 5, exponential backoff) and immediately closed on line 59. The code comment says 'Set retry defaults on the Queue so that jobs adde",
+        "fix": "Remove the dead Queue instantiation. Instead, ensure that the producers (other services that add jobs to the 'audit' queue) specify the retry options when calling queue.add(). Alternatively, if the lo"
+      }
+    ]
+  },
+  {
+    "name": "services/auth",
+    "count": 8,
+    "fixes": [
+      {
+        "file": "services/auth/src/services/auth-service.ts",
+        "line": 871,
+        "title": "getJwtExpirySeconds and getRefreshTokenTtlSeconds lack NaN guards (unlike token-service copies)",
+        "desc": "The auth-service has its own local copies of getJwtExpirySeconds() (line 871) and getRefreshTokenTtlSeconds() (line 876) that use parseInt() without any NaN check. If OP_JWT_EXPIRY_SECONDS or OP_REFRE",
+        "fix": "Add the same isNaN/non-positive guards that token-service.ts has: if the parsed value isNaN or <= 0, throw an error with a descriptive message."
+      },
+      {
+        "file": "services/auth/src/services/oauth-service.ts",
+        "line": 528,
+        "title": "OAuth service getJwtExpirySeconds and getRefreshTokenTtlSeconds lack NaN guards",
+        "desc": "The OAuth service has its own copies of getJwtExpirySeconds() (line 528) and getRefreshTokenTtlSeconds() (line 533) that parse environment variables with parseInt but do not check for NaN. If the env ",
+        "fix": "Add NaN and non-positive guards identical to the token-service versions, or better yet, extract this helper into a shared utility to eliminate the duplication across four copies."
+      },
+      {
+        "file": "services/auth/src/routes/users.ts",
+        "line": 232,
+        "title": "User role update does not validate that assigned roles exist in the tenant",
+        "desc": "When updating a user's roles via PUT /api/v1/users/:id (line 232), the route validates against privilege escalation (platform-admin assignment) but does NOT validate that the requested roles actually ",
+        "fix": "Add the same role existence validation that the POST /api/v1/users route has: query roleRepository.findByTenantId(user.tenantId), check that all requested roles exist in the result set, and throw a Va"
+      },
+      {
+        "file": "services/auth/src/routes/auth.ts",
+        "line": 50,
+        "title": "Redis INCR + EXPIRE for refresh rate limiting has a TOCTOU race window",
+        "desc": "The refresh rate limiter (lines 50-61) uses a non-atomic sequence: redis.incr(key) then redis.expire(key, ttl) when count === 1. If the process crashes between INCR and EXPIRE, the key persists withou",
+        "fix": "Replace the INCR + conditional EXPIRE with an atomic Lua script like the guest-session-service does: `local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1"
+      },
+      {
+        "file": "services/auth/src/services/token-service.ts",
+        "line": 383,
+        "title": "Token verification accepts any unknown algorithm as HS256, enabling potential algorithm confusion",
+        "desc": "In verifyAccessToken (line 388-389), the algorithm detection code defaults any unrecognized algorithm to HS256: `tokenAlgorithm = header.alg === 'EdDSA' ? 'EdDSA' : 'HS256'`. If an attacker forges a t",
+        "fix": "Explicitly check for 'HS256' and 'EdDSA' only, returning null for any other algorithm value: `if (header.alg === 'EdDSA') tokenAlgorithm = 'EdDSA'; else if (header.alg === 'HS256') tokenAlgorithm = 'H"
+      },
+      {
+        "file": "services/auth/src/routes/auth.ts",
+        "line": 46,
+        "title": "In-memory refresh rate limiter Map grows unboundedly without cleanup",
+        "desc": "The in-memory fallback rate limiter for the refresh endpoint (line 46: `const refreshAttempts = new Map<string, ...>()`) has no cleanup mechanism. While entries have a window-based check that resets o",
+        "fix": "Add a periodic cleanup interval similar to bootstrap-service.ts that iterates the Map and deletes entries whose window has elapsed. Unref the timer so it does not prevent graceful shutdown."
+      },
+      {
+        "file": "services/auth/src/services/branding-service.ts",
+        "line": 119,
+        "title": "CSS sanitization regex for url() does not handle nested parentheses or escaped characters",
+        "desc": "The url() stripping regex `/url\\s*\\([^)]*\\)/gi` (line 119) uses `[^)]*` which does not match nested parentheses. A payload like `url(data:text/css;base64,...)` works fine, but `url(calc(1))` or CSS co",
+        "fix": "Use a more robust approach that handles nesting: either use a recursive regex or a parser-based approach. At minimum, replace `[^)]*` with a pattern that handles nested parens or match greedily up to "
+      },
+      {
+        "file": "services/auth/src/routes/roles.ts",
+        "line": 143,
+        "title": "Role rename updates users and role in separate non-transactional operations, risking inconsistency",
+        "desc": "When a role is renamed (lines 143-159), the code first updates the role name via roleRepository.update(id, ...) and then updates all users' roles arrays via a separate db.query(). These two operations",
+        "fix": "Wrap both the roleRepository.update() and the user roles update in a single database transaction using db.connect() + BEGIN/COMMIT/ROLLBACK, similar to how other operations in the codebase handle mult"
+      }
+    ]
+  },
+  {
+    "name": "services/execution",
+    "count": 4,
+    "fixes": [
+      {
+        "file": "services/execution/src/services/context-call-handler.ts",
+        "line": 121,
+        "title": "SSRF bypass via IPv6 unspecified address :: and missing IPv4-mapped IPv6 handling",
+        "desc": "The BLOCKED_IPV6_PREFIXES list checks for '::1' (loopback), 'fe80:' (link-local), 'fd' and 'fc' (ULA), but does not include '::' (the unspecified address, equivalent to 0.0.0.0 for IPv6) or '::ffff:' ",
+        "fix": "Add '::' to the prefix list for the unspecified address. Add '::ffff:' to catch IPv4-mapped IPv6 addresses, and when a '::ffff:' address is detected, extract the embedded IPv4 address and run it throu"
+      },
+      {
+        "file": "services/execution/src/services/execution-router.ts",
+        "line": 287,
+        "title": "Timer leak in routeToIsolatedVm creates unhandled promise rejections",
+        "desc": "The timeout Promise created at line 287-292 uses a setTimeout that is never cleared when client.send() resolves successfully. When the normal (non-timeout) path completes, the timer continues running ",
+        "fix": "Store the setTimeout handle and clear it in both the success path (after Promise.race resolves) and the catch path. For example:\n```\nlet timeoutHandle: ReturnType<typeof setTimeout>;\nconst timeoutProm"
+      },
+      {
+        "file": "services/execution/src/services/execution-service.ts",
+        "line": 145,
+        "title": "execution_date derived from log line timestamp instead of execution started_at, breaking co-partitioning",
+        "desc": "The comment at lines 138-141 explicitly states 'execution_date must match the execution's started_at so the log row lands in the correct co-partitioned range' but the implementation uses `new Date(log",
+        "fix": "Look up the execution's started_at from the execution record (or cache it when the execution is created/dispatched) and use that value for execution_date. For example, maintain a Map<executionId, Date"
+      },
+      {
+        "file": "services/execution/src/index.ts",
+        "line": 405,
+        "title": "Unhandled promise rejection in HTTP server when app.fetch rejects",
+        "desc": "The HTTP server handler uses `void responseOrPromise.then(handleResponse)` without a .catch() handler. If app.fetch() throws asynchronously (e.g., middleware throws an unhandled exception), the reject",
+        "fix": "Add .catch() handlers:\n```\nif (responseOrPromise instanceof Promise) {\n  void responseOrPromise.then(handleResponse).catch((err) => {\n    console.error('Unhandled error in app.fetch:', err);\n    if (!"
+      }
+    ]
+  },
+  {
+    "name": "services/gateway",
+    "count": 10,
+    "fixes": [
+      {
+        "file": "services/gateway/src/services/metering-service.ts",
+        "line": 493,
+        "title": "Billing webhook HMAC signing uses raw secret_encrypted ciphertext instead of decrypted secret",
+        "desc": "In checkAndDeliverThresholds, the code sets 'const secret = config.secret_encrypted' and passes it directly to deliverBillingWebhook as the HMAC signing key. The comment says 'the config upsert route ",
+        "fix": "If a signing secret is intended, the billing webhook config should store an encrypted secret (like webhook-service does with masterKey), and checkAndDeliverThresholds should decrypt it with the master"
+      },
+      {
+        "file": "services/gateway/src/routes/usage.ts",
+        "line": 116,
+        "title": "CSV export vulnerable to CSV injection via unescaped tenant_id and type fields",
+        "desc": "The /api/v1/usage/export endpoint generates CSV output by directly interpolating ev.tenantId and ev.type into quoted CSV fields without escaping embedded double quotes. While these fields are less lik",
+        "fix": "Escape all CSV field values consistently: (1) double any embedded double-quote characters in tenantId and type, (2) prefix any value starting with =, +, -, or @ with a single quote to prevent CSV form"
+      },
+      {
+        "file": "services/gateway/src/services/metering-service.ts",
+        "line": 362,
+        "title": "Non-atomic read-and-delete in metering flush allows data loss between HGETALL and DEL",
+        "desc": "The flush code claims to perform an 'atomic GETDEL via MULTI/EXEC' but actually uses a pipeline (redis.pipeline()), not a transaction (redis.multi()). A Redis pipeline sends commands in a batch for ne",
+        "fix": "Replace redis.pipeline() with redis.multi() to create an actual Redis MULTI/EXEC transaction, which guarantees that no other commands can interleave between HGETALL and DEL. Alternatively, use a Lua s"
+      },
+      {
+        "file": "services/gateway/src/routes/storage.ts",
+        "line": 22,
+        "title": "Bucket name regex is too permissive, allowing path traversal-adjacent characters",
+        "desc": "The BUCKET_NAME_RE regex (/^[a-zA-Z0-9._-]{1,63}$/) allows dots in bucket names. While the assertBucketBelongsToTenant check provides tenant isolation, the dot character in bucket names combined with ",
+        "fix": "Tighten the regex to enforce actual S3 bucket naming rules: /^[a-z0-9][a-z0-9.-]{0,61}[a-z0-9]$/ and add a check to reject consecutive dots (..)."
+      },
+      {
+        "file": "services/gateway/src/routes/sse.ts",
+        "line": 51,
+        "title": "SSE connection limit check has TOCTOU race despite comment claiming otherwise",
+        "desc": "The comment on line 49 says 'Increment immediately after all validation passes, closing the TOCTOU window', but the check on line 34 reads the current count and the increment on line 52 sets it non-at",
+        "fix": "Move the increment to occur immediately after the limit check, before any async validation. The current code already tries to do this but there is async work (sseQuery.safeParse is synchronous so this"
+      },
+      {
+        "file": "services/gateway/src/repositories/webhook-repository.ts",
+        "line": 56,
+        "title": "Webhook listing pagination uses 'id > cursor' which is incompatible with UUID ordering",
+        "desc": "The findByTenantId method with cursor-based pagination uses 'id > $2' for keyset pagination, but the ORDER BY is 'created_at ASC, id ASC'. UUIDs (v4) are not lexicographically ordered by creation time",
+        "fix": "Change the cursor to encode both created_at and id (like the GDPR request repository does with 'requested_at|id' format), and use a compound keyset comparison: WHERE (created_at, id) > ($cursor_ts, $c"
+      },
+      {
+        "file": "services/gateway/src/repositories/webhook-repository.ts",
+        "line": 55,
+        "title": "Webhook listing only returns enabled webhooks, but the management API should show all",
+        "desc": "The findByTenantId method always filters by 'enabled = true'. This is correct for event fan-out (findMatchingWebhooks), but it is also used by the webhook management API (GET /api/v1/webhooks). A user",
+        "fix": "Add an optional 'includeDisabled' parameter to findByTenantId, or create a separate method for the management API that does not filter by enabled. The route handler should call the version that shows "
+      },
+      {
+        "file": "services/gateway/src/index.ts",
+        "line": 299,
+        "title": "Gateway API key validation call to auth service uses Bearer token instead of X-Service-Token",
+        "desc": "When the gateway validates API keys, it calls the auth service's /internal/auth/validate-api-key endpoint with an Authorization: Bearer header containing config.serviceToken (a plain string from OP_SE",
+        "fix": "Use the Ed25519 service token signer (createServiceTokenSigner) to generate a proper X-Service-Token header for service-to-service calls, matching what serviceAuthMiddleware expects on /internal/* rou"
+      },
+      {
+        "file": "services/gateway/src/routes/health.ts",
+        "line": 37,
+        "title": "Gateway readyz uses \"error\" for failed checks while all other services use \"fail\"",
+        "desc": "The gateway's readyz endpoint sets check values to \"error\" on failure, while all other services (and the core package) use either \"fail\" (custom health routes) or \"error\" (core health.ts). The core he",
+        "fix": "Standardize check failure values. Either update the gateway to use \"fail\" to match the 5 other custom health routes, or update all to use \"error\" to match the core health.ts pattern."
+      },
+      {
+        "file": "services/gateway/src/routes/health.ts",
+        "line": 21,
+        "title": "Gateway healthz returns status \"alive\" while all other services return \"ok\"",
+        "desc": "The gateway's /healthz endpoint returns status: \"alive\" while the core health.ts returns status: \"ok\" and all other custom health routes also return status: \"ok\". Any health monitoring system that che",
+        "fix": "Change the gateway healthz status from \"alive\" to \"ok\" to match all other services."
+      }
+    ]
+  },
+  {
+    "name": "services/ingestion",
+    "count": 9,
+    "fixes": [
+      {
+        "file": "services/ingestion/src/services/sync-service.ts",
+        "line": 894,
+        "title": "Race condition in batch progress tracking causes lost progress updates",
+        "desc": "In processBatchJob, the progress is read from Redis, incremented, and written back without any atomicity guarantees. When multiple batch jobs run concurrently (concurrency is set to 10 for the batch w",
+        "fix": "Use a Redis MULTI/EXEC transaction or a Lua script to atomically read-modify-write the progress JSON. Alternatively, use Redis HINCRBY on individual numeric fields instead of reading and rewriting the"
+      },
+      {
+        "file": "services/ingestion/src/services/webhook-receive-service.ts",
+        "line": 38,
+        "title": "Webhook signature header lookup ignores the receiver's configured headerName",
+        "desc": "The webhook receive route (webhooks.ts line 38) hardcodes the signature header lookup to check only 'X-Webhook-Signature', 'x-hub-signature-256', and 'x-signature'. The receiver's configured headerNam",
+        "fix": "The route handler should not hardcode which headers to check. Instead, pass all headers to receiveEvent and let the service look up the correct header based on the receiver's configured headerName. Th"
+      },
+      {
+        "file": "services/ingestion/src/routes/uploads.ts",
+        "line": 8,
+        "title": "MIME type allowlist mismatch between route and service causes silent rejection",
+        "desc": "The uploads route has an ALLOWED_MIME_TYPES set containing 'application/x-ndjson' but NOT 'application/octet-stream'. The upload service (upload-service.ts line 113) has an ALLOWED_CONTENT_TYPES set c",
+        "fix": "Unify the two MIME type allowlists into a single shared constant. Both should include the same set of types: 'text/csv', 'application/json', 'text/tab-separated-values', 'application/x-ndjson', and 'a"
+      },
+      {
+        "file": "services/ingestion/src/routes/uploads.ts",
+        "line": 97,
+        "title": "Upload uses uploadJob.id as connectorId fallback, creating orphaned raw tables",
+        "desc": "When no connectorId is provided in the form data, the upload route passes it to createUpload without connectorId, so uploadJob.connector_id is null. Then on line 97, the fileParseQueue payload sets `c",
+        "fix": "Either require a connectorId for file uploads (reject if missing), or create a tracking mechanism for unlinked upload tables so the retention service can clean them up. At minimum, document this behav"
+      },
+      {
+        "file": "services/ingestion/src/routes/uploads.ts",
+        "line": 17,
+        "title": "Module-level BullMQ Queue reads OP_REDIS_URL at import time, ignoring runtime config",
+        "desc": "The uploads route creates a module-level BullMQ Queue singleton that reads `process.env['OP_REDIS_URL']` at import time. This means the Queue is created before the service app is initialized, using wh",
+        "fix": "Pass the Redis URL from the injected config via UploadRouteDeps rather than reading process.env at module level. Create the Queue inside createUploadRoutes and ensure it is included in the cleanup fun"
+      },
+      {
+        "file": "services/ingestion/src/services/sync-service.ts",
+        "line": 487,
+        "title": "Cursor-based pagination returns wrong results when cursor ID is not found",
+        "desc": "In listSyncs, the cursor pagination uses `findIndex` to locate the cursor position. If the cursor syncJobId is not found in the filtered array (e.g., the job was removed from BullMQ between pages), `f",
+        "fix": "When the cursor is not found in the result set, either return an empty page with no nextCursor (indicating the cursor has expired) or throw a validation error informing the client that the cursor is n"
+      },
+      {
+        "file": "services/ingestion/src/services/sync-service.ts",
+        "line": 698,
+        "title": "Double JSON serialization of records wastes CPU and memory on the hot path",
+        "desc": "In processSyncJob, the records array is serialized to JSON twice on every batch: once for the 10 MB soft size guard (line 683: `JSON.stringify(records)`) and once for the 1 MB hard fail guard (line 69",
+        "fix": "Remove the separate records-only JSON.stringify and rely solely on the jobPayload size check. Adjust the warning threshold to apply to the full payload size, or compute serialized size once and reuse "
+      },
+      {
+        "file": "services/ingestion/src/services/sync-service.ts",
+        "line": 288,
+        "title": "Three duplicate ontology:map Queue instances created at module level with no retry config and no consumer",
+        "desc": "The ingestion service creates three separate BullMQ Queue instances for the \"ontology:map\" queue (in sync-service.ts:288, upload-service.ts:165, and webhook-receive-service.ts:180), each at module lev",
+        "fix": "Either implement a Worker for the ontology:map queue in the ontology service, or if the queue processing is not yet implemented, add a TODO and ensure the queues have retry configuration matching the "
+      },
+      {
+        "file": "services/ingestion/src/routes/uploads.ts",
+        "line": 21,
+        "title": "Module-level BullMQ Queue bypasses validated config and uses different retry settings",
+        "desc": "The uploads route creates a module-level Queue with attempts: 3 and delay: 5000ms, while the core createQueue() helper uses attempts: 5 and delay: 1000ms. Additionally, the core createWorker() sets re",
+        "fix": "Use createQueue() from @oneplatform/core to ensure consistent retry policy, or document why this queue intentionally differs. The module-level instantiation also reads process.env[\"OP_REDIS_URL\"] dire"
+      }
+    ]
+  },
+  {
+    "name": "services/logging",
+    "count": 2,
+    "fixes": [
+      {
+        "file": "services/logging/src/routes/logs.ts",
+        "line": 181,
+        "title": "CSV export produces malformed output when trace_id or service contain commas or newlines",
+        "desc": "In the CSV export streaming handler, the trace_id (line 183) and service (line 184) fields are written without CSV quoting. The input validation schemas allow any characters in these fields (only leng",
+        "fix": "Quote all string fields in the CSV output using proper RFC 4180 escaping. Apply the same quoting pattern used for message to trace_id and service: `\"${row.trace_id.replace(/\"/g, '\"\"')}\"` and `\"${row.s"
+      },
+      {
+        "file": "services/logging/src/routes/logs.ts",
+        "line": 229,
+        "title": "Missing UUID validation on log event ID path parameter causes 500 errors",
+        "desc": "The GET /api/v1/logs/:id endpoint extracts the id path parameter and passes it directly to logEventRepository.findById() which uses it in a WHERE id = $1 query against a UUID column. If a caller passe",
+        "fix": "Add UUID format validation before calling the repository: const idResult = z.string().uuid().safeParse(id); if (!idResult.success) throw new ValidationError('Invalid log event ID', idResult.error.issu"
+      }
+    ]
+  },
+  {
+    "name": "services/ontology",
+    "count": 3,
+    "fixes": [
+      {
+        "file": "services/ontology/src/repositories/shadow-registry-repository.ts",
+        "line": 51,
+        "title": "olderThanHours parameter is accepted but never used in query",
+        "desc": "The findUnregisteredShadowTables method accepts an olderThanHours parameter (called with value 48 from cleanup-service.ts line 83), but the SQL query does not include any time-based filter. All unregi",
+        "fix": "Add a time-based filter to the query, for example: AND (SELECT MAX(obj_description(c.oid)) FROM pg_catalog.pg_class c WHERE c.relname = t.table_name) ... or more practically, compare against a creatio"
+      },
+      {
+        "file": "services/ontology/src/services/entity-service.ts",
+        "line": 676,
+        "title": "Unsanitized non-string default value interpolated into migration view SQL",
+        "desc": "In buildMigrationFieldSpec, when the default value is not a string, it is converted via String(f.defaultValue) and stored as defaultExpression. This expression is later interpolated directly into SQL ",
+        "fix": "Validate the default value type strictly: for number fields, ensure it is actually typeof 'number' and isFinite. For other types, use proper SQL escaping. Consider using parameterized queries or a whi"
+      },
+      {
+        "file": "services/ontology/src/routes/entities.ts",
+        "line": 63,
+        "title": "List entities returns items.length as total instead of actual total count",
+        "desc": "The GET /api/v1/ontology endpoint returns total: items.length which is the count of items in the current page, not the total number of entities across all pages. This misleads API consumers who expect",
+        "fix": "Either query for the actual total count from the database (e.g., SELECT COUNT(*) FROM ontology.entities WHERE tenant_id = $1 AND deleted_at IS NULL), or rename the field to 'count' or 'pageSize' to av"
+      }
+    ]
+  },
+  {
+    "name": "services/pipeline",
+    "count": 7,
+    "fixes": [
+      {
+        "file": "services/pipeline/src/services/execution-engine.ts",
+        "line": 1488,
+        "title": "Stale pre-fetched run step statuses used for cancellation \u2014 already-completed steps may be re-cancelled",
+        "desc": "The allRunStepRows array is fetched once before the step traversal loop at line 1481, but the statuses of individual steps change to 'running', 'completed', 'failed', etc. during the loop. When cancel",
+        "fix": "Re-fetch the run steps from the database when cancellation is detected, or use the DB to conditionally update only steps that are still in 'pending' status: UPDATE ... SET status='cancelled' WHERE run"
+      },
+      {
+        "file": "services/pipeline/src/services/pipeline-service.ts",
+        "line": 377,
+        "title": "SSRF blocklist regex does not match URLs without trailing path",
+        "desc": "The SSRF_BLOCKED_PATTERNS regexes in pipeline-service.ts (lines 379-395) all require a trailing slash after the host/port (e.g., /^https?:\\/\\/localhost(:\\d+)?\\//) . A URL like 'http://localhost' or 'h",
+        "fix": "Change all SSRF_BLOCKED_PATTERNS regexes in pipeline-service.ts to match URLs both with and without trailing slashes by using (\\/|$) instead of \\/ at the end, matching the pattern already used in exec"
+      },
+      {
+        "file": "services/pipeline/src/services/execution-engine.ts",
+        "line": 793,
+        "title": "Promise.race in parallel step waitMode 'any' leaks unresolved branch promises and does not cancel losing branches",
+        "desc": "When a parallel step has waitMode='any', Promise.race is used so the first branch to complete wins. However, the losing branches continue executing in the background indefinitely \u2014 they are never canc",
+        "fix": "Use AbortController or a shared cancellation token to cancel losing branches when the first one completes. Alternatively, use Promise.allSettled with a first-completion flag, and document that waitMod"
+      },
+      {
+        "file": "services/pipeline/src/index.ts",
+        "line": 462,
+        "title": "HTTP server response error not handled \u2014 promise rejection on arrayBuffer() silently swallowed",
+        "desc": "In the HTTP server handler, the non-SSE response path calls `void response.arrayBuffer().then(...)` but never attaches a .catch() handler. If arrayBuffer() rejects (e.g., body stream interrupted), the",
+        "fix": "Add .catch() handlers to both promise chains: (1) response.arrayBuffer().then(...).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); }), and (2) responseOrPromise.then(handleResponse)"
+      },
+      {
+        "file": "services/pipeline/src/services/trigger-service.ts",
+        "line": 93,
+        "title": "Event trigger filter timeout uses resolve(undefined) instead of reject, conflating timeout with 'undefined' evaluation result",
+        "desc": "The evaluateFilter function at line 93 races the JSONata evaluation against a 100ms timeout. On timeout, it resolves with `undefined` and treats `undefined` as a timeout (fail-open, returns true). How",
+        "fix": "Use a sentinel symbol or reject with a TimeoutError instead of resolving with undefined. For example: use a unique Symbol('timeout') as the sentinel value, or use new Promise<never>((_, reject) => set"
+      },
+      {
+        "file": "services/pipeline/src/services/pipeline-service.ts",
+        "line": 405,
+        "title": "deriveSlug can produce empty string or slugs shorter than minimum length",
+        "desc": "The deriveSlug function strips all non-alphanumeric/hyphen characters, then trims leading/trailing hyphens. If the pipeline name is something like '---' or consists entirely of non-ASCII characters (e",
+        "fix": "After deriving the slug, validate it against the same regex used in the schema. If it is empty or too short, either throw a validation error or fall back to a UUID-based slug (e.g., 'pipeline-' + uuid"
+      },
+      {
+        "file": "services/pipeline/src/routes/executions.ts",
+        "line": 53,
+        "title": "Inline error responses bypass error handler and omit requestId field",
+        "desc": "Seven inline error responses in pipeline/executions.ts and app/embed.ts return error JSON directly via c.json() instead of throwing AppError subclasses. These responses omit the requestId field that t",
+        "fix": "Replace inline c.json error returns with throw new ValidationError(\"Missing pipelineId path parameter.\") to go through the error handler which properly includes requestId. The same applies to pipeline"
+      }
+    ]
+  },
+  {
+    "name": "services/plugin",
+    "count": 7,
+    "fixes": [
+      {
+        "file": "services/plugin/src/routes/plugins.ts",
+        "line": 182,
+        "title": "Upload temp directory never cleaned up",
+        "desc": "The POST /api/v1/plugins route creates a temp directory at /tmp/oneplatform-plugins/<uuid> and writes the uploaded bundle file there. However, this directory is never cleaned up. The installPlugin ser",
+        "fix": "Add a try/finally block around the installPlugin call in the route handler that removes tmpDir after the service call completes (or fails): try { ... await pluginService.installPlugin({...}); ... } fi"
+      },
+      {
+        "file": "services/plugin/src/index.ts",
+        "line": 184,
+        "title": "Redis retryWithBackoff calls connect() on already-connected client",
+        "desc": "The Redis client is created with lazyConnect: true. The retryWithBackoff function calls both redis.connect() and redis.ping() in sequence. If connect() succeeds but ping() fails (e.g., due to a transi",
+        "fix": "Check the Redis client status before calling connect(): async () => { if (redis.status === 'wait') await redis.connect(); await redis.ping(); }. Alternatively, separate the connect and ping into two s"
+      },
+      {
+        "file": "services/plugin/src/services/instance-service.ts",
+        "line": 233,
+        "title": "Missing ROLLBACK in disableInstance hook-disable transaction",
+        "desc": "In disableInstance, a database transaction is opened with BEGIN at line 236, but the try block has no catch clause. If hookRepo.updateStateByInstance throws (e.g., database connection error, constrain",
+        "fix": "Add a catch clause that rolls back before re-throwing: try { await client.query('BEGIN'); ... await client.query('COMMIT'); } catch (err) { await client.query('ROLLBACK').catch(() => undefined); throw"
+      },
+      {
+        "file": "services/plugin/src/services/instance-service.ts",
+        "line": 391,
+        "title": "patchInstance re-enables with stale instance data after config/displayName update",
+        "desc": "When patchInstance receives both config/displayName changes AND enabled=true, the config and displayName are updated in the database first (lines 365, 368). Then enableInstance is called with the orig",
+        "fix": "Re-fetch the instance from the database after applying config/displayName updates and before calling enableInstance: const freshInstance = await instanceRepo.findByIdAndTenant(instanceId, tenantId); i"
+      },
+      {
+        "file": "services/plugin/src/services/upgrade-service.ts",
+        "line": 218,
+        "title": "Upgrade config validation only checks 'required' fields, misses schema constraints",
+        "desc": "The upgrade pre-flight config validation (B6 fix) at line 218 only checks whether required fields exist in the instance config using a simple 'key in config' test. It does not run full JSON Schema val",
+        "fix": "Use the same validateConfigAgainstSchema function (Ajv-based) that the instance service uses: import or extract the validateConfigAgainstSchema function to a shared location and call it for each insta"
+      },
+      {
+        "file": "services/plugin/src/routes/health.ts",
+        "line": 33,
+        "title": "Plugin service readyz uses check key \"database\" while all other services use \"postgres\"",
+        "desc": "The plugin service names its Postgres check as checks[\"database\"] while all other services (app, execution, gateway, ingestion, pipeline) and the core health.ts use checks[\"postgres\"]. A unified monit",
+        "fix": "Change the plugin service check key from \"database\" to \"postgres\" to match all other services."
+      },
+      {
+        "file": "services/plugin/src/index.ts",
+        "line": 449,
+        "title": "Plugin service reads OP_SERVICE_TOKEN_SECRET while gateway and execution read OP_SERVICE_TOKEN",
+        "desc": "The plugin service reads process.env[\"OP_SERVICE_TOKEN_SECRET\"] and fatally exits if it is empty. The gateway reads process.env[\"OP_SERVICE_TOKEN\"] (no _SECRET suffix) and the execution service also r",
+        "fix": "Standardize on a single env var name (either OP_SERVICE_TOKEN or OP_SERVICE_TOKEN_SECRET) across all services, and add it to docker-compose.yml."
+      }
+    ]
+  }
+]
