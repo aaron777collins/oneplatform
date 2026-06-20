@@ -1,61 +1,156 @@
 # Full Platform Demo
 
-A complete OnePlatform demo environment with seeded data, monitoring, and all features enabled.
+A complete OnePlatform deployment demo that provisions tenants, users, connectors, entity types, pipelines, and applications using the `@oneplatform/sdk`. This example is designed for evaluation, training, and development environments where you need a fully populated platform instance with realistic data.
 
-## What's Included
+## What Gets Created
 
-- 2 demo tenants (Acme Corp, Widget Co)
-- Users with different roles (admin, analyst, viewer)
-- All 5 connector types configured
-- 4 entity definitions (Customer, Order, Product, Event)
-- 3 pipelines (sync, ETL, event processing)
-- 2 apps (admin dashboard, customer portal)
-- Grafana monitoring dashboard
+The seed script provisions the following resources across two demo tenants:
+
+### Acme Corp (Enterprise Tenant)
+- **Users**: 6 users across 4 roles (admin, data engineer, analyst, viewer)
+- **Connectors**: Salesforce CRM, PostgreSQL data warehouse, REST API
+- **Entity types**: Customer, Order, Product, SupportTicket
+- **Pipelines**: CRM sync, order ETL, product catalog refresh, support ticket triage
+- **Apps**: Executive dashboard, inventory management tool
+
+### Widget Co (Professional Tenant)
+- **Users**: 4 users across 3 roles
+- **Connectors**: Shopify, Google Analytics
+- **Entity types**: Product, Order, WebSession
+- **Pipelines**: Shopify product sync, order processing, analytics aggregation
+- **Apps**: Sales dashboard
 
 ## Prerequisites
 
-- Docker Desktop (4GB+ RAM allocated)
-- Node.js 18+
-- `op` CLI installed (`npm i -g @oneplatform/cli`)
+- **Docker Desktop** (v4.0+) or a remote Docker host
+- **Node.js 18+** with npm
+- **OnePlatform** source code (this demo lives inside the monorepo)
+- An **admin API key** (generated during platform bootstrap)
 
 ## Quick Start
 
+### 1. Start the Platform
+
 ```bash
-# 1. Start the platform with demo overrides
-docker compose -f ../../docker/docker-compose.yml -f docker-compose.override.yml up -d
-
-# 2. Wait for services to be healthy (about 30 seconds)
-docker compose -f ../../docker/docker-compose.yml ps
-
-# 3. Seed demo data
-pnpm install
-pnpm seed
-
-# 4. Open the platform
-open http://localhost:3000
+npm run demo:up
 ```
 
-## Demo Credentials
+This starts all OnePlatform services plus the demo overrides (Grafana on port 3100, Jaeger on port 16686).
 
-| User | Email | Password | Role | Tenant |
-|------|-------|----------|------|--------|
-| Admin | admin@acme.example.com | Demo1234! | platform-admin | Acme Corp |
-| Analyst | analyst@acme.example.com | Demo1234! | data-engineer | Acme Corp |
-| Viewer | viewer@acme.example.com | Demo1234! | viewer | Acme Corp |
-| Admin | admin@widget.example.com | Demo1234! | tenant-admin | Widget Co |
+### 2. Configure Environment
+
+```bash
+cp .env.example .env
+# Edit .env and set OP_API_KEY to your admin API key
+```
+
+### 3. Seed the Platform
+
+```bash
+npm run seed
+```
+
+The seed script creates all tenants, users, connectors, entities, pipelines, and apps in order, respecting dependencies.
+
+### 4. Explore the Platform
+
+- **OnePlatform UI**: https://localhost
+- **Grafana dashboards**: http://localhost:3100 (admin / admin)
+- **Jaeger tracing**: http://localhost:16686
+
+### 5. Clean Up
+
+```bash
+# Remove all demo data (keeps the platform running)
+npm run cleanup
+
+# Stop everything
+npm run demo:down
+
+# Full reset: stop, clean, reseed
+npm run demo:reset
+```
+
+## Directory Structure
+
+```
+full-platform-demo/
+  seed/
+    tenants.json          Tenant definitions
+    users.json            User accounts with role assignments
+    connectors.json       Data source connector configurations
+    entities.json         Entity type (ontology) definitions
+    pipelines.json        Pipeline definitions with steps
+    apps.json             Application definitions
+  scripts/
+    seed.ts               Seed script using @oneplatform/sdk
+    cleanup.sh            Tear down all demo data
+  monitoring/
+    grafana-dashboard.json  Pre-built Grafana dashboard for platform observability
+  docker-compose.override.yml  Docker Compose overrides for demo services
+  .env.example            Environment variable template
+  package.json            Dependencies and npm scripts
+  README.md               This file
+```
+
+## Seed Data Details
+
+### Tenants
+
+Two tenants demonstrate different platform configurations:
+
+| Tenant | Plan | Timezone | Features |
+|--------|------|----------|----------|
+| Acme Corp | Enterprise | America/New_York | Audit logging, 512MB sandbox, 90-day retention |
+| Widget Co | Professional | Europe/London | 256MB sandbox, 30-day retention |
+
+### Users
+
+Each user has a realistic name, email, and role assignment:
+
+| User | Tenant | Role | Purpose |
+|------|--------|------|---------|
+| Sarah Chen | Acme Corp | tenant-admin | Tenant administrator |
+| Marcus Rivera | Acme Corp | data-engineer | Pipeline and connector management |
+| Emily Nakamura | Acme Corp | data-engineer | Ontology and data modeling |
+| David Okonkwo | Acme Corp | business-analyst | Dashboard and app development |
+| Priya Sharma | Acme Corp | viewer | Read-only stakeholder access |
+| James Mitchell | Acme Corp | viewer | External auditor access |
+| Lena Fischer | Widget Co | tenant-admin | Tenant administrator |
+| Raj Patel | Widget Co | data-engineer | E-commerce data integration |
+| Sofia Andersson | Widget Co | business-analyst | Sales analytics |
+| Tom Williams | Widget Co | viewer | Management reporting |
+
+### Pipelines
+
+Pipelines demonstrate different patterns:
+
+- **Scheduled sync**: CRM data pulled every 15 minutes
+- **Event-driven ETL**: Order data processed on connector events
+- **Batch refresh**: Product catalog refreshed daily at 02:00 UTC
+- **Multi-step processing**: Support tickets enriched, classified, then routed
 
 ## Monitoring
 
-Grafana is available at `http://localhost:3001` with the pre-configured dashboard.
+The included Grafana dashboard (`monitoring/grafana-dashboard.json`) provides:
 
-## Cleanup
+- **Pipeline health**: Run success/failure rates, duration percentiles, throughput
+- **Connector status**: Sync intervals, record counts, error rates
+- **API performance**: Request latency, error rates, active connections
+- **Resource usage**: CPU, memory, and disk usage for each service
 
-```bash
-./scripts/cleanup.sh
-```
+Import the dashboard via Grafana UI (Dashboards > Import > Upload JSON) or place it in Grafana's provisioning directory.
 
-## See Also
+## Customization
 
-- [Quick Start](../quick-start/) — Simpler getting-started guide
-- [Visual Pipeline](../visual-pipeline/) — Pipeline builder examples
-- [Enterprise Auth](../enterprise-auth/) — Authentication setup
+### Adding More Seed Data
+
+Edit the JSON files in `seed/` to add more resources. The seed script processes them in dependency order (tenants -> users -> connectors -> entities -> pipelines -> apps), so new resources must reference existing parent resources.
+
+### Adjusting Docker Compose
+
+The `docker-compose.override.yml` extends the base Docker Compose configuration with demo-specific settings (exposed ports, Grafana, Jaeger). Modify it to change ports, add services, or adjust resource limits.
+
+### Environment Variables
+
+See `.env.example` for all available configuration options including database credentials, TLS mode, observability settings, and demo-specific flags.

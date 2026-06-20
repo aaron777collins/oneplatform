@@ -1,73 +1,69 @@
 /**
- * Full Platform Demo — Seed Script
+ * Seed script for the OnePlatform Full Platform Demo.
  *
- * Seeds the OnePlatform instance with demo data for two tenants:
- *   - Acme Corp (enterprise manufacturing)
- *   - Widget Co (mid-size e-commerce)
+ * Creates tenants, users, connectors, entity types, pipelines, and apps
+ * using the @oneplatform/sdk. Resources are created in dependency order:
  *
- * Each tenant receives users, connectors, ontology entity types, pipelines,
- * apps, and sample entity records. The script is idempotent — running it
- * twice will fail on duplicate names rather than corrupting data. Use
- * scripts/cleanup.sh to reset before re-running.
+ *   1. Tenants
+ *   2. Users (depend on tenants)
+ *   3. Connectors (depend on tenants)
+ *   4. Entity types / ontology (depend on tenants)
+ *   5. Pipelines (depend on connectors and entity types)
+ *   6. Apps (depend on entity types)
  *
- * Required environment variables:
- *   OP_BASE_URL — e.g. https://localhost
- *   OP_API_KEY  — admin-scoped API key
+ * Usage:
+ *   npx tsx scripts/seed.ts
  *
- * Optional environment variables:
- *   DEMO_SKIP_CONNECTORS   — "true" to skip connector creation
- *   DEMO_TRIGGER_PIPELINES — "true" to trigger pipelines after seeding
- *
- * Run with: npm run seed
+ * Environment:
+ *   OP_BASE_URL  — Platform base URL (default: https://localhost)
+ *   OP_API_KEY   — Admin API key with full scopes
  */
 
 import { createClient } from "@oneplatform/sdk";
-import type {
-  OnePlatformClient,
-  ConnectorInstance,
-  OntologySchema,
-  Pipeline,
-  App,
-  CreateConnectorRequest,
-  CreatePipelineRequest,
-  CreateAppRequest,
-  CreateOntologyRequest,
-  CreateUserRequest,
-} from "@oneplatform/sdk";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────
+// Configuration
+// ────────────────────────────────────────────────────────────────────────────
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SEED_DIR = resolve(__dirname, "..", "seed");
+const seedDir = resolve(__dirname, "..", "seed");
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
+const BASE_URL = process.env.OP_BASE_URL ?? "https://localhost";
+const API_KEY = process.env.OP_API_KEY;
 
-const BASE_URL = process.env["OP_BASE_URL"];
-const API_KEY = process.env["OP_API_KEY"];
-const SKIP_CONNECTORS = process.env["DEMO_SKIP_CONNECTORS"] === "true";
-const TRIGGER_PIPELINES = process.env["DEMO_TRIGGER_PIPELINES"] === "true";
-
-if (!BASE_URL || !API_KEY) {
-  console.error(
-    "Error: OP_BASE_URL and OP_API_KEY environment variables are required.\n" +
-      "\n" +
-      "  cp .env.example .env\n" +
-      "  # Edit .env and set OP_BASE_URL and OP_API_KEY\n" +
-      "  npm run seed\n",
-  );
+if (!API_KEY) {
+  console.error("Error: OP_API_KEY environment variable is required.");
+  console.error("Generate an admin API key from the platform UI or use the bootstrap key.");
   process.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// Load seed data files
-// ---------------------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────────
+
+function loadSeedFile<T>(filename: string): T {
+  const path = resolve(seedDir, filename);
+  const raw = readFileSync(path, "utf-8");
+  return JSON.parse(raw) as T;
+}
+
+function log(phase: string, message: string): void {
+  const timestamp = new Date().toISOString().substring(11, 19);
+  console.log(`[${timestamp}] [${phase}] ${message}`);
+}
+
+function logError(phase: string, message: string, error: unknown): void {
+  const timestamp = new Date().toISOString().substring(11, 19);
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  console.error(`[${timestamp}] [${phase}] ERROR: ${message}: ${errorMsg}`);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Seed functions
+// ────────────────────────────────────────────────────────────────────────────
 
 interface TenantSeed {
   id: string;
@@ -80,442 +76,304 @@ interface TenantSeed {
 }
 
 interface UserSeed {
-  tenantSlug: string;
+  tenantId: string;
   email: string;
   displayName: string;
-  roles: string[];
+  role: string;
+  department: string;
+  title: string;
+  password: string;
+  active: boolean;
 }
 
 interface ConnectorSeed {
-  tenantSlug: string;
+  tenantId: string;
+  id: string;
   name: string;
-  pluginId: string;
-  config: Record<string, unknown>;
-  syncMode: "full" | "incremental";
-  isEnabled: boolean;
-  scheduleCron: string | null;
+  type: string;
   description: string;
+  config: Record<string, unknown>;
+  schedule: Record<string, unknown>;
+  credentials: Record<string, unknown>;
 }
 
 interface EntityFieldSeed {
   name: string;
   type: string;
   required: boolean;
-  indexed: boolean;
-  description: string | null;
-}
-
-interface EntityRelationshipSeed {
-  name: string;
-  targetEntity: string;
-  cardinality: "one" | "many";
+  referenceTo?: string;
 }
 
 interface EntitySeed {
-  tenantSlug: string;
+  tenantId: string;
   name: string;
   displayName: string;
+  description: string;
+  primaryKey: string;
   fields: EntityFieldSeed[];
-  relationships: EntityRelationshipSeed[];
-  sampleRecords: Record<string, unknown>[];
-}
-
-interface PipelineStepSeed {
-  id: string;
-  name: string;
-  type: string;
-  [key: string]: unknown;
-}
-
-interface PipelineDefinitionSeed {
-  version: 1;
-  entryStepId: string;
-  steps: PipelineStepSeed[];
-  options?: Record<string, unknown>;
 }
 
 interface PipelineSeed {
-  tenantSlug: string;
+  tenantId: string;
+  id: string;
   name: string;
   description: string;
-  connectorName: string;
-  definition: PipelineDefinitionSeed;
-  isActive: boolean;
-}
-
-interface AppFileSeed {
-  [path: string]: string;
+  trigger: Record<string, unknown>;
+  steps: Record<string, unknown>[];
+  errorHandling: Record<string, unknown>;
+  enabled: boolean;
 }
 
 interface AppSeed {
-  tenantSlug: string;
+  tenantId: string;
+  id: string;
   name: string;
-  slug: string;
   description: string;
-  accessMode: "platform-user" | "public";
-  files: AppFileSeed;
+  type: string;
+  config: Record<string, unknown>;
+  access: Record<string, unknown>;
+  enabled: boolean;
 }
 
-function loadJson<T>(filename: string): T {
-  const content = readFileSync(resolve(SEED_DIR, filename), "utf-8");
-  return JSON.parse(content) as T;
-}
+async function seedTenants(
+  client: ReturnType<typeof createClient>,
+  tenants: TenantSeed[]
+): Promise<void> {
+  log("tenants", `Creating ${tenants.length} tenant(s)...`);
 
-const tenants = loadJson<TenantSeed[]>("tenants.json");
-const users = loadJson<UserSeed[]>("users.json");
-const connectors = loadJson<ConnectorSeed[]>("connectors.json");
-const entities = loadJson<EntitySeed[]>("entities.json");
-const pipelines = loadJson<PipelineSeed[]>("pipelines.json");
-const apps = loadJson<AppSeed[]>("apps.json");
-
-// ---------------------------------------------------------------------------
-// Client
-// ---------------------------------------------------------------------------
-
-const client: OnePlatformClient = createClient({
-  baseUrl: BASE_URL,
-  auth: { apiKey: API_KEY },
-});
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Log a step with indentation for readability. */
-function log(indent: number, message: string): void {
-  const prefix = "  ".repeat(indent);
-  console.log(`${prefix}${message}`);
-}
-
-/** Retry wrapper for transient failures during seeding. */
-async function withRetry<T>(
-  label: string,
-  fn: () => Promise<T>,
-  maxAttempts = 3,
-): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (const tenant of tenants) {
     try {
-      return await fn();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (attempt === maxAttempts) {
-        throw new Error(`${label}: failed after ${maxAttempts} attempts: ${message}`);
+      await client.data.entity("_tenants").create({
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        description: tenant.description,
+        plan: tenant.plan,
+        settings: tenant.settings,
+        contactEmail: tenant.contactEmail,
+      });
+      log("tenants", `  Created: ${tenant.name} (${tenant.slug})`);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("409")) {
+        log("tenants", `  Already exists: ${tenant.name} (${tenant.slug})`);
+      } else {
+        logError("tenants", `Failed to create ${tenant.name}`, error);
       }
-      const backoffMs = attempt * 1000;
-      log(2, `${label}: attempt ${attempt} failed (${message}), retrying in ${backoffMs}ms...`);
-      await new Promise((r) => setTimeout(r, backoffMs));
     }
   }
-  // TypeScript requires a return, but this line is unreachable.
-  throw new Error("Unreachable");
 }
 
-// ---------------------------------------------------------------------------
-// Seed functions
-// ---------------------------------------------------------------------------
+async function seedUsers(
+  client: ReturnType<typeof createClient>,
+  users: UserSeed[]
+): Promise<void> {
+  log("users", `Creating ${users.length} user(s)...`);
 
-async function seedUsers(tenantSlug: string): Promise<void> {
-  const tenantUsers = users.filter((u) => u.tenantSlug === tenantSlug);
-  if (tenantUsers.length === 0) {
-    log(1, "No users to seed for this tenant.");
-    return;
-  }
-
-  log(1, `Seeding ${tenantUsers.length} users...`);
-  for (const user of tenantUsers) {
-    const request: CreateUserRequest = {
-      email: user.email,
-      displayName: user.displayName,
-      roles: user.roles,
-    };
-    await withRetry(`User ${user.email}`, () => client.users.create(request));
-    log(2, `Created user: ${user.displayName} <${user.email}> [${user.roles.join(", ")}]`);
+  for (const user of users) {
+    try {
+      await client.users.create({
+        email: user.email,
+        displayName: user.displayName,
+        password: user.password,
+        role: user.role,
+        tenantId: user.tenantId,
+        metadata: {
+          department: user.department,
+          title: user.title,
+        },
+        active: user.active,
+      });
+      log("users", `  Created: ${user.displayName} (${user.email}) -> ${user.role}`);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("409")) {
+        log("users", `  Already exists: ${user.displayName} (${user.email})`);
+      } else {
+        logError("users", `Failed to create ${user.displayName}`, error);
+      }
+    }
   }
 }
 
 async function seedConnectors(
-  tenantSlug: string,
-): Promise<Map<string, ConnectorInstance>> {
-  const result = new Map<string, ConnectorInstance>();
-  const tenantConnectors = connectors.filter((c) => c.tenantSlug === tenantSlug);
+  client: ReturnType<typeof createClient>,
+  connectors: ConnectorSeed[]
+): Promise<void> {
+  log("connectors", `Creating ${connectors.length} connector(s)...`);
 
-  if (tenantConnectors.length === 0 || SKIP_CONNECTORS) {
-    if (SKIP_CONNECTORS) {
-      log(1, "Skipping connectors (DEMO_SKIP_CONNECTORS=true).");
-    } else {
-      log(1, "No connectors to seed for this tenant.");
+  for (const connector of connectors) {
+    try {
+      await client.connectors.create({
+        id: connector.id,
+        name: connector.name,
+        type: connector.type,
+        description: connector.description,
+        config: connector.config,
+        schedule: connector.schedule,
+        tenantId: connector.tenantId,
+      });
+      log("connectors", `  Created: ${connector.name} (${connector.id})`);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("409")) {
+        log("connectors", `  Already exists: ${connector.name} (${connector.id})`);
+      } else {
+        logError("connectors", `Failed to create ${connector.name}`, error);
+      }
     }
-    return result;
   }
-
-  log(1, `Seeding ${tenantConnectors.length} connectors...`);
-  for (const conn of tenantConnectors) {
-    const request: CreateConnectorRequest = {
-      name: conn.name,
-      pluginId: conn.pluginId,
-      config: conn.config,
-      syncMode: conn.syncMode,
-      isEnabled: conn.isEnabled,
-      scheduleCron: conn.scheduleCron ?? undefined,
-    };
-    const created = await withRetry(
-      `Connector ${conn.name}`,
-      () => client.connectors.create(request),
-    );
-    result.set(conn.name, created);
-    log(2, `Created connector: ${created.id} (${created.name}) [${conn.syncMode}]`);
-  }
-
-  return result;
 }
 
 async function seedEntities(
-  tenantSlug: string,
-): Promise<Map<string, OntologySchema>> {
-  const result = new Map<string, OntologySchema>();
-  const tenantEntities = entities.filter((e) => e.tenantSlug === tenantSlug);
+  client: ReturnType<typeof createClient>,
+  entities: EntitySeed[]
+): Promise<void> {
+  log("entities", `Creating ${entities.length} entity type(s)...`);
 
-  if (tenantEntities.length === 0) {
-    log(1, "No entity types to seed for this tenant.");
-    return result;
-  }
-
-  log(1, `Seeding ${tenantEntities.length} ontology entity types...`);
-  for (const entity of tenantEntities) {
-    // Create the ontology schema (entity type definition).
-    const ontologyRequest: CreateOntologyRequest = {
-      name: entity.name,
-      displayName: entity.displayName,
-      fields: entity.fields,
-      relationships: entity.relationships,
-    };
-    const schema = await withRetry(
-      `Ontology ${entity.name}`,
-      () => client.ontologies.create(ontologyRequest),
-    );
-    result.set(entity.name, schema);
-    log(2, `Created entity type: ${schema.id} (${schema.name}) — ${entity.fields.length} fields`);
-
-    // Insert sample records if provided.
-    if (entity.sampleRecords.length > 0) {
-      log(2, `Inserting ${entity.sampleRecords.length} sample records for ${entity.name}...`);
-      const entityResource = client.data.entity(entity.name);
-      for (const record of entity.sampleRecords) {
-        await withRetry(
-          `Record in ${entity.name}`,
-          () => entityResource.create(record),
-        );
+  for (const entity of entities) {
+    try {
+      await client.ontologies.createEntityType({
+        name: entity.name,
+        displayName: entity.displayName,
+        description: entity.description,
+        primaryKey: entity.primaryKey,
+        fields: entity.fields,
+        tenantId: entity.tenantId,
+      });
+      log("entities", `  Created: ${entity.displayName} (${entity.tenantId})`);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("409")) {
+        log("entities", `  Already exists: ${entity.displayName} (${entity.tenantId})`);
+      } else {
+        logError("entities", `Failed to create ${entity.displayName}`, error);
       }
-      log(3, `Inserted ${entity.sampleRecords.length} records.`);
     }
   }
-
-  return result;
 }
 
 async function seedPipelines(
-  tenantSlug: string,
-  connectorMap: Map<string, ConnectorInstance>,
-): Promise<Pipeline[]> {
-  const result: Pipeline[] = [];
-  const tenantPipelines = pipelines.filter((p) => p.tenantSlug === tenantSlug);
+  client: ReturnType<typeof createClient>,
+  pipelines: PipelineSeed[]
+): Promise<void> {
+  log("pipelines", `Creating ${pipelines.length} pipeline(s)...`);
 
-  if (tenantPipelines.length === 0) {
-    log(1, "No pipelines to seed for this tenant.");
-    return result;
-  }
-
-  log(1, `Seeding ${tenantPipelines.length} pipelines...`);
-  for (const pipelineSeed of tenantPipelines) {
-    // Resolve connector references in step definitions.
-    // Steps that reference a connector by name need the runtime connector ID.
-    const resolvedSteps = pipelineSeed.definition.steps.map((step) => {
-      const resolved = { ...step };
-      if ("connectorRef" in resolved && typeof resolved["connectorRef"] === "string") {
-        const connectorName = resolved["connectorRef"] as string;
-        const connector = connectorMap.get(connectorName);
-        if (connector) {
-          resolved["connectorId"] = connector.id;
-        } else {
-          log(3, `Warning: connector "${connectorName}" not found — step "${step.id}" may fail at runtime.`);
-        }
-        delete resolved["connectorRef"];
-      }
-      return resolved;
-    });
-
-    const request: CreatePipelineRequest = {
-      name: pipelineSeed.name,
-      description: pipelineSeed.description,
-      definition: {
-        ...pipelineSeed.definition,
-        steps: resolvedSteps,
-      },
-      isActive: pipelineSeed.isActive,
-    };
-
-    const created = await withRetry(
-      `Pipeline ${pipelineSeed.name}`,
-      () => client.pipelines.create(request),
-    );
-    result.push(created);
-    log(2, `Created pipeline: ${created.id} (${created.name}) — ${resolvedSteps.length} steps`);
-  }
-
-  return result;
-}
-
-async function seedApps(tenantSlug: string): Promise<App[]> {
-  const result: App[] = [];
-  const tenantApps = apps.filter((a) => a.tenantSlug === tenantSlug);
-
-  if (tenantApps.length === 0) {
-    log(1, "No apps to seed for this tenant.");
-    return result;
-  }
-
-  log(1, `Seeding ${tenantApps.length} apps...`);
-  for (const appSeed of tenantApps) {
-    // Create the app definition.
-    const request: CreateAppRequest = {
-      name: appSeed.name,
-      slug: appSeed.slug,
-      description: appSeed.description,
-      accessMode: appSeed.accessMode,
-    };
-    const created = await withRetry(
-      `App ${appSeed.name}`,
-      () => client.apps.create(request),
-    );
-    result.push(created);
-    log(2, `Created app: ${created.id} (${created.slug}) [${appSeed.accessMode}]`);
-
-    // Upload files to the app's virtual file system.
-    const fileEntries = Object.entries(appSeed.files);
-    if (fileEntries.length > 0) {
-      log(2, `Uploading ${fileEntries.length} files...`);
-      for (const [filePath, content] of fileEntries) {
-        await withRetry(
-          `File ${filePath} in ${appSeed.slug}`,
-          () =>
-            client.apps.writeFile(created.id, filePath, {
-              content,
-              fileVersion: 0, // 0 = create new file
-            }),
-        );
-        log(3, `Uploaded: ${filePath} (${content.length} bytes)`);
-      }
-    }
-  }
-
-  return result;
-}
-
-async function triggerAllPipelines(createdPipelines: Pipeline[]): Promise<void> {
-  if (!TRIGGER_PIPELINES || createdPipelines.length === 0) {
-    return;
-  }
-
-  log(0, "");
-  log(0, "Triggering pipelines...");
-  for (const pipeline of createdPipelines) {
+  for (const pipeline of pipelines) {
     try {
-      const run = await client.pipelines.trigger(pipeline.id);
-      log(1, `Triggered: ${pipeline.name} -> run ${run.id} (${run.status})`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      log(1, `Warning: Could not trigger ${pipeline.name}: ${message}`);
+      await client.pipelines.create({
+        id: pipeline.id,
+        name: pipeline.name,
+        description: pipeline.description,
+        trigger: pipeline.trigger,
+        steps: pipeline.steps,
+        errorHandling: pipeline.errorHandling,
+        enabled: pipeline.enabled,
+        tenantId: pipeline.tenantId,
+      });
+      log("pipelines", `  Created: ${pipeline.name} (${pipeline.id})`);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("409")) {
+        log("pipelines", `  Already exists: ${pipeline.name} (${pipeline.id})`);
+      } else {
+        logError("pipelines", `Failed to create ${pipeline.name}`, error);
+      }
     }
   }
 }
 
-// ---------------------------------------------------------------------------
+async function seedApps(
+  client: ReturnType<typeof createClient>,
+  apps: AppSeed[]
+): Promise<void> {
+  log("apps", `Creating ${apps.length} app(s)...`);
+
+  for (const app of apps) {
+    try {
+      await client.apps.create({
+        id: app.id,
+        name: app.name,
+        description: app.description,
+        type: app.type,
+        config: app.config,
+        access: app.access,
+        enabled: app.enabled,
+        tenantId: app.tenantId,
+      });
+      log("apps", `  Created: ${app.name} (${app.id})`);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("409")) {
+        log("apps", `  Already exists: ${app.name} (${app.id})`);
+      } else {
+        logError("apps", `Failed to create ${app.name}`, error);
+      }
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Main
-// ---------------------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  console.log("");
   console.log("=".repeat(60));
-  console.log("OnePlatform Full Demo — Seed Script");
+  console.log("  OnePlatform Full Demo — Seed Script");
+  console.log("=".repeat(60));
+  console.log(`  Platform URL: ${BASE_URL}`);
+  console.log(`  Seed data:    ${seedDir}`);
   console.log("=".repeat(60));
   console.log("");
 
-  // Verify connectivity.
-  log(0, "Verifying connection...");
-  const identity = await client.ping();
-  log(1, `Connected as ${identity.email} (tenant: ${identity.tenantId})`);
-  log(1, `Roles: ${identity.roles.join(", ")}`);
-  console.log("");
+  // Create the SDK client
+  const client = createClient({
+    baseUrl: BASE_URL,
+    auth: { apiKey: API_KEY },
+    timeout: 30_000,
+  });
 
-  const allPipelines: Pipeline[] = [];
+  try {
+    // Verify connectivity
+    log("init", "Verifying platform connectivity...");
+    const whoami = await client.ping();
+    log("init", `Authenticated as: ${whoami.email ?? whoami.userId ?? "admin"}`);
 
-  // Seed each tenant sequentially. Within each tenant, resources are created
-  // in dependency order: users -> entities -> connectors -> pipelines -> apps.
-  for (const tenant of tenants) {
-    console.log("-".repeat(60));
-    log(0, `Tenant: ${tenant.name} (${tenant.slug})`);
-    log(0, `  Plan: ${tenant.plan}`);
-    log(0, `  ${tenant.description}`);
+    // Load seed data
+    const tenants = loadSeedFile<TenantSeed[]>("tenants.json");
+    const users = loadSeedFile<UserSeed[]>("users.json");
+    const connectors = loadSeedFile<ConnectorSeed[]>("connectors.json");
+    const entities = loadSeedFile<EntitySeed[]>("entities.json");
+    const pipelines = loadSeedFile<PipelineSeed[]>("pipelines.json");
+    const apps = loadSeedFile<AppSeed[]>("apps.json");
+
+    // Seed in dependency order
+    await seedTenants(client, tenants);
+    await seedUsers(client, users);
+    await seedConnectors(client, connectors);
+    await seedEntities(client, entities);
+    await seedPipelines(client, pipelines);
+    await seedApps(client, apps);
+
     console.log("");
-
-    // 1. Users — no dependencies.
-    await seedUsers(tenant.slug);
+    console.log("=".repeat(60));
+    console.log("  Seeding complete!");
     console.log("");
-
-    // 2. Ontology entity types — no dependencies, but must exist before
-    //    pipeline steps that reference entityType.
-    const entityMap = await seedEntities(tenant.slug);
+    console.log("  Summary:");
+    console.log(`    Tenants:    ${tenants.length}`);
+    console.log(`    Users:      ${users.length}`);
+    console.log(`    Connectors: ${connectors.length}`);
+    console.log(`    Entities:   ${entities.length}`);
+    console.log(`    Pipelines:  ${pipelines.length}`);
+    console.log(`    Apps:       ${apps.length}`);
     console.log("");
-
-    // 3. Connectors — no platform dependencies, but pipeline steps reference
-    //    connector IDs so connectors must be created before pipelines.
-    const connectorMap = await seedConnectors(tenant.slug);
+    console.log("  Next steps:");
+    console.log("    - Open the platform UI: https://localhost");
+    console.log("    - View Grafana dashboards: http://localhost:3100");
+    console.log("    - View Jaeger traces: http://localhost:16686");
+    console.log("=".repeat(60));
     console.log("");
-
-    // 4. Pipelines — depend on connectors (by ID) and entities (by name).
-    const tenantPipelines = await seedPipelines(tenant.slug, connectorMap);
-    allPipelines.push(...tenantPipelines);
-    console.log("");
-
-    // 5. Apps — depend on entity types being present (the app code queries them).
-    await seedApps(tenant.slug);
-    console.log("");
-
-    log(0, `Tenant ${tenant.name} seeded successfully.`);
-    log(1, `Users:      ${users.filter((u) => u.tenantSlug === tenant.slug).length}`);
-    log(1, `Entities:   ${entityMap.size}`);
-    log(1, `Connectors: ${connectorMap.size}`);
-    log(1, `Pipelines:  ${tenantPipelines.length}`);
-    log(1, `Apps:       ${apps.filter((a) => a.tenantSlug === tenant.slug).length}`);
-    console.log("");
+  } finally {
+    client.destroy();
   }
-
-  // Optionally trigger all pipelines.
-  await triggerAllPipelines(allPipelines);
-
-  // Summary
-  console.log("=".repeat(60));
-  console.log("Seeding complete.");
-  console.log("");
-  console.log("Next steps:");
-  console.log("  1. Open the platform UI at " + BASE_URL);
-  console.log("  2. Log in as admin@acmecorp.example.com to explore Acme Corp");
-  console.log("  3. Log in as admin@widgetco.example.com to explore Widget Co");
-  console.log("  4. View Grafana dashboards at http://localhost:3100");
-  console.log("  5. View Jaeger traces at http://localhost:16686");
-  console.log("");
-  console.log("To remove all demo data:");
-  console.log("  npm run cleanup");
-  console.log("=".repeat(60));
-
-  client.destroy();
 }
 
-main().catch((err: unknown) => {
-  console.error("");
-  console.error("Seed failed:", err instanceof Error ? err.message : err);
-  if (err instanceof Error && err.stack) {
-    console.error(err.stack);
-  }
-  client.destroy();
+main().catch((error) => {
+  console.error("Fatal error:", error);
   process.exit(1);
 });

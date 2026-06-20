@@ -1,136 +1,122 @@
-# =============================================================================
-# Full Platform Demo — Docker Compose Override
+# ---------------------------------------------------------------------------
+# docker-compose.override.yml — Demo-specific overrides
 #
-# Extends the main docker/docker-compose.yml with demo-specific additions:
-#   - Seed data service (one-shot container that runs the seed script)
-#   - Mock external API server (WireMock) for connector testing
-#   - Grafana dashboard provisioning with demo-specific dashboards
-#   - Sample data volumes for persistent demo state
+# This file extends the base docker-compose.yml in the project root. It adds
+# monitoring services (Grafana, Jaeger), exposes additional ports for debugging,
+# and configures demo-friendly defaults.
 #
 # Usage:
 #   docker compose -f ../../docker/docker-compose.yml -f docker-compose.override.yml up -d
-#   # or via npm:
-#   npm run demo:up
 #
-# This file uses Docker Compose "override" semantics: services with the same
-# name as the main file are merged (not replaced). New services are added.
-# =============================================================================
+# Or via the npm script:
+#   npm run demo:up
+# ---------------------------------------------------------------------------
 
 services:
-
-  # ---------------------------------------------------------------------------
-  # Demo Seed Service — one-shot container
-  #
-  # Runs the TypeScript seed script after all platform services are healthy.
-  # Exits with code 0 on success. Re-run with:
-  #   docker compose -f ... run --rm demo-seed
-  # ---------------------------------------------------------------------------
-  demo-seed:
-    build:
-      context: ../..
-      dockerfile: docker/Dockerfile.service
-    working_dir: /app/examples/full-platform-demo
-    entrypoint: ["node", "--import", "tsx", "scripts/seed.ts"]
+  # ── Gateway overrides ───────────────────────────────────────────────────
+  gateway:
     environment:
-      OP_BASE_URL: ${OP_BASE_URL:-https://gateway-service:3000}
-      OP_API_KEY: ${OP_API_KEY:-op_live_REPLACE_ME}
-      DEMO_SKIP_CONNECTORS: ${DEMO_SKIP_CONNECTORS:-false}
-      DEMO_TRIGGER_PIPELINES: ${DEMO_TRIGGER_PIPELINES:-true}
-      # Trust the internal Caddy self-signed cert when the seed script connects
-      # to the gateway via HTTPS inside the Docker network.
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
-    volumes:
-      # Mount seed data and scripts as read-only so the container picks up
-      # the latest version without rebuilding.
-      - ./seed:/app/examples/full-platform-demo/seed:ro
-      - ./scripts:/app/examples/full-platform-demo/scripts:ro
-      - demo-seed-state:/app/examples/full-platform-demo/.state
-    networks:
-      - oneplatform-internal
-    depends_on:
-      gateway-service:
-        condition: service_healthy
-      auth-service:
-        condition: service_healthy
-      ontology-service:
-        condition: service_healthy
-      ingestion-service:
-        condition: service_healthy
-      pipeline-service:
-        condition: service_healthy
-      app-service:
-        condition: service_healthy
-    restart: "no"
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: "0.25"
-
-  # ---------------------------------------------------------------------------
-  # Mock External API — WireMock
-  #
-  # Provides stubbed responses for the demo connectors so you can test the full
-  # pipeline flow without real external API credentials. The mappings simulate:
-  #   - Salesforce Account query endpoint
-  #   - Product catalog REST API
-  #   - Shopify orders endpoint
-  #
-  # Access the WireMock admin UI at http://localhost:9090/__admin
-  # ---------------------------------------------------------------------------
-  mock-api:
-    image: wiremock/wiremock:3.5.4
-    container_name: op-demo-mock-api
-    command: ["--port", "8080", "--verbose"]
-    volumes:
-      - demo-mock-mappings:/home/wiremock/mappings
+      - LOG_LEVEL=debug
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3100,http://localhost:16686
+      - RATE_LIMIT_ENABLED=false
     ports:
-      - "127.0.0.1:9090:8080"
-    networks:
-      - oneplatform-internal
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/__admin/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: "0.25"
+      - "8080:8080"
 
-  # ---------------------------------------------------------------------------
-  # Grafana — override to add demo dashboard provisioning
-  #
-  # Merges with the Grafana service from the main docker-compose.yml.
-  # The demo dashboard JSON is mounted alongside the platform dashboards.
-  # ---------------------------------------------------------------------------
+  # ── Auth Service overrides ──────────────────────────────────────────────
+  auth:
+    environment:
+      - LOG_LEVEL=debug
+      - TOKEN_EXPIRY_SECONDS=3600
+      - REFRESH_TOKEN_EXPIRY_SECONDS=86400
+      - PASSWORD_MIN_LENGTH=8
+
+  # ── Ingestion Service overrides ─────────────────────────────────────────
+  ingestion:
+    environment:
+      - LOG_LEVEL=debug
+      - MAX_BATCH_SIZE=1000
+      - DEDUP_WINDOW_SECONDS=300
+
+  # ── Pipeline Service overrides ──────────────────────────────────────────
+  pipeline:
+    environment:
+      - LOG_LEVEL=debug
+      - MAX_CONCURRENT_RUNS=10
+      - STEP_TIMEOUT_SECONDS=300
+
+  # ── Execution Service overrides ─────────────────────────────────────────
+  execution:
+    environment:
+      - LOG_LEVEL=debug
+      - SANDBOX_MEMORY_LIMIT_MB=512
+      - SANDBOX_TIMEOUT_SECONDS=60
+      - SANDBOX_POOL_SIZE=5
+
+  # ── App Service overrides ──────────────────────────────────────────────
+  app:
+    environment:
+      - LOG_LEVEL=debug
+      - HOT_RELOAD=true
+
+  # ── Grafana ─────────────────────────────────────────────────────────────
+  # Pre-configured monitoring dashboard for platform observability.
+  # Access at http://localhost:3100
   grafana:
+    image: grafana/grafana:11.1.0
+    container_name: oneplatform-grafana
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${OP_GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/oneplatform.json
     volumes:
       - grafana-data:/var/lib/grafana
-      - ../../docker/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/json/demo-overview.json:ro
+      - ./monitoring/grafana-dashboard.json:/var/lib/grafana/dashboards/oneplatform.json:ro
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on:
+      - prometheus
 
-# ---------------------------------------------------------------------------
-# Volumes — demo-specific persistent state
-# ---------------------------------------------------------------------------
+  # ── Prometheus ──────────────────────────────────────────────────────────
+  # Metrics collection for Grafana dashboards.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: oneplatform-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - prometheus-data:/prometheus
+
+  # ── Jaeger ──────────────────────────────────────────────────────────────
+  # Distributed tracing UI for debugging request flows across services.
+  # Access at http://localhost:16686
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: oneplatform-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+    volumes:
+      - jaeger-data:/badger
+
 volumes:
-  # Tracks whether the seed script has already run (prevents duplicate seeding
-  # when the stack is restarted).
-  demo-seed-state:
-
-  # WireMock mapping files for mock external API responses.
-  demo-mock-mappings:
-
-  # Re-declare volumes from the main compose file that are referenced above.
-  # Docker Compose requires volume declarations in the file that uses them.
   grafana-data:
-
-# ---------------------------------------------------------------------------
-# Networks — re-declare the internal network from the main compose file.
-# ---------------------------------------------------------------------------
-networks:
-  oneplatform-internal:
-    external: false
+    driver: local
+  prometheus-data:
+    driver: local
+  jaeger-data:
+    driver: local

@@ -90,7 +90,7 @@ ok "Platform is healthy."
 
 step 1 "Create the Customer entity type"
 
-op entity create --from-file configs/entity-customer.json
+op ontology create --file configs/entity-customer.json
 ok "Customer entity defined."
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,10 @@ ok "Customer entity defined."
 
 step 2 "Create the REST API connector"
 
-op connector create --from-file configs/connector-rest-api.json
+op connector create \
+  --plugin com.oneplatform.connector-rest-api \
+  --name "jsonplaceholder-api" \
+  --config configs/connector-rest-api.json
 ok "REST API connector created."
 
 # ---------------------------------------------------------------------------
@@ -108,7 +111,10 @@ ok "REST API connector created."
 
 step 3 "Create the CSV file connector"
 
-op connector create --from-file configs/connector-csv.json
+op connector create \
+  --plugin com.oneplatform.connector-csv \
+  --name "customer-csv-import" \
+  --config configs/connector-csv.json
 ok "CSV connector created."
 
 # ---------------------------------------------------------------------------
@@ -117,7 +123,7 @@ ok "CSV connector created."
 
 step 4 "Create the import pipeline"
 
-op pipeline create --from-file configs/pipeline-import.json
+op pipeline create --file configs/pipeline-import.json
 ok "Import pipeline created."
 
 # ---------------------------------------------------------------------------
@@ -126,8 +132,8 @@ ok "Import pipeline created."
 
 step 5 "Create the dashboard app"
 
-op app create --from-file configs/app-dashboard.json
-ok "Customer Dashboard deployed."
+op app create --name "Customer Dashboard" --template crud-admin --slug customer-dashboard
+ok "Customer Dashboard created."
 
 # ---------------------------------------------------------------------------
 # Step 6: Trigger the pipeline
@@ -180,6 +186,7 @@ echo "    1. Open the platform UI in your browser"
 echo "    2. Navigate to Apps > Customer Dashboard"
 echo "    3. Browse and search your imported customer records"
 echo ""
-echo "Open your app:  op app open customer-dashboard"
-echo "Import CSV:     op pipeline run import-customers --file sample-data/customers.csv"
+echo "View your app:  op app get customer-dashboard"
+echo "Import CSV:     op pipeline trigger <csv-pipeline-id>"
+echo "Query data:     op data query Customer --limit 10"
 echo ""

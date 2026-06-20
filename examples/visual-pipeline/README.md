@@ -222,12 +222,26 @@ order history from an API, and support tickets from a CSV export.
 ### Running from the CLI
 
 ```bash
-# Import and run a pipeline definition
-npx @oneplatform/cli pipeline import pipelines/csv-to-postgres.json
-npx @oneplatform/cli pipeline run csv-to-postgres
+# Create a pipeline from a JSON definition file
+op pipeline create --file pipelines/csv-to-postgres.json
 
-# Check run status
-npx @oneplatform/cli pipeline status csv-to-postgres --last
+# List pipelines to find the ID assigned by the platform
+op pipeline list
+
+# Trigger a pipeline run (replace <pipeline-id> with the ID from the list above)
+op pipeline trigger <pipeline-id>
+
+# Wait for the run to complete and stream status to stderr
+op pipeline trigger <pipeline-id> --wait
+
+# Check the run history for a pipeline
+op pipeline runs <pipeline-id> --limit 5
+
+# Get the status of a specific run (replace <run-id> with the ID printed by trigger)
+op pipeline run-status <run-id>
+
+# Stream live logs for a run
+op pipeline run-logs <run-id> --follow
 ```
 
 ### Running from the SDK
@@ -247,8 +261,7 @@ console.log(`Run ${run.id} finished with status: ${run.status}`);
 
 ### Tips
 
-- **Dry-run mode** — pass `--dry-run` (CLI) or `{ dryRun: true }` (SDK) to
-  validate the pipeline without writing to any destination.
+- **Dry-run mode** — pass `{ dryRun: true }` in the pipeline definition's trigger input or set the `dryRun` flag via the SDK (`{ dryRun: true }`) to validate the pipeline without writing to any destination. From the CLI: `op pipeline trigger <id> --input '{"dryRun":true}'`.
 - **Environment variables** — credentials should never be hard-coded. Use
   `{{ env.DB_PASSWORD }}` tokens in the JSON configs and set the values in
   your `.env` file or the UI's **Secrets** panel.

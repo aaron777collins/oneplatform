@@ -1,13 +1,15 @@
 {
   "$schema": "https://oneplatform.dev/schemas/branding/v1.json",
+  "primaryColor": "#2563eb",
+  "secondaryColor": "#7c3aed",
+  "fontFamily": "Inter, sans-serif",
+  "logo": "/assets/logo.svg",
+  "darkMode": true,
   "branding": {
     "appName": "Acme CRM",
     "logoUrl": "/assets/branding/acme-logo.svg",
     "faviconUrl": "/assets/branding/acme-favicon.png",
-    "supportEmail": "support@acme-corp.example.com",
-    "primaryColor": "#2563eb",
-    "accentColor": "#7c3aed",
-    "customCss": null
+    "supportEmail": "support@acme-corp.example.com"
   },
   "colors": {
     "background": "#ffffff",
@@ -55,24 +57,22 @@
     "dropdown": "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)",
     "modal": "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)"
   },
-  "darkMode": {
-    "colors": {
-      "background": "#111827",
-      "foreground": "#f9fafb",
-      "muted": "#1f2937",
-      "mutedForeground": "#9ca3af",
-      "border": "#374151",
-      "ring": "#3b82f6",
-      "primary": "#3b82f6",
-      "primaryForeground": "#ffffff",
-      "secondary": "#8b5cf6",
-      "secondaryForeground": "#ffffff",
-      "success": "#22c55e",
-      "successBackground": "#052e16",
-      "warning": "#f59e0b",
-      "warningBackground": "#451a03",
-      "danger": "#ef4444",
-      "dangerBackground": "#450a0a"
-    }
+  "darkModeColors": {
+    "background": "#111827",
+    "foreground": "#f9fafb",
+    "muted": "#1f2937",
+    "mutedForeground": "#9ca3af",
+    "border": "#374151",
+    "ring": "#3b82f6",
+    "primary": "#3b82f6",
+    "primaryForeground": "#ffffff",
+    "secondary": "#8b5cf6",
+    "secondaryForeground": "#ffffff",
+    "success": "#22c55e",
+    "successBackground": "#052e16",
+    "warning": "#f59e0b",
+    "warningBackground": "#451a03",
+    "danger": "#ef4444",
+    "dangerBackground": "#450a0a"
   }
 }

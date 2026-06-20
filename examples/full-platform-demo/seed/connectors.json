@@ -1,116 +1,141 @@
 [
   {
-    "tenantSlug": "acme-corp",
+    "tenantId": "tenant_acme_001",
+    "id": "connector_salesforce_acme",
     "name": "Salesforce CRM",
-    "pluginId": "com.oneplatform.connectors.rest-api",
+    "type": "rest-api",
+    "description": "Syncs customer, opportunity, and contact data from Salesforce CRM via the Bulk API 2.0.",
     "config": {
-      "baseUrl": "https://acme.my.salesforce.com",
-      "path": "/services/data/v59.0/query",
-      "method": "GET",
-      "paginationStrategy": "cursor",
-      "cursorField": "nextRecordsUrl",
-      "credentialName": "salesforce_oauth_token",
-      "headers": {
-        "Accept": "application/json"
-      },
-      "schedule": "0 */2 * * *",
-      "queryParams": {
-        "q": "SELECT Id, Name, Email, Phone, Industry, AnnualRevenue, CreatedDate, LastModifiedDate FROM Account"
-      }
+      "baseUrl": "https://acme-corp.my.salesforce.com",
+      "authType": "oauth2",
+      "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
+      "apiVersion": "v59.0",
+      "objects": ["Account", "Contact", "Opportunity", "Lead"],
+      "batchSize": 500,
+      "useBulkApi": true,
+      "rateLimitRequestsPerMinute": 100
     },
-    "syncMode": "incremental",
-    "isEnabled": true,
-    "scheduleCron": "0 */2 * * *",
-    "description": "Pulls Account records from Salesforce every 2 hours using the REST Query API."
+    "schedule": {
+      "type": "interval",
+      "intervalMinutes": 15,
+      "enabled": true
+    },
+    "credentials": {
+      "clientId": { "source": "env", "envVar": "SF_CLIENT_ID" },
+      "clientSecret": { "source": "env", "envVar": "SF_CLIENT_SECRET" },
+      "refreshToken": { "source": "env", "envVar": "SF_REFRESH_TOKEN" }
+    }
   },
   {
-    "tenantSlug": "acme-corp",
-    "name": "PostgreSQL Warehouse",
-    "pluginId": "com.oneplatform.connectors.database",
+    "tenantId": "tenant_acme_001",
+    "id": "connector_postgres_warehouse",
+    "name": "Data Warehouse (PostgreSQL)",
+    "type": "database",
+    "description": "Reads order history, product inventory, and financial data from the central PostgreSQL data warehouse.",
     "config": {
-      "driver": "postgres",
-      "host": "warehouse.acmecorp.example.com",
+      "host": "warehouse.internal.acmecorp.example.com",
       "port": 5432,
-      "database": "analytics",
+      "database": "acme_warehouse",
       "schema": "public",
-      "tables": ["orders", "order_items", "shipments"],
-      "credentialName": "warehouse_pg_credentials",
-      "schedule": "30 1 * * *",
+      "tables": ["orders", "order_items", "products", "inventory", "customers"],
+      "useSsl": true,
+      "sslMode": "verify-full",
+      "connectionPoolSize": 5,
+      "queryTimeoutSeconds": 120,
       "incrementalColumn": "updated_at",
-      "batchSize": 5000
+      "primaryKeyColumn": "id"
     },
-    "syncMode": "incremental",
-    "isEnabled": true,
-    "scheduleCron": "30 1 * * *",
-    "description": "Nightly incremental sync of order data from the PostgreSQL analytics warehouse."
+    "schedule": {
+      "type": "cron",
+      "cronExpression": "0 */6 * * *",
+      "timezone": "America/New_York",
+      "enabled": true
+    },
+    "credentials": {
+      "username": { "source": "env", "envVar": "DW_USERNAME" },
+      "password": { "source": "env", "envVar": "DW_PASSWORD" },
+      "sslCertificate": { "source": "env", "envVar": "DW_SSL_CERT" }
+    }
   },
   {
-    "tenantSlug": "acme-corp",
-    "name": "Product Catalog API",
-    "pluginId": "com.oneplatform.connectors.rest-api",
+    "tenantId": "tenant_acme_001",
+    "id": "connector_support_api",
+    "name": "Support Ticket API",
+    "type": "rest-api",
+    "description": "Polls the internal support ticket system for new and updated tickets via REST API.",
     "config": {
-      "baseUrl": "https://api.acmecorp.example.com",
-      "path": "/v2/products",
-      "method": "GET",
-      "paginationStrategy": "offset",
-      "pageSizeParam": "limit",
-      "offsetParam": "offset",
-      "pageSize": 100,
-      "credentialName": "product_api_key",
-      "schedule": "0 * * * *"
-    },
-    "syncMode": "full",
-    "isEnabled": true,
-    "scheduleCron": "0 * * * *",
-    "description": "Hourly full sync of the product catalog from the internal REST API."
-  },
-  {
-    "tenantSlug": "widget-co",
-    "name": "Shopify Store",
-    "pluginId": "com.oneplatform.connectors.rest-api",
-    "config": {
-      "baseUrl": "https://widget-co.myshopify.com",
-      "path": "/admin/api/2024-01/orders.json",
-      "method": "GET",
-      "paginationStrategy": "link-header",
-      "credentialName": "shopify_access_token",
-      "headers": {
-        "X-Shopify-Access-Token": "{{credential:shopify_access_token}}"
-      },
-      "schedule": "*/15 * * * *",
-      "queryParams": {
-        "status": "any",
-        "limit": "250"
-      }
-    },
-    "syncMode": "incremental",
-    "isEnabled": true,
-    "scheduleCron": "*/15 * * * *",
-    "description": "Pulls Shopify orders every 15 minutes using the REST Admin API with link-header pagination."
-  },
-  {
-    "tenantSlug": "widget-co",
-    "name": "Stripe Payments Webhook",
-    "pluginId": "com.oneplatform.connectors.webhook",
-    "config": {
-      "webhookPath": "/ingest/stripe-events",
-      "secretHeaderName": "Stripe-Signature",
-      "credentialName": "stripe_webhook_secret",
-      "eventTypes": [
-        "payment_intent.succeeded",
-        "payment_intent.payment_failed",
-        "charge.refunded",
-        "customer.subscription.created",
-        "customer.subscription.deleted"
+      "baseUrl": "https://support.internal.acmecorp.example.com/api/v2",
+      "authType": "api-key",
+      "headerName": "X-API-Key",
+      "endpoints": [
+        {
+          "path": "/tickets",
+          "method": "GET",
+          "params": { "status": "open,pending", "sort": "updated_at:desc" },
+          "pagination": { "type": "cursor", "cursorParam": "after", "cursorPath": "meta.next_cursor" }
+        }
       ],
-      "retryPolicy": {
-        "maxRetries": 3,
-        "backoffMs": 1000
-      }
+      "rateLimitRequestsPerMinute": 60
     },
-    "syncMode": "incremental",
-    "isEnabled": true,
-    "scheduleCron": null,
-    "description": "Receives Stripe payment events via webhook. No scheduled sync — data arrives in real time."
+    "schedule": {
+      "type": "interval",
+      "intervalMinutes": 5,
+      "enabled": true
+    },
+    "credentials": {
+      "apiKey": { "source": "env", "envVar": "SUPPORT_API_KEY" }
+    }
+  },
+  {
+    "tenantId": "tenant_widget_002",
+    "id": "connector_shopify_widget",
+    "name": "Shopify Store",
+    "type": "rest-api",
+    "description": "Syncs product catalog, orders, and customer data from the Widget Co Shopify store via the Admin API.",
+    "config": {
+      "baseUrl": "https://widgetco.myshopify.com",
+      "authType": "api-key",
+      "headerName": "X-Shopify-Access-Token",
+      "apiVersion": "2024-07",
+      "resources": ["products", "orders", "customers", "inventory_levels"],
+      "batchSize": 250,
+      "rateLimitRequestsPerMinute": 40
+    },
+    "schedule": {
+      "type": "interval",
+      "intervalMinutes": 10,
+      "enabled": true
+    },
+    "credentials": {
+      "accessToken": { "source": "env", "envVar": "SHOPIFY_ACCESS_TOKEN" }
+    }
+  },
+  {
+    "tenantId": "tenant_widget_002",
+    "id": "connector_ga4_widget",
+    "name": "Google Analytics 4",
+    "type": "rest-api",
+    "description": "Imports web analytics data (sessions, page views, conversions) from Google Analytics 4 via the Data API.",
+    "config": {
+      "baseUrl": "https://analyticsdata.googleapis.com",
+      "authType": "oauth2",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "propertyId": "properties/123456789",
+      "metrics": ["sessions", "totalUsers", "screenPageViews", "conversions", "averageSessionDuration"],
+      "dimensions": ["date", "country", "deviceCategory", "sessionSource"],
+      "dateRange": { "type": "relative", "days": 30 },
+      "rateLimitRequestsPerMinute": 10
+    },
+    "schedule": {
+      "type": "cron",
+      "cronExpression": "0 4 * * *",
+      "timezone": "Europe/London",
+      "enabled": true
+    },
+    "credentials": {
+      "clientId": { "source": "env", "envVar": "GA_CLIENT_ID" },
+      "clientSecret": { "source": "env", "envVar": "GA_CLIENT_SECRET" },
+      "refreshToken": { "source": "env", "envVar": "GA_REFRESH_TOKEN" }
+    }
   }
 ]

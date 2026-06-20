@@ -33,7 +33,10 @@ You should see all services in the `healthy` state before proceeding.
 Create a REST API connector that pulls user data from the JSONPlaceholder test API:
 
 ```bash
-op connector create --from-file configs/connector-rest-api.json
+op connector create \
+  --plugin com.oneplatform.connector-rest-api \
+  --name "jsonplaceholder-api" \
+  --config configs/connector-rest-api.json
 ```
 
 This registers a connector named `jsonplaceholder-api` that knows how to fetch user records from `https://jsonplaceholder.typicode.com/users`.
@@ -41,7 +44,10 @@ This registers a connector named `jsonplaceholder-api` that knows how to fetch u
 You can also create a CSV connector for file-based imports:
 
 ```bash
-op connector create --from-file configs/connector-csv.json
+op connector create \
+  --plugin com.oneplatform.connector-csv \
+  --name "customer-csv-import" \
+  --config configs/connector-csv.json
 ```
 
 ## Step 3: Define Your Data Model
@@ -49,7 +55,7 @@ op connector create --from-file configs/connector-csv.json
 Create a `Customer` entity that describes the shape of your data:
 
 ```bash
-op entity create --from-file configs/entity-customer.json
+op ontology create --file configs/entity-customer.json
 ```
 
 This creates a `Customer` entity with fields for `id`, `name`, `email`, `company`, `phone`, and `created_at`. OnePlatform automatically provisions the underlying database table and generates the necessary APIs.
@@ -59,7 +65,7 @@ This creates a `Customer` entity with fields for `id`, `name`, `email`, `company
 Set up a pipeline that fetches data from the REST API, transforms it, and stores it in your Customer entity:
 
 ```bash
-op pipeline create --from-file configs/pipeline-import.json
+op pipeline create --file configs/pipeline-import.json
 ```
 
 The pipeline has three steps:
@@ -68,10 +74,14 @@ The pipeline has three steps:
 2. **transform** -- Maps API response fields to your entity fields
 3. **store** -- Writes the transformed records into the `customer` entity using upsert logic
 
-To run the pipeline immediately:
+To run the pipeline immediately, first get the pipeline ID and then trigger it:
 
 ```bash
-op pipeline run "Import Customers from API"
+# List pipelines to find the ID
+op pipeline list
+
+# Trigger the pipeline (replace <pipeline-id> with the ID from above)
+op pipeline trigger <pipeline-id> --wait
 ```
 
 ## Step 5: Deploy an App
@@ -79,20 +89,21 @@ op pipeline run "Import Customers from API"
 Create a fully functional CRUD dashboard for managing customer data:
 
 ```bash
-op app create --from-file configs/app-dashboard.json
+op app create --name "Customer Dashboard" --template crud-admin --slug customer-dashboard
 ```
 
-This generates a web application with search, pagination, export, and full create/edit/delete capabilities -- all configured declaratively in JSON.
+This creates a web application with search, pagination, export, and full create/edit/delete capabilities.
 
 ## Step 6: Open the App
 
-Launch the Customer Dashboard in your default browser:
+List your apps to find the URL for the Customer Dashboard:
 
 ```bash
-op app open customer-dashboard
+op app list
+op app get customer-dashboard
 ```
 
-You should see a table of customer records with search, sorting, and pagination controls. Try creating a new customer, editing an existing one, or exporting the data to CSV.
+Navigate to the platform URL shown in the output. You should see a table of customer records with search, sorting, and pagination controls.
 
 ## Automated Setup
 
@@ -103,20 +114,21 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-Then open the dashboard:
+Once complete, list your apps to find the URL:
 
 ```bash
-op app open customer-dashboard
+op app list
+op app get customer-dashboard
 ```
 
 ## What's Next?
 
 Now that you have a working application, explore these other examples to go further:
 
-- **[Data Pipeline Example](../data-pipeline/)** -- Build multi-step ETL pipelines with branching and error handling
-- **[Plugin Development Example](../plugin-development/)** -- Create custom plugins to extend OnePlatform
-- **[Custom App Example](../custom-app/)** -- Build a fully custom React frontend with the OnePlatform SDK
-- **[Multi-Source Integration](../multi-source/)** -- Combine data from REST APIs, CSV files, and databases
-- **[Real-Time Dashboard](../real-time-dashboard/)** -- Build dashboards with live-updating data via WebSockets
+- **[Multi-Source ETL](../multi-source-etl/)** -- Combine data from multiple databases with field mapping rules
+- **[Visual Pipeline Builder](../visual-pipeline/)** -- Import ready-made pipeline definitions into the UI
+- **[App Templates](../app-templates/)** -- Deploy dashboards and CRUD admin panels from JSON configs
+- **[Enterprise Auth](../enterprise-auth/)** -- Set up OIDC and LDAP authentication providers
+- **[Custom Connector](../custom-connector/)** -- Build a plugin that connects to any data source
 
 For full documentation, visit the [OnePlatform Docs](../../packages/docs/).

@@ -1,151 +1,453 @@
 [
   {
-    "tenantSlug": "acme-corp",
-    "name": "Customer Sync Pipeline",
-    "description": "Syncs customer records from Salesforce into the Customer entity. Runs every 2 hours via the Salesforce CRM connector schedule. Normalizes Salesforce Account fields to the Customer ontology schema.",
-    "connectorName": "Salesforce CRM",
-    "definition": {
-      "version": 1,
-      "entryStepId": "fetch-accounts",
-      "steps": [
-        {
-          "id": "fetch-accounts",
-          "name": "Fetch Salesforce Accounts",
-          "type": "connector",
-          "connectorRef": "Salesforce CRM",
-          "onError": "fail"
+    "tenantId": "tenant_acme_001",
+    "id": "pipeline_crm_sync",
+    "name": "CRM Data Sync",
+    "description": "Syncs customer and opportunity data from Salesforce CRM every 15 minutes. Deduplicates by Salesforce Account ID and maps fields to the Customer entity type.",
+    "trigger": {
+      "type": "connector",
+      "connectorId": "connector_salesforce_acme",
+      "onEvents": ["sync.complete"]
+    },
+    "steps": [
+      {
+        "id": "step_extract",
+        "name": "Extract CRM Records",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_salesforce_acme",
+          "objects": ["Account", "Contact"]
+        }
+      },
+      {
+        "id": "step_transform",
+        "name": "Map to Customer Entity",
+        "type": "transform",
+        "config": {
+          "mappings": {
+            "customerId": "$.Account.Id",
+            "companyName": "$.Account.Name",
+            "industry": "$.Account.Industry",
+            "website": "$.Account.Website",
+            "primaryContactEmail": "$.Contact.Email",
+            "primaryContactName": "$.Contact.Name",
+            "phone": "$.Account.Phone",
+            "annualRevenue": "$.Account.AnnualRevenue",
+            "employeeCount": "$.Account.NumberOfEmployees"
+          }
         },
-        {
-          "id": "normalize-customer",
-          "name": "Map Account to Customer",
-          "type": "code",
-          "inputs": {
-            "records": { "from": "step", "stepId": "fetch-accounts", "path": "records" }
-          },
-          "expression": "records.map(r => ({ sourceId: r.sourceId, data: { customerId: r.data.Id, companyName: r.data.Name, contactEmail: r.data.Email || '', phone: r.data.Phone || null, industry: r.data.Industry || null, annualRevenue: Number(r.data.AnnualRevenue) || null, status: 'active', createdAt: r.data.CreatedDate, updatedAt: r.data.LastModifiedDate } }))",
-          "onError": "fail"
+        "dependsOn": ["step_extract"]
+      },
+      {
+        "id": "step_deduplicate",
+        "name": "Deduplicate Customers",
+        "type": "transform",
+        "config": {
+          "deduplication": {
+            "strategy": "upsert",
+            "keyFields": ["customerId"],
+            "mergeStrategy": "latest-wins"
+          }
         },
-        {
-          "id": "write-customers",
-          "name": "Upsert Customer Records",
-          "type": "connector",
+        "dependsOn": ["step_transform"]
+      },
+      {
+        "id": "step_load",
+        "name": "Load into Customer Entity",
+        "type": "entity-write",
+        "config": {
           "entityType": "Customer",
           "writeMode": "upsert",
-          "inputs": {
-            "records": { "from": "step", "stepId": "normalize-customer", "path": "output" }
-          },
-          "onError": "fail"
-        }
-      ],
-      "options": {
-        "allowConcurrentRuns": false,
-        "retainRunsCount": 50,
-        "stepTimeout": 300
+          "batchSize": 100
+        },
+        "dependsOn": ["step_deduplicate"]
       }
+    ],
+    "errorHandling": {
+      "onStepFailure": "retry-then-skip",
+      "maxRetries": 3,
+      "retryDelaySeconds": 30,
+      "notifyOnFailure": ["marcus.rivera@acmecorp.example.com"]
     },
-    "isActive": true
+    "enabled": true
   },
   {
-    "tenantSlug": "acme-corp",
+    "tenantId": "tenant_acme_001",
+    "id": "pipeline_order_etl",
     "name": "Order ETL Pipeline",
-    "description": "Nightly ETL pipeline that extracts order data from the PostgreSQL warehouse, enriches it with customer information, and loads it into the Order entity store. Joins order records with customer IDs for relational integrity.",
-    "connectorName": "PostgreSQL Warehouse",
-    "definition": {
-      "version": 1,
-      "entryStepId": "extract-orders",
-      "steps": [
-        {
-          "id": "extract-orders",
-          "name": "Extract from Warehouse",
-          "type": "connector",
-          "connectorRef": "PostgreSQL Warehouse",
-          "onError": "fail"
+    "description": "Extracts order data from the PostgreSQL data warehouse every 6 hours. Enriches with customer data, calculates aggregates, and loads into the Order entity type.",
+    "trigger": {
+      "type": "connector",
+      "connectorId": "connector_postgres_warehouse",
+      "onEvents": ["sync.complete"]
+    },
+    "steps": [
+      {
+        "id": "step_extract_orders",
+        "name": "Extract Orders",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_postgres_warehouse",
+          "tables": ["orders", "order_items"],
+          "incrementalColumn": "updated_at"
+        }
+      },
+      {
+        "id": "step_join",
+        "name": "Join Order Lines",
+        "type": "transform",
+        "config": {
+          "operation": "join",
+          "leftTable": "orders",
+          "rightTable": "order_items",
+          "joinKey": "order_id",
+          "aggregateLineItems": true
         },
-        {
-          "id": "transform-orders",
-          "name": "Normalize Order Fields",
-          "type": "code",
-          "inputs": {
-            "records": { "from": "step", "stepId": "extract-orders", "path": "records" }
-          },
-          "expression": "records.map(r => ({ sourceId: r.sourceId, data: { orderId: r.data.order_number || r.sourceId, customerId: r.data.customer_account_id, totalAmount: Number(r.data.total_amount_cents) / 100, currency: r.data.currency_code || 'USD', status: r.data.fulfillment_status || 'pending', itemCount: Number(r.data.line_item_count) || 0, shippingAddress: [r.data.ship_street, r.data.ship_city, r.data.ship_state, r.data.ship_zip, r.data.ship_country].filter(Boolean).join(', '), orderedAt: r.data.created_at, updatedAt: r.data.updated_at } }))",
-          "onError": "fail"
+        "dependsOn": ["step_extract_orders"]
+      },
+      {
+        "id": "step_enrich",
+        "name": "Enrich with Customer Data",
+        "type": "entity-lookup",
+        "config": {
+          "entityType": "Customer",
+          "lookupField": "customerId",
+          "sourceField": "customer_id",
+          "includeFields": ["companyName", "accountTier"]
         },
-        {
-          "id": "validate-orders",
-          "name": "Filter Invalid Records",
-          "type": "code",
-          "inputs": {
-            "records": { "from": "step", "stepId": "transform-orders", "path": "output" }
-          },
-          "expression": "records.filter(r => r.data.orderId && r.data.customerId && r.data.totalAmount > 0)",
-          "onError": "skip"
+        "dependsOn": ["step_join"]
+      },
+      {
+        "id": "step_calculate",
+        "name": "Calculate Totals",
+        "type": "transform",
+        "config": {
+          "computedFields": {
+            "totalAmount": "subtotal + taxAmount + shippingAmount",
+            "lineItemCount": "lineItems.length"
+          }
         },
-        {
-          "id": "load-orders",
-          "name": "Load into Order Store",
-          "type": "connector",
+        "dependsOn": ["step_enrich"]
+      },
+      {
+        "id": "step_load_orders",
+        "name": "Load into Order Entity",
+        "type": "entity-write",
+        "config": {
           "entityType": "Order",
           "writeMode": "upsert",
-          "inputs": {
-            "records": { "from": "step", "stepId": "validate-orders", "path": "output" }
-          },
-          "onError": "fail"
-        }
-      ],
-      "options": {
-        "allowConcurrentRuns": false,
-        "retainRunsCount": 90,
-        "stepTimeout": 600
+          "batchSize": 200
+        },
+        "dependsOn": ["step_calculate"]
       }
+    ],
+    "errorHandling": {
+      "onStepFailure": "abort",
+      "maxRetries": 2,
+      "retryDelaySeconds": 60,
+      "notifyOnFailure": ["marcus.rivera@acmecorp.example.com", "sarah.chen@acmecorp.example.com"]
     },
-    "isActive": true
+    "enabled": true
   },
   {
-    "tenantSlug": "widget-co",
-    "name": "Stripe Event Processor",
-    "description": "Real-time event processing pipeline for Stripe webhooks. Receives payment events, classifies them by type, and writes structured records into the Event entity store for analytics and alerting.",
-    "connectorName": "Stripe Payments Webhook",
-    "definition": {
-      "version": 1,
-      "entryStepId": "receive-events",
-      "steps": [
-        {
-          "id": "receive-events",
-          "name": "Receive Stripe Webhook Events",
-          "type": "connector",
-          "connectorRef": "Stripe Payments Webhook",
-          "onError": "fail"
-        },
-        {
-          "id": "classify-event",
-          "name": "Classify and Normalize Event",
-          "type": "code",
-          "inputs": {
-            "records": { "from": "step", "stepId": "receive-events", "path": "records" }
-          },
-          "expression": "records.map(r => { const evt = r.data; const eventType = evt.type.includes('refund') ? 'refund' : evt.type.includes('succeeded') ? 'purchase' : evt.type.includes('failed') ? 'payment_failed' : evt.type.includes('subscription') ? 'subscription_change' : 'other'; return { sourceId: evt.id, data: { eventId: evt.id, eventType: eventType, customerId: evt.data?.object?.customer || null, sessionId: evt.request?.idempotency_key || evt.id, properties: JSON.stringify({ stripeEventType: evt.type, amount: evt.data?.object?.amount, currency: evt.data?.object?.currency, paymentMethodType: evt.data?.object?.payment_method_types?.[0] }), source: 'webhook', occurredAt: new Date(evt.created * 1000).toISOString() } }; })",
-          "onError": "fail"
-        },
-        {
-          "id": "store-events",
-          "name": "Write to Event Store",
-          "type": "connector",
-          "entityType": "Event",
-          "writeMode": "upsert",
-          "inputs": {
-            "records": { "from": "step", "stepId": "classify-event", "path": "output" }
-          },
-          "onError": "fail"
-        }
-      ],
-      "options": {
-        "allowConcurrentRuns": true,
-        "maxConcurrentRuns": 5,
-        "retainRunsCount": 200,
-        "stepTimeout": 30
-      }
+    "tenantId": "tenant_acme_001",
+    "id": "pipeline_product_refresh",
+    "name": "Product Catalog Refresh",
+    "description": "Refreshes the full product catalog from the data warehouse daily at 02:00 UTC. Performs a full table scan rather than incremental updates.",
+    "trigger": {
+      "type": "schedule",
+      "cronExpression": "0 2 * * *",
+      "timezone": "UTC"
     },
-    "isActive": true
+    "steps": [
+      {
+        "id": "step_extract_products",
+        "name": "Extract Products",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_postgres_warehouse",
+          "tables": ["products", "inventory"],
+          "fullRefresh": true
+        }
+      },
+      {
+        "id": "step_merge_inventory",
+        "name": "Merge Inventory Data",
+        "type": "transform",
+        "config": {
+          "operation": "join",
+          "leftTable": "products",
+          "rightTable": "inventory",
+          "joinKey": "product_id",
+          "includeFields": ["quantity_in_stock", "reorder_threshold"]
+        },
+        "dependsOn": ["step_extract_products"]
+      },
+      {
+        "id": "step_load_products",
+        "name": "Load into Product Entity",
+        "type": "entity-write",
+        "config": {
+          "entityType": "Product",
+          "writeMode": "replace",
+          "batchSize": 500
+        },
+        "dependsOn": ["step_merge_inventory"]
+      }
+    ],
+    "errorHandling": {
+      "onStepFailure": "abort",
+      "maxRetries": 1,
+      "retryDelaySeconds": 120,
+      "notifyOnFailure": ["emily.nakamura@acmecorp.example.com"]
+    },
+    "enabled": true
+  },
+  {
+    "tenantId": "tenant_acme_001",
+    "id": "pipeline_ticket_triage",
+    "name": "Support Ticket Triage",
+    "description": "Processes new support tickets every 5 minutes. Enriches with customer data, runs a priority classification step, and routes high-priority tickets to the on-call engineer.",
+    "trigger": {
+      "type": "connector",
+      "connectorId": "connector_support_api",
+      "onEvents": ["sync.complete"]
+    },
+    "steps": [
+      {
+        "id": "step_extract_tickets",
+        "name": "Extract New Tickets",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_support_api",
+          "incrementalColumn": "updated_at"
+        }
+      },
+      {
+        "id": "step_enrich_customer",
+        "name": "Enrich with Customer Data",
+        "type": "entity-lookup",
+        "config": {
+          "entityType": "Customer",
+          "lookupField": "customerId",
+          "sourceField": "customer_id",
+          "includeFields": ["companyName", "accountTier"]
+        },
+        "dependsOn": ["step_extract_tickets"]
+      },
+      {
+        "id": "step_classify",
+        "name": "Classify Priority",
+        "type": "sandbox-execute",
+        "config": {
+          "runtime": "javascript",
+          "code": "if (record.accountTier === 'enterprise' || record.subject.toLowerCase().includes('outage')) { record.priority = 'critical'; } else if (record.accountTier === 'professional') { record.priority = 'high'; } else { record.priority = record.priority || 'medium'; } return record;",
+          "timeout": 5
+        },
+        "dependsOn": ["step_enrich_customer"]
+      },
+      {
+        "id": "step_load_tickets",
+        "name": "Load into SupportTicket Entity",
+        "type": "entity-write",
+        "config": {
+          "entityType": "SupportTicket",
+          "writeMode": "upsert",
+          "batchSize": 50
+        },
+        "dependsOn": ["step_classify"]
+      }
+    ],
+    "errorHandling": {
+      "onStepFailure": "retry-then-skip",
+      "maxRetries": 2,
+      "retryDelaySeconds": 15,
+      "notifyOnFailure": ["marcus.rivera@acmecorp.example.com"]
+    },
+    "enabled": true
+  },
+  {
+    "tenantId": "tenant_widget_002",
+    "id": "pipeline_shopify_sync",
+    "name": "Shopify Product Sync",
+    "description": "Syncs the Shopify product catalog every 10 minutes. Maps Shopify product fields to the Widget Co Product entity type.",
+    "trigger": {
+      "type": "connector",
+      "connectorId": "connector_shopify_widget",
+      "onEvents": ["sync.complete"]
+    },
+    "steps": [
+      {
+        "id": "step_extract_shopify",
+        "name": "Extract Shopify Products",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_shopify_widget",
+          "resources": ["products", "inventory_levels"]
+        }
+      },
+      {
+        "id": "step_transform_products",
+        "name": "Map to Product Entity",
+        "type": "transform",
+        "config": {
+          "mappings": {
+            "productId": "$.id",
+            "title": "$.title",
+            "handle": "$.handle",
+            "vendor": "$.vendor",
+            "productType": "$.product_type",
+            "price": "$.variants[0].price",
+            "compareAtPrice": "$.variants[0].compare_at_price",
+            "currency": "GBP",
+            "inventoryQuantity": "$.variants[0].inventory_quantity",
+            "tags": "$.tags",
+            "imageUrl": "$.image.src",
+            "isPublished": "$.status === 'active'"
+          }
+        },
+        "dependsOn": ["step_extract_shopify"]
+      },
+      {
+        "id": "step_load_shopify_products",
+        "name": "Load into Product Entity",
+        "type": "entity-write",
+        "config": {
+          "entityType": "Product",
+          "writeMode": "upsert",
+          "batchSize": 100
+        },
+        "dependsOn": ["step_transform_products"]
+      }
+    ],
+    "errorHandling": {
+      "onStepFailure": "retry-then-skip",
+      "maxRetries": 3,
+      "retryDelaySeconds": 20,
+      "notifyOnFailure": ["raj.patel@widgetco.example.com"]
+    },
+    "enabled": true
+  },
+  {
+    "tenantId": "tenant_widget_002",
+    "id": "pipeline_order_processing",
+    "name": "Order Processing",
+    "description": "Processes Shopify orders into the Order entity type with financial status normalization.",
+    "trigger": {
+      "type": "connector",
+      "connectorId": "connector_shopify_widget",
+      "onEvents": ["sync.complete"]
+    },
+    "steps": [
+      {
+        "id": "step_extract_orders",
+        "name": "Extract Shopify Orders",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_shopify_widget",
+          "resources": ["orders"]
+        }
+      },
+      {
+        "id": "step_transform_orders",
+        "name": "Map to Order Entity",
+        "type": "transform",
+        "config": {
+          "mappings": {
+            "orderId": "$.id",
+            "orderNumber": "$.order_number",
+            "customerEmail": "$.email",
+            "customerName": "$.customer.first_name + ' ' + $.customer.last_name",
+            "financialStatus": "$.financial_status",
+            "fulfillmentStatus": "$.fulfillment_status",
+            "currency": "$.currency",
+            "subtotalPrice": "$.subtotal_price",
+            "totalTax": "$.total_tax",
+            "totalPrice": "$.total_price",
+            "lineItems": "$.line_items",
+            "shippingAddress": "$.shipping_address",
+            "source": "$.source_name"
+          }
+        },
+        "dependsOn": ["step_extract_orders"]
+      },
+      {
+        "id": "step_load_orders",
+        "name": "Load into Order Entity",
+        "type": "entity-write",
+        "config": {
+          "entityType": "Order",
+          "writeMode": "upsert",
+          "batchSize": 100
+        },
+        "dependsOn": ["step_transform_orders"]
+      }
+    ],
+    "errorHandling": {
+      "onStepFailure": "retry-then-skip",
+      "maxRetries": 3,
+      "retryDelaySeconds": 15,
+      "notifyOnFailure": ["raj.patel@widgetco.example.com"]
+    },
+    "enabled": true
+  },
+  {
+    "tenantId": "tenant_widget_002",
+    "id": "pipeline_analytics_agg",
+    "name": "Analytics Aggregation",
+    "description": "Imports Google Analytics 4 daily data and aggregates web session metrics into the WebSession entity type.",
+    "trigger": {
+      "type": "connector",
+      "connectorId": "connector_ga4_widget",
+      "onEvents": ["sync.complete"]
+    },
+    "steps": [
+      {
+        "id": "step_extract_analytics",
+        "name": "Extract GA4 Data",
+        "type": "connector-read",
+        "config": {
+          "connectorId": "connector_ga4_widget"
+        }
+      },
+      {
+        "id": "step_transform_sessions",
+        "name": "Aggregate Sessions",
+        "type": "transform",
+        "config": {
+          "mappings": {
+            "sessionId": "$.date + '_' + $.country + '_' + $.deviceCategory",
+            "date": "$.date",
+            "country": "$.country",
+            "deviceCategory": "$.deviceCategory",
+            "source": "$.sessionSource",
+            "sessions": "$.sessions",
+            "totalUsers": "$.totalUsers",
+            "pageViews": "$.screenPageViews",
+            "conversions": "$.conversions",
+            "averageSessionDurationSeconds": "$.averageSessionDuration"
+          }
+        },
+        "dependsOn": ["step_extract_analytics"]
+      },
+      {
+        "id": "step_load_sessions",
+        "name": "Load into WebSession Entity",
+        "type": "entity-write",
+        "config": {
+          "entityType": "WebSession",
+          "writeMode": "upsert",
+          "batchSize": 500
+        },
+        "dependsOn": ["step_transform_sessions"]
+      }
+    ],
+    "errorHandling": {
+      "onStepFailure": "abort",
+      "maxRetries": 2,
+      "retryDelaySeconds": 60,
+      "notifyOnFailure": ["sofia.andersson@widgetco.example.com"]
+    },
+    "enabled": true
   }
 ]

@@ -28,11 +28,14 @@ import { createHmac } from "node:crypto";
 
 const BASE_URL = process.env["OP_BASE_URL"];
 const API_KEY = process.env["OP_API_KEY"];
-const WEBHOOK_SECRET = process.env["WEBHOOK_SECRET"] || "whsec_default_change_me_in_production";
+// WEBHOOK_SECRET must never fall back to a hardcoded default: it is the
+// shared secret used to verify HMAC-SHA256 signatures on inbound webhooks.
+// A known or weak default would allow anyone to forge verified requests.
+const WEBHOOK_SECRET = process.env["WEBHOOK_SECRET"];
 
-if (!BASE_URL || !API_KEY) {
+if (!BASE_URL || !API_KEY || !WEBHOOK_SECRET) {
   console.error(
-    "Error: OP_BASE_URL and OP_API_KEY environment variables are required.\n" +
+    "Error: OP_BASE_URL, OP_API_KEY, and WEBHOOK_SECRET environment variables are required.\n" +
       "  export OP_BASE_URL=https://your-instance.example.com\n" +
       "  export OP_API_KEY=op_live_...\n" +
       "  export WEBHOOK_SECRET=whsec_your_shared_secret",

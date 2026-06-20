@@ -1,44 +1,102 @@
 [
   {
-    "tenantSlug": "acme-corp",
-    "email": "admin@acmecorp.example.com",
+    "tenantId": "tenant_acme_001",
+    "email": "sarah.chen@acmecorp.example.com",
     "displayName": "Sarah Chen",
-    "roles": ["admin", "ontology:write", "connectors:write", "pipelines:write", "apps:write"]
+    "role": "tenant-admin",
+    "department": "Engineering",
+    "title": "VP of Engineering",
+    "password": "AcmeDemo2024!Secure",
+    "active": true
   },
   {
-    "tenantSlug": "acme-corp",
-    "email": "data-eng@acmecorp.example.com",
+    "tenantId": "tenant_acme_001",
+    "email": "marcus.rivera@acmecorp.example.com",
     "displayName": "Marcus Rivera",
-    "roles": ["connectors:write", "pipelines:write", "ontology:read", "data:read"]
+    "role": "data-engineer",
+    "department": "Data Engineering",
+    "title": "Senior Data Engineer",
+    "password": "AcmeDemo2024!Secure",
+    "active": true
   },
   {
-    "tenantSlug": "acme-corp",
-    "email": "analyst@acmecorp.example.com",
+    "tenantId": "tenant_acme_001",
+    "email": "emily.nakamura@acmecorp.example.com",
+    "displayName": "Emily Nakamura",
+    "role": "data-engineer",
+    "department": "Data Engineering",
+    "title": "Data Architect",
+    "password": "AcmeDemo2024!Secure",
+    "active": true
+  },
+  {
+    "tenantId": "tenant_acme_001",
+    "email": "david.okonkwo@acmecorp.example.com",
+    "displayName": "David Okonkwo",
+    "role": "business-analyst",
+    "department": "Business Intelligence",
+    "title": "Senior Business Analyst",
+    "password": "AcmeDemo2024!Secure",
+    "active": true
+  },
+  {
+    "tenantId": "tenant_acme_001",
+    "email": "priya.sharma@acmecorp.example.com",
     "displayName": "Priya Sharma",
-    "roles": ["data:read", "apps:read", "logs:read"]
+    "role": "viewer",
+    "department": "Product Management",
+    "title": "Product Manager",
+    "password": "AcmeDemo2024!Secure",
+    "active": true
   },
   {
-    "tenantSlug": "acme-corp",
-    "email": "developer@acmecorp.example.com",
-    "displayName": "James O'Brien",
-    "roles": ["apps:write", "data:read", "ontology:read", "pipelines:read"]
+    "tenantId": "tenant_acme_001",
+    "email": "james.mitchell@acmecorp.example.com",
+    "displayName": "James Mitchell",
+    "role": "viewer",
+    "department": "Compliance",
+    "title": "External Auditor",
+    "password": "AcmeDemo2024!Secure",
+    "active": true
   },
   {
-    "tenantSlug": "widget-co",
-    "email": "admin@widgetco.example.com",
-    "displayName": "Alex Kim",
-    "roles": ["admin", "ontology:write", "connectors:write", "pipelines:write", "apps:write"]
+    "tenantId": "tenant_widget_002",
+    "email": "lena.fischer@widgetco.example.com",
+    "displayName": "Lena Fischer",
+    "role": "tenant-admin",
+    "department": "Technology",
+    "title": "CTO",
+    "password": "WidgetDemo2024!Secure",
+    "active": true
   },
   {
-    "tenantSlug": "widget-co",
-    "email": "ops@widgetco.example.com",
-    "displayName": "Jordan Taylor",
-    "roles": ["connectors:write", "pipelines:write", "logs:read", "data:read"]
+    "tenantId": "tenant_widget_002",
+    "email": "raj.patel@widgetco.example.com",
+    "displayName": "Raj Patel",
+    "role": "data-engineer",
+    "department": "Engineering",
+    "title": "Lead Data Engineer",
+    "password": "WidgetDemo2024!Secure",
+    "active": true
   },
   {
-    "tenantSlug": "widget-co",
-    "email": "viewer@widgetco.example.com",
-    "displayName": "Casey Morgan",
-    "roles": ["data:read", "apps:read"]
+    "tenantId": "tenant_widget_002",
+    "email": "sofia.andersson@widgetco.example.com",
+    "displayName": "Sofia Andersson",
+    "role": "business-analyst",
+    "department": "Analytics",
+    "title": "Analytics Manager",
+    "password": "WidgetDemo2024!Secure",
+    "active": true
+  },
+  {
+    "tenantId": "tenant_widget_002",
+    "email": "tom.williams@widgetco.example.com",
+    "displayName": "Tom Williams",
+    "role": "viewer",
+    "department": "Executive",
+    "title": "Head of Sales",
+    "password": "WidgetDemo2024!Secure",
+    "active": true
   }
 ]

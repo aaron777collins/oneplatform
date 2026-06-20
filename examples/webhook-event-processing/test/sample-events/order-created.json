@@ -1,0 +1,44 @@
+{
+  "event_id": "evt_ord_2024_09_15_001",
+  "event_type": "order.created",
+  "timestamp": "2024-09-15T14:32:07.891Z",
+  "source": "shopfront-api",
+  "data": {
+    "order_id": "ORD-2024-78432",
+    "customer_email": "sarah.chen@example.com",
+    "customer_id": "cust_8f3k2j1",
+    "items": [
+      {
+        "sku": "LAPTOP-PRO-15",
+        "name": "ProBook Laptop 15-inch",
+        "quantity": 1,
+        "price": 1299.99
+      },
+      {
+        "sku": "USB-C-DOCK-4K",
+        "name": "USB-C 4K Docking Station",
+        "quantity": 1,
+        "price": 189.99
+      },
+      {
+        "sku": "WIRELESS-MOUSE-ERG",
+        "name": "Ergonomic Wireless Mouse",
+        "quantity": 2,
+        "price": 49.99
+      }
+    ],
+    "total": 1589.96,
+    "currency": "USD",
+    "tax": 127.20,
+    "shipping_method": "express",
+    "shipping_address": {
+      "street": "742 Evergreen Terrace",
+      "city": "Portland",
+      "state": "OR",
+      "zip": "97201",
+      "country": "US"
+    },
+    "payment_method": "credit_card",
+    "order_notes": "Please leave at front door if no one answers."
+  }
+}
