@@ -310,7 +310,13 @@ async function main(): Promise<void> {
         };
 
         if (responseOrPromise instanceof Promise) {
-          void responseOrPromise.then(handleResponse);
+          void responseOrPromise.then(handleResponse).catch((err: unknown) => {
+            console.error("Unhandled error in request handler:", err);
+            if (!res.headersSent) {
+              res.writeHead(500, { "Content-Type": "text/plain" });
+            }
+            res.end("Internal Server Error");
+          });
         } else {
           handleResponse(responseOrPromise);
         }

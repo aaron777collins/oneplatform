@@ -148,8 +148,8 @@ describe("isBlockedIpRange — public IPv4 addresses", () => {
     expect(isBlockedIpRange("93.184.216.34")).toBe(false);
   });
 
-  it("does not block 0.0.0.0", () => {
-    expect(isBlockedIpRange("0.0.0.0")).toBe(false);
+  it("blocks 0.0.0.0", () => {
+    expect(isBlockedIpRange("0.0.0.0")).toBe(true);
   });
 
   it("does not block 255.255.255.255", () => {

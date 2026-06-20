@@ -322,8 +322,15 @@ This document tracks the current state of development. Read this FIRST when resu
   - 23 developer agents covering all 9 services, 7 packages, 7 plugins, docker
   - Key fixes: atomic rate limiting, algorithm confusion prevention, SSE cleanup, origin matching, timer leaks, token refresh races, filter builder injection, connection pool limits
   - Commit: `4219d83`
-- [ ] LOW fixes: 56 bugs across 21 components (IN PROGRESS — workflow wf_807668c6-018)
-- [ ] Re-analysis cycle until clean
+- [x] LOW fixes: 54 bugs fixed, 1 skipped across 21 components (all builds + tests pass)
+  - 7 batched developer agents covering 21 components
+  - Commit: `26e99dc`
+- [x] Re-analysis cycle 1: 91 new findings (1 CRIT, 19 HIGH, 43 MED, 28 LOW)
+  - 16 CRIT/HIGH confirmed after adversarial verification (4 refuted)
+  - 82 total fixes (16 CRIT/HIGH + 43 MED + 21 LOW + 2 skipped)
+  - Key fixes: ECDSA JWT verification (CRITICAL), OAuth route auth bypass, HMAC body mismatch, gRPC context wiring, streaming export OOM, transaction scope, CSS sanitization, SQL injection, input validation, SSRF hardening
+  - Commit: `3bb7ec4`
+- [ ] Re-analysis cycle 2 — verifying codebase is clean (workflow wf_832ecc11-492)
 - [ ] Example projects with all features and all user personas
 - [ ] Final quality gates
 

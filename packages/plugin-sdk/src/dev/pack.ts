@@ -298,10 +298,12 @@ async function signPackage(
   const unsignedTar = bundlePath + ".unsigned.tar.gz";
   await createTarGz(unsignedTar, [manifestPath, bundlePath, checksumPath]);
 
+  const sigPath = bundlePath + ".sig";
   await execFileAsync("gpg", [
     "--detach-sign",
     "--armor",
     "--local-user", gpgKeyId,
+    "--output", sigPath,
     unsignedTar,
   ]);
 

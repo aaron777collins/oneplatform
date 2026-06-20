@@ -226,10 +226,10 @@ describe("initialize()", () => {
     expect(bindCall).toBeDefined();
   });
 
-  it("caches the bind password for use by handleCallback", async () => {
+  it("does not cache the bind password (uses CredentialAccessor at call time)", async () => {
     const ctx = await initializeProvider();
     const cached = await ctx.cache.get<string>("ldap:bindPassword");
-    expect(cached).toBe(BIND_PASSWORD);
+    expect(cached).toBeNull();
   });
 
   it("caches the proxy URL for use by handleCallback", async () => {

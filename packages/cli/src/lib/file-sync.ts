@@ -18,17 +18,22 @@ export interface FileSyncOptions {
   onStatus: (message: string) => void;
 }
 
-/** Debounce helper — coalesces rapid file change events. */
-function debounce<T extends (...args: Parameters<T>) => void>(
-  fn: T,
+function debouncedQueue(
+  fn: (filePath: string) => Promise<void>,
   ms: number,
-): (...args: Parameters<T>) => void {
+): (filePath: string) => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Parameters<T>): void => {
+  const pending = new Set<string>();
+  return (filePath: string): void => {
+    pending.add(filePath);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
-      fn(...args);
+      const batch = [...pending];
+      pending.clear();
+      for (const p of batch) {
+        fn(p);
+      }
     }, ms);
   };
 }
@@ -40,7 +45,7 @@ function debounce<T extends (...args: Parameters<T>) => void>(
 export function startLocalWatcher(opts: FileSyncOptions): () => void {
   const { slug, localDir, http, onStatus } = opts;
 
-  const uploadFile = debounce(async (filePath: string): Promise<void> => {
+  const uploadFile = debouncedQueue(async (filePath: string): Promise<void> => {
     const relativePath = relative(localDir, filePath).replace(/\\/g, "/");
     try {
       const content = readFileSync(filePath, "utf8");

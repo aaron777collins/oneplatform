@@ -39,6 +39,7 @@ function parseCidr(cidr: string): CidrBlock {
 // These ranges must never be reachable from an outbound webhook delivery.
 // The 169.254.0.0/16 block covers AWS/GCP IMDS endpoints (169.254.169.254).
 const BLOCKED_CIDR_BLOCKS: CidrBlock[] = [
+  "0.0.0.0/8",
   "10.0.0.0/8",
   "172.16.0.0/12",
   "192.168.0.0/16",

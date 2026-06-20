@@ -117,6 +117,7 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
         c.header(
           "Set-Cookie",
           `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+          { append: true },
         );
       }
       return c.res;

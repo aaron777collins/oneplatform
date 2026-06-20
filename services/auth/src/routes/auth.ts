@@ -150,6 +150,7 @@ return count`,
         c.header(
           "Set-Cookie",
           `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+          { append: true },
         );
       }
       return c.res;

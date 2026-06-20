@@ -428,7 +428,7 @@ class Parser {
 
     // Validate max depth across all operations
     for (const op of operations) {
-      const depth = selectionSetDepth(op.selectionSet, fragments, 0);
+      const depth = selectionSetDepth(op.selectionSet, fragments, 0, new Set());
       if (depth > this.maxDepth) {
         return {
           ok: false,
@@ -742,24 +742,27 @@ function selectionSetDepth(
   set: GraphQLSelectionSet,
   fragments: Map<string, GraphQLFragmentDefinition>,
   current: number,
+  visited: Set<string>,
 ): number {
   let max = current;
   for (const sel of set.selections) {
     if (sel.kind === "FragmentSpread") {
+      if (visited.has(sel.name)) {
+        return Infinity;
+      }
       const frag = fragments.get(sel.name);
       if (frag) {
-        max = Math.max(max, selectionSetDepth(frag.selectionSet, fragments, current));
+        const nextVisited = new Set(visited);
+        nextVisited.add(sel.name);
+        max = Math.max(max, selectionSetDepth(frag.selectionSet, fragments, current, nextVisited));
       }
     } else if (sel.kind === "InlineFragment") {
-      max = Math.max(max, selectionSetDepth(sel.selectionSet, fragments, current + 1));
+      max = Math.max(max, selectionSetDepth(sel.selectionSet, fragments, current + 1, visited));
     } else {
-      // Every concrete field counts as one level regardless of whether it has
-      // a sub-selection (leaf fields must still be counted so that a 6-level
-      // query is rejected when maxDepth is 5).
       const fieldDepth = current + 1;
       max = Math.max(max, fieldDepth);
       if (sel.selectionSet) {
-        max = Math.max(max, selectionSetDepth(sel.selectionSet, fragments, fieldDepth));
+        max = Math.max(max, selectionSetDepth(sel.selectionSet, fragments, fieldDepth, visited));
       }
     }
   }

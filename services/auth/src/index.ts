@@ -376,10 +376,11 @@ async function main(): Promise<void> {
 
         const responseOrPromise = app.fetch(fetchRequest);
         const handleResponse = (response: Response): void => {
-          res.writeHead(
-            response.status,
-            Object.fromEntries(response.headers.entries()),
-          );
+          const outHeaders: [string, string][] = [];
+          response.headers.forEach((value, key) => {
+            outHeaders.push([key, value]);
+          });
+          res.writeHead(response.status, outHeaders);
           void response.arrayBuffer().then((buf: ArrayBuffer) => {
             res.end(Buffer.from(buf));
           });

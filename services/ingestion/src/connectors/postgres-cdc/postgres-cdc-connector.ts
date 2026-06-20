@@ -112,6 +112,23 @@ function parseConfig(config: Record<string, unknown>): PostgresCdcConfig {
     );
   }
 
+  const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$/;
+  const slotName = config["slotName"] as string;
+  const publicationName = config["publicationName"] as string;
+
+  if (!SAFE_IDENTIFIER.test(slotName)) {
+    throw new Error(
+      `PostgreSQL CDC connector: "slotName" contains invalid characters. ` +
+      `Only ASCII letters, digits, underscores, and dollar signs are allowed.`,
+    );
+  }
+  if (!SAFE_IDENTIFIER.test(publicationName)) {
+    throw new Error(
+      `PostgreSQL CDC connector: "publicationName" contains invalid characters. ` +
+      `Only ASCII letters, digits, underscores, and dollar signs are allowed.`,
+    );
+  }
+
   const port =
     typeof config["port"] === "number"
       ? config["port"]

@@ -1,0 +1,150 @@
+{
+  "services/auth": [
+    {
+      "severity": "HIGH",
+      "title": "PUT /api/v1/users/:id crashes when only isActive is changed",
+      "description": "When the request body contains only `{ isActive: false }` (or `{ isActive: true }`), the route handler at line 246 calls `userRepository.update(id, {})` with an empty object. The UserRepository.update() method at line 94-96 of user-repository.ts throws 'update() called with no fields to update' when no fields are provided. This causes a 500 error for any user activation/deactivation request that does not also include displayName or roles changes. The fix is to skip the userRepository.update() call when only isActive is being changed, or pass a no-op field like updated_at.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/users.ts",
+      "line": 246,
+      "component": "services/auth"
+    },
+    {
+      "severity": "HIGH",
+      "title": "OAuth authorize and callback routes missing from publicRoutes",
+      "description": "The OAuth routes /api/v1/oauth/:provider/authorize and /api/v1/oauth/:provider/callback are designed to be public (accessed by browser redirects without JWT auth, per oauth.ts line 7-8 comment), but they are not listed in the publicRoutes array in index.ts (lines 255-269). This means the auth middleware will reject all OAuth requests with 401 Unauthorized because browsers navigating to these URLs have no Bearer token. OAuth login flow is completely broken.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/index.ts",
+      "line": 255,
+      "component": "services/auth"
+    }
+  ],
+  "services/gateway": [
+    {
+      "severity": "HIGH",
+      "title": "HMAC signature computed on wrong body for Stripe billing webhooks",
+      "description": "In deliverBillingWebhook(), the HMAC signature is computed over `body` (the raw JSON.stringify of payload) on line 125, but when provider is 'stripe', the actual HTTP body sent is `finalBody` (lines 131-135), which wraps the payload in a different structure: {type: 'platform.usage_threshold_crossed', data: {object: payload}}. The receiving Stripe endpoint will compute its verification HMAC over what it actually received (finalBody), and the signature will never match. This makes webhook signature verification fail for all Stripe-provider billing webhooks.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/services/metering-service.ts",
+      "line": 125,
+      "component": "services/gateway"
+    },
+    {
+      "severity": "HIGH",
+      "title": "gRPC-Web handler constructs RpcContext but never passes it to RPC handlers",
+      "description": "The createGrpcWebHandler function properly extracts auth info (tenantId, userId, roles, requestId) into an RpcContext object (lines 99-104) and passes it to handleUnaryRpc, handleServerStreamingRpc, and handleClientStreamingRpc. However, all three handler functions declare the parameter as `_ctx: RpcContext` (underscore prefix = intentionally unused) and never pass it to the actual RPC handler. The handlers (e.g., DataService.GetEntity, IngestionService.TriggerSync) receive only the decoded request message, with no tenant/user context. This means gRPC handlers currently operate without authentication context, relying solely on the tenant ID embedded in the request message body rather than the verified JWT identity.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/grpc/grpc-web-handler.ts",
+      "line": 141,
+      "component": "services/gateway"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Webhook read routes check for non-existent 'webhooks:read' scope, blocking legitimate access",
+      "description": "The webhook GET routes (list webhooks, get webhook, list deliveries) check for scope 'webhooks:read' (lines 57, 80, 139 in webhooks.ts), but this scope does not exist in the platform's scope system. The ALL_SCOPES array in token-service.ts (line 34-56) only defines 'webhooks:manage' -- there is no 'webhooks:read' scope. The PREDEFINED_ROLE_SCOPES mapping only grants 'webhooks:manage' to tenant-admin. This means that a tenant-admin user who has 'webhooks:manage' scope will be denied access to read endpoints (GET /webhooks, GET /webhooks/:id, GET /webhooks/:id/deliveries) because they lack the undefined 'webhooks:read' scope. Only users with 'admin' scope (platform-admin) can read webhooks. The scope check should be 'webhooks:manage' instead of 'webhooks:read' to match the defined scope vocabulary, or 'webhooks:read' should be added to ALL_SCOPES and the tenant-admin role mapping.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/routes/webhooks.ts",
+      "line": 57,
+      "component": "cross-cutting-security"
+    }
+  ],
+  "services/ingestion": [
+    {
+      "severity": "HIGH",
+      "title": "WebhookReceiverNotFoundError returns HTTP 200 on authenticated management endpoints",
+      "description": "WebhookReceiverNotFoundError has statusCode = 200, which is intentional for the public receive endpoint (anti-enumeration). However, the authenticated management routes (GET /inbound/:id at line 121, PATCH /inbound/:id at line 131, DELETE /inbound/:id at line 165, POST /inbound/:id/rotate-secret at line 175) throw this error without catching it, so the global error handler returns HTTP 200 for genuinely not-found resources on authenticated endpoints. These management endpoints are already behind authentication so the anti-enumeration rationale does not apply. The delivery log routes (lines 220-258) have explicit catch handlers that correctly return 404, demonstrating the intended pattern.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/errors.ts",
+      "line": 80,
+      "component": "services/ingestion"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Reconciliation service uses instance_id instead of connector.id for credential vault lookup",
+      "description": "In reconciliation-service.ts, both fetchSourceIds (line 601) and fetchSourceRecords (line 687) pass connector.instance_id as credentialBundleId when calling the execution service. The credential vault is keyed by the connector's primary key (connector.id), not instance_id. Other services correctly use connectorId/connector.id: sync-service.ts line 718 uses connectorId, and connector-service.ts line 472 uses connector.id. This means reconciliation jobs will fail to decrypt credentials and cannot authenticate with the source system, making the entire reconciliation feature non-functional.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/reconciliation-service.ts",
+      "line": 601,
+      "component": "services/ingestion"
+    }
+  ],
+  "services/ontology": [
+    {
+      "severity": "HIGH",
+      "title": "cleanupDeletedEntities runs repo deletes outside the client transaction",
+      "description": "In the cleanupDeletedEntities method, after BEGIN on a client connection, the code calls `fieldRepo.hardDeleteByEntityId(entity.id)` and `entityRepo.hardDelete(entity.id)`. These repository methods use `db.query()` (the pool), not `client.query()`. This means the catalog deletes run outside the transaction that wraps the DROP TABLE. If the DROP TABLE succeeds but a subsequent hardDelete fails, the ROLLBACK only rolls back the DROP TABLE (on the client), leaving the catalog in an inconsistent state where the table exists but some catalog records are already deleted, or vice versa.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/services/entity-service.ts",
+      "line": 571,
+      "component": "services/ontology"
+    }
+  ],
+  "services/execution": [
+    {
+      "severity": "HIGH",
+      "title": "Context call handler is constructed but never wired to sandbox message dispatch",
+      "description": "The ContextCallHandler is created and passed as a dependency to both ExecutionRouter and ExecutionService, but neither actually invokes handleContextCall(). The UnixSocketClient's dispatchMessage() only handles 'log' type messages and final responses (matched by id). There is no handler for 'contextCall' type messages from the sandbox. When sandbox user code calls context.fetch(), context.credentials.get(), context.cache.get(), context.pipeline.trigger(), or context.ontology.getEntity(), the sandbox sends a contextCall message over the Unix socket. This message arrives in dispatchMessage(), but since its 'type' is 'contextCall' (not 'log'), it falls through to the response-matching logic. There is no pending request with a matching id (context calls have their own callId), so the message is silently discarded with a warning log. All PluginContext API calls from sandbox code will fail silently.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/unix-socket-client.ts",
+      "line": 144,
+      "component": "services/execution"
+    }
+  ],
+  "services/logging": [
+    {
+      "severity": "HIGH",
+      "title": "Streaming export response is fully buffered in memory via arrayBuffer(), defeating streaming and risking OOM",
+      "description": "The HTTP adapter calls `response.arrayBuffer()` on line 299 to read the entire response body into memory before sending it to the client. For the streaming export endpoint (GET /api/v1/logs/export), which is designed to stream potentially millions of log rows via a ReadableStream, this means the entire export is buffered in a single ArrayBuffer. A 7-day export across a busy platform could easily exhaust available memory and crash the process. The adapter should use `response.body` (a ReadableStream) and pipe it to `res` to preserve the streaming behavior.",
+      "file": "/home/ubuntu/topics/oneplatform/services/logging/src/index.ts",
+      "line": 299,
+      "component": "services/logging"
+    }
+  ],
+  "services/plugin": [
+    {
+      "severity": "HIGH",
+      "title": "Cursor pagination direction mismatch in plugin list query",
+      "description": "The plugin list query uses `id > $cursor` for cursor-based pagination, but the ORDER BY clause is `installed_at DESC, id DESC`. For descending order pagination, the cursor condition should be `id < $cursor` to fetch the next page of results. The current `id > $cursor` condition returns rows that should appear on PREVIOUS pages, causing pagination to produce incorrect or empty results when a cursor is provided.",
+      "file": "/home/ubuntu/topics/oneplatform/services/plugin/src/repositories/plugin-repository.ts",
+      "line": 134,
+      "component": "services/plugin"
+    }
+  ],
+  "packages/core": [
+    {
+      "severity": "HIGH",
+      "title": "verifyUserContextSignature crashes on invalid hex in X-User-Context-Signature",
+      "description": "The verifyUserContextSignature function on line 53 creates Buffer.from(receivedSig, 'hex') after checking that receivedSig has the same STRING length as the expected signature. However, if receivedSig contains invalid hex characters (e.g., 'zzzz...') with matching string length, Buffer.from(string, 'hex') silently produces a shorter or empty buffer. This causes timingSafeEqual to throw 'RangeError: Input buffers must have the same byte length', which bubbles up as an unhandled 500 Internal Server Error instead of a clean 401. An attacker can trigger this by sending an X-User-Context-Signature header with the correct length (64 hex chars) but invalid hex characters.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/core/src/middleware/service-auth.ts",
+      "line": 53,
+      "component": "packages/core"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Auth middleware blocks /internal/* routes, preventing service-to-service communication",
+      "description": "In createApp(), the authMiddleware (position 6) runs on all routes ('*') before serviceAuthMiddleware (position 7, '/internal/*'). When a service-to-service request arrives at /internal/* with only an X-Service-Token header (no Bearer JWT or X-API-Key), the auth middleware returns 401 'Authentication required' on line 253 before serviceAuthMiddleware ever runs. The comment on lines 140-142 explicitly states these routes should 'pass through here' for serviceAuthMiddleware to handle, but the code does not implement this passthrough. None of the downstream services (pipeline, execution, logging, plugin, ontology) include '/internal/*' in their publicRoutes configuration, so all inter-service calls to /internal/* endpoints would fail with 401.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/core/src/middleware/auth.ts",
+      "line": 253,
+      "component": "packages/core"
+    }
+  ],
+  "plugins/connector-postgres": [
+    {
+      "severity": "HIGH",
+      "title": "Lexicographic string comparison of primary keys in incremental dedup filter causes incorrect filtering for numeric IDs",
+      "description": "At line 674, the client-side deduplication filter uses `pkVal <= lastId` where both values are coerced to strings via `String()`. For numeric primary keys (the common case), this produces incorrect results because lexicographic comparison differs from numeric comparison. For example, `\"9\" <= \"10\"` evaluates to `false` (since '9' > '1' lexicographically), so a row with id=9 would NOT be filtered out even when lastId=\"10\". This means rows can be either incorrectly kept (re-ingested as duplicates) or incorrectly skipped depending on the ID values. The bug manifests whenever the proxy does not handle the `cursor_last_id` parameter server-side and the client-side fallback filter is the only deduplication mechanism.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/connector-postgres/src/index.ts",
+      "line": 674,
+      "component": "plugins/connector-postgres"
+    },
+    {
+      "severity": "HIGH",
+      "title": "hasMore in incremental sync uses post-filter record count, causing premature sync termination",
+      "description": "At line 699, `hasMore = records.length === cfg.batchSize` checks the count of records AFTER client-side filtering (line 668-676). If the proxy returns a full batch of `batchSize` rows but the client-side dedup filter removes some, `records.length` will be less than `batchSize`, so `hasMore` is set to `false`. This causes the sync to terminate prematurely, silently skipping all remaining rows in the table. The comment at lines 631-635 claims the code over-fetches to compensate, but the actual limit parameter at line 641 is exactly `cfg.batchSize` with no over-fetching. The correct fix is to base `hasMore` on `payload.rows.length` (pre-filter count from the proxy) rather than the post-filter `records.length`.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/connector-postgres/src/index.ts",
+      "line": 699,
+      "component": "plugins/connector-postgres"
+    }
+  ],
+  "plugins/auth-provider-oidc": [
+    {
+      "severity": "CRITICAL",
+      "title": "ECDSA JWT signature verification always fails due to missing hash parameter",
+      "description": "In verifySignatureWithKeySet(), when verifying ECDSA-signed tokens (ES256, ES384, ES512), the code passes cryptoKey.algorithm as the verify algorithm parameter. For ECDSA keys, cryptoKey.algorithm is { name: 'ECDSA', namedCurve: 'P-256' }, but crypto.subtle.verify() requires EcdsaParams which mandates a 'hash' property (e.g., { name: 'ECDSA', hash: 'SHA-256' }). Without 'hash', the verify call throws 'Failed to normalize algorithm: passed algorithm can not be converted to EcdsaParams because hash is required'. The error is silently caught by the catch block, the loop continues, no key succeeds, and the function returns false. This means ALL tokens signed with ES256, ES384, or ES512 are rejected as having invalid signatures. The RSA-PSS case has special handling (lines 337-343) but the ECDSA case falls through to the raw cryptoKey.algorithm which lacks the required hash field. The fix needs to add ECDSA-specific algorithm construction similar to the RSA-PSS branch, mapping ES256->SHA-256, ES384->SHA-384, ES512->SHA-512.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-oidc/src/jwks.ts",
+      "line": 344,
+      "component": "plugins/auth-provider-oidc"
+    }
+  ]
+}

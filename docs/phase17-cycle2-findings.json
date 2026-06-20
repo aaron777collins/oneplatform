@@ -1,0 +1,889 @@
+{
+  "summary": "Cycle 2: 94 total, 9 confirmed CRIT/HIGH",
+  "critHighCount": 15,
+  "confirmedCritHighCount": 9,
+  "mediumCount": 54,
+  "lowCount": 25,
+  "allFindings": [
+    {
+      "severity": "HIGH",
+      "title": "Set-Cookie headers overwritten: browser clients lose access token cookie",
+      "description": "In the login route (auth.ts line 145-153) and bootstrap route (bootstrap.ts line 112-121), two c.header('Set-Cookie', ...) calls are made without the { append: true } option. Hono's c.header() calls headers.set() by default, which replaces the previous value. The second Set-Cookie (refresh token) overwrites the first (access token), so browser clients never receive the op_access_token cookie. This breaks browser-based authentication entirely for cookie-mode clients. Fix: change the second c.header() call to use c.header('Set-Cookie', value, { append: true }).",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/auth.ts",
+      "line": 150,
+      "component": "routes/auth.ts"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Set-Cookie headers overwritten in bootstrap route (same bug as login)",
+      "description": "The bootstrap route has the same c.header('Set-Cookie', ...) overwrite bug. The refresh token cookie replaces the access token cookie on line 117-120. Browser clients completing bootstrap lose their access token cookie. Fix: add { append: true } to the second c.header('Set-Cookie', ...) call.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/bootstrap.ts",
+      "line": 117,
+      "component": "routes/bootstrap.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "CSS sanitization bypassed via CSS backslash escapes in url() and @import",
+      "description": "The sanitizeCss() function strips url(), @import, expression(), and javascript: using regex patterns that match literal text. CSS allows backslash escapes in identifiers: ur\\l(...), ur\\6c(...), \\75rl(...) are all parsed as url(...) by browsers. Similarly, @\\69mport is parsed as @import. An attacker can use these escape sequences to embed url() calls or @import rules that survive sanitization but execute in browsers, enabling data exfiltration from tenant users. Fix: normalize CSS escape sequences before applying the stripping regexes, or use a proper CSS parser for sanitization.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/branding-service.ts",
+      "line": 98,
+      "component": "services/branding-service.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "HTTP server silently swallows unhandled promise rejections from app.fetch()",
+      "description": "In the Node.js HTTP server handler (index.ts line 388-389), app.fetch() may return a rejected promise if middleware throws. The code uses 'void responseOrPromise.then(handleResponse)' without a .catch() handler. If the promise rejects, the error becomes an unhandled promise rejection (which crashes the process in Node.js with --unhandled-rejections=throw, and will crash by default in future Node versions). Additionally, the client connection hangs indefinitely because res.end() is never called. Fix: add a .catch() handler that sends a 500 response and logs the error.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/index.ts",
+      "line": 389,
+      "component": "index.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "HTTP server collapses duplicate response headers via Object.fromEntries()",
+      "description": "In the Node.js HTTP server handler (index.ts line 381), Object.fromEntries(response.headers.entries()) is used to convert headers for res.writeHead(). Object.fromEntries keeps only the last entry for duplicate keys. HTTP headers like Set-Cookie legally appear multiple times, but this conversion loses all but the last one. Even if the Hono-level Set-Cookie bug is fixed (by using append), the HTTP bridge layer would still collapse them. Fix: use response.headers.raw() (node-fetch) or iterate response.headers with getSetCookie() or forEach() to preserve multi-value headers.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/index.ts",
+      "line": 381,
+      "component": "index.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Last-admin deactivation guard has TOCTOU race condition",
+      "description": "In the user update route (users.ts lines 273-290 and 297-309), the check for whether the user is the last admin and the subsequent deactivation (line 311) are not atomic. Two concurrent requests to deactivate two different admin users could both pass the 'other admins exist' check (each sees the other as still active) and then both proceed to deactivate, leaving the tenant with no admin. Fix: wrap the count check and the deactivation in a serializable transaction, or use a SELECT ... FOR UPDATE pattern.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/users.ts",
+      "line": 273,
+      "component": "routes/users.ts"
+    },
+    {
+      "severity": "LOW",
+      "title": "CSS url() regex leaves partial content when url() argument contains unbalanced parentheses",
+      "description": "The url() stripping regex /url\\s*\\([^)]*(?:\\([^)]*\\)[^)]*)*\\)/gi handles one level of nested balanced parentheses, but fails on unbalanced parentheses inside the URL argument (e.g., url(https://evil.com/path?cb=func(1)). The regex matches only up to the first closing paren after the innermost opening paren, leaving trailing content like ')' in the output. While this does not produce a valid url() call in the residue, it can produce broken CSS. This is a correctness issue rather than a security one since the url() itself is stripped.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/branding-service.ts",
+      "line": 121,
+      "component": "services/branding-service.ts"
+    },
+    {
+      "severity": "LOW",
+      "title": "Redis operations after DB commit are not atomic in token rotation",
+      "description": "In rotateRefreshToken() (token-service.ts lines 564-579), after the DB commit succeeds, multiple Redis operations (SET new token, SET family index, SREM old from family, SADD new to family, EXPIRE, SREM old from user-sessions, SADD new to user-sessions) are executed sequentially without a pipeline. If the process crashes mid-way (e.g., after writing the new token but before removing the old from the family set), Redis state becomes inconsistent: the family set may contain both old and new tokens, or the user-sessions set may be missing the new token (breaking logout-all). While the system is resilient (old tokens expire via TTL), the inconsistency could cause stale entries in replay detection sets.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/token-service.ts",
+      "line": 564,
+      "component": "services/token-service.ts"
+    },
+    {
+      "severity": "CRITICAL",
+      "title": "GraphQL fragment cycle causes stack overflow (DoS)",
+      "description": "The selectionSetDepth function recursively expands fragment spreads to calculate query depth but does not track which fragments have already been visited. If a client sends a query with circular fragment definitions (e.g., fragment A spreads fragment B, fragment B spreads fragment A), the function will recurse infinitely until the Node.js process crashes with a stack overflow. The validateSelectionSet function explicitly defers fragment body validation (line 108-110: 'Fragment body validation is deferred'), so circular fragments are never detected before selectionSetDepth is called. This is a remotely exploitable denial-of-service: any authenticated user can crash the entire gateway process with a single GraphQL request containing two mutually-recursive named fragments.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/graphql/parser.ts",
+      "line": 741,
+      "component": "services/gateway"
+    },
+    {
+      "severity": "HIGH",
+      "title": "ReDoS in webhook glob pattern matching",
+      "description": "The matchesGlobPattern function converts user-supplied glob patterns to regex by replacing '*' with '.*' and wrapping in ^...$. A pattern like '*a*a*a*a*a*a*b' produces the regex ^.*a.*a.*a.*a.*a.*a.*b$ which is vulnerable to catastrophic backtracking when tested against a string of many 'a' characters without a trailing 'b'. Since glob patterns are supplied by webhook registrants (tenant users with webhooks:manage scope) and are evaluated on every event delivery attempt in the hot path (matchesGlobPattern is called for each registered webhook per event), a malicious or careless pattern can cause the event delivery thread to hang for minutes or longer, effectively blocking webhook processing for the entire platform.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/repositories/webhook-repository.ts",
+      "line": 260,
+      "component": "services/gateway"
+    },
+    {
+      "severity": "HIGH",
+      "title": "SSRF bypass via 0.0.0.0/8 address range",
+      "description": "The SSRF guard blocks private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8), and link-local (169.254.0.0/16) but does not block the 0.0.0.0/8 range. A webhook URL whose hostname resolves to 0.0.0.0 will pass SSRF validation. On Linux, connecting to 0.0.0.0 reaches services listening on all interfaces (INADDR_ANY), which includes internal services like the database, Redis, and other microservices. An attacker can register a webhook with a hostname they control, point its DNS A record to 0.0.0.0, and the gateway will deliver webhook payloads to (and read responses from) internal services. This bypasses the entire SSRF protection mechanism.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/utils/ssrf-guard.ts",
+      "line": 41,
+      "component": "services/gateway"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Proxied requests always send x-forwarded-for: unknown",
+      "description": "In proxy-service.ts, the code attempts to read the client IP from c.req.raw.socket?.remoteAddress (line 203-204). However, c.req.raw is a Fetch API Request object which has no 'socket' property - the code accesses it via an unsafe cast to { socket?: { remoteAddress?: string } }. The actual client IP is available as the x-real-ip header (set by the Node.js HTTP server adapter in index.ts line 674-676 from req.socket.remoteAddress), but x-real-ip is in the HEADERS_TO_STRIP set (line 81) and is removed before the proxy reads it. As a result, all proxied requests are forwarded with 'x-forwarded-for: unknown'. Upstream services that rely on x-forwarded-for for rate limiting, audit logging, geo-location, or abuse detection will receive no useful client IP information. The fix is to read from c.req.header('x-real-ip') before stripping headers, or to exclude x-real-ip from HEADERS_TO_STRIP and instead read it directly.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/services/proxy-service.ts",
+      "line": 203,
+      "component": "services/gateway"
+    },
+    {
+      "severity": "HIGH",
+      "title": "SQL injection in PostgreSQL CDC START_REPLICATION command via publicationName and slotName",
+      "description": "The startCdcStream method builds a START_REPLICATION SQL command by directly interpolating config.publicationName and config.slotName into the query string without sanitization or parameterization. At line 331, publicationName is embedded inside single quotes: `publication_names '${config.publicationName}'`. At line 333, slotName is embedded inside double quotes: `SLOT \"${config.slotName}\"`. The parseConfig function (line 83) only checks that these fields are non-empty strings but does not enforce the documented regex constraint [a-z0-9_]{1,63} from the types.ts interface (line 123). A user creating a connector with a publicationName containing a single quote (e.g., \"foo'; DROP TABLE users; --\") or a slotName containing a double quote can inject arbitrary SQL into the replication command sent to the source PostgreSQL server. While this targets the source database (not the platform database), the connector config is user-provided through the POST /connectors API with an unvalidated z.record(z.unknown()) config schema. The START_REPLICATION protocol command does not support parameterized queries, so the fix must validate these identifiers against a strict allowlist regex (e.g., /^[a-z0-9_]{1,63}$/) in parseConfig before interpolation.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/connectors/postgres-cdc/postgres-cdc-connector.ts",
+      "line": 331,
+      "component": "connectors/postgres-cdc"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "BullMQ queues use module-level process.env Redis URL instead of injected dependency",
+      "description": "The sync-service.ts file reads OP_REDIS_URL from process.env at module load time (line 186) and uses it to construct three BullMQ Queue instances (syncQueue at line 268, batchQueue at line 278, ontologyQueue at line 291). The createSyncService factory receives deps.redis (an ioredis client) for progress tracking and pub/sub, but the BullMQ queues independently resolve their Redis connection from the module-level env var. If the injected Redis client was configured with a different URL (e.g., via config file or service discovery), the queues connect to a different Redis instance than the workers. This would cause enqueued jobs to be invisible to workers, resulting in syncs that remain permanently in 'queued' status with no errors logged. The same pattern exists in webhook-receive-service.ts (line 168), upload-service.ts (line 131), and reconciliation-service.ts (line 170). All four services should derive the Redis URL from the injected dependency or accept it as an explicit parameter in the service deps interface.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/sync-service.ts",
+      "line": 186,
+      "component": "services/sync-service"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "BullMQ Queue in webhook-receive-service uses module-level process.env Redis URL",
+      "description": "Same issue as sync-service.ts: webhook-receive-service.ts reads OP_REDIS_URL from process.env at module load time (line 168) and constructs a BullMQ Queue (ontologyQueue at line 182) with this URL instead of deriving it from the injected deps. If the environment variable differs from the Redis URL used by the main application config or workers, enqueued ontology mapping jobs will be sent to the wrong Redis instance and never processed.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/webhook-receive-service.ts",
+      "line": 168,
+      "component": "services/webhook-receive-service"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "BullMQ Queue in upload-service uses module-level process.env Redis URL",
+      "description": "Same issue as sync-service.ts: upload-service.ts reads OP_REDIS_URL from process.env at module load time (line 131) and constructs BullMQ Queues with this URL instead of using the injected dependency. If the environment variable differs from the Redis URL used by the main application or workers, file parse jobs will be enqueued to the wrong Redis instance and never processed, causing uploads to remain stuck in 'processing' status indefinitely.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/upload-service.ts",
+      "line": 131,
+      "component": "services/upload-service"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "BullMQ Queue in reconciliation-service uses module-level process.env Redis URL",
+      "description": "Same issue as sync-service.ts: reconciliation-service.ts reads OP_REDIS_URL from process.env at module load time (line 170) and constructs a BullMQ Queue with this URL instead of using the injected dependency. If the environment variable differs from the Redis URL used by workers, reconciliation jobs will be enqueued to the wrong Redis instance and never processed.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/reconciliation-service.ts",
+      "line": 170,
+      "component": "services/reconciliation-service"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Webhook delivery log cursor pagination may skip rows with identical received_at timestamps",
+      "description": "The listByWebhookId cursor pagination in WebhookDeliveryLogRepositoryImpl uses `received_at < (SELECT received_at FROM ... WHERE id = $2)` to paginate (line 130). If multiple delivery log rows have the exact same received_at timestamp, rows sharing the cursor row's timestamp are excluded from subsequent pages, causing them to be silently skipped. The subquery also does not filter by webhook_id, so if the cursor ID happens to match a delivery log belonging to a different webhook (unlikely with UUIDs but semantically incorrect), pagination would use the wrong timestamp boundary. The fix should use a composite cursor (received_at, id) with a tie-breaking condition like `(received_at, id) < ((SELECT received_at, id FROM ... WHERE id = $2))` or switch to id-based cursor pagination.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/repositories/webhook-delivery-log-repository.ts",
+      "line": 130,
+      "component": "repositories/webhook-delivery-log-repository"
+    },
+    {
+      "severity": "HIGH",
+      "title": "SET LOCAL statement_timeout has no effect outside a transaction",
+      "description": "The executeQuery method calls `SET LOCAL statement_timeout = 30000` on line 426, but SET LOCAL only takes effect within a transaction block (BEGIN/COMMIT). Since no transaction is started, the statement_timeout setting is silently ignored, leaving queries with no timeout protection. A malicious or poorly constructed structured query could run indefinitely, exhausting database connections and causing denial of service. Fix: wrap the queries in a BEGIN/COMMIT block, or use `SET statement_timeout` (without LOCAL) and reset it in the finally block.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/services/query-service.ts",
+      "line": 426,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "buildJoinTableDDL ignores cascadeDelete parameter, always uses ON DELETE CASCADE",
+      "description": "The buildJoinTableDDL function accepts a `cascadeDelete` boolean parameter but the generated SQL always hard-codes `ON DELETE CASCADE` on both foreign key references (lines 174-175). When cascadeDelete is false (the caller intends RESTRICT behavior), the join table will still cascade deletes, potentially causing unintended data loss when a referenced entity row is deleted. The cascadeDelete parameter should control whether ON DELETE CASCADE or ON DELETE RESTRICT is used.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/utils/ddl-builder.ts",
+      "line": 174,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "RLS policy tenantId not properly sanitized against SQL injection",
+      "description": "In buildRlsDDL, the tenantId is interpolated directly into a SQL string literal after only removing hyphens (`tenantId.replace(/-/g, '')`). If a tenantId ever contained a single quote (e.g., through a crafted JWT or misconfigured identity provider), the resulting SQL `USING (current_setting('app.tenant_id') = '${tenantSafe}')` would be vulnerable to SQL injection. While tenant IDs are typically UUIDs, the function does not validate this. The value should be escaped with single-quote doubling or use a parameterized approach.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/utils/ddl-builder.ts",
+      "line": 98,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Expression transform validation can be bypassed with string concatenation",
+      "description": "The EXPRESSION_DANGEROUS_PATTERNS use word-boundary regex checks (e.g., /\\bconstructor\\b/, /\\bFunction\\b/) which can be bypassed by splitting the keyword across string operations. For example, `this['constru' + 'ctor']` bypasses the \\bconstructor\\b check, and `this['Func' + 'tion']` bypasses \\bFunction\\b. While this is defense-in-depth (the execution service has its own sandbox), a bypass here means dangerous expressions get stored and repeatedly executed. Consider also blocking bracket notation property access patterns like `this[` combined with string concatenation.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/schemas/index.ts",
+      "line": 97,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "countDataRows bypasses identifier validation used everywhere else",
+      "description": "The countDataRows method in entity-repository.ts uses a custom double-quote escaping scheme (line 137-138) for schema and table names instead of the quotePgIdentifier function that validates identifiers against a strict regex and is used consistently everywhere else. While the double-quote escaping prevents SQL injection, it skips the regex validation that guards against malformed identifiers. If schemaName or entitySlug contain unexpected characters (e.g., from a corrupted database row), this method would silently attempt to query an invalid table name instead of failing fast with a clear error. Use quotePgIdentifier for consistency.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/repositories/entity-repository.ts",
+      "line": 137,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Mapping rule update allows changing transformType to 'expression' without validating existing transform value",
+      "description": "In the updateMappingRuleRequest schema (line 157-182), the superRefine checks dangerous patterns when transformType is 'expression' OR when transformType is undefined and transform is provided. However, when a user PATCHes only `transformType: 'expression'` without providing a new `transform` value, the existing stored transform (which may have been saved as a 'constant' or 'template' type and not subject to expression validation) is NOT re-validated. This means a user could: (1) create a rule with transformType='constant' and transform='process.exit(1)', (2) then PATCH it to transformType='expression'. The dangerous expression would then be executed by the execution service.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/schemas/index.ts",
+      "line": 157,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "LOW",
+      "title": "Cleanup service DROP TABLE without CASCADE may fail on tables with dependent views",
+      "description": "In the cleanup service (line 71), shadow tables are dropped with plain `DROP TABLE` without CASCADE. If a union migration view still references a shadow table (e.g., due to a race condition or incomplete cleanup of a previous migration), the DROP will fail with a PostgreSQL dependency error. The error is caught and the table is marked 'corrupt', but this means the cleanup effectively stalls for that table. Since these are known shadow tables being cleaned up, DROP TABLE CASCADE would be more appropriate.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/services/cleanup-service.ts",
+      "line": 71,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "LOW",
+      "title": "Race condition between findById tenant check and confirm/reject in draft routes",
+      "description": "In the drafts confirm and reject routes, there is a TOCTOU (time-of-check-time-of-use) pattern: first findById checks tenant_id ownership (line 65-67), then confirm/reject is called without tenant_id in the WHERE clause. The draftRepo.confirm UPDATE uses `WHERE id = $2 AND status = 'draft'` without tenant_id. Between the findById check and the confirm call, a concurrent request from a different tenant could theoretically race (though the window is small). The confirm/reject SQL should include a tenant_id condition for defense in depth.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ontology/src/routes/drafts.ts",
+      "line": 70,
+      "component": "services/ontology"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "ReDoS vulnerability in condition evaluator matches operator",
+      "description": "The `matches` operator at line 196 creates `new RegExp(condValue)` from user-supplied pipeline definition input without any complexity bounds or timeout. While the operator catches regex syntax errors, it does not protect against catastrophic backtracking. A malicious regex like `(a+)+$` matched against a long string of 'a's followed by a non-matching character causes exponential execution time, blocking the Node.js event loop and causing denial of service for all concurrent pipeline runs on the same worker.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/condition-evaluator.ts",
+      "line": 196,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "SSRF blocklist inconsistency: execution engine missing IPv6 link-local fe80: pattern",
+      "description": "The pipeline-service's SSRF blocklist (save-time validation) includes a pattern for IPv6 link-local addresses (`/^https?:\\/\\/\\[fe80:/i`) at line 388, but the execution engine's runtime SSRF blocklist is missing this pattern entirely. Since the execution engine is the actual enforcement point when webhook URLs are dynamically constructed or when definition validation was bypassed at write time (e.g., via direct DB manipulation or migration), this gap allows SSRF requests to IPv6 link-local addresses at runtime. An attacker could craft a webhook step URL like `http://[fe80::1%25eth0]/` that passes the runtime check.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts",
+      "line": 224,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Execution tracker SSE shows step as completed after after:step hook failure overwrites it to failed",
+      "description": "When a step completes successfully, the execution tracker is updated to 'completed' status (line 1707) and SSE subscribers are notified. If the subsequent after:step hook then fails (lines 1742-1751), the DB row is correctly updated to 'failed', but the execution tracker is never updated back to 'failed' for that step. SSE subscribers see the step as 'completed' while the authoritative DB record shows 'failed'. This creates an inconsistent view for real-time monitoring clients, who would not know the step actually failed due to a critical hook failure.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts",
+      "line": 1745,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Parallel step waitMode=any causes resource leak with uncontrolled background branch execution",
+      "description": "When a parallel step uses `waitMode: 'any'`, `Promise.race` returns as soon as the first branch resolves. The losing branches continue executing in the background indefinitely -- making HTTP calls (webhook steps), executing sandbox code, writing step status updates to the database, and consuming BullMQ worker concurrency slots. There is no cancellation mechanism to abort the losing branches. On long-running branches (e.g., with wait steps or approval steps), this wastes significant resources and writes misleading step status records to the database for steps that will never contribute to the pipeline result.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts",
+      "line": 825,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "LOW",
+      "title": "Parallel branches share mutable stepOutputs Map causing cross-branch data leakage",
+      "description": "The `traverseBranch` function executes steps that write to `ctx.stepOutputs`, which is the same shared Map instance across all parallel branches. When branches run concurrently via `Promise.all` or `Promise.race`, one branch's step can read another branch's step output through `resolveStepInput` if it references a step ID from the sibling branch. This produces non-deterministic behavior depending on branch execution order, since the output availability depends on which branch's step finishes first. Each branch should operate on an isolated copy of stepOutputs to prevent cross-contamination.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts",
+      "line": 846,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "LOW",
+      "title": "Approval service in-memory store grows unboundedly with no eviction for completed approvals",
+      "description": "The ApprovalService stores approval records in an in-memory Map that is never cleaned up after an approval decision is submitted or times out. Unlike the ExecutionTracker which has `archiveToHistory` and `MAX_ACTIVE_EXECUTIONS` caps, the approval service's store grows indefinitely over the lifetime of the process. In a high-throughput deployment with many approval steps, this constitutes a memory leak. Completed/timed-out approval records should be evicted after the execution engine has consumed the decision.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/approval-service.ts",
+      "line": 122,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "LOW",
+      "title": "Trigger service evaluateFilter leaks timeout timer on successful evaluation path",
+      "description": "In the `evaluateFilter` function, when `expr.evaluate(eventData)` resolves before the timeout, `clearTimeout(timeoutHandle)` is called inside the `.then()` callback. However, if the Promise.race resolves with the evaluate branch first, the `timeoutPromise` rejection handler (the setTimeout callback) is never cancelled in the error path. Specifically, if the evaluate call itself throws synchronously or the promise rejects before the race resolves, the catch block returns `true` but the timeout timer remains active. The timer will fire later, call `reject()` on an already-settled promise, which is harmless but represents a dangling timer resource.",
+      "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/trigger-service.ts",
+      "line": 102,
+      "component": "services/pipeline"
+    },
+    {
+      "severity": "HIGH",
+      "title": "User-supplied fetch init can override redirect policy via nested object spreading",
+      "description": "In handleFetch, user-supplied args[1] is cast as RequestInit and spread into the fetch call (line 319: `{...init, redirect: 'manual', signal: controller.signal}`). While the explicit `redirect: 'manual'` overrides a direct `redirect` property, the user-supplied init is not sanitized. A malicious plugin could pass properties that interfere with the security model, for example setting a custom `dispatcher` (in undici-based Node.js fetch) to bypass the DNS rebinding check, or injecting headers that impersonate internal services (e.g., `headers: {'X-Service-Token': '...'}`) to external attacker-controlled servers. The init should be restricted to a safe allowlist (method, headers, body) rather than blindly spreading all properties.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/context-call-handler.ts",
+      "line": 309,
+      "component": "services/execution"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "SSRF TOCTOU: DNS resolution and fetch use separate connections",
+      "description": "assertHostnameResolvesToPublicIp resolves DNS and checks the IPs, but the subsequent fetch() call resolves DNS independently. Between the check and the fetch, the DNS record could change (DNS rebinding). Although the redirect:'manual' mitigation and URL pattern blocklist provide defense-in-depth, the fundamental TOCTOU gap means a sophisticated attacker with a DNS server that returns a public IP first, then an internal IP, could bypass the check. The proper fix is to pass the resolved IP directly to fetch (e.g., via a custom resolver or by rewriting the URL to use the resolved IP with a Host header).",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/context-call-handler.ts",
+      "line": 306,
+      "component": "services/execution"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Unbounded SSE log buffer can cause memory exhaustion",
+      "description": "In SseManager.publish(), every log line is appended to the logBuffers map (line 199: `buf.push(logLine)`) with no size limit. For long-running executions producing millions of log lines (e.g., a tight loop printing to stdout), this buffer grows without bound and is retained for LOG_BUFFER_TTL_MS (5 minutes) after execution completes. A malicious or buggy execution generating 10M+ log lines could exhaust process memory. The buffer should have a maximum size (e.g., ring buffer or cap at N entries).",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/sse-manager.ts",
+      "line": 199,
+      "component": "services/execution"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Plugin bundle cache key parsing breaks when tenantId contains a colon",
+      "description": "The cache invalidate function (line 215-218) splits the cache key on ':' and assumes parts[0] is tenantId and parts[1] is pluginId. The key format is `${tenantId}:${pluginId}:${version}`. While the comment says 'tenantId may contain hyphens (UUID) but not colons', if a tenantId ever contains a colon (e.g., a non-UUID tenant identifier), the split would misparse the key. The pluginId and version fields (also UUIDs/strings) could also theoretically contain colons. A delimiter that cannot appear in UUIDs should be used, or the key should use a structured format that supports unambiguous parsing.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/plugin-cache.ts",
+      "line": 215,
+      "component": "services/execution"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Reconnect loop creates unbounded timer chain without cleanup on stop()",
+      "description": "scheduleReconnect() (line 146-163) creates a setTimeout that, on failure, recursively calls scheduleReconnect(5_000). The handle for this timeout is never stored, so calling stop() does not cancel a pending reconnect timer. If the sandbox crashes and the service is shutting down, the reconnect timer chain continues to fire and attempt connections after cleanup has completed. This can cause 'use after free' style errors on the destroyed socket or pool.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/sandbox-manager.ts",
+      "line": 146,
+      "component": "services/execution"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Docker forceKill timer uses async callback in setTimeout which silently swallows errors",
+      "description": "In routeToDocker (line 395-402), the setTimeout callback is declared as `async () => {...}` and calls `await deleteDockerContainer(...)`. Because setTimeout does not handle Promise rejections from async callbacks, if deleteDockerContainer throws after the .catch() handler (e.g., socket error), the rejection is unhandled. More critically, `forceKilled = true` is set inside the async callback which races with the `try/finally` block at line 410 -- the flag may be set after `clearTimeout(forceKillTimer)` on line 411 but before the `if (forceKilled)` check on line 413, creating a race where a timed-out container is treated as completed normally.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/execution-router.ts",
+      "line": 395,
+      "component": "services/execution"
+    },
+    {
+      "severity": "LOW",
+      "title": "handleSandboxCrash does not clean up executionStartedAt and activeExecutionContexts maps",
+      "description": "When handleSandboxCrash is called (line 726-758 in execution-service.ts), it updates the DB status and publishes SSE errors for killed execution IDs, but it does not remove the corresponding entries from the executionStartedAt and activeExecutionContexts Maps. The dispatchExecution's finally block (line 550-553) would normally clean these up, but if the execution's Promise.race was resolved by the sandbox crash (socket error), the dispatchExecution catch/finally may not run for all crashed executions. This leads to stale entries that could cause context calls to be incorrectly routed to dead execution contexts.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/execution-service.ts",
+      "line": 726,
+      "component": "services/execution"
+    },
+    {
+      "severity": "LOW",
+      "title": "readBuffer uses inefficient Buffer.concat on every data chunk",
+      "description": "In the Unix socket client, every incoming data chunk triggers `readBuffer = Buffer.concat([readBuffer, chunk])` (line 260), which allocates a new buffer and copies both the existing and new data on every chunk. For high-throughput execution with many log lines, this O(n^2) pattern can cause significant GC pressure and CPU overhead. A buffer list approach (collecting chunks in an array and only concatenating when needed for parsing) would be more efficient.",
+      "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/unix-socket-client.ts",
+      "line": 260,
+      "component": "services/execution"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Path traversal in app-serving MinIO proxy allows reading arbitrary S3 objects",
+      "description": "The rawPath variable in the /apps/:slug/* route handler at line 479 is extracted from the URL by splitting on `/apps/${slug}/` and used directly to construct a MinIO object key at line 607 without any path traversal validation. An attacker can request `/apps/my-app/../../other-tenant/other-app/builds/X/bundle.js` to read objects belonging to other tenants in the same MinIO bucket. The rawPath is URL-decoded by the router but never checked for `..` segments, leading to arbitrary key traversal within the `op-app-artifacts` bucket. This is a cross-tenant data access vulnerability. The `validateFilePath` function exists for VFS paths but is never applied to the serving path.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/index.ts",
+      "line": 607,
+      "component": "index.ts (app serving route)"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "SSE build log stream does not verify app ownership before exposing build logs",
+      "description": "The GET /builds/:buildId/logs/stream route in versions.ts does not verify that the authenticated user's tenant owns the app identified by appId. The route reads appId from the URL param but only checks that the user is authenticated, then immediately starts streaming Redis-backed build logs. Any authenticated user who knows or guesses a buildId can subscribe to build logs of another tenant's app. The other build routes (GET /builds, GET /builds/:buildId, DELETE /builds/:buildId) all call buildService.getBuild/listBuilds/deleteBuild which internally verify tenant ownership, but the log stream route bypasses this check entirely.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/routes/versions.ts",
+      "line": 98,
+      "component": "routes/versions.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Race condition: guest rate limit INCR and EXPIRE are not atomic",
+      "description": "The checkGuestRateLimit function at line 172 performs a Redis INCR followed by a conditional EXPIRE as two separate Redis commands. Under high concurrency, two requests can both see count===1 from INCR (the second request arriving between INCR and EXPIRE of the first), but the real issue is the reverse: if the EXPIRE call fails (network blip, Redis error) after INCR succeeds, the key persists forever without a TTL, permanently blocking that IP from creating guest sessions. A single MULTI/EXEC pipeline or a Lua script would make this atomic. Additionally, since Redis errors on EXPIRE are not caught, a transient failure could leave stale rate-limit keys that never expire.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/index.ts",
+      "line": 172,
+      "component": "index.ts (guest rate limiting)"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Slug not validated against XSS in error JSON responses and redirect URL",
+      "description": "When the slug resolves to null, the error messages at lines 499 and 550 include the raw slug from the URL in the JSON response: `App \"${slug}\" not found`. Additionally at line 491, the slug is interpolated into a redirect URL via encodeURIComponent(c.req.url) which includes the slug verbatim. While JSON Content-Type headers typically prevent browser XSS rendering, if the slug contains special characters, this could cause issues in client-side rendering that uses innerHTML or dangerouslySetInnerHTML. More critically, the slug is used directly in the Set-Cookie Path directive at line 540 (`Path=/apps/${slug}`) without sanitization -- a slug containing semicolons could inject additional cookie attributes.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/index.ts",
+      "line": 540,
+      "component": "index.ts (app serving route)"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "BFF data proxy routes read executionServiceUrl from env on every request instead of using injected config",
+      "description": "The BFF data proxy routes (GET/POST/PATCH/PUT/DELETE /bff/data/:entity) read `process.env['EXECUTION_SERVICE_URL']` on every request at lines 231, 281, 341, 390, 438, 484 instead of using the executionServiceUrl that was injected via the service config at startup. This creates two problems: (1) it is inconsistent with the rest of the codebase which injects config at service creation time and passes it through dependency injection, and (2) if the env var is changed at runtime (e.g., by a container orchestrator hot-reloading env), some code paths use the old value while BFF routes use the new one, leading to split-brain routing.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/routes/bff.ts",
+      "line": 231,
+      "component": "routes/bff.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Embed serve route accepts appId from JWT payload for bundle URL but does not verify app existence",
+      "description": "The embed serve route at line 276 constructs an app URL using `payload.appId` directly from the JWT payload: `const appUrl = ${baseUrl}/apps/${payload.appId}`. The validateEmbedToken call checks the JWT signature and DB revocation but never verifies that the app still exists or that it has an active build. If an app is deleted after an embed token was issued, the served HTML will reference a non-existent app's bundle URL, but more importantly the appId from the JWT is used without verifying it matches a real app -- a subtlety if the embed_tokens DB row was created for an app that has since been soft-deleted.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/routes/embed.ts",
+      "line": 276,
+      "component": "routes/embed.ts"
+    },
+    {
+      "severity": "LOW",
+      "title": "Uncaught promise rejection in HTTP response handler when arrayBuffer() fails",
+      "description": "In the main HTTP server handler at line 818, the non-SSE response path calls `void response.arrayBuffer().then(...)` without a .catch() handler. If arrayBuffer() rejects (e.g., the response body stream errors), this creates an unhandled promise rejection that could crash the process in strict environments. The SSE path has a .catch() on the pump function but the standard response path does not.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/index.ts",
+      "line": 818,
+      "component": "index.ts (HTTP server)"
+    },
+    {
+      "severity": "LOW",
+      "title": "SSE keepalive write error handler attempts to close already-errored writer",
+      "description": "In the preview reload SSE stream at line 696, when the keepalive write fails (caught by .catch()), the handler calls `sub.unsubscribe` and `sub.quit()` but does not call `writer.close()`. Conversely, the sub.on('error') handler at line 689 calls `writer.close()` but does not clear the keepalive interval. This means on a Redis error, the keepalive interval continues running and attempting writes to a closed writer, generating additional errors until the client disconnects and the abort handler fires.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/index.ts",
+      "line": 689,
+      "component": "index.ts (SSE preview reload)"
+    },
+    {
+      "severity": "LOW",
+      "title": "App version restore operation is not atomic -- partial state on failure",
+      "description": "The restoreVersion function in app-version-service.ts at lines 170-189 first deletes all current files one by one in a loop, then creates new files one by one from the snapshot. If the process crashes or an error occurs between the delete and create phases (e.g., after deleting files but before writing the restored ones), the app's VFS is left in an empty state with all files lost. This operation should be wrapped in a database transaction to ensure atomicity. The sequential file.delete and file.create calls are each individual queries outside any transaction boundary.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/services/app-version-service.ts",
+      "line": 170,
+      "component": "services/app-version-service.ts"
+    },
+    {
+      "severity": "LOW",
+      "title": "Deployment repository update() does not set updated_at on write",
+      "description": "The DeploymentRepository.update() method at line 91 does not include `updated_at = now()` in the SET clause, unlike AppRepository.update() which correctly includes it. The recoverInterruptedBuilds() function at line 748 in build-service.ts explicitly sets `updated_at = now()` in its raw SQL, confirming that the column exists and is expected to be maintained. However, all other update calls through buildRepo.update() (status transitions, bundle_path, error_message, etc.) do not update this timestamp. This means the updated_at column becomes stale after the initial build creation, which could cause recoverInterruptedBuilds to mark recent builds as interrupted at startup if the grace period check relies on updated_at being current.",
+      "file": "/home/ubuntu/topics/oneplatform/services/app/src/repositories/deployment-repository.ts",
+      "line": 91,
+      "component": "repositories/deployment-repository.ts"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Unhandled promise rejection in HTTP adapter can crash the process",
+      "description": "When app.fetch() returns a Promise that rejects (e.g., due to an uncaught middleware error), line 313 uses `void responseOrPromise.then(handleResponse)` with no .catch() handler. The void keyword suppresses linting but does not handle the rejection. In Node.js 15+, an unhandled promise rejection terminates the process by default. A single malformed request that triggers an unhandled error in Hono's middleware stack would crash the entire logging service. The fix is to add `.catch((err) => { res.writeHead(500); res.end(); console.error(...); })` to the promise chain.",
+      "file": "/home/ubuntu/topics/oneplatform/services/logging/src/index.ts",
+      "line": 313,
+      "component": "services/logging"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "queryByResource method lacks tenant isolation, enabling cross-tenant data access",
+      "description": "The public method AuditEventRepository.queryByResource(resourceType, resourceId) queries audit events across all tenants without any tenantId filter. While not currently exposed via HTTP routes, it is a public method on the exported repository class. Any future route handler or internal caller that uses this method without manually adding tenant filtering would leak audit events from other tenants. The fix is to add a mandatory tenantId parameter to enforce tenant isolation at the repository level, consistent with all other query methods in the codebase.",
+      "file": "/home/ubuntu/topics/oneplatform/services/logging/src/repositories/audit-event-repository.ts",
+      "line": 179,
+      "component": "services/logging"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "CSV export vulnerable to formula injection in spreadsheet applications",
+      "description": "The CSV export endpoint constructs CSV rows by quoting string fields and escaping double quotes, but does not sanitize against CSV formula injection. If user-controlled fields (message, trace_id, service) begin with characters like =, +, -, or @, the exported CSV could execute arbitrary formulas when opened in Excel, Google Sheets, or LibreOffice Calc. For example, a log message of '=HYPERLINK(\"http://evil.com\",\"click\")' would be rendered as a clickable link. The fix is to prefix cell values starting with =, +, -, @, \\t, or \\r with a single quote or tab character to neutralize formula interpretation.",
+      "file": "/home/ubuntu/topics/oneplatform/services/logging/src/routes/logs.ts",
+      "line": 182,
+      "component": "services/logging"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Hooks route ignores the plugin ID parameter, returning unscoped results",
+      "description": "The GET /:id/hooks route at line 18 accepts a plugin ID path parameter and the comment says 'This public route lists hooks registered for a specific plugin.' However, the implementation completely ignores the :id param and calls hookService.resolveChain(stage, tenantId) which returns hooks from ALL plugins for that stage/tenant combination. This violates the API contract -- callers asking for hooks of a specific plugin will receive hooks from all plugins, potentially exposing information about other plugins' hook registrations and confusing consumers who rely on plugin-scoped results.",
+      "file": "/home/ubuntu/topics/oneplatform/services/plugin/src/routes/hooks.ts",
+      "line": 18,
+      "component": "routes/hooks"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Cursor pagination uses single-column (id) filter with multi-column ORDER BY, producing incorrect pages",
+      "description": "The plugin list query uses ORDER BY installed_at DESC, id DESC (line 150) but the cursor condition filters only on id (id < $cursor at line 136). Because UUIDv4 ids are randomly generated and do not correlate with installed_at ordering, this creates a mismatch: the cursor skips rows by id value while the sort order is driven by installed_at. Rows with a later installed_at but a lower UUID (lexicographically) than the cursor will be incorrectly excluded, causing some plugins to be skipped in pagination. The cursor condition should be a composite: (installed_at, id) < ($cursor_installed_at, $cursor_id) to match the ORDER BY.",
+      "file": "/home/ubuntu/topics/oneplatform/services/plugin/src/repositories/plugin-repository.ts",
+      "line": 136,
+      "component": "repositories/plugin-repository"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Ajv compile() called per-request with distinct schema objects leaks memory unboundedly",
+      "description": "Both instance-service.ts and upgrade-service.ts call ajv.compile(schema) on every config validation request, where the schema is the plugin's configSchema loaded from the database. Ajv v6 internally caches compiled schemas keyed by their serialized JSON. Each distinct plugin configSchema object creates a new permanent cache entry in the shared Ajv instance. Over time, with many plugins and many config schema variations (including schema updates across versions), the Ajv internal cache grows without bound, constituting a memory leak. The same issue exists in both files (lines 42 and 20 respectively). The fix would be to use a bounded LRU cache for compiled validators keyed by a stable hash of the schema JSON.",
+      "file": "/home/ubuntu/topics/oneplatform/services/plugin/src/services/instance-service.ts",
+      "line": 42,
+      "component": "services/instance-service"
+    },
+    {
+      "severity": "LOW",
+      "title": "Cache key tenantId and pluginId path parameters not validated, allowing cross-tenant key collision",
+      "description": "The internal cache routes validate the 'key' path parameter with regex /^[\\w\\-.:]+$/ (line 178) but do not validate the 'tenantId' and 'pluginId' path parameters before they are interpolated into the Redis key via CacheRepository.buildKey() (format: plugin:cache:{tenantId}:{pluginId}:{key}). A tenantId or pluginId containing ':' would create a Redis key that collides with keys belonging to a different tenant or plugin, allowing cross-tenant cache reads and writes. While the route is protected by a service token, a compromised or buggy internal service could exploit this. The same validation regex should be applied to tenantId and pluginId.",
+      "file": "/home/ubuntu/topics/oneplatform/services/plugin/src/routes/internal.ts",
+      "line": 174,
+      "component": "routes/internal"
+    },
+    {
+      "severity": "LOW",
+      "title": "findById error swallowed in createInstance, masking database connection failures",
+      "description": "In createInstance, the call pluginRepo.findById(pluginIdOrManifestId).catch(() => null) at line 295 catches ALL errors including database connection errors, transient PostgreSQL failures, and pool exhaustion. The intent is to gracefully fall back to findActiveByManifestId when the input is not a UUID, but the blanket catch converts actual infrastructure failures into a 'not found' error path. If both calls fail due to a DB outage, the user sees 'Plugin not found' (404) instead of a 503 service unavailable error, making debugging harder.",
+      "file": "/home/ubuntu/topics/oneplatform/services/plugin/src/services/instance-service.ts",
+      "line": 295,
+      "component": "services/instance-service"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "X-Forwarded-For port suffix not stripped, causing false IP allowlist denials",
+      "description": "The parseIpFromRequest function's comment says 'strip any port suffix' but the code does not actually strip port suffixes from the X-Forwarded-For header value. When X-Forwarded-For contains an IP with a port (e.g., '192.168.1.1:12345'), the returned string includes the port. This causes parseIpv4() to return null (since '1:12345' is not a valid octet) and the IP will never match any allowlist entry, resulting in a false 403 denial for legitimate requests routed through proxies that append port numbers to X-Forwarded-For. Similarly, bracketed IPv6 addresses with ports (e.g., '[::1]:8080') would not be parsed correctly.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/core/src/middleware/ip-allowlist.ts",
+      "line": 44,
+      "component": "middleware/ip-allowlist"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Unhandled JSON parse exception in response envelope middleware can crash request",
+      "description": "The responseEnvelopeMiddleware calls 'c.res.clone().json()' at line 27 without a try/catch. If any route handler sets Content-Type to 'application/json' and returns a 2xx status with a body that is not valid JSON, this call throws a SyntaxError. Because this occurs after 'await next()' (in the outgoing middleware phase), the error is not caught by Hono's app.onError handler, which only catches errors thrown during the inbound phase. This would result in an unhandled exception, causing the client to receive a broken or opaque error response instead of a proper error envelope.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/core/src/middleware/response-envelope.ts",
+      "line": 27,
+      "component": "middleware/response-envelope"
+    },
+    {
+      "severity": "LOW",
+      "title": "Cursor HMAC comparison leaks timing information via early length check",
+      "description": "In decodeCursor, the signature comparison uses 'Buffer.from(sig)' and 'Buffer.from(expectedSig)' with the default UTF-8 encoding, then does an early-exit length comparison before timingSafeEqual. This pattern introduces a timing side-channel: an attacker can determine whether their signature has the correct length by measuring response time. In contrast, the verifyUserContextSignature function in service-auth.ts correctly handles this by always calling timingSafeEqual with equal-length buffers. In practice, HMAC-SHA256 base64url output is always 43 characters, so the length is effectively fixed and not exploitable, but the pattern is inconsistent with the security-conscious approach used elsewhere in the codebase.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/core/src/cursor.ts",
+      "line": 50,
+      "component": "cursor"
+    },
+    {
+      "severity": "LOW",
+      "title": "X-User-Context JSON is cast without runtime validation, risking downstream type violations",
+      "description": "In serviceAuthMiddleware, after HMAC verification of X-User-Context, the header value is parsed as JSON and cast to UserContext via 'JSON.parse(userJson) as UserContext' without any runtime schema validation (e.g., zod). If a trusted but buggy peer service sends a malformed user context (e.g., missing 'roles' array, missing 'tenantId'), the cast succeeds silently and downstream code would operate on a UserContext that doesn't match the TypeScript interface. While the HMAC signature ensures only authenticated services can produce this header, a bug in any service could propagate invalid user contexts to all downstream services. Adding a zod schema or runtime check would catch such issues at the trust boundary.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/core/src/middleware/service-auth.ts",
+      "line": 186,
+      "component": "middleware/service-auth"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "SSE subscriptions that auto-close due to max reconnects leak in activeSubscriptions",
+      "description": "When an SSE subscription exhausts its 10 reconnect attempts, sse-subscriber.ts transitions the status to 'closed' (line 303) but never calls unsubscribe(). The client.ts wrapper (lines 250-263) only removes subscriptions from the activeSubscriptions Set when the wrapped unsubscribe() is called. If the subscription auto-closes because the server is unreachable, the Subscription object remains referenced in activeSubscriptions permanently. For long-lived client instances that create many subscriptions (e.g., in a server-side process that subscribes per-tenant), this is an unbounded memory leak because the Set grows but entries are never removed unless the user explicitly calls unsubscribe() after the subscription has already closed itself.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/client.ts",
+      "line": 251,
+      "component": "packages/sdk"
+    },
+    {
+      "severity": "LOW",
+      "title": "API key error message may leak first 3 characters of non-API-key secrets",
+      "description": "In createApiKeyHandler(), when the key fails prefix validation, the error message includes apiKey.slice(0, 3). If a user accidentally passes a non-OnePlatform secret (e.g., an AWS secret key, a database password, or another API token) as the apiKey parameter, the first 3 characters of that secret are embedded in the error message. While 3 characters is minimal exposure, the error message could end up in logs, error tracking systems (Sentry, Datadog), or client-side console output, leaking partial secret material. The fix is to omit the received key prefix entirely or replace it with the key's length.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/auth/api-key.ts",
+      "line": 27,
+      "component": "packages/sdk"
+    },
+    {
+      "severity": "LOW",
+      "title": "Transport.activeControllers is publicly accessible, allowing external abort of in-flight requests",
+      "description": "The activeControllers property on the Transport class (line 217) is declared as 'readonly' but not 'private'. Since the Transport instance is passed to all resource namespace factories, any code that obtains a reference to the transport (directly or by reflecting on the namespace closures) can call .abort() on in-flight controllers, inject new controllers, or clear the set. While the Transport is not exported from the public barrel (index.ts), it is accessible to internal code and any code that inspects the client internals. This should be declared 'private' to enforce encapsulation.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/transport.ts",
+      "line": 217,
+      "component": "packages/sdk"
+    },
+    {
+      "severity": "HIGH",
+      "title": "XSS via dangerouslySetInnerHTML in HtmlBlock ComponentPreview",
+      "description": "ComponentPreview renders HtmlBlock content using dangerouslySetInnerHTML at line 112 with user-provided HTML from the builder config panel. While the comment says the user 'controls the content', the HtmlBlock content is stored as a component prop in the builder store, which could be loaded from a server-stored layout. If a malicious actor with access to the layout data (e.g., a compromised API response, or a shared tenant where another user creates a layout) stores a script payload in the HtmlBlock's html prop, it will execute in the session context of any user who views the canvas. This is compounded by the code-generator.ts which also emits dangerouslySetInnerHTML at line 136 into generated app code. The builder canvas renders this without any sanitization.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/ComponentPreview.tsx",
+      "line": 112,
+      "component": "components/app-builder/ComponentPreview.tsx"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Stale closure in VisualPipelineEditor keyboard handler causes undo/redo to use outdated state",
+      "description": "The useEffect for keyboard shortcuts (handleKeyDown) at line 125 has no dependency array, so it registers a new handler on every render. However, handleUndo and handleRedo close over the stale 'graph', 'history', and 'future' values from the render in which they were defined. Because the effect has no deps, React removes and re-adds the handler each render, which means it uses the latest closure values. But this is by accident, not design -- the missing dependency array means the effect runs on every single render, adding and removing event listeners rapidly, which is a performance bug. More critically, if React batches state updates, handleUndo/handleRedo capture stale 'graph' state which causes redo to pop from the wrong end of the future array (line 113 pops from the end but line 184 of graph-model uses slice(0,-1) pattern inconsistently).",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/VisualPipelineEditor.tsx",
+      "line": 125,
+      "component": "components/pipeline-editor/VisualPipelineEditor.tsx"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Race condition in debounced auto-save uses stale fileVersion",
+      "description": "In AppEditor.tsx, handleEditorChange at line 147-153 captures activeFile.fileVersion at the time of the keystroke and passes it to debouncedSave. However, if the user types rapidly and a save completes between keystrokes (updating fileVersion via markSaved), the next debounced save call will use the fileVersion that was captured before the previous save completed, not the updated one. The debouncedSave function reads from storeRef.current inside its body, but the fileVersion parameter is already captured from the outer closure at call time. This can cause APP_FILE_VERSION_CONFLICT errors when rapid typing overlaps with save responses.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/editor/AppEditor.tsx",
+      "line": 150,
+      "component": "components/editor/AppEditor.tsx"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "FileTree encodes path incorrectly -- single encodeURIComponent wraps entire path including slashes",
+      "description": "At line 108, handleFileClick calls encodeURIComponent(path) on the entire file path including slashes (e.g., 'src/components/App.tsx'). This encodes the slashes themselves, producing 'src%2Fcomponents%2FApp.tsx' in the URL, which the server likely interprets as a single path segment rather than a nested file path. This would cause 404 errors when trying to open files in subdirectories. The AppEditor.tsx at line 125 correctly splits on '/' and encodes each segment individually, showing this is a known pattern but inconsistently applied.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/editor/FileTree.tsx",
+      "line": 108,
+      "component": "components/editor/FileTree.tsx"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "IDBDatabase connection leaked in enqueueMutation -- db is never closed",
+      "description": "The openMutationDb() function in pwa.ts opens an IndexedDB connection but the caller (enqueueMutation at line 150) never calls db.close() after completing the transaction. Each call to enqueueMutation opens a new database connection that is never released. Over time, especially during offline scenarios where many mutations are queued, this leaks IDBDatabase handles. While browsers eventually GC these, it can cause 'blocked' events on other IndexedDB operations and excessive resource consumption.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/lib/pwa.ts",
+      "line": 150,
+      "component": "lib/pwa.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "VisualPipelineEditor redo pops from wrong end of future array",
+      "description": "In handleRedo at line 110-122, the code pops from the END of the future array (future[future.length - 1]) but then slices off the last element with slice(0, -1). However, in handleUndo at line 103 the future stack is built by appending the current graph to the end with [...f, graph]. This means redo should pop from the END, which it does -- but this is inconsistent with the app builder store (builder.store.ts) which uses the FIFO convention where future[0] is the next redo target. While internally consistent within this component, the inverted convention means undo followed by redo may not restore the same state if multiple undo operations are performed, because the redo stack effectively operates as a LIFO stack with reversed semantics.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/VisualPipelineEditor.tsx",
+      "line": 110,
+      "component": "components/pipeline-editor/VisualPipelineEditor.tsx"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "SSE EventSource in PreviewPane never handled onerror -- reconnects silently consume resources",
+      "description": "The EventSource created at line 66 in PreviewPane.tsx has no onerror handler. When the connection fails (e.g., server restart, network issue), the browser's native EventSource auto-reconnect fires indefinitely without any backoff control. Unlike the SSEConnection class in lib/sse.ts which implements exponential backoff, this raw EventSource will hammer the server with reconnection attempts at the browser's default ~3-second interval forever. There is no UI feedback and no way for the user to know the preview reload stream is in a failed state.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/editor/PreviewPane.tsx",
+      "line": 66,
+      "component": "components/editor/PreviewPane.tsx"
+    },
+    {
+      "severity": "LOW",
+      "title": "Regex-based JSX props parser in code-generator can be confused by nested braces",
+      "description": "The parseJsxProps function at line 377 in code-generator.ts uses a non-greedy regex /=(\\{[\\s\\S]*?\\})/g to match JSX expression attributes. This regex matches the first closing brace it encounters, so prop values containing nested objects like key={{ nested: true }} will be parsed incorrectly -- the regex will capture '{' + '{ nested: true }' and stop, leaving a stray '}'. While the comment says it only handles 'the same forms the generator emits', the generator's buildPropsString at line 179 does emit nested JSON via JSON.stringify, which can produce nested braces for array/object values.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/code-generator.ts",
+      "line": 389,
+      "component": "components/app-builder/code-generator.ts"
+    },
+    {
+      "severity": "HIGH",
+      "title": "Debounce in file sync drops file changes, causing silent data loss",
+      "description": "The `debounce` helper in `startLocalWatcher` uses a single shared timer for all file paths. When multiple files change within the 300ms debounce window (common during builds or multi-file saves), only the last file is uploaded. All intermediate file changes are silently dropped. For example, if files A, B, and C change within 300ms, only C's upload is executed; A and B are never synced to the server. This causes silent data loss during `op app dev`. The fix is to use a per-file debounce (e.g., a Map<string, Timer>) so each file path gets its own independent timer.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/file-sync.ts",
+      "line": 43,
+      "component": "lib/file-sync.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Credentials file written with permissive umask before chmod",
+      "description": "In `writeCredentialsFile`, the credentials JSON is first written via `writeFileSync` (which creates the file with the process's default umask, typically 0644 or 0666 on some systems), then restricted with `chmodSync(CREDENTIALS_FILE, 0o600)`. On the very first write (file does not yet exist), there is a brief TOCTOU window where the file exists with world-readable permissions containing encrypted credentials. The fix is to use `writeFileSync` with `{ mode: 0o600 }` in the options object to atomically set the correct permissions on creation, or to write to a temp file with correct permissions and rename it into place.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/credentials.ts",
+      "line": 175,
+      "component": "lib/credentials.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "insecureTls disables TLS verification globally and permanently for the process",
+      "description": "When `insecureTls` is enabled (from a profile setting), the code sets `process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'` which disables TLS certificate verification for ALL subsequent HTTPS connections in the process, not just those to the platform URL. This is never reset. This means if a user has `insecureTls` set in their profile and runs `op plugin install https://some-registry.com/plugin.oppkg`, the plugin download will also skip TLS verification, making it vulnerable to MITM attacks. The comment acknowledges this but the scope extends beyond platform API calls to untrusted third-party URLs.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/http-client.ts",
+      "line": 67,
+      "component": "lib/http-client.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Empty platformUrl causes unhelpful 'Invalid URL' error instead of actionable message",
+      "description": "When no platform URL is configured (no --platform flag, no OP_PLATFORM_URL env var, no profile with platformUrl, and no stored credentials), `resolvePlatformUrl` returns an empty string. The `createHttpClient` strips trailing slashes producing '', and `buildUrl` then calls `new URL('' + '/')` which throws a raw `Invalid URL` error. This surfaces as an unhelpful 'Unexpected error: Invalid URL' rather than a clear message like 'No platform URL configured. Run op profile add or set OP_PLATFORM_URL.' This affects any command that makes HTTP calls when no platform is configured (everything except profile/config local operations).",
+      "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/http-client.ts",
+      "line": 31,
+      "component": "lib/http-client.ts"
+    },
+    {
+      "severity": "LOW",
+      "title": "promptPassphrase readline not properly cleaned up on SIGINT race",
+      "description": "In the `promptPassphrase` function in config/index.ts, the `process.once('SIGINT', onSigint)` handler calls `process.exit(EXIT.GENERAL)`. However, the readline interface (`rl`) is created but the `rl.close()` call within `cleanup()` may not fully restore the terminal if `process.exit` fires before the cleanup completes. The `onSigint` handler also calls `cleanup()` which calls `stdin.setRawMode(false)`, but `process.exit()` is called synchronously afterward, which may not flush stderr. More importantly, the SIGINT handler is registered with `process.once` but is not removed in the normal (non-SIGINT) resolution path's `cleanup()` call, so it persists. The `process.removeListener('SIGINT', onSigint)` is called in `onData` but not in the `onSigint` handler itself, meaning a double SIGINT could cause issues.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/config/index.ts",
+      "line": 53,
+      "component": "commands/config/index.ts"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Race condition in useAppStorage concurrent writes causes rollback to wrong value",
+      "description": "When two rapid setValue() calls are made concurrently, both capture the same rollbackValue from confirmedValueRef.current before either resolves. If write A succeeds (updating confirmedRef) and then write B fails, B rolls back to the original pre-A value, silently discarding write A's confirmed data. Unlike useMutation which serializes operations through a mutation queue, useAppStorage has no serialization mechanism for concurrent writes, leading to data inconsistency between client state and server state.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/hooks/useAppStorage.ts",
+      "line": 150,
+      "component": "packages/app-sdk"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Previous in-flight fetch not aborted when new fetchPage call starts",
+      "description": "In useQuery's fetchPage, a new AbortController is created and stored in abortControllerRef, but the previous controller is NOT aborted -- it is simply overwritten. The comment claims 'the old request...will be ignored because its abort signal fires independently' but this is incorrect: the old signal never fires. If the stale request completes after the new one, it can overwrite the cache with outdated data. For example, if refetch() starts a page-1 fetch and fetchNextPage() starts concurrently, whichever resolves last writes to the cache, potentially losing data. The effect cleanup only aborts abortControllerRef.current (the latest controller), leaking the previous request.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/hooks/useQuery.ts",
+      "line": 199,
+      "component": "packages/app-sdk"
+    },
+    {
+      "severity": "LOW",
+      "title": "Type generator does not sanitize entity/field slugs, allowing TypeScript injection",
+      "description": "In generate-types.ts, both entity.slug and field.slug are interpolated directly into generated TypeScript declaration files without validation or escaping. A malicious or compromised ontology API returning a slug containing TypeScript syntax (e.g., 'id; }; declare const x: any; //') could inject arbitrary type declarations. While .d.ts files have no runtime effect and the ontology service should validate slugs, this violates defense-in-depth: the generator trusts input from a network API without local validation.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/dev/generate-types.ts",
+      "line": 68,
+      "component": "packages/app-sdk"
+    },
+    {
+      "severity": "LOW",
+      "title": "CSS sanitizer produces malformed CSS output with trailing parenthesis",
+      "description": "The url() sanitization regex in sanitizeCss matches 'url(javascript:alert(1)' (consuming the content and first closing paren as part of [^)]*) then replaces it with 'url(about:invalid)', but the closing ')' from the original CSS is left behind, producing 'url(about:invalid))' with a doubled closing paren. This creates syntactically invalid CSS that may cause subsequent style rules to be unparseable or ignored by the browser, potentially breaking the visual appearance of the application when malicious CSS is being sanitized.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/providers/BrandingProvider.tsx",
+      "line": 79,
+      "component": "packages/app-sdk"
+    },
+    {
+      "severity": "HIGH",
+      "title": "GPG signing produces signature at wrong path, resulting in unsigned packages falsely reported as signed",
+      "description": "In signPackage(), GPG --detach-sign --armor on the unsigned tarball produces a .asc file (e.g., dist/bundle.js.unsigned.tar.gz.asc), but the signed tarball is deleted and createOppkg() looks for the signature at bundlePath + '.sig' (e.g., dist/bundle.js.sig). These are completely different paths. The .asc signature file is never found by createOppkg (fs.existsSync returns false), so the signature is silently omitted from the .oppkg archive. However, the PackResult reports signed=true and the user sees 'Signed: Yes' in the output. This means: (1) the user is told their package is cryptographically signed when it is not, (2) the .asc file is leaked on disk and never cleaned up, (3) any downstream signature verification would fail because the signature was never included in the package.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/dev/pack.ts",
+      "line": 138,
+      "component": "dev/pack.ts - signPackage + createOppkg"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Scaffold escapeJsString does not escape backticks or template literal expressions, causing generator crash",
+      "description": "The escapeJsString() function uses JSON.stringify().slice(1,-1) which escapes double-quotes and control characters but does NOT escape backticks (`) or template literal expressions (${...}). Since the scaffold source builders (buildConnectorSource, buildTransformerSource, etc.) use JavaScript template literals to construct the output, if opts.name, opts.author, or opts.id contains a backtick or ${...}, the template literal in the generator itself will be broken, causing a runtime crash with a confusing syntax error. The manifest schema does not restrict the 'name' or 'author' fields to ASCII alphanumeric characters, so these inputs are reachable via user input in 'op plugin create'.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/dev/scaffold.ts",
+      "line": 838,
+      "component": "dev/scaffold.ts - escapeJsString"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Scaffold generates invalid JavaScript identifiers when plugin name starts with digits or contains only special characters",
+      "description": "The toCamelCase(opts.name.replace(/[^a-zA-Z0-9]/g, ' ')) computation in generateScaffold() can produce identifiers that are not valid JavaScript. If the plugin name starts with digits (e.g., '123 Widget'), the entrypoint becomes '123Widget' which starts with a digit and is not a valid JS identifier. If the name contains only special characters (e.g., '---'), the entrypoint becomes an empty string. In both cases, the generated source file will have syntax errors (e.g., 'export const 123Widget = ...' or 'export const  = ...'), and the generated manifest will have an entrypoint that fails the manifest schema regex validation (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/). The developer discovers this only after running 'npm run build' or 'op plugin pack', not at scaffold time.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/dev/scaffold.ts",
+      "line": 809,
+      "component": "dev/scaffold.ts - generateScaffold"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "MySQL connector: primaryKeyColumn from INFORMATION_SCHEMA used in SQL without identifier validation",
+      "description": "The `discoverPrimaryKey` function retrieves the primary key column name from MySQL's `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` (line 480) and stores it in HandleMetadata without validating it against the `SAFE_IDENTIFIER` regex (`/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/`) that protects `database`, `table`, and `incrementalColumn`. This column name is then interpolated directly into a backtick-quoted SQL string in `buildTableQuery` at line 522 (`ORDER BY \\`${handle.primaryKeyColumn}\\` ASC`). In MySQL, column names can contain backtick characters if the column was created with escaped backtick quoting (e.g., `CREATE TABLE t (\\`bad\\`\\`name\\` INT PRIMARY KEY)`). If the `COLUMN_NAME` value from `INFORMATION_SCHEMA` contains a backtick, it would break out of the backtick quoting and enable SQL injection. Mitigation: apply the same `SAFE_IDENTIFIER` validation to the discovered column name, or strip/reject backtick characters.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/connector-mysql/src/index.ts",
+      "line": 480,
+      "component": "connector-mysql"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Webhook connector: race condition between reading and writing the pending index causes data loss",
+      "description": "In `fetchBatch`, the connector reads the pending payload index from cache (line 516), processes a batch of IDs, and then writes back a pruned index (line 619) using `cache.set`. Between the read and write, the ingestion service may be concurrently appending new payload IDs to the same cache key (`webhook:index:{instanceId}`). The `cache.set` on line 619 replaces the entire index value, silently discarding any IDs that the ingestion service added after the read on line 516. This is a TOCTOU (time-of-check-to-time-of-use) race condition that causes silent data loss of webhook payloads arriving during batch processing. Mitigation: use an atomic list-pop operation, optimistic concurrency control (versioned cache writes), or a separate 'processing' index to avoid clobbering concurrent writes.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/connector-webhook/src/index.ts",
+      "line": 619,
+      "component": "connector-webhook"
+    },
+    {
+      "severity": "LOW",
+      "title": "MySQL connector: cursor value leaked in error messages",
+      "description": "The `decodeCursor` function includes the raw cursor string in two error messages (lines 110 and 126): `Invalid cursor value -- cannot decode pagination state: ${cursor}` and `Invalid cursor value -- unexpected shape: ${cursor}`. The cursor is a base64url-encoded JSON object containing `offset` and `since` values. While the cursor does not typically contain secrets, the `since` field carries the high-water mark of the incremental column, which could contain sensitive data values (e.g., timestamps, user IDs). By contrast, the REST API connector's `decodeCursor` (line 114-117) intentionally excludes the cursor value from error messages with a comment explaining that cursor tokens may contain sensitive information. The MySQL connector should follow the same pattern for consistency and defense-in-depth.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/connector-mysql/src/index.ts",
+      "line": 110,
+      "component": "connector-mysql"
+    },
+    {
+      "severity": "HIGH",
+      "title": "LDAP bind password cached in plugin cache, violating CredentialAccessor contract and blocking rotation",
+      "description": "The LDAP provider stores the service account bind password in the plugin cache at initialize() (line 585: `await context.cache.set(BIND_PASSWORD_CACHE_KEY, bindPassword, 3600)`). The CredentialAccessor interface documentation in context.ts explicitly states: 'Never store it in the plugin's cache -- the platform rotates credentials and will deliver updated values automatically.' This has two impacts: (1) The bind password is persisted in the cache store (typically Redis) in plaintext for up to 3600 seconds, expanding the attack surface. (2) If the platform rotates the bind password, the plugin will continue using the stale cached value for up to an hour, causing authentication failures. Since AuthContext already has a `credentials` property (verified in auth-provider.ts line 79), both handleCallback() and validateToken() could call `context.credentials.get(cfg.bindCredentialKey)` directly instead of reading from cache.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-ldap/src/index.ts",
+      "line": 585,
+      "component": "auth-provider-ldap"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "LDAP validateToken uses unsanitized token as LDAP search base without baseDN scope check",
+      "description": "In validateToken(), the token string (representing a user DN) is used directly as the LDAP searchBase (line 798: `const searchBase = token.trim()`) without verifying it falls within the configured baseDN. If a forged or tampered token contains an arbitrary DN such as 'cn=admin,dc=other,dc=com', the service account will look up that entry and return its attributes in the claims. While the token normally originates from the platform's session store, defense-in-depth dictates that the plugin should verify `token.trim().toLowerCase().endsWith(cfg.baseDN.toLowerCase())` before using it as a search base. Without this check, a compromised session store or token forgery could lead to information disclosure of arbitrary directory entries accessible to the service account.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-ldap/src/index.ts",
+      "line": 798,
+      "component": "auth-provider-ldap"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "LDAP memberOf DN parsing fails on escaped commas in group names",
+      "description": "The extractMemberOfGroups() method parses memberOf DNs using simple string splitting: `dn.split(',')[0]` (line 1129). This does not handle RFC 4514 escaped commas in RDN values. For example, a group DN like 'cn=Finance\\, Legal,ou=groups,dc=example,dc=com' would be incorrectly split at the escaped comma, yielding 'cn=Finance\\' as the first RDN. The extracted group name would be 'Finance\\' instead of the correct 'Finance, Legal'. This causes group-to-role mapping failures for any group whose CN contains a comma -- a valid scenario in enterprise Active Directory environments. The fix requires a DN parser that respects backslash escaping per RFC 4514 section 3.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-ldap/src/index.ts",
+      "line": 1129,
+      "component": "auth-provider-ldap"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "OIDC redirect_uri state map has no upper bound, enabling memory exhaustion",
+      "description": "The in-memory Map `redirectUriByState` (line 366) stores one entry per concurrent auth flow. The eviction at line 499 only removes expired entries (10-minute TTL). An attacker who can repeatedly call getAuthorizationUrl() without completing the callback (e.g., by automating login initiation requests) can grow this map indefinitely within the 10-minute TTL window. At high enough request rates, this could exhaust process memory. While the comment at line 363 says 'the map stays small', there is no cap on the number of entries. A size limit (e.g., rejecting new flows when the map exceeds 10,000 entries, or using an LRU cache) would prevent this denial-of-service vector.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-oidc/src/index.ts",
+      "line": 366,
+      "component": "auth-provider-oidc"
+    },
+    {
+      "severity": "LOW",
+      "title": "OIDC provider logs client_id in initialize(), which may aid reconnaissance",
+      "description": "At line 443, the OIDC provider logs the clientId in an info-level log message: `context.logger.info('OIDC provider initialized', { issuerUrl: this.config.issuerUrl, clientId: this.config.clientId, scopes: this.config.scopes })`. While client_id is not a secret in OAuth2 (it is sent to the browser in authorization URLs), logging it at INFO level in production makes it easier for an attacker with log access to identify the OAuth client and target it for client impersonation or phishing attacks. Consider logging at DEBUG level or omitting the client_id.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-oidc/src/index.ts",
+      "line": 443,
+      "component": "auth-provider-oidc"
+    }
+  ],
+  "confirmedCritHigh": [
+    {
+      "severity": "HIGH",
+      "title": "Set-Cookie headers overwritten: browser clients lose access token cookie",
+      "description": "In the login route (auth.ts line 145-153) and bootstrap route (bootstrap.ts line 112-121), two c.header('Set-Cookie', ...) calls are made without the { append: true } option. Hono's c.header() calls headers.set() by default, which replaces the previous value. The second Set-Cookie (refresh token) overwrites the first (access token), so browser clients never receive the op_access_token cookie. This breaks browser-based authentication entirely for cookie-mode clients. Fix: change the second c.header() call to use c.header('Set-Cookie', value, { append: true }).",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/auth.ts",
+      "line": 150,
+      "component": "routes/auth.ts",
+      "verdict": {
+        "title": "Set-Cookie headers overwritten: browser clients lose access token cookie",
+        "isReal": true,
+        "reasoning": "Confirmed through source code analysis and runtime testing. In both auth.ts (lines 145-153) and bootstrap.ts (lines 112-121), two consecutive c.header('Set-Cookie', ...) calls are made without the { append: true } option. Hono's c.header() method calls headers.set() by default (verified in node_modules/hono/dist/cjs/context.js line 241), and Headers.set() replaces any existing header with the same name. Runtime testing with Node.js confirmed that calling headers.set('Set-Cookie', 'b=2') after headers.set('Set-Cookie', 'a=1') results in only 'b=2' being present. The auth service always returns both accessToken and refreshToken from login, so the refreshToken cookie always overwrites the accessToken cookie. The code path is reachable for any browser client sending an Origin header. No prior commit has ever added { append: true } to these calls. The fix is to add { append: true } to the second c.header('Set-Cookie', ...) call in both files.",
+        "severity": "HIGH"
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "Set-Cookie headers overwritten in bootstrap route (same bug as login)",
+      "description": "The bootstrap route has the same c.header('Set-Cookie', ...) overwrite bug. The refresh token cookie replaces the access token cookie on line 117-120. Browser clients completing bootstrap lose their access token cookie. Fix: add { append: true } to the second c.header('Set-Cookie', ...) call.",
+      "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/bootstrap.ts",
+      "line": 117,
+      "component": "routes/bootstrap.ts",
+      "verdict": {
+        "title": "Set-Cookie headers overwritten in bootstrap route (same bug as login)",
+        "isReal": true,
+        "severity": "HIGH",
+        "reasoning": "Confirmed real by inspecting the Hono framework source code. In `/home/ubuntu/topics/oneplatform/services/auth/src/routes/bootstrap.ts` at lines 112-120, the code calls `c.header('Set-Cookie', ...)` twice without passing `{ append: true }` as the third argument. Hono's `c.header()` implementation (in `node_modules/.pnpm/hono@4.12.25/node_modules/hono/dist/context.js` line 209-221) uses `headers.set(name, value)` by default, which per the Web API Headers spec replaces any existing header with the same name. Only when `options?.append` is truthy does it use `headers.append()`. Therefore the second Set-Cookie call (refresh token, line 117) overwrites the first (access token, line 112), and browser clients completing bootstrap would only receive the refresh token cookie, losing the access token cookie. The same bug exists in `auth.ts` login route at lines 145-153. No middleware, tests, or other mechanism compensates for this. The code path is reachable whenever a browser client (with Origin header) completes bootstrap and the result includes both an accessToken and a refreshToken. The fix is to add `{ append: true }` as the third argument to the second `c.header('Set-Cookie', ...)` call in both files."
+      }
+    },
+    {
+      "severity": "CRITICAL",
+      "title": "GraphQL fragment cycle causes stack overflow (DoS)",
+      "description": "The selectionSetDepth function recursively expands fragment spreads to calculate query depth but does not track which fragments have already been visited. If a client sends a query with circular fragment definitions (e.g., fragment A spreads fragment B, fragment B spreads fragment A), the function will recurse infinitely until the Node.js process crashes with a stack overflow. The validateSelectionSet function explicitly defers fragment body validation (line 108-110: 'Fragment body validation is deferred'), so circular fragments are never detected before selectionSetDepth is called. This is a remotely exploitable denial-of-service: any authenticated user can crash the entire gateway process with a single GraphQL request containing two mutually-recursive named fragments.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/graphql/parser.ts",
+      "line": 741,
+      "component": "services/gateway",
+      "verdict": {
+        "title": "GraphQL fragment cycle causes stack overflow (DoS)",
+        "isReal": true,
+        "severity": "CRITICAL",
+        "reasoning": "The bug is confirmed as real and exploitable. Here is the analysis:\n\n1. THE CODE: The `selectionSetDepth` function (line 741 in parser.ts) recursively expands fragment spreads to calculate query depth. It takes a `GraphQLSelectionSet` and a `fragments` map, and when it encounters a `FragmentSpread`, it looks up the fragment by name and recurses into its selection set. There is no `visited` set, no `seen` tracker, and no recursion depth limit on this function.\n\n2. NO GUARDS ELSEWHERE: I searched the entire gateway service for any fragment cycle detection (keywords: circular, cycle, visited, seen+fragment). None exists. The `validateSelectionSet` function (line 94) explicitly skips fragment spread validation (line 108-110: \"Fragment body validation is deferred\"). The `validateDocument` function (line 71) only validates field existence and arguments. Neither function detects circular fragment references.\n\n3. REACHABLE: A query like `query Q { ...A } fragment A on Query { ...B } fragment B on Query { ...A }` would parse successfully. The parser stores fragments as AST nodes with FragmentSpread references (just string names, not inlined bodies). After parsing succeeds without errors, `selectionSetDepth` is called at line 431 for every operation. With circular fragments, this function recurses infinitely: A -> B -> A -> B -> ... until a stack overflow crashes the Node.js process.\n\n4. NO PRIOR FIX: The git history shows only one commit for parser.ts (the initial creation commit `59e073a`). No fix has ever been applied.\n\n5. EXPLOITABILITY: The GraphQL route handler (graphql.ts line 96) calls `parseDocument` directly on user-supplied query strings. Any authenticated user (JWT with a tenant) can send a single POST to /api/v1/graphql with circular fragment definitions to crash the entire gateway process. Even a self-referencing fragment (`fragment A on Query { ...A }`) would trigger the bug.\n\nThe fix would be to add a `visited: Set<string>` parameter to `selectionSetDepth` that tracks which fragment names are currently being expanded, and either returns the current depth or reports an error when a cycle is detected."
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "SSRF bypass via 0.0.0.0/8 address range",
+      "description": "The SSRF guard blocks private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8), and link-local (169.254.0.0/16) but does not block the 0.0.0.0/8 range. A webhook URL whose hostname resolves to 0.0.0.0 will pass SSRF validation. On Linux, connecting to 0.0.0.0 reaches services listening on all interfaces (INADDR_ANY), which includes internal services like the database, Redis, and other microservices. An attacker can register a webhook with a hostname they control, point its DNS A record to 0.0.0.0, and the gateway will deliver webhook payloads to (and read responses from) internal services. This bypasses the entire SSRF protection mechanism.",
+      "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/utils/ssrf-guard.ts",
+      "line": 41,
+      "component": "services/gateway",
+      "verdict": {
+        "title": "SSRF bypass via 0.0.0.0/8 address range",
+        "isReal": true,
+        "severity": "HIGH",
+        "reasoning": "The bug is confirmed and real. The SSRF guard in `/home/ubuntu/topics/oneplatform/services/gateway/src/utils/ssrf-guard.ts` blocks five CIDR ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16) but does NOT block the 0.0.0.0/8 range (\"This Network\" per RFC 1122/IANA).\n\nEvidence:\n1. The `BLOCKED_CIDR_BLOCKS` array on lines 41-47 does not include \"0.0.0.0/8\".\n2. The test suite explicitly asserts that 0.0.0.0 passes validation (line 151-152 of ssrf-guard.test.ts): `expect(isBlockedIpRange(\"0.0.0.0\")).toBe(false)` -- confirming the omission is unintentional (treated as a \"public\" address).\n3. The IPv4-mapped IPv6 forms (::ffff:0.0.0.0 and ::ffff:0000:0000) are also not blocked, verified by tracing the code logic.\n4. Git history shows no prior fix for this issue. Commit 139a735 (\"Fix all 53 v3 user story findings\") addressed \"SSRF IPv6\" but not 0.0.0.0/8.\n5. No other guards exist -- `validateWebhookUrl` calls `isBlockedIpRange` for all resolved IPs, and `fetch()` (Node.js built-in) has no SSRF protection.\n\nExploitability: An attacker registers a webhook URL with a hostname whose DNS A record points to 0.0.0.0. On Linux, connecting to 0.0.0.0 reaches services listening on INADDR_ANY. In the Docker deployment, this enables self-SSRF against the gateway's own port 3000 (accessing admin/billing/internal routes). In non-containerized deployments, it reaches ALL host-local services including PostgreSQL (port 5432), Redis (port 6379, explicitly bound to 0.0.0.0 per docker/redis/redis.conf), and all microservices. The webhook delivery response body is captured (line 344: `responseBody = (await response.text()).slice(0, 1024)`) and stored, enabling data exfiltration.\n\nStandard SSRF protection libraries (OWASP recommendations, AWS WAF, npm ssrf-req-filter) all block 0.0.0.0/8. Its omission here is a genuine gap in the SSRF guard."
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "SQL injection in PostgreSQL CDC START_REPLICATION command via publicationName and slotName",
+      "description": "The startCdcStream method builds a START_REPLICATION SQL command by directly interpolating config.publicationName and config.slotName into the query string without sanitization or parameterization. At line 331, publicationName is embedded inside single quotes: `publication_names '${config.publicationName}'`. At line 333, slotName is embedded inside double quotes: `SLOT \"${config.slotName}\"`. The parseConfig function (line 83) only checks that these fields are non-empty strings but does not enforce the documented regex constraint [a-z0-9_]{1,63} from the types.ts interface (line 123). A user creating a connector with a publicationName containing a single quote (e.g., \"foo'; DROP TABLE users; --\") or a slotName containing a double quote can inject arbitrary SQL into the replication command sent to the source PostgreSQL server. While this targets the source database (not the platform database), the connector config is user-provided through the POST /connectors API with an unvalidated z.record(z.unknown()) config schema. The START_REPLICATION protocol command does not support parameterized queries, so the fix must validate these identifiers against a strict allowlist regex (e.g., /^[a-z0-9_]{1,63}$/) in parseConfig before interpolation.",
+      "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/connectors/postgres-cdc/postgres-cdc-connector.ts",
+      "line": 331,
+      "component": "connectors/postgres-cdc",
+      "verdict": {
+        "title": "SQL injection in PostgreSQL CDC START_REPLICATION command via publicationName and slotName",
+        "isReal": true,
+        "severity": "HIGH",
+        "reasoning": "The bug is confirmed as real. The evidence chain is clear:\n\n1. **Unparameterized string interpolation at lines 331-333**: `config.publicationName` is directly interpolated inside single quotes (`publication_names '${config.publicationName}'`) and `config.slotName` inside double quotes (`SLOT \"${config.slotName}\"`). The `START_REPLICATION` protocol command does not support parameterized queries, so these values are directly embedded in the command string.\n\n2. **No input validation on the dangerous fields**: The `parseConfig` function (line 83-141) only checks that `slotName` and `publicationName` are non-empty strings (`typeof config[key] !== \"string\" || config[key] === \"\"`). Despite the `types.ts` interface comment at line 122-123 documenting that slotName \"must match [a-z0-9_]{1,63}\", this constraint is never enforced in code. The prior fix commit (eb28cd8) only addressed password validation (V5-025/035), not these fields.\n\n3. **API layer passes config through unchecked**: The `createConnectorRequest` Zod schema at `schemas/index.ts:20` uses `config: z.record(z.unknown())`, which imposes zero constraints on the inner config structure. There is no intermediate validation layer between the HTTP route and the connector's `parseConfig`.\n\n4. **Full attack path is reachable**: An authenticated user calls `POST /api/v1/connectors` with a pluginId for the postgres-cdc connector and a `config.publicationName` like `foo'; SELECT pg_sleep(30); --` or a `config.slotName` containing a double quote. The value passes Zod validation, passes `parseConfig` (which only checks non-empty string), gets stored, and when CDC streaming starts, it is interpolated into the `START_REPLICATION` command executed against the source PostgreSQL database.\n\n5. **Impact**: While the injection targets the user's own source database rather than the platform database, this is still high severity because: (a) it can be used to execute arbitrary SQL on any PostgreSQL server the platform connects to, (b) a malicious tenant could craft connector configs that exploit shared source databases, and (c) the platform is facilitating SQL injection by not sanitizing identifiers it constructs and sends.\n\nThe fix is straightforward: enforce `slotName` and `publicationName` against `/^[a-z0-9_]{1,63}$/` in `parseConfig` before they reach the string interpolation."
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "Unhandled promise rejection in HTTP adapter can crash the process",
+      "description": "When app.fetch() returns a Promise that rejects (e.g., due to an uncaught middleware error), line 313 uses `void responseOrPromise.then(handleResponse)` with no .catch() handler. The void keyword suppresses linting but does not handle the rejection. In Node.js 15+, an unhandled promise rejection terminates the process by default. A single malformed request that triggers an unhandled error in Hono's middleware stack would crash the entire logging service. The fix is to add `.catch((err) => { res.writeHead(500); res.end(); console.error(...); })` to the promise chain.",
+      "file": "/home/ubuntu/topics/oneplatform/services/logging/src/index.ts",
+      "line": 313,
+      "component": "services/logging",
+      "verdict": {
+        "title": "Unhandled promise rejection in HTTP adapter can crash the process",
+        "isReal": true,
+        "severity": "HIGH",
+        "reasoning": "The bug is real and confirmed by multiple lines of evidence:\n\n1. **The missing `.catch()` is verified at line 313**: `void responseOrPromise.then(handleResponse)` has no `.catch()` handler. If either `app.fetch()` rejects or `handleResponse` throws, the result is an unhandled promise rejection.\n\n2. **Hono's `app.fetch()` CAN reject**: Examining the Hono source (`hono-base.js` lines 292-337 and `compose.js` lines 44-51), if any middleware throws a value that is not an `instanceof Error`, both `compose`'s catch block and `#handleError` re-throw it, producing a rejected promise from `app.fetch()`. Additionally, if the registered `app.onError` handler itself throws, the rejection propagates.\n\n3. **`handleResponse` can also throw**: Even when `app.fetch()` resolves, `handleResponse` (which calls `Readable.fromWeb()`, `res.writeHead()`, etc.) could throw synchronously inside the `.then()` callback, producing an unhandled rejection with no `.catch()` to handle it.\n\n4. **Two other services already fixed this exact issue**: The execution service (`services/execution/src/index.ts:409`) and the pipeline service (`services/pipeline/src/index.ts:472`) both have `.catch()` handlers on the identical `void responseOrPromise.then(handleResponse)` pattern. The execution service's handler even logs \"Unhandled error in app.fetch:\" before responding with 500. This proves the team already recognized this as a real problem but missed applying the fix to the logging service (and several others).\n\n5. **The global `unhandledRejection` handler does NOT prevent the crash**: `setupProcessErrorHandlers` (called at line 153) registers a global `unhandledRejection` handler, but that handler calls `process.exit(1)` after a 5-second timeout. It prevents the Node.js default immediate termination but still terminates the process. A single bad request would kill the logging service. The correct fix is a local `.catch()` that returns HTTP 500 and keeps the process alive, as already implemented in execution and pipeline services."
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "Debounce in file sync drops file changes, causing silent data loss",
+      "description": "The `debounce` helper in `startLocalWatcher` uses a single shared timer for all file paths. When multiple files change within the 300ms debounce window (common during builds or multi-file saves), only the last file is uploaded. All intermediate file changes are silently dropped. For example, if files A, B, and C change within 300ms, only C's upload is executed; A and B are never synced to the server. This causes silent data loss during `op app dev`. The fix is to use a per-file debounce (e.g., a Map<string, Timer>) so each file path gets its own independent timer.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/file-sync.ts",
+      "line": 43,
+      "component": "lib/file-sync.ts",
+      "verdict": {
+        "title": "Debounce in file sync drops file changes, causing silent data loss",
+        "isReal": true,
+        "severity": "HIGH",
+        "reasoning": "The bug is real and the description is accurate. The `debounce` helper (lines 22-34 in `/home/ubuntu/topics/oneplatform/packages/cli/src/lib/file-sync.ts`) creates a closure with a single shared `timer` variable. The `uploadFile` function on line 43 wraps the upload logic using this debounce with a 300ms window. When multiple different files change within 300ms, each call to `uploadFile(newPath)` clears the previous timer via `clearTimeout(timer)` and sets a new one. Only the final file's upload callback executes; all intermediate files are silently dropped and never synced.\n\nThis is confirmed by:\n1. The debounce implementation uses a single `let timer` variable shared across all invocations regardless of the `filePath` argument.\n2. There is no per-file debounce map (`Map<string, Timer>`), no retry queue, and no periodic full-sync reconciliation that could catch dropped files.\n3. The `startLocalWatcher` is the sole mechanism for syncing local file changes to the server during `op app dev`.\n4. The scenario is easily reachable: build tools, formatters (like Prettier/ESLint with auto-fix), and IDE multi-file saves routinely modify multiple files within 300ms.\n5. Git history shows the only prior change to this file (commit 4219d83) added path traversal protection in `applyRemoteChange`, not any fix for the debounce issue.\n6. No tests exist for the file-sync module.\n\nThe fix is exactly as described: replace the single shared timer with a `Map<string, Timer>` keyed by file path, so each file gets its own independent debounce timer."
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "GPG signing produces signature at wrong path, resulting in unsigned packages falsely reported as signed",
+      "description": "In signPackage(), GPG --detach-sign --armor on the unsigned tarball produces a .asc file (e.g., dist/bundle.js.unsigned.tar.gz.asc), but the signed tarball is deleted and createOppkg() looks for the signature at bundlePath + '.sig' (e.g., dist/bundle.js.sig). These are completely different paths. The .asc signature file is never found by createOppkg (fs.existsSync returns false), so the signature is silently omitted from the .oppkg archive. However, the PackResult reports signed=true and the user sees 'Signed: Yes' in the output. This means: (1) the user is told their package is cryptographically signed when it is not, (2) the .asc file is leaked on disk and never cleaned up, (3) any downstream signature verification would fail because the signature was never included in the package.",
+      "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/dev/pack.ts",
+      "line": 138,
+      "component": "dev/pack.ts - signPackage + createOppkg",
+      "verdict": {
+        "title": "GPG signing produces signature at wrong path, resulting in unsigned packages falsely reported as signed",
+        "isReal": true,
+        "reasoning": "The bug is confirmed through careful code tracing:\n\n1. `signPackage()` (line 287) creates an unsigned tarball at `bundlePath + \".unsigned.tar.gz\"` and runs `gpg --detach-sign --armor` on it. GPG with `--armor` flag produces a `.asc` extension (confirmed via GPG documentation), so the signature lands at `dist/bundle.js.unsigned.tar.gz.asc`.\n\n2. `signPackage()` then deletes the unsigned tarball (line 308) but does NOT delete or rename the `.asc` file, leaving it orphaned on disk.\n\n3. Back in `packPlugin()` (line 138), `createOppkg()` is called with `sigPath: bundlePath + \".sig\"` which resolves to `dist/bundle.js.sig` -- a completely different path from where GPG wrote the signature.\n\n4. In `createOppkg()` (line 328), `fs.existsSync(files.sigPath)` checks for `dist/bundle.js.sig`, which does not exist. The signature is silently excluded from the archive.\n\n5. Despite the signature not being included, `signed = true` was set unconditionally after `signPackage()` returned (line 124), and the PackResult reports `signed: true` to the caller. The user sees \"Signed: Yes\" in output (line 146).\n\nGit history confirms this mismatch has existed since the original implementation (commit 0363edc) and was never addressed in subsequent fix commits. There are no other guards, fallback checks, or alternative code paths that would catch or compensate for this path mismatch. The validation function (`validatePlugin`) also skips GPG verification entirely (line 218: \"skipped (no sig file)\"), so even validation would not catch the missing signature.",
+        "severity": "high"
+      }
+    },
+    {
+      "severity": "HIGH",
+      "title": "LDAP bind password cached in plugin cache, violating CredentialAccessor contract and blocking rotation",
+      "description": "The LDAP provider stores the service account bind password in the plugin cache at initialize() (line 585: `await context.cache.set(BIND_PASSWORD_CACHE_KEY, bindPassword, 3600)`). The CredentialAccessor interface documentation in context.ts explicitly states: 'Never store it in the plugin's cache -- the platform rotates credentials and will deliver updated values automatically.' This has two impacts: (1) The bind password is persisted in the cache store (typically Redis) in plaintext for up to 3600 seconds, expanding the attack surface. (2) If the platform rotates the bind password, the plugin will continue using the stale cached value for up to an hour, causing authentication failures. Since AuthContext already has a `credentials` property (verified in auth-provider.ts line 79), both handleCallback() and validateToken() could call `context.credentials.get(cfg.bindCredentialKey)` directly instead of reading from cache.",
+      "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-ldap/src/index.ts",
+      "line": 585,
+      "component": "auth-provider-ldap",
+      "verdict": {
+        "title": "LDAP bind password cached in plugin cache, violating CredentialAccessor contract and blocking rotation",
+        "isReal": true,
+        "reasoning": "The bug is confirmed real with strong evidence:\n\n1. **The code exists exactly as described.** Line 585 of `/home/ubuntu/topics/oneplatform/plugins/auth-provider-ldap/src/index.ts` caches the bind password: `await context.cache.set(BIND_PASSWORD_CACHE_KEY, bindPassword, 3600)`. The `requireBindPassword()` method at line 1216-1224 then reads exclusively from cache rather than from `context.credentials.get()`.\n\n2. **AuthContext DOES have credentials available.** The `AuthContext` interface at line 55-86 of `/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/types/auth-provider.ts` explicitly includes `credentials: CredentialAccessor` (line 79), with the doc comment at line 77 saying \"Never log or cache credential values -- the platform manages rotation.\" The LDAP plugin's code comment at line 480-481 claiming \"handleCallback() receives AuthContext without credential access\" is factually incorrect.\n\n3. **The OIDC plugin (sister auth plugin) does it correctly.** In `/home/ubuntu/topics/oneplatform/plugins/auth-provider-oidc/src/index.ts`, lines 436-438 explicitly comment: \"We do not cache the value -- the CredentialAccessor contract requires secrets to be retrieved on demand so the platform can rotate them.\" The OIDC plugin's `handleCallback` (line 540) and `validateToken` (line 719) both call `context.credentials.get(\"clientSecret\")` directly, proving the pattern works.\n\n4. **The CredentialAccessor contract is explicit.** The interface doc at lines 61-63 of `context.ts` states: \"Never store it in the plugin's cache -- the platform rotates credentials and will deliver updated values automatically.\"\n\n5. **Both claimed impacts are real:**\n   - The bind password sits in plaintext in Redis for up to 3600 seconds, expanding the attack surface.\n   - If the platform rotates the bind password, the LDAP plugin uses the stale cached value for up to an hour, causing all LDAP authentications to fail with cryptic \"bind password not available\" or LDAP bind failure errors.\n\n6. **The bug has not been fixed.** Git history shows the file was created in commit 9b6de3a and subsequent commits did not address this specific issue.",
+        "severity": "HIGH"
+      }
+    }
+  ]
+}

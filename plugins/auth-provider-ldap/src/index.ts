@@ -477,11 +477,6 @@ function decodeCredentials(code: string): { username: string; password: string }
 // Cache keys
 // ────────────────────────────────────────────────────────────────────────────
 
-// The bind password is resolved by initialize() and cached so handleCallback()
-// (which receives AuthContext without credential access) can use it for searches.
-// TTL of 3600s — rotated at plugin re-enable time via a new initialize() call.
-const BIND_PASSWORD_CACHE_KEY = "ldap:bindPassword";
-
 // The platform LDAP proxy URL is injected by the Auth Service into
 // tenant.config["ldapProxyUrl"]. We cache it at initialize() time.
 const PROXY_URL_CACHE_KEY = "ldap:proxyUrl";
@@ -559,7 +554,7 @@ class LdapAuthProvider implements AuthProvider {
    * PluginContext. We use this opportunity to:
    *   1. Parse and validate the configuration.
    *   2. Capture the FetchProxy and platform LDAP proxy URL.
-   *   3. Resolve the bind password from CredentialAccessor and store in cache.
+   *   3. Resolve the bind password from CredentialAccessor and probe the connection.
    *   4. Probe the LDAP connection so misconfiguration is caught immediately.
    */
   async initialize(config: Record<string, unknown>, context: PluginContext): Promise<void> {
@@ -579,10 +574,7 @@ class LdapAuthProvider implements AuthProvider {
       }
       this.proxyUrl = rawProxyUrl.trim();
 
-      // Resolve the bind password now so AuthContext-scoped methods can read it
-      // from cache. Credentials are not accessible from AuthContext.
       const bindPassword = await context.credentials.get(this.config.bindCredentialKey);
-      await context.cache.set(BIND_PASSWORD_CACHE_KEY, bindPassword, 3600);
       await context.cache.set(PROXY_URL_CACHE_KEY, this.proxyUrl, 3600);
 
       // Probe the LDAP connection with the service-account bind to surface
@@ -1214,13 +1206,8 @@ class LdapAuthProvider implements AuthProvider {
   }
 
   private async requireBindPassword(context: AuthContext): Promise<string> {
-    const cached = await context.cache.get<string>(BIND_PASSWORD_CACHE_KEY);
-    if (cached === null) {
-      throw new PluginAuthError(
-        "LDAP bind password not available — ensure initialize() completed before the first login",
-      );
-    }
-    return cached;
+    const cfg = this.requireConfig();
+    return context.credentials.get(cfg.bindCredentialKey);
   }
 
   private async requireProxyUrl(context: AuthContext): Promise<string> {
