@@ -8,6 +8,17 @@
  *     skew production-representative numbers.
  *   - Concurrency aware: concurrent load is modelled with Promise.all
  *     worker pools that match the given concurrency setting.
+ *
+ * EE-025: Consider chaos and resilience testing. The current suite covers
+ * performance benchmarks. A chaos harness (e.g. Chaos Monkey patterns using
+ * tc-netem for network delays, container SIGKILL injection, or database
+ * connection interruptions) would validate that:
+ *   - The pipeline engine resumes from the last completed step after a worker
+ *     restart (advisory lock + BullMQ persistence already supports this).
+ *   - PgBouncer reconnects cleanly after a transient Postgres outage.
+ *   - The sandbox container pool replenishes after a sandbox crash.
+ * These tests would live in tests/chaos/ and run in a dedicated Docker Compose
+ * environment, separate from the unit and integration suites.
  */
 
 // ---------------------------------------------------------------------------

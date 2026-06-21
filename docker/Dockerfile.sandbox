@@ -12,8 +12,10 @@
 # Ref spec §7.6 "Execution Service", §13 "Security Summary — Sandbox escape",
 # §2 "Docker Compose Stack Layer 4 op-sandbox-vm".
 
-# Node 20 pinned to a specific patch version for reproducible isolated-vm ABI.
-# Verify this version against isolated-vm's compatibility matrix before upgrading:
+# Node 20 pinned for isolated-vm compatibility. Test before upgrading —
+# isolated-vm builds native modules that may not compile with newer Node versions.
+# Pinned to a specific patch version for reproducible ABI.
+# Verify against isolated-vm's compatibility matrix before upgrading:
 # https://github.com/laverdet/isolated-vm#requirements
 FROM node:20.14.0-alpine AS sandbox-builder
 

@@ -1,3 +1,17 @@
+// EE-016: Consider SIEM export for audit logs. The current design emits
+// structured audit events to Postgres via the BullMQ worker below. Future
+// enhancement: add a parallel export path (e.g. CEF/LEEF format over syslog,
+// or JSON streaming to an HTTP endpoint) so that enterprise customers can feed
+// audit events into Splunk, Sentinel, or similar SIEM platforms without
+// log-forwarding pipelines. Would require an AuditExporter interface with
+// pluggable transport implementations.
+
+// EE-017: Consider automated compliance reports. A scheduled job (cron) that
+// queries audit_events grouped by actor/resource/action and renders a PDF or
+// CSV summary would let security teams satisfy SOC 2 / ISO 27001 audit requests
+// without manual SQL queries. Report templates would live in the Logging Service
+// and be triggered by the Pipeline Service's schedule engine.
+
 import { Worker } from "bullmq";
 import { z } from "zod";
 import type { AuditEventRepository } from "../repositories/index.js";

@@ -48,6 +48,22 @@ const PASSWORD_HISTORY_DEPTH = 5;
 // Defaults (5 attempts, 30 min) match the authConfigSchema defaults so the
 // values are always consistent even when loadConfig() has not been called yet
 // (e.g. in unit tests that import this module in isolation).
+//
+// Known limitation (SA-008): Per-user lockout is a double-edged sword — a
+// malicious actor who knows a valid email address can intentionally trigger a
+// lockout by repeatedly submitting wrong passwords, causing a denial-of-service
+// for the legitimate account holder.
+//
+// Defence-in-depth: The API gateway applies IP-level rate limiting
+// (OP_GLOBAL_RATE_LIMIT, enforced via Redis sliding-window counters) which
+// throttles repeated login attempts long before they can reach the per-user
+// lockout threshold under normal load patterns. Operators should tune
+// OP_LOCKOUT_MAX_ATTEMPTS together with the gateway rate limit so a single
+// IP cannot lock out an arbitrary number of accounts within a short window.
+//
+// The generic error message ("Invalid email or password") on lockout prevents
+// the attacker from distinguishing locked-out accounts from non-existent ones,
+// limiting the utility of the attack as an account enumeration oracle.
 // ---------------------------------------------------------------------------
 
 function readLockoutMaxAttempts(): number {
@@ -96,6 +112,36 @@ function getJwtSecret(): Uint8Array {
     throw new Error("OP_JWT_SECRET is required but not set.");
   }
   return new TextEncoder().encode(secret);
+}
+
+/**
+ * Returns the signing key for purpose tokens (email verification, password reset).
+ *
+ * Design note (SA-007): Purpose tokens use a separate signing key from access
+ * tokens to limit the blast radius of a key compromise. If OP_JWT_SECRET were
+ * leaked, an attacker could forge both access tokens AND purpose tokens. Using
+ * a distinct key (OP_PURPOSE_TOKEN_SECRET) means each key type's exposure is
+ * isolated.
+ *
+ * In production, set OP_PURPOSE_TOKEN_SECRET to a randomly-generated value
+ * independent of OP_JWT_SECRET. If the variable is absent, we fall back to
+ * OP_JWT_SECRET for backward compatibility with existing deployments, but a
+ * warning is logged at startup in production environments.
+ *
+ * The purpose claim inside the token payload prevents cross-purpose reuse even
+ * when the same key is shared (a password-reset token cannot be submitted as
+ * an email-verify token and vice versa).
+ */
+function getPurposeTokenSecret(): Uint8Array {
+  // Prefer a dedicated secret so purpose tokens are isolated from access tokens.
+  const dedicated = process.env["OP_PURPOSE_TOKEN_SECRET"];
+  if (dedicated) {
+    return new TextEncoder().encode(dedicated);
+  }
+  // Fall back to the access-token signing key. This maintains backward
+  // compatibility, but operators SHOULD set OP_PURPOSE_TOKEN_SECRET in
+  // production to isolate purpose-token exposure from access-token exposure.
+  return getJwtSecret();
 }
 
 function requireEmailVerification(): boolean {
@@ -206,7 +252,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         .setProtectedHeader({ alg: "HS256" })
         .setIssuedAt()
         .setExpirationTime("24h")
-        .sign(getJwtSecret());
+        .sign(getPurposeTokenSecret());
 
       await redis.set(`auth:verify:${jti}`, "1", "EX", 86_400);
 
@@ -549,7 +595,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime("1h")
-      .sign(getJwtSecret());
+      .sign(getPurposeTokenSecret());
 
     // Store single-use gate in Redis
     await redis.set(`reset:${jti}`, "1", "EX", 3_600);
@@ -607,10 +653,13 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     token: string,
     newPassword: string
   ): Promise<void> {
-    // 1. Verify JWT signature — throws on invalid/malformed
+    // 1. Verify JWT signature — throws on invalid/malformed.
+    //    Uses getPurposeTokenSecret() (OP_PURPOSE_TOKEN_SECRET if set, else OP_JWT_SECRET)
+    //    to match the key used at issuance. See getPurposeTokenSecret() for the
+    //    design rationale around keeping purpose tokens on a separate key.
     let payload: JWTPayload & { sub?: string; purpose?: string; jti?: string };
     try {
-      const result = await jwtVerify(token, getJwtSecret(), {
+      const result = await jwtVerify(token, getPurposeTokenSecret(), {
         algorithms: ["HS256"],
       });
       payload = result.payload as typeof payload;
@@ -872,10 +921,11 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
   // -------------------------------------------------------------------------
 
   async function verifyEmail(token: string): Promise<VerifyEmailResult> {
-    // 1. Verify JWT
+    // 1. Verify JWT — uses getPurposeTokenSecret() to match the key used at
+    //    issuance (OP_PURPOSE_TOKEN_SECRET if set, else OP_JWT_SECRET).
     let payload: JWTPayload & { sub?: string; purpose?: string; jti?: string };
     try {
-      const result = await jwtVerify(token, getJwtSecret(), {
+      const result = await jwtVerify(token, getPurposeTokenSecret(), {
         algorithms: ["HS256"],
       });
       payload = result.payload as typeof payload;

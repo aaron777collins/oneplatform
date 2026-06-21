@@ -43,6 +43,19 @@ export type StepType =
   | "wait"
   | "approval"
   | "sub_workflow";
+// EE-008: Consider adding a "catch" step type — an error-handler branch that
+// runs when a preceding step fails. Would allow pipelines to recover gracefully
+// (e.g. send an alert, write to a dead-letter queue) rather than hard-failing.
+// Execution engine would need to route the error context into the catch branch.
+
+// EE-009: Consider event-driven triggers on internal platform events (e.g.
+// "ontology.entity.created", "ingestion.batch.completed"). The trigger-service
+// already supports cron, webhook, and manual triggers; adding an "event" trigger
+// type would let pipelines react to platform activity without polling.
+
+// EE-010: Consider adding a visual dependency tree for sub-workflows. The
+// sub_workflow step type already supports nesting; a Mermaid-like rendering of
+// the call graph would help operators understand complex multi-pipeline setups.
 
 export type InputSource =
   | { from: "pipeline.input"; path?: string }

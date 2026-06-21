@@ -15,6 +15,12 @@
  * "ping" or metadata event would not warrant a cache flush. EntityEventType in
  * the current spec is exactly {created, updated, deleted}, so the guard is
  * effectively a no-op today but is explicit for future-proofing.
+ *
+ * @internal
+ * This hook is an implementation detail of useSubscription. It is exported to
+ * allow unit testing in isolation, but app authors should not depend on it
+ * directly — the API may change without a semver bump. Use useSubscription
+ * (which calls this hook internally) as the public API instead.
  */
 
 import React from "react";

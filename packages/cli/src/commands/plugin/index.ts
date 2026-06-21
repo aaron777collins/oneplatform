@@ -647,6 +647,12 @@ export function registerPlugin(program: Command): void {
     .option("--remote", "Execute on the running OnePlatform server instead of locally (requires --plugin <plugin-id>)")
     .action(withContext<[string, SimulateOpts]>(simulateHookAction));
 
+  // PU-014: Consider adding an `op plugin test` command that discovers and runs
+  // the plugin's own test suite (e.g. vitest/jest) inside the plugin-sdk sandbox,
+  // with mock context and credential injection from the dev server. This would
+  // give plugin authors a single command for the full develop→test→pack cycle
+  // without requiring them to configure their own test runner separately.
+
   plugin.command("dev")
     .description(
       "Run the connector lifecycle locally for development (no server required). " +

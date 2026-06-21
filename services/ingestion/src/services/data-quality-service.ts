@@ -78,6 +78,19 @@ export interface QualityStatsRepository {
   upsert(stats: ConnectorQualityStats): Promise<void>;
 }
 
+// EE-005: Quality alert integration enhancement path.
+// The current implementation emits quality issues as structured log events
+// (via the Logger) so that external systems (PagerDuty, Slack, OpsGenie) can
+// subscribe via log-forwarding pipelines.
+//
+// Future enhancement: add a webhook/email alert mechanism triggered directly
+// from this service when quality thresholds are breached. The integration point
+// is in analyzeBatch — after issue detection, call a configurable AlertDispatcher
+// that fans out to registered alert channels (email, webhook, Slack). Alert
+// configuration would live in the connector settings (connector_alerts table).
+// Suggested threshold-based routing: "critical" issues → page-on-call,
+// "warning" issues → Slack notification, "info" issues → daily digest.
+
 export interface DataQualityService {
   /**
    * Load the current quality stats for a connector from the DB.

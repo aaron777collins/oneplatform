@@ -42,10 +42,13 @@ export interface EntityResource<T> {
   /**
    * Creates a new entity record.
    *
-   * @param data - The fields to set on the new record.
+   * @param data - The fields to set on the new record. Server-assigned fields
+   *   (`id`, `createdAt`, `updatedAt`) are excluded so TypeScript catches callers
+   *   that accidentally pass a full entity object (which would include stale server
+   *   timestamps). The server always generates these fields on create.
    * @param options - Optional idempotency key to prevent duplicate creates.
    */
-  create(data: Partial<T>, options?: MutationOptions): Promise<T>;
+  create(data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>, options?: MutationOptions): Promise<T>;
 
   /**
    * Applies a partial update (PATCH) to an existing record.
@@ -134,7 +137,7 @@ function createEntityResource<T>(
       });
     },
 
-    async create(data: Partial<T>, options?: MutationOptions): Promise<T> {
+    async create(data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>, options?: MutationOptions): Promise<T> {
       return transport.request<T>({
         method: 'POST',
         path: basePath,

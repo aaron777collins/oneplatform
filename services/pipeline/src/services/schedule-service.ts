@@ -176,9 +176,26 @@ export interface ScheduleServiceDeps {
 // Cron expression validation and next-run computation (design spec §8.1)
 // ---------------------------------------------------------------------------
 
+// DE-008: Common @-shorthand aliases mapped to their 5-field equivalents.
+// Supporting these reduces friction for users who are familiar with
+// the Unix/systemd convention. All map to minute-granularity expressions
+// since sub-minute scheduling is not supported (see field-count check below).
+const CRON_ALIAS_MAP: Record<string, string> = {
+  "@yearly":   "0 0 1 1 *",
+  "@annually": "0 0 1 1 *",
+  "@monthly":  "0 0 1 * *",
+  "@weekly":   "0 0 * * 0",
+  "@daily":    "0 0 * * *",
+  "@midnight": "0 0 * * *",
+  "@hourly":   "0 * * * *",
+};
+
 function validateCronExpression(cronExpr: string): void {
+  // Expand @-shorthand aliases before validation so they pass the field-count check.
+  const expanded = CRON_ALIAS_MAP[cronExpr.trim()] ?? cronExpr;
+
   // Reject 6-field (second-level) expressions — minimum granularity is 1 minute
-  const fields = cronExpr.trim().split(/\s+/);
+  const fields = expanded.trim().split(/\s+/);
   if (fields.length !== 5) {
     throw new ScheduleInvalidCronError(
       `Invalid cron expression: expected 5 fields (got ${fields.length}). ` +
@@ -189,7 +206,7 @@ function validateCronExpression(cronExpr: string): void {
 
   // Validate via cron-parser — throws if expression is syntactically invalid
   try {
-    parseExpression(cronExpr, { tz: "UTC" });
+    parseExpression(expanded, { tz: "UTC" });
   } catch (err) {
     throw new ScheduleInvalidCronError(
       `Invalid cron expression "${cronExpr}": ${err instanceof Error ? err.message : String(err)}`,
@@ -212,7 +229,9 @@ function validateTimezone(timezone: string): void {
 }
 
 function computeNextRunAt(cronExpr: string, timezone: string): Date {
-  const interval = parseExpression(cronExpr, {
+  // Expand @-shorthands so the parser receives a valid 5-field expression.
+  const expanded = CRON_ALIAS_MAP[cronExpr.trim()] ?? cronExpr;
+  const interval = parseExpression(expanded, {
     tz: timezone,
     currentDate: new Date(),
   });

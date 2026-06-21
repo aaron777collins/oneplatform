@@ -44,7 +44,10 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "flex items-start justify-between gap-4 border-b border-[var(--color-border)] bg-[var(--color-background)] px-6 py-4",
+        // MU-014: Stack vertically on narrow screens (< sm) so the title never
+        // competes with action buttons for horizontal space on 375px viewports.
+        // On sm+ we restore the side-by-side layout with reduced padding on mobile.
+        "flex flex-col sm:flex-row items-start sm:justify-between gap-2 sm:gap-4 border-b border-[var(--color-border)] bg-[var(--color-background)] px-4 sm:px-6 py-4",
         className,
       )}
     >
@@ -85,8 +88,8 @@ export function PageHeader({
           </nav>
         )}
 
-        {/* Page title */}
-        <h1 className="truncate text-2xl font-bold tracking-tight text-[var(--color-foreground)]">
+        {/* Page title — smaller on mobile to conserve vertical space */}
+        <h1 className="truncate text-xl sm:text-2xl font-bold tracking-tight text-[var(--color-foreground)]">
           {title}
         </h1>
         {description !== undefined && (
@@ -94,9 +97,9 @@ export function PageHeader({
         )}
       </div>
 
-      {/* Action slot */}
+      {/* Action slot — full-width row on mobile, right-aligned on sm+ */}
       {actions !== undefined && (
-        <div className="flex shrink-0 items-center gap-2 pt-1">{actions}</div>
+        <div className="flex w-full sm:w-auto shrink-0 flex-wrap items-center gap-2 sm:pt-1">{actions}</div>
       )}
     </header>
   );

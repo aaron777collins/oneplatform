@@ -169,6 +169,15 @@ export function createOutputRenderer(
       } else if (format === "table" && columns && isArray) {
         renderTable(columns, data as Record<string, unknown>[]);
       } else {
+        // PU-015: Non-array data falls back to JSON regardless of the requested
+        // format. This is intentional — table and TSV formats require an array
+        // of rows with known column keys. If callers start returning single-object
+        // responses for list commands this warning will surface the mismatch.
+        if ((format === "table" || format === "tsv") && !isArray) {
+          process.stderr.write(
+            `WARNING: --format=${format} requires array data; falling back to JSON output.\n`,
+          );
+        }
         renderJson(data);
       }
     },

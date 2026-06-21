@@ -147,6 +147,19 @@ export interface OnePlatformClient {
  * ```
  */
 export function createClient(options: ClientOptions): OnePlatformClient {
+  // Guard: Node.js 18+ ships with globalThis.fetch. Older versions and some
+  // custom runtimes lack it. Failing here (before any I/O) gives the caller a
+  // clear, actionable error instead of a cryptic "fetch is not a function"
+  // crash later at the first network call. Callers on Node < 18 may pass a
+  // polyfill via ClientOptions.fetch to satisfy this requirement.
+  if (options.fetch === undefined && typeof globalThis.fetch !== 'function') {
+    throw new ConfigurationError(
+      'OnePlatform SDK requires Node.js 18+ or a fetch polyfill. ' +
+        'Provide a fetch implementation via ClientOptions.fetch ' +
+        '(e.g. import fetch from "node-fetch") or upgrade to Node.js 18+.',
+    );
+  }
+
   // --- Validate and normalise baseUrl ---
   if (!options.baseUrl || options.baseUrl.trim() === '') {
     throw new ConfigurationError('ClientOptions.baseUrl is required and must not be empty.');

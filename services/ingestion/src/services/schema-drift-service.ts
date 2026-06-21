@@ -238,6 +238,16 @@ export function createSchemaDriftService(deps: SchemaDriftServiceDeps): SchemaDr
             nullabilityChanged: f.nullabilityChanged,
           })),
         });
+        // EE-002: Current behavior is detect + alert (warn log + structured event).
+        // Enhancement path for auto-remediation policies:
+        //   - "auto-add-fields": automatically extend the ontology entity when
+        //     drift.added is non-empty, so new source fields land in the schema
+        //     without manual intervention.
+        //   - "auto-deprecate-fields": mark fields in drift.removed as deprecated
+        //     (soft-delete) rather than leaving them as orphaned columns.
+        //   - Policies would be configurable per-connector and enforced here after
+        //     the drift.hasDrift check. Implementation requires a policy store and
+        //     calls to the Ontology Service's migration API.
       }
 
       return drift;

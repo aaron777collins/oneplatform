@@ -14,6 +14,7 @@ import type { OAuthRouteDeps } from "./oauth.js";
 import type { InternalRouteDeps } from "./internal.js";
 import type { TenantRouteDeps } from "./tenants.js";
 import type { BrandingRouteDeps } from "./branding.js";
+import type { ScimRouteDeps } from "./scim.js";
 import { createBootstrapRoutes } from "./bootstrap.js";
 import { createAuthRoutes } from "./auth.js";
 import { createApiKeyRoutes } from "./api-keys.js";
@@ -23,6 +24,7 @@ import { createOAuthRoutes } from "./oauth.js";
 import { createInternalRoutes } from "./internal.js";
 import { createTenantRoutes } from "./tenants.js";
 import { createBrandingRoutes } from "./branding.js";
+import { createScimRoutes } from "./scim.js";
 import { createJwksRoutes } from "./jwks.js";
 import type pg from "pg";
 import type { Redis } from "ioredis";
@@ -36,7 +38,8 @@ export interface RegisterRoutesConfig
     OAuthRouteDeps,
     InternalRouteDeps,
     TenantRouteDeps,
-    BrandingRouteDeps {
+    BrandingRouteDeps,
+    ScimRouteDeps {
   db: pg.Pool;
   redis: Redis;
   serviceName: string;
@@ -78,6 +81,8 @@ export function registerRoutes(
   app.route("/", createOAuthRoutes(config));
   app.route("/", createInternalRoutes(config));
   app.route("/", createBrandingRoutes(config));
+  // SCIM 2.0 user provisioning — for IdP integration (Okta, Azure AD, etc.)
+  app.route("/", createScimRoutes(config));
   // JWKS endpoint — no deps required; reads algorithm config from env at request time
   app.route("/", createJwksRoutes());
 }
@@ -112,3 +117,6 @@ export { createBrandingRoutes } from "./branding.js";
 export type { BrandingRouteDeps } from "./branding.js";
 
 export { createJwksRoutes } from "./jwks.js";
+
+export { createScimRoutes } from "./scim.js";
+export type { ScimRouteDeps } from "./scim.js";

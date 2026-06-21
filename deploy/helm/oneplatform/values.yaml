@@ -5,6 +5,13 @@
 #
 # Override in a separate values file per environment:
 #   helm upgrade oneplatform ./deploy/helm/oneplatform -f values-prod.yaml
+#
+# EE-022: Consider adding HorizontalPodAutoscaler (HPA) configs and a
+# Kubernetes Operator for lifecycle management. HPA configs would auto-scale
+# stateless services (gateway, pipeline, execution) based on CPU/RPS metrics.
+# A CRD-based Operator would handle rolling schema migrations, secret rotation,
+# and initial bootstrap automatically in the cluster — reducing operational
+# burden for teams running OnePlatform on Kubernetes in production.
 
 # ---------------------------------------------------------------------------
 # Global

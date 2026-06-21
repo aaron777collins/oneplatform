@@ -1,3 +1,15 @@
+// EE-013: Consider row-level security (RLS) for app queries. Embedded apps
+// currently inherit the tenant's RBAC rules via the gateway. Future enhancement:
+// allow app authors to declare per-app RLS policies that further restrict which
+// ontology rows a specific embedded-app viewer can see, independent of their
+// tenant-level role. This would require a policy store and a query rewriting
+// layer that injects WHERE clauses before forwarding to the Ontology Service.
+
+// EE-014: Consider analytics for embedded apps. A lightweight event-tracking SDK
+// (page views, button clicks, query execution counts) emitted from App SDK and
+// stored in the Logging Service would let app authors measure engagement without
+// exporting to an external analytics platform.
+
 import { createHash } from "node:crypto";
 import type { Logger } from "@oneplatform/core";
 import type { AppRepository } from "../repositories/app-repository.js";

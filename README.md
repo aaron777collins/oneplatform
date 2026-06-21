@@ -97,6 +97,14 @@ pnpm lint       # Lint all packages
 - [Design Spec](./docs/superpowers/specs/) — Detailed design specifications
 - [Development Process](./DEVELOPMENT-PROCESS.md) — How we build and review code
 
+## Learning Resources
+
+- [Quick Start](./docs/QUICKSTART.md) — Get OnePlatform running locally in under 10 minutes
+- [Plugin Development](./docs/quickstarts/plugin-quickstart.md) — Build your first connector or transformer plugin
+- [App Builder](./docs/quickstarts/app-quickstart.md) — Create and embed your first app
+
+> Interactive tutorials are planned for a future release. Until then, the quickstart guides above provide step-by-step walkthroughs for common workflows.
+
 ## License
 
 Business Source License (BSL) — source-available, free to self-host and modify. Converts to MIT License after 4 years.

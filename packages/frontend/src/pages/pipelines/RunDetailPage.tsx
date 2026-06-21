@@ -84,7 +84,7 @@ function classifyRunError(error: string): ClassifiedRunError {
     return {
       category: "Connection",
       title: "Connection failed",
-      suggestion: "Verify that all external services and databases are reachable. Check network configuration and firewall rules.",
+      suggestion: "Check if the data source is accessible and that your network settings allow the connection.",
     };
   }
   if (lower.includes("syntax") || lower.includes("parse") || lower.includes("unexpected token") || lower.includes("invalid")) {
@@ -104,7 +104,7 @@ function classifyRunError(error: string): ClassifiedRunError {
   return {
     category: "Error",
     title: "Execution failed",
-    suggestion: "Review the error details and logs below for more information.",
+    suggestion: "View error details below to learn more about what went wrong.",
   };
 }
 

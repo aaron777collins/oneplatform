@@ -203,5 +203,12 @@ export function createGraphQLRoutes(deps: GraphQLRouteDeps): Hono<{ Variables: A
     return c.json(result);
   });
 
+  // PU-008: Consider adding GraphQL GET support (query-string encoding).
+  // The GraphQL-over-HTTP spec allows GET requests with ?query=...&variables=...
+  // for cacheable read-only operations. Adding a GET handler here would let
+  // HTTP-level caches (CDNs, Varnish) cache introspection and list queries,
+  // reducing server load for frequently repeated queries.
+  // Mutations MUST remain POST-only per the spec.
+
   return routes;
 }

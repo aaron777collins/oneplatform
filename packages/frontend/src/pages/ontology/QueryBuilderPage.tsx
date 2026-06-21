@@ -2191,6 +2191,27 @@ export function QueryBuilderPage() {
 
       <div className="p-6 space-y-6 max-w-6xl">
 
+        {/* --- AI natural-language query input (NCP-016) --- */}
+        {/* Placeholder UI: AI query integration is planned for a future release.
+            The input is intentionally disabled so users know the feature is coming
+            without it appearing broken. */}
+        <section aria-labelledby="ai-query-label">
+          <h2 id="ai-query-label" className="text-sm font-medium text-[var(--color-foreground)] mb-1.5">
+            Ask a question
+          </h2>
+          <div className="flex items-center gap-2">
+            <Input
+              disabled
+              placeholder="Ask a question about your data..."
+              aria-label="AI natural language query (coming soon)"
+              className="max-w-lg opacity-60 cursor-not-allowed"
+            />
+            <span className="text-xs text-[var(--color-muted-foreground)] italic whitespace-nowrap">
+              AI query coming soon
+            </span>
+          </div>
+        </section>
+
         {/* --- Saved queries panel --- */}
         {showSavedQueries && (
           <section aria-labelledby="saved-section-label" className="rounded-md border border-[var(--color-border)] p-4 space-y-3">
