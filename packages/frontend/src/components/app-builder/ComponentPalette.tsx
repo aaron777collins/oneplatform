@@ -20,6 +20,18 @@ import {
   Code,
   FileText,
   Search,
+  BarChart3,
+  LineChart,
+  PieChart,
+  Type,
+  Hash,
+  Calendar,
+  ChevronDown,
+  CheckSquare,
+  MousePointer,
+  Link2,
+  Gauge,
+  Activity,
 } from "lucide-react";
 import { PALETTE_ENTRIES, PALETTE_CATEGORIES } from "./palette-registry.js";
 import type { PaletteEntry, DragState } from "./types.js";
@@ -34,6 +46,7 @@ import type { PaletteEntry, DragState } from "./types.js";
 type SimpleIcon = React.ComponentType<{ className?: string }>;
 
 const ICON_MAP: Record<string, SimpleIcon> = {
+  // Existing
   Table: Table as SimpleIcon,
   TrendingUp: TrendingUp as SimpleIcon,
   Badge: Badge as SimpleIcon,
@@ -43,6 +56,22 @@ const ICON_MAP: Record<string, SimpleIcon> = {
   LayoutTemplate: LayoutTemplate as SimpleIcon,
   Code: Code as SimpleIcon,
   FileText: FileText as SimpleIcon,
+  // Charts
+  BarChart3: BarChart3 as SimpleIcon,
+  LineChart: LineChart as SimpleIcon,
+  PieChart: PieChart as SimpleIcon,
+  Activity: Activity as SimpleIcon,
+  // Form Inputs
+  Type: Type as SimpleIcon,
+  Hash: Hash as SimpleIcon,
+  Calendar: Calendar as SimpleIcon,
+  ChevronDown: ChevronDown as SimpleIcon,
+  CheckSquare: CheckSquare as SimpleIcon,
+  // Interactive
+  MousePointer: MousePointer as SimpleIcon,
+  Link2: Link2 as SimpleIcon,
+  // Progress
+  Gauge: Gauge as SimpleIcon,
 };
 
 // ---------------------------------------------------------------------------

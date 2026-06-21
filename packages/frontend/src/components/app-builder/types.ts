@@ -58,7 +58,15 @@ export interface DataBinding {
 // Palette component descriptor
 // ---------------------------------------------------------------------------
 
-export type ComponentCategory = "Data Display" | "Input" | "Layout" | "Charts" | "Custom";
+export type ComponentCategory =
+  | "Data Display"
+  | "Input"
+  | "Layout"
+  | "Charts"
+  | "Form Inputs"
+  | "Interactive"
+  | "Progress"
+  | "Custom";
 
 export interface PaletteEntry {
   type: string;
