@@ -172,7 +172,9 @@ interface SavedQuery {
 // ---------------------------------------------------------------------------
 
 function makeId(): string {
-  return Math.random().toString(36).slice(2);
+  // crypto.randomUUID() is available in all modern browsers and avoids the
+  // ~1-in-2^52 collision probability of the old Math.random approach.
+  return crypto.randomUUID();
 }
 
 /** Parse a comma-separated string into an array for "in" / "not_in" operators. */
@@ -201,7 +203,8 @@ function rowsToCsv(columns: QueryColumn[], rows: Record<string, unknown>[]): str
       .map((c) => {
         const v = row[c.name];
         if (v === null || v === undefined) return "";
-        if (typeof v === "object") return JSON.stringify(JSON.stringify(v));
+        // S1: objects need exactly one level of JSON.stringify — no double-encoding
+        if (typeof v === "object") return JSON.stringify(v);
         return JSON.stringify(String(v));
       })
       .join(","),
@@ -216,8 +219,15 @@ function downloadText(content: string, filename: string, mimeType: string): void
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  // The anchor must be in the DOM for Firefox to fire the download reliably.
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoke asynchronously so the browser has time to initiate the download
+  // before the object URL is released.
+  requestAnimationFrame(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
 }
 
 /**
@@ -291,6 +301,20 @@ function buildSqlPreview(params: {
   return lines.join("\n");
 }
 
+/**
+ * Runtime guard for data coming out of localStorage. Dropping invalid entries
+ * silently prevents a corrupt saved-query from crashing the page on load.
+ */
+function isValidSavedQuery(q: unknown): q is SavedQuery {
+  if (typeof q !== "object" || q === null) return false;
+  const obj = q as Record<string, unknown>;
+  return (
+    typeof obj["name"] === "string" &&
+    typeof obj["entityType"] === "string" &&
+    Array.isArray(obj["selectedFields"])
+  );
+}
+
 /** Load saved queries from localStorage — returns empty array on parse failure. */
 function loadSavedQueries(): SavedQuery[] {
   try {
@@ -298,7 +322,9 @@ function loadSavedQueries(): SavedQuery[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as SavedQuery[];
+    // Filter out any entries that don't match the SavedQuery shape so that
+    // data written by an older version of the app doesn't cause runtime errors.
+    return parsed.filter(isValidSavedQuery);
   } catch {
     // Silently ignore malformed data — user can re-save
     return [];
@@ -935,12 +961,29 @@ interface SqlPreviewProps {
   sql: string;
 }
 
+/**
+ * HTML-escape raw text before it is inserted via dangerouslySetInnerHTML.
+ * Must run BEFORE the keyword-highlighting regex so that user-supplied data
+ * (field slugs, alias names, values) cannot inject markup.
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function SqlPreview({ sql }: SqlPreviewProps) {
   // Minimal keyword highlighting — avoids adding a syntax-highlight dependency.
-  // We split the SQL text and wrap SQL keywords in styled spans.
+  // We wrap SQL keywords in styled spans after HTML-escaping the whole string.
   const SQL_KEYWORDS = /\b(SELECT|FROM|WHERE|AND|OR|NOT|IN|IS|NULL|GROUP BY|ORDER BY|LIMIT|AS|ASC|DESC|LIKE)\b/g;
 
-  const highlighted = sql.replace(SQL_KEYWORDS, (kw) =>
+  // Escape first so that any user-supplied field slugs or values containing
+  // '<', '>', or '"' cannot break out of the text context into markup.
+  const escaped = escapeHtml(sql);
+  const highlighted = escaped.replace(SQL_KEYWORDS, (kw) =>
     `<span style="color:hsl(220,70%,50%);font-weight:600">${kw}</span>`,
   );
 
@@ -949,8 +992,8 @@ function SqlPreview({ sql }: SqlPreviewProps) {
       <pre
         className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/30 p-4 text-xs font-mono overflow-x-auto text-[var(--color-foreground)] leading-relaxed"
         aria-label="SQL preview"
-        // The highlighted HTML comes entirely from our own template — no user
-        // input is interpolated as HTML. The SQL keyword spans are safe.
+        // Safe: the sql string is HTML-escaped before the keyword regex runs,
+        // so no user-supplied data can appear as raw HTML.
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: highlighted }}
       />
@@ -1410,14 +1453,24 @@ export function QueryBuilderPage() {
                 <SelectValue placeholder="Select an entity…" />
               </SelectTrigger>
               <SelectContent>
-                {entityList.map((e) => {
+                {entityList.flatMap((e) => {
                   const entity = e as EntitySummary & { slug?: string };
-                  const value = entity.slug ?? entity.name.toLowerCase().replace(/\s+/g, "_");
-                  return (
-                    <SelectItem key={value} value={value}>
+                  if (!entity.slug) {
+                    // An entity without a slug cannot be queried — warn once
+                    // so the developer knows the ontology record is incomplete.
+                    // We use flatMap so the missing-slug entity is skipped in
+                    // the dropdown rather than falling back to a derived value
+                    // that may not match the backend's routing.
+                    console.warn(
+                      `[QueryBuilder] Entity "${entity.name}" has no slug — skipping. Update the ontology record to add a slug.`,
+                    );
+                    return [];
+                  }
+                  return [
+                    <SelectItem key={entity.slug} value={entity.slug}>
                       {entity.name}
-                    </SelectItem>
-                  );
+                    </SelectItem>,
+                  ];
                 })}
               </SelectContent>
             </Select>
@@ -1639,6 +1692,13 @@ export function QueryBuilderPage() {
                     max={1000}
                     value={limitStr}
                     onChange={(e) => setLimitStr(e.target.value)}
+                    onBlur={(e) => {
+                      // Clamp to valid range on blur so the displayed value
+                      // always reflects what will actually be sent to the API.
+                      const v = parseInt(e.target.value, 10);
+                      if (isNaN(v) || v < 1) setLimitStr("1");
+                      else if (v > 1000) setLimitStr("1000");
+                    }}
                   />
                 </div>
               </div>

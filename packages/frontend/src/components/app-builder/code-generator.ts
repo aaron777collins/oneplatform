@@ -111,15 +111,38 @@ export function layoutToReactCode(layout: AppLayout): string {
   return lines.join("\n");
 }
 
+/**
+ * Strip characters that cannot appear in a safe HTML attribute value.
+ * Row and column IDs come from nanoid (already alphanumeric + hyphens) but
+ * we guard here in case IDs ever come from untrusted sources such as parsed
+ * user code returned by reactCodeToLayout.
+ */
+function sanitizeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+/**
+ * Remove script tags, iframes, and inline event handlers from HTML before
+ * embedding it in generated TSX. The generated file is code the developer
+ * will review, but a malicious payload could trick them into deploying XSS.
+ */
+function sanitizeHtmlForCodeGen(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, "");
+}
+
 function renderRow(row: LayoutRow, indent: number): string[] {
   const pad = " ".repeat(indent);
   const lines: string[] = [];
 
   const heightStyle = row.height !== undefined ? ` style={{ height: "${row.height}" }}` : "";
 
-  // Each row is a CSS grid div with the standard 12-column grid
+  // Each row is a CSS grid div with the standard 12-column grid.
+  // IDs are sanitized to prevent attribute injection from parsed user code.
   lines.push(
-    `${pad}<div className="grid grid-cols-12 gap-4"${heightStyle} data-row-id="${row.id}">`,
+    `${pad}<div className="grid grid-cols-12 gap-4"${heightStyle} data-row-id="${sanitizeId(row.id)}">`,
   );
 
   for (const col of row.columns) {
@@ -135,7 +158,7 @@ function renderColumn(col: LayoutColumn, indent: number): string[] {
   const lines: string[] = [];
   const span = `col-span-${col.width}`;
 
-  lines.push(`${pad}<div className="${span}" data-col-id="${col.id}">`);
+  lines.push(`${pad}<div className="${span}" data-col-id="${sanitizeId(col.id)}">`);
 
   if (col.component !== undefined) {
     lines.push(...renderComponent(col.component, indent + 2));
@@ -159,7 +182,11 @@ function renderComponent(component: PlacedComponent, indent: number): string[] {
   // Custom blocks render raw content
   if (component.type === "HtmlBlock") {
     const html = String(component.props["html"] ?? "");
-    lines.push(`${pad}<div dangerouslySetInnerHTML={{ __html: ${JSON.stringify(html)} }} />`);
+    // Strip scripts, iframes, and event handlers before embedding so that a
+    // developer reviewing the generated file isn't silently shipping XSS.
+    const safeHtml = sanitizeHtmlForCodeGen(html);
+    lines.push(`${pad}{/* WARNING: User-supplied HTML content — review before deploying */}`);
+    lines.push(`${pad}<div dangerouslySetInnerHTML={{ __html: ${JSON.stringify(safeHtml)} }} />`);
     return lines;
   }
 
@@ -241,22 +268,6 @@ function collectUsedBuilderComponents(layout: AppLayout): Set<string> {
   for (const row of layout.rows) {
     for (const col of row.columns) {
       if (col.component && BUILDER_COMPONENTS.has(col.component.type)) {
-        result.add(col.component.type);
-      }
-    }
-  }
-  return result;
-}
-
-function collectUsedCustomComponents(layout: AppLayout): Set<string> {
-  const result = new Set<string>();
-  for (const row of layout.rows) {
-    for (const col of row.columns) {
-      if (
-        col.component &&
-        !SDK_COMPONENTS.has(col.component.type) &&
-        !BUILDER_COMPONENTS.has(col.component.type)
-      ) {
         result.add(col.component.type);
       }
     }

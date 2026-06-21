@@ -151,14 +151,16 @@ export function ComponentPreview({ component }: ComponentPreviewProps) {
 
     case "HtmlBlock": {
       const html = String(props["html"] ?? "");
+      // Render inside a sandboxed iframe so that user-supplied HTML cannot
+      // execute scripts or access the parent document in multi-user contexts.
+      // sandbox="" (empty string) blocks ALL capabilities: scripts, forms,
+      // same-origin access, and navigation — without needing DOMPurify.
       return (
-        <div
-          style={style}
-          // This is an intentional builder feature — the user explicitly
-          // placed an HTML block and controls the content.
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: html }}
-          className="text-sm text-[var(--color-foreground,#111)]"
+        <iframe
+          srcDoc={html}
+          sandbox=""
+          title="HTML Block Preview"
+          style={{ width: "100%", height: "100%", border: "none", ...style }}
         />
       );
     }
@@ -191,10 +193,10 @@ export function ComponentPreview({ component }: ComponentPreviewProps) {
       return <PieChartPreview props={props} style={style} />;
 
     case "AreaChart":
-      return <AreaChartPreview props={props} style={style} />;
+      return <AreaChartPreview props={props} style={style} componentId={component.id} />;
 
     case "KPICard":
-      return <KPICardPreview props={props} style={style} />;
+      return <KPICardPreview props={props} style={style} componentId={component.id} />;
 
     // -----------------------------------------------------------------------
     // Form Inputs
@@ -248,6 +250,13 @@ interface PreviewProps {
   props: Record<string, unknown>;
   // style is taken directly from component.styles which may be undefined
   style: React.CSSProperties | undefined;
+}
+
+interface PreviewPropsWithId extends PreviewProps {
+  // componentId is the placed-component's stable ID, used to scope SVG
+  // gradient IDs so that multiple chart instances on the same canvas do
+  // not share the same <linearGradient> element and clash.
+  componentId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +380,7 @@ function PieChartPreview({ props, style }: PreviewProps) {
   );
 }
 
-function AreaChartPreview({ props, style }: PreviewProps) {
+function AreaChartPreview({ props, style, componentId }: PreviewPropsWithId) {
   const title = String(props["title"] ?? "");
   const data = (props["data"] as object[] | undefined) ?? [];
   const xField = String(props["xField"] ?? "x");
@@ -380,7 +389,9 @@ function AreaChartPreview({ props, style }: PreviewProps) {
   const gradient = props["gradient"] !== false;
   const height = Number(props["height"] ?? 300);
 
-  const gradientId = "area-preview-gradient";
+  // Scope the gradient ID to this component instance so that multiple
+  // AreaChart components on the same canvas do not share the same SVG element.
+  const gradientId = `area-gradient-${componentId}`;
 
   return (
     <div style={style} className="p-3">
@@ -415,7 +426,7 @@ function AreaChartPreview({ props, style }: PreviewProps) {
   );
 }
 
-function KPICardPreview({ props, style }: PreviewProps) {
+function KPICardPreview({ props, style, componentId }: PreviewPropsWithId) {
   const title = String(props["title"] ?? "");
   const value = String(props["value"] ?? "0");
   const change = Number(props["change"] ?? 0);
@@ -429,6 +440,10 @@ function KPICardPreview({ props, style }: PreviewProps) {
     trend === "up" ? "#10b981" : trend === "down" ? "#ef4444" : "#6b7280";
   const trendSymbol = trend === "up" ? "▲" : trend === "down" ? "▼" : "—";
   const changeStr = `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`;
+
+  // Scope the gradient ID to this component instance so that multiple KPI
+  // cards on the same canvas don't fight over the same SVG gradient element.
+  const sparklineGradientId = `kpi-sparkline-fill-${componentId}`;
 
   return (
     <div
@@ -447,7 +462,7 @@ function KPICardPreview({ props, style }: PreviewProps) {
           <ResponsiveContainer width={80} height={40}>
             <RechartsAreaChart data={chartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id="kpi-sparkline-fill" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={sparklineGradientId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={trendColor} stopOpacity={0.3} />
                   <stop offset="95%" stopColor={trendColor} stopOpacity={0} />
                 </linearGradient>
@@ -457,7 +472,7 @@ function KPICardPreview({ props, style }: PreviewProps) {
                 dataKey="v"
                 stroke={trendColor}
                 strokeWidth={1.5}
-                fill="url(#kpi-sparkline-fill)"
+                fill={`url(#${sparklineGradientId})`}
                 dot={false}
               />
             </RechartsAreaChart>
