@@ -12,6 +12,9 @@
     "dev": "turbo dev",
     "test": "turbo run test",
     "test:e2e": "vitest run --config tests/vitest.e2e.config.ts",
+    "test:e2e:browser": "playwright test --config tests/e2e/playwright.config.ts",
+    "test:e2e:browser:ui": "playwright test --config tests/e2e/playwright.config.ts --ui",
+    "test:e2e:browser:headed": "playwright test --config tests/e2e/playwright.config.ts --headed",
     "test:bench": "vitest run --config tests/vitest.bench.config.ts",
     "bench": "vitest run --config tests/vitest.bench.config.ts run-all",
     "bench:save": "BENCH_SAVE_BASELINE=1 vitest run --config tests/vitest.bench.config.ts run-all",
@@ -24,9 +27,11 @@
     "docs:build": "pnpm --filter @oneplatform/docs build"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
+    "playwright": "^1.61.0",
     "prettier": "^3.3.0",
     "tsx": "*",
     "turbo": "^2.0.0",
