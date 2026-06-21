@@ -75,7 +75,8 @@ const NAV_GROUPS: NavGroup[] = [
         description: "Browse and install connectors from the catalog.",
       },
       {
-        label: "Ontology",
+        // Display label is "Data Models" — the /ontology route path is kept for backwards compatibility
+        label: "Data Models",
         to: "/ontology",
         icon: Layers,
         description: "Define your data models and schemas. Create entity types that describe the shape of your data (like Customer, Order, or Product) and the relationships between them.",

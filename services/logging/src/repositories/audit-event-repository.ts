@@ -173,6 +173,54 @@ export class AuditEventRepository {
   }
 
   /**
+   * Fetch a bounded slice of audit events for export (no pagination cursor).
+   *
+   * Designed for the NDJSON export endpoint — the caller pipes each row through
+   * a transform stream. We fetch all rows in one query up to `limit` rows so the
+   * DB round-trip count stays at 1, but the route handler writes them out one at a
+   * time without buffering the entire result set into a JSON array.
+   */
+  async queryForExport(params: {
+    startDate: string;
+    endDate: string;
+    actorId?: string;
+    action?: string;
+    limit: number;
+  }): Promise<AuditEventRow[]> {
+    const conditions: string[] = [
+      "created_at >= $1",
+      "created_at < $2",
+    ];
+    const args: unknown[] = [params.startDate, params.endDate];
+    let n = 3;
+
+    if (params.actorId !== undefined) {
+      conditions.push(`actor_id = $${n++}`);
+      args.push(params.actorId);
+    }
+    if (params.action !== undefined) {
+      conditions.push(`action = $${n++}`);
+      args.push(params.action);
+    }
+
+    args.push(params.limit);
+    const limitParam = `$${n}`;
+
+    const sql = `
+      SELECT id, trace_id, actor_id, actor_type, tenant_id, action,
+             resource_type, resource_id, result, metadata, created_at,
+             archived, job_id
+      FROM logging.audit_events
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${limitParam}
+    `;
+
+    const result = await this.db.query<AuditEventRow>(sql, args);
+    return result.rows;
+  }
+
+  /**
    * Fetch all audit events for a specific resource — primary access pattern
    * for compliance queries (e.g., "who did what to tenant X's resource Y?").
    */

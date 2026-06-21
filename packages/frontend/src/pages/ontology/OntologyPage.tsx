@@ -99,9 +99,9 @@ export function OntologyPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <PageHeader
-        title="Ontology"
+        title="Data Models"
         description="Define your data models and schemas."
-        breadcrumbs={[{ label: "Platform" }, { label: "Ontology" }]}
+        breadcrumbs={[{ label: "Platform" }, { label: "Data Models" }]}
         actions={
           <div className="flex items-center gap-2">
             <Button

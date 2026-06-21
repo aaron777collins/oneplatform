@@ -42,6 +42,13 @@ interface ApiKeyRow {
   revoked_at: Date | null;
 }
 
+// Enriched row returned by admin list query — joins api_keys with auth.users
+// to surface the owning user's display name alongside key metadata.
+interface AdminApiKeyRow extends ApiKeyRow {
+  display_name: string | null;
+  email: string;
+}
+
 // ---------------------------------------------------------------------------
 // Service interface
 // ---------------------------------------------------------------------------
@@ -51,6 +58,13 @@ export interface ApiKeyServiceDeps {
   redis: Redis;
   logger: Logger;
   events: EventPublisher;
+}
+
+// Record returned by listAllKeys — augments the base record with owning user info.
+// Never exposes key_hash; only the short prefix is included for identification.
+export interface AdminApiKeyRecord extends ApiKeyRecord {
+  displayName: string | null;
+  email: string;
 }
 
 export interface ApiKeyService {
@@ -65,7 +79,16 @@ export interface ApiKeyService {
     userId: string,
     options?: { status?: "active" | "revoked" | "all"; limit?: number; offset?: number },
   ): Promise<{ keys: ApiKeyRecord[]; total: number }>;
+  // Admin-only: list all keys across all users (no ownership filter).
+  listAllKeys(options?: {
+    status?: "active" | "revoked" | "all";
+    limit?: number;
+    offset?: number;
+  }): Promise<{ keys: AdminApiKeyRecord[]; total: number }>;
   revoke(keyId: string, revokedBy: string, tenantId: string): Promise<void>;
+  // Admin-only: revoke any key regardless of ownership; tenantId is not required
+  // because the admin has already been authenticated at the service entry point.
+  revokeAsAdmin(keyId: string, revokedBy: string): Promise<void>;
   rotate(
     keyId: string,
     userId: string,
@@ -321,6 +344,56 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
   }
 
   // -------------------------------------------------------------------------
+  // listAllKeys (admin-only)
+  // -------------------------------------------------------------------------
+
+  async function listAllKeys(options?: {
+    status?: "active" | "revoked" | "all";
+    limit?: number;
+    offset?: number;
+  }): Promise<{ keys: AdminApiKeyRecord[]; total: number }> {
+    const status = options?.status ?? "active";
+    const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
+    const offset = Math.max(options?.offset ?? 0, 0);
+
+    let statusClause = "";
+    if (status === "active") {
+      statusClause = " AND k.revoked_at IS NULL";
+    } else if (status === "revoked") {
+      statusClause = " AND k.revoked_at IS NOT NULL";
+    }
+
+    const countResult = await db.query<{ count: string }>(
+      `SELECT count(*) AS count FROM auth.api_keys k WHERE 1=1${statusClause}`
+    );
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+    // Join with auth.users to surface owning user info.
+    // key_hash is intentionally excluded — the column is never returned by this
+    // service method. key_prefix provides enough context for identification.
+    const result = await db.query<AdminApiKeyRow>(
+      `SELECT k.id, k.user_id, k.tenant_id, k.name, k.key_hash, k.key_prefix,
+              k.scopes, k.expires_at, k.last_used_at, k.created_at, k.revoked_at,
+              u.display_name, u.email
+       FROM auth.api_keys k
+       JOIN auth.users u ON u.id = k.user_id
+       WHERE 1=1${statusClause}
+       ORDER BY k.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    return {
+      keys: result.rows.map((row) => ({
+        ...rowToRecord(row),
+        displayName: row.display_name,
+        email: row.email,
+      })),
+      total,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Revoke
   // -------------------------------------------------------------------------
 
@@ -353,6 +426,43 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
       tenantId: row.tenant_id,
       actor: { type: "user", id: revokedBy },
       data: { keyId, userId: row.user_id, revokedBy },
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // revokeAsAdmin — revoke any key without a tenantId ownership check.
+  // The caller (route layer) is responsible for verifying admin scope before
+  // calling this method. The tenantId is not enforced here because a platform
+  // admin can revoke keys belonging to any tenant for compliance purposes.
+  // -------------------------------------------------------------------------
+
+  async function revokeAsAdmin(keyId: string, revokedBy: string): Promise<void> {
+    const result = await db.query<{ id: string; tenant_id: string; user_id: string }>(
+      `UPDATE auth.api_keys
+       SET revoked_at = now(), revoked_by = $1
+       WHERE id = $2 AND revoked_at IS NULL
+       RETURNING id, tenant_id, user_id`,
+      [revokedBy, keyId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError(`API key ${keyId} not found or already revoked.`);
+    }
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new NotFoundError(`API key ${keyId} not found.`);
+    }
+
+    const REVOCATION_TTL_SECONDS = 30 * 24 * 60 * 60;
+    await redis.set(`auth:apikey:revocation:${keyId}`, "1", "EX", REVOCATION_TTL_SECONDS);
+
+    await events.publish({
+      eventType: "auth.key.revoked",
+      eventVersion: "1.0",
+      tenantId: row.tenant_id,
+      actor: { type: "user", id: revokedBy },
+      data: { keyId, userId: row.user_id, revokedBy, adminRevocation: true },
     });
   }
 
@@ -447,5 +557,5 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
 
   // -------------------------------------------------------------------------
 
-  return { create, validate, list, revoke, rotate };
+  return { create, validate, list, listAllKeys, revoke, revokeAsAdmin, rotate };
 }

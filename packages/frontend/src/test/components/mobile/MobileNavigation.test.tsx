@@ -140,8 +140,8 @@ describe("MobileNavigation", () => {
       render(<MobileNavigation />);
       await user.click(screen.getByRole("button", { name: /more navigation items/i }));
 
-      // Ontology is always visible (no role restriction)
-      await user.click(screen.getByRole("link", { name: /ontology/i }));
+      // "Data Models" (formerly "Ontology") is always visible (no role restriction)
+      await user.click(screen.getByRole("link", { name: /data models/i }));
 
       expect(
         screen.queryByRole("dialog", { name: /more navigation options/i }),

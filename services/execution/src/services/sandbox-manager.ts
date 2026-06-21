@@ -49,8 +49,22 @@ export interface SandboxManagerDeps {
   recycleIntervalMs?: number;
   /** Grace period for drain before force-kill. Env: OP_SANDBOX_RECYCLE_GRACE_MS */
   drainGracePeriodMs?: number;
-  /** Number of warm replacement containers to maintain. Env: OP_SANDBOX_WARM_POOL_SIZE */
+  /**
+   * Number of warm replacement instances to keep ready in the pool.
+   * When the primary reaches its recycle threshold, a warm instance is promoted
+   * (blue-green) instead of creating a new one from scratch, eliminating the
+   * brief outage while the replacement starts. Pool members connect to their
+   * own socket paths derived from the primary socket path with a pool index
+   * suffix (e.g. /run/sandbox/op-pool-1.sock).
+   * Env: OP_SANDBOX_WARM_POOL_SIZE (default: 2)
+   */
   warmPoolSize?: number;
+  /**
+   * Factory for creating additional UnixSocketClient instances for pool members.
+   * If omitted, the warm pool feature is disabled and recycling falls back to
+   * the original single-instance behaviour (matches the pre-pool implementation).
+   */
+  createClient?: () => UnixSocketClient;
   /** Callback invoked when crash is detected; used by ExecutionService to fan out SSE errors */
   onCrash?: (killedExecutionIds: string[]) => void;
 }
@@ -67,11 +81,15 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
     recycleAfterCount = parseInt(process.env["OP_SANDBOX_RECYCLE_COUNT"] ?? "1000", 10),
     recycleIntervalMs = parseInt(process.env["OP_SANDBOX_RECYCLE_INTERVAL_MS"] ?? "3600000", 10),
     drainGracePeriodMs = parseInt(process.env["OP_SANDBOX_RECYCLE_GRACE_MS"] ?? "60000", 10),
+    warmPoolSize = parseInt(process.env["OP_SANDBOX_WARM_POOL_SIZE"] ?? "2", 10),
+    createClient,
     onCrash,
   } = deps;
 
-  // Primary sandbox instance — the one receiving all new execution requests
-  const primary: SandboxInstance = {
+  // Primary sandbox instance — the one receiving all new execution requests.
+  // This reference is replaced during blue-green recycle when a warm pool
+  // instance is promoted.
+  let primary: SandboxInstance = {
     id: "sandbox-primary-0",
     socketPath,
     client: primaryClient,
@@ -80,6 +98,72 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
     startedAt: new Date(),
     inflightIds: new Set(),
   };
+
+  // ---------------------------------------------------------------------------
+  // Warm pool — array of ready sandbox instances waiting to be promoted.
+  //
+  // WHY: Without a warm pool, recycling the primary creates a brief window where
+  // getPrimary() throws DRAINING_OLD. With the pool, we promote a pre-warmed
+  // instance as the new primary before draining the old one (blue-green), so
+  // callers always have a healthy instance available during recycle.
+  //
+  // Pool capacity is warmPoolSize. Each pool member uses a dedicated socket
+  // path derived from the primary socket path. If createClient is not provided
+  // the pool is disabled and we fall back to the original drain-in-place logic.
+  // ---------------------------------------------------------------------------
+  const warmPool: SandboxInstance[] = [];
+  let poolSequence = 0; // monotonically increasing ID suffix for pool instances
+
+  function derivePoolSocketPath(index: number): string {
+    // Replace the last .sock suffix (or append) with a pool-member suffix.
+    // e.g. /run/sandbox/op.sock → /run/sandbox/op-pool-1.sock
+    return socketPath.replace(/\.sock$/, "") + `-pool-${index}.sock`;
+  }
+
+  /** Connects a pool instance and marks it ACTIVE. Silently logs errors. */
+  async function connectPoolInstance(instance: SandboxInstance): Promise<void> {
+    try {
+      await instance.client.connect(instance.socketPath);
+      instance.state = "ACTIVE";
+      instance.startedAt = new Date();
+      logger.info("SandboxManager: warm pool instance ready", {
+        instanceId: instance.id,
+        socketPath: instance.socketPath,
+        poolSize: warmPool.length,
+      });
+    } catch (err) {
+      logger.warn("SandboxManager: warm pool instance failed to connect — will retry", {
+        instanceId: instance.id,
+        socketPath: instance.socketPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Remove from pool so it is not handed out in STARTING state
+      const idx = warmPool.indexOf(instance);
+      if (idx !== -1) warmPool.splice(idx, 1);
+    }
+  }
+
+  /** Replenishes the warm pool up to warmPoolSize. */
+  function replenishPool(): void {
+    if (createClient === undefined) return; // Pool feature disabled
+    if (isDraining) return; // Do not grow pool during shutdown
+
+    while (warmPool.length < warmPoolSize) {
+      poolSequence++;
+      const newInstance: SandboxInstance = {
+        id: `sandbox-pool-${poolSequence}`,
+        socketPath: derivePoolSocketPath(poolSequence),
+        client: createClient(),
+        state: "STARTING",
+        runCount: 0,
+        startedAt: new Date(),
+        inflightIds: new Set(),
+      };
+      warmPool.push(newInstance);
+
+      void connectPoolInstance(newInstance);
+    }
+  }
 
   let consecutivePingMisses = 0;
   let pingIntervalHandle: ReturnType<typeof setInterval> | null = null;
@@ -101,6 +185,8 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
         primary.startedAt = new Date();
         logger.info("SandboxManager: sandbox became healthy", { sandboxId: primary.id });
         scheduleRecycleTimer();
+        // After the primary is healthy, seed the warm pool
+        replenishPool();
       }
     } catch (err) {
       consecutivePingMisses++;
@@ -157,6 +243,7 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
           primary.startedAt = new Date();
           consecutivePingMisses = 0;
           scheduleRecycleTimer();
+          replenishPool();
         })
         .catch((err: unknown) => {
           logger.warn("SandboxManager: reconnect attempt failed — retrying in 5s", {
@@ -169,41 +256,75 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
 
   // ---------------------------------------------------------------------------
   // Recycle — design spec §9.2
+  //
+  // Blue-green recycle when warm pool is available:
+  //   1. Pop an ACTIVE pool instance to become the new primary.
+  //   2. Atomically swap primary references — callers see no gap.
+  //   3. Drain the old primary in the background.
+  //   4. Replenish the pool with a new instance.
+  //
+  // Without a warm pool (createClient undefined, or pool empty), falls back
+  // to the original drain-in-place behaviour which causes a brief DRAINING_OLD
+  // window where getPrimary() throws.
   // ---------------------------------------------------------------------------
 
   function scheduleRecycleTimer(): void {
     if (recycleTimeoutHandle !== null) {
       clearTimeout(recycleTimeoutHandle);
     }
-    // Recycle at the 1-hour mark regardless of run count
+    // Recycle at the interval mark regardless of run count
     recycleTimeoutHandle = setTimeout(() => {
-      triggerRecycle("time");
+      void triggerRecycle("time");
     }, recycleIntervalMs);
   }
 
   async function triggerRecycle(reason: "threshold" | "time" | "crash"): Promise<void> {
     if (isDraining) return; // Already draining
-    isDraining = true;
 
     logger.info("SandboxManager: recycle triggered", {
       reason,
       sandboxId: primary.id,
       runCount: primary.runCount,
+      warmPoolSize: warmPool.length,
     });
 
+    // Attempt blue-green promotion from warm pool first.
+    const poolCandidate = warmPool.find((inst) => inst.state === "ACTIVE");
+
+    if (poolCandidate !== undefined) {
+      // Blue-green: promote pool candidate as the new primary BEFORE draining
+      // the old one. This eliminates the DRAINING_OLD gap entirely.
+      warmPool.splice(warmPool.indexOf(poolCandidate), 1);
+
+      const oldPrimary = primary;
+      // Swap the primary reference atomically (JS is single-threaded in the
+      // event loop, so this is safe between await points).
+      primary = poolCandidate;
+      consecutivePingMisses = 0;
+      scheduleRecycleTimer();
+
+      logger.info("SandboxManager: blue-green promotion complete — new primary active", {
+        newPrimaryId: primary.id,
+        oldPrimaryId: oldPrimary.id,
+      });
+
+      // Drain the old primary in the background; do not block the caller.
+      void drainAndCloseInstance(oldPrimary, reason);
+
+      // Immediately replenish the pool to maintain desired pool size.
+      replenishPool();
+      return;
+    }
+
+    // No warm pool candidate available — fall back to drain-in-place.
+    // This causes a brief DRAINING_OLD window where getPrimary() throws.
+    isDraining = true;
     primary.state = "DRAINING_OLD";
     primary.runCount = 0;
 
-    // Wait for in-flight executions to finish up to the grace period.
-    // For connector-run executions with long timeouts, the spec says we extend
-    // the grace period to max(inflight_timeout + 5000, drainGracePeriodMs).
-    // Since we do not have access to per-execution timeouts here we use the
-    // configured grace period as the upper bound.
     const drainStart = Date.now();
+    await waitForInflightDrain(primary, drainStart);
 
-    await waitForInflightDrain(drainStart);
-
-    // Signal the sandbox to complete its own cleanup
     try {
       await primary.client.drain();
     } catch (err) {
@@ -216,23 +337,52 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
     primary.startedAt = new Date();
     isDraining = false;
 
-    logger.info("SandboxManager: recycle complete", { sandboxId: primary.id });
+    logger.info("SandboxManager: recycle complete (drain-in-place)", { sandboxId: primary.id });
     scheduleRecycleTimer();
+    replenishPool();
   }
 
-  async function waitForInflightDrain(startMs: number): Promise<void> {
+  /** Drains a retiring sandbox instance and closes its client. */
+  async function drainAndCloseInstance(
+    instance: SandboxInstance,
+    reason: string,
+  ): Promise<void> {
+    instance.state = "DRAINING_OLD";
+    const drainStart = Date.now();
+
+    await waitForInflightDrain(instance, drainStart);
+
+    try {
+      await instance.client.drain();
+    } catch (err) {
+      logger.warn("SandboxManager: drain command failed on retiring instance", {
+        instanceId: instance.id,
+        reason,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    instance.client.close();
+    logger.info("SandboxManager: retired sandbox instance closed", {
+      instanceId: instance.id,
+      reason,
+    });
+  }
+
+  async function waitForInflightDrain(instance: SandboxInstance, startMs: number): Promise<void> {
     return new Promise((resolve) => {
       function check(): void {
         const elapsed = Date.now() - startMs;
-        if (primary.inflightIds.size === 0 || elapsed >= drainGracePeriodMs) {
-          if (primary.inflightIds.size > 0) {
+        if (instance.inflightIds.size === 0 || elapsed >= drainGracePeriodMs) {
+          if (instance.inflightIds.size > 0) {
             logger.warn("SandboxManager: drain grace period expired with in-flight executions", {
-              remainingInflight: primary.inflightIds.size,
-              killedIds: Array.from(primary.inflightIds),
+              instanceId: instance.id,
+              remainingInflight: instance.inflightIds.size,
+              killedIds: Array.from(instance.inflightIds),
             });
             // Force-kill remaining — mark them as killed via onCrash notification
-            const killedIds = Array.from(primary.inflightIds);
-            primary.inflightIds.clear();
+            const killedIds = Array.from(instance.inflightIds);
+            instance.inflightIds.clear();
             if (onCrash !== undefined) {
               onCrash(killedIds);
             }
@@ -321,6 +471,11 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
       reconnectTimeoutHandle = null;
     }
     primary.client.close();
+    // Close all warm pool instances
+    for (const inst of warmPool) {
+      inst.client.close();
+    }
+    warmPool.length = 0;
   }
 
   return { getPrimary, recordRun, recordCompletion, startHealthChecks, stop, handleCrash };

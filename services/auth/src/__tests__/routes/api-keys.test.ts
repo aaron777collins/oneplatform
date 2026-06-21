@@ -61,7 +61,9 @@ function makeApiKeyService(overrides: Partial<ApiKeyService> = {}): ApiKeyServic
     }),
     validate: vi.fn().mockResolvedValue(null),
     list: vi.fn().mockResolvedValue({ keys: [], total: 0 }),
+    listAllKeys: vi.fn().mockResolvedValue({ keys: [], total: 0 }),
     revoke: vi.fn().mockResolvedValue(undefined),
+    revokeAsAdmin: vi.fn().mockResolvedValue(undefined),
     rotate: vi.fn().mockResolvedValue({
       apiKey: "op_live_" + "B".repeat(43),
       keyRecord: makeKeyRecord({ id: "new-key-id" }),

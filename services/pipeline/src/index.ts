@@ -203,6 +203,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     scheduleRepo,
     pipelineRepo,
     runService,
+    runRepo,
     logger,
   });
 

@@ -428,7 +428,17 @@ function AreaChartPreview({ props, style, componentId }: PreviewPropsWithId) {
 
 function KPICardPreview({ props, style, componentId }: PreviewPropsWithId) {
   const title = String(props["title"] ?? "");
-  const value = String(props["value"] ?? "0");
+  const autoCalculate = props["autoCalculate"] === true;
+  const aggregation = String(props["aggregation"] ?? "sum").toUpperCase();
+  const aggregationField = String(props["aggregationField"] ?? "");
+  // When auto-calculate is enabled, the displayed value is a formula placeholder
+  // rather than a static string — this shows the user how the card will behave
+  // at runtime when bound to real entity data.
+  const value = autoCalculate
+    ? aggregationField.length > 0
+      ? `= ${aggregation}(${aggregationField})`
+      : `= ${aggregation}(...)`
+    : String(props["value"] ?? "0");
   const change = Number(props["change"] ?? 0);
   const trend = String(props["trend"] ?? "flat");
   const sparklineData = (props["sparklineData"] as number[] | undefined) ?? [];
@@ -451,9 +461,21 @@ function KPICardPreview({ props, style, componentId }: PreviewPropsWithId) {
       className="rounded-md border border-[var(--color-border,#e5e7eb)] bg-[var(--color-background,#fff)] p-4"
     >
       <p className="text-xs text-[var(--color-muted-foreground,#6b7280)]">{title}</p>
+      {autoCalculate && (
+        <p className="mt-0.5 text-[10px] font-medium text-[var(--color-primary,#6366f1)]">
+          Auto-calculated from data
+        </p>
+      )}
       <div className="mt-1 flex items-end justify-between gap-2">
         <div>
-          <p className="text-2xl font-bold text-[var(--color-foreground,#111)]">{value}</p>
+          <p
+            className="text-2xl font-bold text-[var(--color-foreground,#111)]"
+            // Formula placeholders are rendered in muted style so the builder
+            // canvas makes clear this is a computed slot, not a real value.
+            style={autoCalculate ? { color: "#6366f1", fontFamily: "monospace", fontSize: "1rem" } : undefined}
+          >
+            {value}
+          </p>
           <p className="mt-1 text-xs font-medium" style={{ color: trendColor }}>
             {trendSymbol} {changeStr}
           </p>

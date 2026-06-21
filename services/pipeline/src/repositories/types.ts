@@ -112,6 +112,8 @@ export interface ScheduleRow {
   timezone: string;
   enabled: boolean;
   input_template: Record<string, unknown>;
+  /** Pipeline IDs that must complete before this schedule fires. */
+  depends_on: string[];
   last_run_at: Date | null;
   next_run_at: Date | null;
   created_at: Date;
@@ -232,6 +234,7 @@ export interface CreateScheduleData {
   timezone?: string;
   enabled?: boolean;
   input_template?: Record<string, unknown>;
+  depends_on?: string[];
   next_run_at?: Date;
 }
 
@@ -240,6 +243,7 @@ export interface UpdateScheduleData {
   timezone?: string;
   enabled?: boolean;
   input_template?: Record<string, unknown>;
+  depends_on?: string[];
   next_run_at?: Date;
   last_run_at?: Date;
 }

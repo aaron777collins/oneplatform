@@ -55,7 +55,8 @@ const PRIMARY_TABS: NavItem[] = [
 
 /** Secondary items — exposed via the "More" slide-out sheet. */
 const SECONDARY_ITEMS: NavItem[] = [
-  { label: "Ontology", to: "/ontology", icon: Layers },
+  // Display label is "Data Models" — /ontology route path kept for backwards compat
+  { label: "Data Models", to: "/ontology", icon: Layers },
   { label: "Marketplace", to: "/connectors/marketplace", icon: Store },
   { label: "Logs", to: "/logs", icon: FileText },
   { label: "Audit", to: "/logs/audit", icon: ClipboardList },

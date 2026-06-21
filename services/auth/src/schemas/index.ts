@@ -483,6 +483,18 @@ export const updateUserRequest = z.object({
   isActive: z.boolean().optional(),
 });
 
+// Bulk user creation — each entry mirrors createUserRequest fields.
+// Max 100 per call: large imports should use sequential batches to stay within
+// the auth service's transactional memory budget.
+export const bulkCreateUsersRequest = z.object({
+  users: z
+    .array(createUserRequest)
+    .min(1, "At least one user is required")
+    .max(100, "Bulk create accepts a maximum of 100 users per request"),
+});
+
+export type BulkCreateUsersRequest = z.infer<typeof bulkCreateUsersRequest>;
+
 export const userResponse = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
@@ -629,6 +641,7 @@ export type CreateUserRequest = z.infer<typeof createUserRequest>;
 export type UpdateUserRequest = z.infer<typeof updateUserRequest>;
 export type UserResponse = z.infer<typeof userResponse>;
 export type UserListResponse = z.infer<typeof userListResponse>;
+// BulkCreateUsersRequest is defined inline above alongside bulkCreateUsersRequest
 
 export type ValidateQuery = z.infer<typeof validateQuery>;
 export type ValidateResponse = z.infer<typeof validateResponse>;

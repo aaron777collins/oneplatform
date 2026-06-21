@@ -4,7 +4,7 @@ import { ValidationError, ForbiddenError } from "@oneplatform/core";
 import type { AuditEventRepository } from "../repositories/index.js";
 import type { AuditQueryParams } from "../repositories/types.js";
 import type { AuditEventRow } from "../repositories/types.js";
-import { auditQuerySchema } from "../schemas/index.js";
+import { auditQuerySchema, auditExportQuerySchema } from "../schemas/index.js";
 
 function mapAuditRow(row: AuditEventRow) {
   return {
@@ -83,6 +83,66 @@ export function createAuditRoutes(
         cursor: queryResult.nextCursor,
         limit: params.limit,
         hasMore: queryResult.nextCursor !== null,
+      },
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /api/v1/audit/export — stream audit events as newline-delimited JSON
+  //
+  // Designed for SIEM integration and compliance archives. Each row is written
+  // as a single JSON object followed by a newline (NDJSON / JSON Lines format).
+  // The response streams rows as they are serialised — the entire result set is
+  // NOT held in memory as a JSON array, so this endpoint handles 50k row exports
+  // without excessive memory allocation.
+  //
+  // Requires admin scope. startDate + endDate are mandatory to bound the query.
+  // ---------------------------------------------------------------------------
+  routes.get("/api/v1/audit/export", async (c) => {
+    const user = c.var.user;
+    if (!user.scopes.includes("admin")) {
+      throw new ForbiddenError("admin scope is required to export audit events.");
+    }
+
+    const parsed = auditExportQuerySchema.safeParse(
+      Object.fromEntries(new URL(c.req.url).searchParams)
+    );
+    if (!parsed.success) {
+      throw new ValidationError("Invalid export query parameters", parsed.error.issues);
+    }
+
+    const rows = await auditEventRepository.queryForExport({
+      startDate: parsed.data.startDate,
+      endDate: parsed.data.endDate,
+      ...(parsed.data.actorId !== undefined ? { actorId: parsed.data.actorId } : {}),
+      // eventType maps to the action column in the audit_events table
+      ...(parsed.data.eventType !== undefined ? { action: parsed.data.eventType } : {}),
+      limit: parsed.data.limit,
+    });
+
+    // Stream each row as a JSON line. Using ReadableStream avoids loading the
+    // entire serialised payload into memory before the first byte is sent.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const row of rows) {
+          // mapAuditRow normalises snake_case columns to the camelCase API contract
+          const line = JSON.stringify(mapAuditRow(row)) + "\n";
+          controller.enqueue(encoder.encode(line));
+        }
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        // Prevent proxies from buffering the stream before forwarding
+        "X-Content-Type-Options": "nosniff",
+        // Expose the row count in a header so callers can detect truncation
+        // without parsing the entire payload
+        "X-Total-Records": String(rows.length),
       },
     });
   });

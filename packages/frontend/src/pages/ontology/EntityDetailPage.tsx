@@ -236,7 +236,7 @@ export function EntityDetailPage() {
         title={isNew ? "New entity" : (entity?.name ?? entityType)}
         breadcrumbs={[
           { label: "Platform" },
-          { label: "Ontology", href: "/ontology" },
+          { label: "Data Models", href: "/ontology" },
           { label: isNew ? "New" : (entity?.name ?? entityType) },
         ]}
         actions={

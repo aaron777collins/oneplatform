@@ -2,6 +2,9 @@ import { Queue, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { AppError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
+import { writeFile, readFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as pathJoin } from "node:path";
 import type { CredentialService } from "./credential-service.js";
 import type { ConnectorRepository, SyncStateRepository, ConnectorRow } from "./connector-service.js";
 import {
@@ -58,19 +61,21 @@ export interface BatchJobPayload {
   batchSeqNum: number;
   syncMode: "full" | "incremental";
   cursor: string | null;
-  // recordCount is stored for metrics/logging; actual records are fetched from
-  // the staging table by processBatchJob rather than carried in the payload.
-  // Storing full record arrays in BullMQ payloads bloats Redis memory and risks
-  // hitting the 512 MB default limit on large syncs.
+  // recordCount is stored for metrics/logging; actual records are read from
+  // `records` (inline) or from the temp file referenced by `recordsFile`.
   recordCount: number;
-  // NOTE: records are included directly in the BullMQ payload rather than
-  // staged externally (e.g. in S3/Redis blob). This is the current pattern
-  // because most batches are small enough to fit comfortably in a Redis value.
-  // A 10 MB size guard (see processSyncJob) warns when payloads grow large so
-  // operators can adjust batch sizes before Redis memory pressure becomes an
-  // issue. A future iteration may externalize large payloads via a staging
-  // store if connector batch sizes routinely exceed this threshold.
-  records: DataRecord[];
+  // For batches under BATCH_PAYLOAD_THRESHOLD, records are included inline for
+  // low-latency processing without filesystem I/O. For larger batches, records
+  // are written to a temp file and only the path is stored here. The worker
+  // reads the file, processes it, then deletes it. This bounds Redis memory
+  // usage even when connectors return very large batches.
+  records?: DataRecord[];
+  /**
+   * Absolute path to a JSON file containing the record array. Populated
+   * instead of `records` when the batch exceeds BATCH_PAYLOAD_THRESHOLD.
+   * The worker deletes this file after successful (or failed) processing.
+   */
+  recordsFile?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +184,20 @@ export interface SyncServiceDeps {
 // BullMQ queue capacity guard. Exceeding this triggers QueueFullError so the
 // sync job reschedules itself rather than flooding the workers.
 const BATCH_QUEUE_MAX = 50_000;
+
+// When a batch payload exceeds this byte threshold, records are written to a
+// temp file instead of being inlined in the BullMQ job payload. This prevents
+// large batches from bloating Redis memory. 1,000 records × ~1 KB per record
+// ≈ 1 MB, which matches the soft warning threshold already in place.
+// Adjust via OP_BATCH_PAYLOAD_THRESHOLD_BYTES env var.
+export const BATCH_PAYLOAD_THRESHOLD: number = (() => {
+  const envVal = process.env["OP_BATCH_PAYLOAD_THRESHOLD_BYTES"];
+  if (envVal !== undefined && envVal !== "") {
+    const parsed = parseInt(envVal, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 1_048_576; // 1 MB default
+})();
 
 // Progress Redis key TTL applied once a sync reaches a terminal state.
 // Matches BullMQ removeOnComplete age (7 days) so progress keys expire
@@ -772,47 +791,57 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
           progress.lastBatchAt = new Date().toISOString();
           await writeProgress(progress);
 
-          const jobPayload: BatchJobPayload = {
-            syncJobId,
-            connectorId,
-            tenantId,
-            batchId,
-            batchSeqNum,
-            syncMode,
-            cursor,
-            recordCount: records.length,
-            records,
-          };
+          // Measure records size before deciding inline vs file storage.
+          // JSON.stringify once here; we reuse the string for inline payloads
+          // to avoid serialising twice.
+          const recordsJson = JSON.stringify(records);
+          const recordsBytes = Buffer.byteLength(recordsJson, "utf8");
 
-          // Guard against Redis memory exhaustion from oversized payloads.
-          // Batches over 1 MB indicate a connector returning excessively large
-          // records; fail loudly so the issue is caught early rather than
-          // silently bloating the queue. A single serialization of the full
-          // payload covers both the records-only and full-payload checks since
-          // the payload always includes the records.
-          const payloadBytes = Buffer.byteLength(JSON.stringify(jobPayload), "utf8");
-          if (payloadBytes > 10_485_760) {
-            logger.error("Batch job payload exceeds 10 MB — aborting sync to protect Redis memory", {
-              syncJobId,
-              connectorId,
-              batchSeqNum,
-              payloadBytes,
-              recordCount: records.length,
-            });
-            throw new Error(
-              `Batch payload too large: ${payloadBytes} bytes (${records.length} records). ` +
-              "Reduce connector batch size to keep BullMQ payloads under 10 MB.",
+          let jobPayload: BatchJobPayload;
+
+          if (recordsBytes >= BATCH_PAYLOAD_THRESHOLD) {
+            // Write records to a temp file to keep the Redis payload small.
+            // The file name embeds the sync job ID and batch sequence number so
+            // it is unique across concurrent syncs and easy to trace in logs.
+            const tmpFile = pathJoin(
+              tmpdir(),
+              `op-batch-${syncJobId}-${batchSeqNum}-${Date.now()}.json`,
             );
-          }
+            await writeFile(tmpFile, recordsJson, "utf8");
 
-          if (payloadBytes > 1_048_576) {
-            logger.warn("Batch payload exceeds 1 MB — consider reducing connector batch size or externalizing to a staging store", {
+            logger.info("Batch records offloaded to temp file to protect Redis memory", {
               syncJobId,
               connectorId,
               batchSeqNum,
-              payloadBytes,
               recordCount: records.length,
+              recordsBytes,
+              threshold: BATCH_PAYLOAD_THRESHOLD,
+              tmpFile,
             });
+
+            jobPayload = {
+              syncJobId,
+              connectorId,
+              tenantId,
+              batchId,
+              batchSeqNum,
+              syncMode,
+              cursor,
+              recordCount: records.length,
+              recordsFile: tmpFile,
+            };
+          } else {
+            jobPayload = {
+              syncJobId,
+              connectorId,
+              tenantId,
+              batchId,
+              batchSeqNum,
+              syncMode,
+              cursor,
+              recordCount: records.length,
+              records,
+            };
           }
 
           await batchQueue.add("batch", jobPayload);
@@ -893,8 +922,34 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
       batchSeqNum,
       syncMode,
       cursor,
-      records,
     } = job.data;
+
+    // Resolve records from inline payload or temp file.
+    // The file is always deleted after processing (success or failure) to avoid
+    // orphaned temp files from crashes. We track the path here so the catch
+    // block can also delete it on failure.
+    const recordsFile = job.data.recordsFile;
+    let records: DataRecord[];
+
+    if (recordsFile !== undefined) {
+      try {
+        const fileContent = await readFile(recordsFile, "utf8");
+        records = JSON.parse(fileContent) as DataRecord[];
+      } catch (readErr) {
+        // File missing or corrupt — this is unrecoverable; throw so BullMQ retries
+        throw new Error(
+          `processBatchJob: failed to read records from temp file "${recordsFile}": ` +
+            (readErr instanceof Error ? readErr.message : String(readErr)),
+        );
+      }
+    } else if (job.data.records !== undefined) {
+      records = job.data.records;
+    } else {
+      throw new Error(
+        `processBatchJob: batch job payload is missing both 'records' and 'recordsFile'. ` +
+          `syncJobId=${syncJobId} batchSeqNum=${batchSeqNum}`,
+      );
+    }
 
     try {
       const connector = await connectorRepo.findById(connectorId);
@@ -1008,12 +1063,25 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
       await incrementBatchProgress(syncJobId, records.length);
 
+      // Clean up temp file after successful processing.
+      if (recordsFile !== undefined) {
+        await unlink(recordsFile).catch((unlinkErr) => {
+          // Non-fatal — log and continue. The file will be cleaned up by OS
+          // on next restart or by a periodic temp file sweeper.
+          logger.warn("processBatchJob: failed to delete temp records file", {
+            recordsFile,
+            error: unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr),
+          });
+        });
+      }
+
       logger.info("Batch job completed", {
         syncJobId,
         connectorId,
         batchId,
         batchSeqNum,
         recordCount: records.length,
+        ...(recordsFile !== undefined ? { recordsFile } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1024,6 +1092,13 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         code: err instanceof AppError ? err.code : (err instanceof Error ? err.name : "UNKNOWN"),
         recordCount: records.length,
       });
+
+      // Attempt to clean up temp file on failure so it does not persist
+      // across BullMQ retries (each retry re-reads from the file; the file
+      // is recreated by processSyncJob on a fresh batch, not here).
+      if (recordsFile !== undefined) {
+        await unlink(recordsFile).catch(() => { /* best-effort */ });
+      }
 
       logger.error("Batch job failed", {
         syncJobId,

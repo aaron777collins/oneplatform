@@ -23,6 +23,31 @@ export type LogQueryInput = z.infer<typeof logQuerySchema>;
 
 const MAX_AUDIT_QUERY_RANGE_DAYS = 90;
 
+// Export query for audit events.
+// startDate and endDate are required to prevent full-table scans — SIEM
+// integrations should always supply a time-bounded window. The default limit
+// is deliberately high (10000) to maximise the value of a single export call,
+// but callers can lower it. A hard cap of 50000 prevents memory exhaustion.
+export const auditExportQuerySchema = z.object({
+  startDate: z.string().datetime({ message: "startDate must be a valid ISO 8601 datetime" }),
+  endDate: z.string().datetime({ message: "endDate must be a valid ISO 8601 datetime" }),
+  actorId: z.string().max(255).optional(),
+  eventType: z.string().max(255).optional(),
+  limit: z.coerce.number().int().min(1).max(50_000).default(10_000),
+}).superRefine((data, ctx) => {
+  const start = new Date(data.startDate).getTime();
+  const end = new Date(data.endDate).getTime();
+  if (end <= start) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "endDate must be after startDate",
+      path: ["endDate"],
+    });
+  }
+});
+
+export type AuditExportQueryInput = z.infer<typeof auditExportQuerySchema>;
+
 export const auditQuerySchema = z.object({
   actorId: z.string().max(255).optional(),
   actorType: z.enum(["user", "service", "system"]).optional(),

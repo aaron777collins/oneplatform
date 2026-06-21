@@ -7,6 +7,11 @@
  * The column definition type is kept minimal — callers pass header labels and
  * a cell renderer function. This avoids a heavy table library dependency for
  * the common paginated list case.
+ *
+ * Mobile UX (MU-007): the scroll container uses scroll-snap for smoother
+ * column panning and shows edge shadow indicators when content overflows
+ * horizontally. A one-time "Scroll" hint fades out after 2 s on first render
+ * so mobile users know the table is horizontally scrollable.
  */
 import * as React from "react";
 import type {
@@ -78,6 +83,99 @@ function SkeletonRows({ columnCount, rowCount }: { columnCount: number; rowCount
 }
 
 // ---------------------------------------------------------------------------
+// ScrollableTableContainer — wraps the table with mobile overflow UX
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps its children in an overflow-x:auto container and renders left/right
+ * gradient shadow indicators whenever content can be scrolled in that direction.
+ * The shadows appear/disappear reactively as the user scrolls.
+ *
+ * A "Scroll" text hint (aria-hidden) is shown on first mount and fades out
+ * after 2 seconds — it only appears when the table is actually overflowing,
+ * so it never shows on desktop where the full table fits in the viewport.
+ */
+function ScrollableTableContainer({ children }: { children: React.ReactNode }) {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+  const [canScrollRight, setCanScrollRight] = React.useState(false);
+  // Show the scroll hint on first render; it fades out automatically after 2 s.
+  const [showHint, setShowHint] = React.useState(true);
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (el === null) return;
+
+    function update() {
+      if (el === null) return;
+      setCanScrollLeft(el.scrollLeft > 0);
+      setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    }
+
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const resizeObserver = new ResizeObserver(update);
+    resizeObserver.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", update);
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // Dismiss the scroll hint after 2 s — it's a one-time orientation aid.
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setShowHint(false);
+    }, 2000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  return (
+    <div className="relative">
+      {/* Left scroll shadow — only visible when the user has scrolled right */}
+      {canScrollLeft && (
+        <div
+          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-[var(--color-background,#fff)] to-transparent"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Right scroll shadow + optional scroll hint — only when content overflows */}
+      {canScrollRight && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-[var(--color-background,#fff)] to-transparent"
+            aria-hidden="true"
+          />
+          {showHint && (
+            <div
+              className="pointer-events-none absolute bottom-2 right-2 z-20 rounded bg-[var(--color-foreground,#111)]/70 px-2 py-0.5 text-[10px] text-white transition-opacity duration-700"
+              aria-hidden="true"
+              // Inline opacity transition driven by state so no extra CSS needed
+              style={{ opacity: showHint ? 1 : 0 }}
+            >
+              Scroll →
+            </div>
+          )}
+        </>
+      )}
+
+      {/* scroll-snap-type gives smoother column-by-column panning on mobile */}
+      <div
+        ref={scrollRef}
+        className="overflow-x-auto"
+        style={{ scrollSnapType: "x proximity" }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // InfiniteTable component
 // ---------------------------------------------------------------------------
 
@@ -111,47 +209,49 @@ export function InfiniteTable<T>({
 
   return (
     <div className={className}>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {columns.map((col) => (
-              <TableHead key={col.key} className={col.headerClassName}>
-                {col.header}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading ? (
-            <SkeletonRows columnCount={columns.length} rowCount={5} />
-          ) : rows.length === 0 ? (
+      <ScrollableTableContainer>
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={columns.length} className="text-center py-12">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-[var(--color-foreground)]">
-                    {emptyTitle}
-                  </p>
-                  {emptyDescription !== undefined && (
-                    <p className="text-sm text-[var(--color-muted-foreground)]">
-                      {emptyDescription}
-                    </p>
-                  )}
-                </div>
-              </TableCell>
+              {columns.map((col) => (
+                <TableHead key={col.key} className={col.headerClassName}>
+                  {col.header}
+                </TableHead>
+              ))}
             </TableRow>
-          ) : (
-            rows.map((row) => (
-              <TableRow key={rowKey(row)}>
-                {columns.map((col) => (
-                  <TableCell key={col.key} className={col.cellClassName}>
-                    {col.cell(row)}
-                  </TableCell>
-                ))}
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <SkeletonRows columnCount={columns.length} rowCount={5} />
+            ) : rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="text-center py-12">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-[var(--color-foreground)]">
+                      {emptyTitle}
+                    </p>
+                    {emptyDescription !== undefined && (
+                      <p className="text-sm text-[var(--color-muted-foreground)]">
+                        {emptyDescription}
+                      </p>
+                    )}
+                  </div>
+                </TableCell>
               </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+            ) : (
+              rows.map((row) => (
+                <TableRow key={rowKey(row)}>
+                  {columns.map((col) => (
+                    <TableCell key={col.key} className={col.cellClassName}>
+                      {col.cell(row)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </ScrollableTableContainer>
 
       {/* Load more / pagination */}
       {hasNextPage === true && (

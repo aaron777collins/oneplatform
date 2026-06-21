@@ -7,7 +7,7 @@ import type {
 
 const SCHEDULE_COLUMNS = `
   id, pipeline_id, tenant_id, cron_expr, timezone,
-  enabled, input_template, last_run_at, next_run_at,
+  enabled, input_template, depends_on, last_run_at, next_run_at,
   created_at, updated_at
 `;
 
@@ -18,8 +18,8 @@ export class ScheduleRepository {
     const result = await this.pool.query<ScheduleRow>(
       `INSERT INTO pipeline.schedules
          (pipeline_id, tenant_id, cron_expr, timezone,
-          enabled, input_template, next_run_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+          enabled, input_template, depends_on, next_run_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING ${SCHEDULE_COLUMNS}`,
       [
         data.pipeline_id,
@@ -28,6 +28,7 @@ export class ScheduleRepository {
         data.timezone ?? "UTC",
         data.enabled ?? true,
         JSON.stringify(data.input_template ?? {}),
+        JSON.stringify(data.depends_on ?? []),
         data.next_run_at ?? null,
       ]
     );
@@ -114,6 +115,10 @@ export class ScheduleRepository {
     if (data.input_template !== undefined) {
       sets.push(`input_template = $${idx++}`);
       values.push(JSON.stringify(data.input_template));
+    }
+    if (data.depends_on !== undefined) {
+      sets.push(`depends_on = $${idx++}`);
+      values.push(JSON.stringify(data.depends_on));
     }
     if (data.next_run_at !== undefined) {
       sets.push(`next_run_at = $${idx++}`);

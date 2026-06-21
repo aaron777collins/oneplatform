@@ -253,6 +253,7 @@ describe("ScheduleRow", () => {
     timezone: "UTC",
     enabled: true,
     input_template: {},
+    depends_on: [],
     last_run_at: null,
     next_run_at: new Date("2026-01-01T01:00:00Z"),
     created_at: new Date("2026-01-01T00:00:00Z"),

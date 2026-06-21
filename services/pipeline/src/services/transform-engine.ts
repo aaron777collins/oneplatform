@@ -5,6 +5,14 @@
 // This makes the operations composable, testable in isolation, and safe to
 // call from any async context without worrying about shared mutable state.
 // The execution engine is the only caller and it owns the I/O boundary.
+//
+// MEMORY SAFETY:
+// All transforms operate in memory. Operations that require the full dataset
+// (sort, dedup, aggregate, join, pivot) are guarded by MAX_IN_MEMORY_RECORDS
+// so operators see an explicit warning before the process OOMs. Per-record
+// operations (filter, map, rename, limit) are additionally available in a
+// streaming/chunked form via the *Stream variants for callers that can supply
+// records incrementally.
 
 import { evaluate, evaluateBoolean, ExpressionEvaluatorError } from "./expression-evaluator.js";
 
@@ -17,6 +25,154 @@ import { evaluate, evaluateBoolean, ExpressionEvaluatorError } from "./expressio
 export type DataRecord = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
+// Memory guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of records that may be loaded into memory for operations that
+ * inherently require the full dataset (sort, dedup, aggregate, join, pivot).
+ *
+ * Operations that exceed this threshold still complete, but emit a warning so
+ * operators know to scale up resources or restructure the pipeline before the
+ * dataset grows large enough to cause an OOM crash.
+ *
+ * Overridable via the OP_MAX_IN_MEMORY_RECORDS environment variable.
+ */
+export const MAX_IN_MEMORY_RECORDS: number = (() => {
+  const envVal = process.env["OP_MAX_IN_MEMORY_RECORDS"];
+  if (envVal !== undefined && envVal !== "") {
+    const parsed = parseInt(envVal, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 100_000;
+})();
+
+/**
+ * Logger interface for the memory guard warning. The transform engine is
+ * intentionally logger-agnostic — callers inject a logger at the call site
+ * for operations that may exceed the threshold.
+ */
+export interface TransformLogger {
+  warn(message: string, context?: Record<string, unknown>): void;
+}
+
+/**
+ * Emits a warning when recordCount exceeds MAX_IN_MEMORY_RECORDS.
+ * Silent when logger is undefined — the guard is opt-in for callers that do
+ * not have a logger available (e.g. unit tests of the pure functions).
+ */
+export function warnIfExceedsMemoryThreshold(
+  operation: string,
+  recordCount: number,
+  logger?: TransformLogger,
+): void {
+  if (recordCount > MAX_IN_MEMORY_RECORDS && logger !== undefined) {
+    logger.warn(
+      `Transform operation "${operation}" is loading ${recordCount.toLocaleString()} records into memory ` +
+        `(threshold: ${MAX_IN_MEMORY_RECORDS.toLocaleString()}). ` +
+        "Large in-memory datasets may cause OOM. Consider filtering earlier in the pipeline, " +
+        "increasing OP_MAX_IN_MEMORY_RECORDS, or splitting the pipeline into smaller batches.",
+      { operation, recordCount, threshold: MAX_IN_MEMORY_RECORDS },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming helpers — per-record transforms that avoid full dataset loading
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies a filter predicate to a record stream (generator → generator).
+ * Unlike the batch filter(), this never materialises the full dataset in
+ * memory — it yields records one at a time as it consumes the input iterator.
+ */
+export function* filterStream(
+  records: Iterable<DataRecord>,
+  condition: string,
+): Generator<DataRecord> {
+  if (!condition || condition.trim() === "") {
+    throw new TransformError("filter requires a non-empty condition expression.");
+  }
+  for (const record of records) {
+    let pass: boolean;
+    try {
+      pass = evaluateBoolean(condition, { record });
+    } catch (err) {
+      throw new TransformError(
+        `filter expression error: ${err instanceof ExpressionEvaluatorError ? err.message : String(err)}`,
+      );
+    }
+    if (pass) yield record;
+  }
+}
+
+/**
+ * Applies field mappings to a record stream (generator → generator).
+ * Equivalent to mapFields() but processes one record at a time.
+ */
+export function* mapFieldsStream(
+  records: Iterable<DataRecord>,
+  mappings: Record<string, string>,
+): Generator<DataRecord> {
+  if (Object.keys(mappings).length === 0) {
+    throw new TransformError("map requires at least one field mapping.");
+  }
+  for (const record of records) {
+    const out: DataRecord = { ...record };
+    for (const [outputField, expression] of Object.entries(mappings)) {
+      try {
+        out[outputField] = evaluate(expression, { record });
+      } catch (err) {
+        throw new TransformError(
+          `map expression error for field "${outputField}": ${err instanceof ExpressionEvaluatorError ? err.message : String(err)}`,
+        );
+      }
+    }
+    yield out;
+  }
+}
+
+/**
+ * Renames fields in a record stream (generator → generator).
+ * Equivalent to rename() but processes one record at a time.
+ */
+export function* renameStream(
+  records: Iterable<DataRecord>,
+  fieldMap: Record<string, string>,
+): Generator<DataRecord> {
+  if (Object.keys(fieldMap).length === 0) {
+    throw new TransformError("rename requires at least one field mapping.");
+  }
+  for (const record of records) {
+    const out: DataRecord = {};
+    for (const [k, v] of Object.entries(record)) {
+      const newKey = fieldMap[k];
+      out[newKey !== undefined ? newKey : k] = v;
+    }
+    yield out;
+  }
+}
+
+/**
+ * Yields at most count records from the input stream.
+ * Equivalent to limit() but operates on a stream without loading all records.
+ */
+export function* limitStream(
+  records: Iterable<DataRecord>,
+  count: number,
+): Generator<DataRecord> {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new TransformError("limit count must be a positive integer.");
+  }
+  let emitted = 0;
+  for (const record of records) {
+    if (emitted >= count) break;
+    yield record;
+    emitted++;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Dedup
 // ---------------------------------------------------------------------------
 
@@ -25,15 +181,21 @@ export type DataRecord = Record<string, unknown>;
  *
  * strategy='first'  — keep the first occurrence (stable input order).
  * strategy='last'   — keep the last occurrence (overwrites with later record).
+ *
+ * Requires the full dataset in memory. Logs a warning via logger when
+ * recordCount exceeds MAX_IN_MEMORY_RECORDS.
  */
 export function dedup(
   records: DataRecord[],
   keyFields: string[],
   strategy: "first" | "last",
+  logger?: TransformLogger,
 ): DataRecord[] {
   if (keyFields.length === 0) {
     throw new TransformError("dedup requires at least one keyField.");
   }
+
+  warnIfExceedsMemoryThreshold("dedup", records.length, logger);
 
   const seen = new Map<string, DataRecord>();
 
@@ -124,15 +286,21 @@ export interface AggregationSpec {
 /**
  * Groups records by groupBy fields and applies aggregation functions.
  * Records with missing groupBy fields are grouped under the key `""`.
+ *
+ * Requires the full dataset in memory. Logs a warning via logger when
+ * recordCount exceeds MAX_IN_MEMORY_RECORDS.
  */
 export function aggregate(
   records: DataRecord[],
   groupBy: string[],
   aggregations: AggregationSpec[],
+  logger?: TransformLogger,
 ): DataRecord[] {
   if (aggregations.length === 0) {
     throw new TransformError("aggregate requires at least one aggregation.");
   }
+
+  warnIfExceedsMemoryThreshold("aggregate", records.length, logger);
 
   // Build groups: composite key → record array
   const groups = new Map<string, DataRecord[]>();
@@ -206,8 +374,12 @@ export interface PivotConfig {
  * groupField: the field whose unique values become row keys (e.g. 'category')
  * pivotField: the field whose unique values become new column names (e.g. 'month')
  * valueField: the field whose values are aggregated into the new columns
+ *
+ * Requires the full dataset in memory. Logs a warning via logger when
+ * recordCount exceeds MAX_IN_MEMORY_RECORDS.
  */
-export function pivot(records: DataRecord[], config: PivotConfig): DataRecord[] {
+export function pivot(records: DataRecord[], config: PivotConfig, logger?: TransformLogger): DataRecord[] {
+  warnIfExceedsMemoryThreshold("pivot", records.length, logger);
   const { groupField, pivotField, valueField, aggregation } = config;
 
   // Collect all unique pivot values to build consistent column set
@@ -321,12 +493,17 @@ export interface JoinConfig {
  * Joins two record sets on key fields.
  * Returns a merged record array; conflicting field names from the right side
  * are prefixed with "right_" to avoid silent overwrites.
+ *
+ * Requires both datasets in memory. Logs a warning via logger when the total
+ * record count (left + right) exceeds MAX_IN_MEMORY_RECORDS.
  */
 export function join(
   leftRecords: DataRecord[],
   rightRecords: DataRecord[],
   config: JoinConfig,
+  logger?: TransformLogger,
 ): DataRecord[] {
+  warnIfExceedsMemoryThreshold("join", leftRecords.length + rightRecords.length, logger);
   const { joinType, leftKey, rightKey } = config;
 
   // Build a lookup from right records keyed by rightKey value.
@@ -401,11 +578,16 @@ export interface SortField {
 /**
  * Sorts records by one or more fields, left-to-right (first field is primary).
  * Null/undefined values are sorted to the end regardless of direction.
+ *
+ * Requires the full dataset in memory. Logs a warning via logger when
+ * recordCount exceeds MAX_IN_MEMORY_RECORDS.
  */
-export function sort(records: DataRecord[], fields: SortField[]): DataRecord[] {
+export function sort(records: DataRecord[], fields: SortField[], logger?: TransformLogger): DataRecord[] {
   if (fields.length === 0) {
     throw new TransformError("sort requires at least one sort field.");
   }
+
+  warnIfExceedsMemoryThreshold("sort", records.length, logger);
 
   // Shallow copy to avoid mutating the input array
   return [...records].sort((a, b) => {

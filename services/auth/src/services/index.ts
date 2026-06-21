@@ -81,6 +81,7 @@ export {
   createApiKeyService,
   type ApiKeyService,
   type ApiKeyServiceDeps,
+  type AdminApiKeyRecord,
 } from "./api-key-service.js";
 
 export {

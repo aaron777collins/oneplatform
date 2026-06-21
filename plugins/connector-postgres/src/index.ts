@@ -12,10 +12,13 @@
  * time by the platform admin — the plugin code never receives or handles it.
  *
  * PAGINATION STRATEGY:
- * - Full sync:        offset-based  — page through all rows with LIMIT/OFFSET
- * - Incremental sync: cursor-based  — filter WHERE incrementalColumn > cursor,
- *                     ORDER BY incrementalColumn, avoids full table scans on
- *                     large append-only or audit-log style tables.
+ * - Full sync (default): keyset-based — WHERE primaryKey > lastSeenId ORDER BY primaryKey.
+ *                         O(log n) per page via the primary key index. Configurable via
+ *                         paginationStrategy='offset' for tables with no stable PK.
+ * - Full sync (offset):  LIMIT/OFFSET — simple but O(n²) on large tables.
+ * - Incremental sync:    cursor-based  — filter WHERE incrementalColumn > cursor,
+ *                         ORDER BY incrementalColumn, avoids full table scans on
+ *                         large append-only or audit-log style tables.
  *
  * CURSOR ENCODING:
  * The cursor is a JSON string containing { mode, value } so the connector can
@@ -40,6 +43,19 @@ import {
 
 // ─── Config shape ─────────────────────────────────────────────────────────────
 
+/**
+ * Pagination strategy for full table sync.
+ *
+ * 'keyset'  — Uses WHERE primaryKey > lastSeenId ORDER BY primaryKey. This is
+ *              O(log n) per page because the database can use the PK index
+ *              rather than skipping rows. Preferred for large tables.
+ *
+ * 'offset'  — Uses LIMIT/OFFSET. Simple but degrades to O(n²) because the
+ *              database must scan and discard all preceding rows for each page.
+ *              Use only when the table has no stable primary key column.
+ */
+export type PaginationStrategy = "keyset" | "offset";
+
 interface PostgresConfig {
   /** Base URL of the Postgres REST proxy. Example: https://proxy.internal/db */
   proxyUrl: string;
@@ -55,11 +71,17 @@ interface PostgresConfig {
   customQuery?: string;
   /** Column whose value becomes the DataRecord.sourceId. Defaults to "id". */
   primaryKey: string;
+  /**
+   * Pagination strategy for full table sync.
+   * Defaults to 'keyset' for O(log n) performance on large tables.
+   * Set to 'offset' when the table has no stable primary key column.
+   */
+  paginationStrategy: PaginationStrategy;
 }
 
 // ─── Cursor shape ─────────────────────────────────────────────────────────────
 
-type CursorMode = "offset" | "incremental";
+type CursorMode = "offset" | "incremental" | "keyset";
 
 interface OffsetCursor {
   mode: "offset";
@@ -82,7 +104,18 @@ interface IncrementalCursor {
   lastId: string;
 }
 
-type ParsedCursor = OffsetCursor | IncrementalCursor;
+/**
+ * Keyset cursor for full table sync. Tracks the last seen primary key value so
+ * the next page uses WHERE primaryKey > lastPkValue rather than OFFSET, giving
+ * O(log n) page performance via the primary key index on large tables.
+ */
+interface KeysetCursor {
+  mode: "keyset";
+  /** The primary key value of the last row returned in the previous batch. */
+  lastPkValue: string;
+}
+
+type ParsedCursor = OffsetCursor | IncrementalCursor | KeysetCursor;
 
 // ─── Proxy response types ─────────────────────────────────────────────────────
 
@@ -234,6 +267,18 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
     );
   }
 
+  const rawPaginationStrategy = raw["paginationStrategy"];
+  let paginationStrategy: PaginationStrategy = "keyset";
+  if (rawPaginationStrategy !== undefined) {
+    if (rawPaginationStrategy !== "keyset" && rawPaginationStrategy !== "offset") {
+      throw new PluginConfigError(
+        "paginationStrategy must be 'keyset' or 'offset'",
+        "paginationStrategy",
+      );
+    }
+    paginationStrategy = rawPaginationStrategy;
+  }
+
   return {
     proxyUrl: proxyUrl.replace(/\/+$/, ""), // strip trailing slash
     ...(typeof table === "string" ? { table } : {}),
@@ -243,6 +288,7 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
     ...(typeof customQuery === "string" ? { customQuery } : {}),
     primaryKey:
       typeof raw["primaryKey"] === "string" ? raw["primaryKey"] : DEFAULT_PRIMARY_KEY,
+    paginationStrategy,
   };
 }
 
@@ -283,6 +329,14 @@ function decodeCursor(raw: string): ParsedCursor {
     // string so those cursors remain valid (they will re-fetch the boundary row).
     const lastId = typeof obj["lastId"] === "string" ? obj["lastId"] : "";
     return { mode: "incremental", lastValue, lastId };
+  }
+
+  if (mode === "keyset") {
+    const lastPkValue = obj["lastPkValue"];
+    if (typeof lastPkValue !== "string") {
+      throw new PluginDataError("keyset cursor must contain a string 'lastPkValue'");
+    }
+    return { mode: "keyset", lastPkValue };
   }
 
   throw new PluginDataError(`Unknown cursor mode: ${String(mode)}`);
@@ -398,6 +452,15 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
       batchSize: { type: "number", default: 1000 },
       customQuery: { type: "string" },
       primaryKey: { type: "string", default: "id" },
+      paginationStrategy: {
+        type: "string",
+        enum: ["keyset", "offset"],
+        default: "keyset",
+        description:
+          "Pagination strategy for full table sync. " +
+          "'keyset' (default) uses WHERE primaryKey > lastId for O(log n) performance. " +
+          "'offset' uses LIMIT/OFFSET; only use for tables without a stable primary key.",
+      },
     },
   },
   outputSchema: {
@@ -468,6 +531,7 @@ class PostgresConnector implements Connector {
         batchSize: cfg.batchSize,
         customQuery: cfg.customQuery ?? null,
         primaryKey: cfg.primaryKey,
+        paginationStrategy: cfg.paginationStrategy,
       },
     };
   }
@@ -490,6 +554,13 @@ class PostgresConnector implements Connector {
       const isIncremental = cfg.incrementalColumn !== null;
       if (isIncremental) {
         return await this.fetchBatchIncremental(cfg, cursor, context);
+      }
+
+      // Full table sync: use keyset pagination by default for O(log n) page
+      // performance on large tables. Fall back to offset only when explicitly
+      // configured (e.g. tables without a stable primary key).
+      if (cfg.paginationStrategy === "keyset") {
+        return await this.fetchBatchKeyset(cfg, cursor, context);
       }
       return await this.fetchBatchOffset(cfg, cursor, context);
     } finally {
@@ -602,6 +673,96 @@ class PostgresConnector implements Connector {
     context.logger.debug("fetchBatch (offset)", {
       table: cfg.table,
       offset,
+      returned: records.length,
+      hasMore,
+    });
+
+    return {
+      records,
+      nextCursor,
+      hasMore,
+      fetchedAt: new Date().toISOString(),
+      ...(payload.total !== undefined ? { estimatedTotal: payload.total } : {}),
+    };
+  }
+
+  /**
+   * Keyset pagination for full table sync.
+   *
+   * Uses WHERE primaryKey > lastPkValue ORDER BY primaryKey LIMIT batchSize.
+   * The database can satisfy this with a single index scan on the primary key,
+   * making each page O(log n) regardless of how deep into the table we are.
+   * OFFSET pagination is O(n) per page because the database must skip rows.
+   *
+   * The proxy must support the `keyset_pk_value` and `keyset_pk_col` params
+   * on the /rows endpoint to route this as a keyset query.
+   */
+  private async fetchBatchKeyset(
+    cfg: RehydratedConfig,
+    cursor: string | null,
+    context: PluginContext,
+  ): Promise<BatchResult> {
+    let lastPkValue: string | null = null;
+    if (cursor !== null) {
+      const parsed = decodeCursor(cursor);
+      if (parsed.mode !== "keyset") {
+        // A cursor from a previous offset sync is incompatible with keyset mode.
+        // Treat it as "start from the beginning" rather than throwing — the
+        // operator may have changed paginationStrategy between syncs.
+        context.logger.warn("fetchBatch (keyset): cursor mode mismatch — restarting from beginning", {
+          table: cfg.table,
+          cursorMode: parsed.mode,
+        });
+        lastPkValue = null;
+      } else {
+        lastPkValue = parsed.lastPkValue;
+      }
+    }
+
+    const params: Record<string, string> = {
+      table: cfg.table!,
+      db_schema: cfg.schema,
+      limit: String(cfg.batchSize),
+      keyset_pk_col: cfg.primaryKey,
+      order_by: cfg.primaryKey,
+    };
+    if (lastPkValue !== null) {
+      params["keyset_pk_value"] = lastPkValue;
+    }
+
+    const url = buildUrl(cfg.proxyUrl, ROWS_PATH, params);
+    const headers = context.tracing.injectHeaders({ "Accept": "application/json" });
+    const response = await fetchWithRetry(
+      () => context.fetch.fetch(url, { method: "GET", headers }),
+      ROWS_PATH,
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      handleProxyError(response.status, ROWS_PATH, body);
+    }
+
+    const payload = await parseRowsResponse(response, ROWS_PATH);
+    const records = rowsToDataRecords(payload.rows, cfg.primaryKey);
+
+    const hasMore = records.length === cfg.batchSize;
+    let nextCursor: string | null = null;
+    if (hasMore && payload.rows.length > 0) {
+      const lastRow = payload.rows[payload.rows.length - 1];
+      const pkVal = lastRow !== undefined ? lastRow[cfg.primaryKey] : undefined;
+      if (pkVal === undefined || pkVal === null) {
+        throw new PluginDataError(
+          `Keyset pagination: primary key column "${cfg.primaryKey}" is absent from the last row. ` +
+            "Verify the primaryKey config option matches your table's primary key column.",
+          { availableColumns: Object.keys(lastRow ?? {}).slice(0, 10) },
+        );
+      }
+      nextCursor = encodeCursor({ mode: "keyset", lastPkValue: String(pkVal) });
+    }
+
+    context.logger.debug("fetchBatch (keyset)", {
+      table: cfg.table,
+      lastPkValue,
       returned: records.length,
       hasMore,
     });
@@ -834,6 +995,7 @@ interface RehydratedConfig {
   batchSize: number;
   customQuery: string | null;
   primaryKey: string;
+  paginationStrategy: PaginationStrategy;
 }
 
 function handleToConfig(handle: ConnectorHandle): RehydratedConfig {
@@ -850,6 +1012,13 @@ function handleToConfig(handle: ConnectorHandle): RehydratedConfig {
   const rawBatchSize = (m["batchSize"] as number) ?? DEFAULT_BATCH_SIZE;
   const batchSize = rawBatchSize > 0 ? rawBatchSize : DEFAULT_BATCH_SIZE;
 
+  // Handles created before paginationStrategy was added default to 'keyset'
+  // for forward compatibility — existing full syncs will switch to keyset on
+  // the next run, which is the correct behaviour for large tables.
+  const rawPaginationStrategy = m["paginationStrategy"];
+  const paginationStrategy: PaginationStrategy =
+    rawPaginationStrategy === "offset" ? "offset" : "keyset";
+
   return {
     proxyUrl,
     table: (m["table"] as string | null) ?? null,
@@ -858,6 +1027,7 @@ function handleToConfig(handle: ConnectorHandle): RehydratedConfig {
     batchSize,
     customQuery: (m["customQuery"] as string | null) ?? null,
     primaryKey: (m["primaryKey"] as string) ?? DEFAULT_PRIMARY_KEY,
+    paginationStrategy,
   };
 }
 

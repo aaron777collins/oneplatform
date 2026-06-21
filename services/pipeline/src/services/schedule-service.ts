@@ -1,7 +1,7 @@
 import type { Logger } from "@oneplatform/core";
 import { parseExpression } from "cron-parser";
 import type { PipelineRow } from "./pipeline-service.js";
-import type { TriggeredBy, TriggerRunResult, RunService } from "./run-service.js";
+import type { TriggeredBy, TriggerRunResult, RunService, RunStatus } from "./run-service.js";
 import { ScheduleNotFoundError, ScheduleInvalidCronError } from "./errors.js";
 
 // ---------------------------------------------------------------------------
@@ -16,6 +16,12 @@ export interface ScheduleRow {
   timezone: string;
   enabled: boolean;
   input_template: Record<string, unknown>;
+  /**
+   * Pipeline IDs that must have a 'completed' latest run before this schedule
+   * fires. If any dependency's latest run is not 'completed', this tick is
+   * skipped and the reason is logged. Empty array (default) means no dependencies.
+   */
+  depends_on: string[];
   last_run_at: Date | null;
   next_run_at: Date | null;
   created_at: Date;
@@ -34,6 +40,7 @@ export interface ScheduleCreateInput {
   timezone?: string;
   enabled?: boolean;
   input_template?: Record<string, unknown>;
+  depends_on?: string[];
   next_run_at?: Date;
 }
 
@@ -43,6 +50,7 @@ export interface ScheduleUpdateInput {
   timezone?: string;
   enabled?: boolean;
   input_template?: Record<string, unknown>;
+  depends_on?: string[];
   next_run_at?: Date;
   last_run_at?: Date;
 }
@@ -89,6 +97,12 @@ export interface CreateScheduleInput {
   timezone: string;
   enabled: boolean;
   inputTemplate: Record<string, unknown>;
+  /**
+   * Pipeline IDs that must complete before this schedule runs.
+   * Evaluated on every cron tick; the tick is skipped if any dependency has
+   * not completed its latest run. Defaults to [] (no dependencies).
+   */
+  dependsOn?: string[];
 }
 
 export interface UpdateScheduleInput {
@@ -96,6 +110,30 @@ export interface UpdateScheduleInput {
   timezone?: string;
   enabled?: boolean;
   inputTemplate?: Record<string, unknown>;
+  /** Replace the dependency list. Pass [] to clear all dependencies. */
+  dependsOn?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Dependency management types
+// ---------------------------------------------------------------------------
+
+export interface DependencyCheckResult {
+  /** true when all dependencies' latest runs are 'completed' (or there are none). */
+  satisfied: boolean;
+  /** Pipeline IDs whose latest run is not in 'completed' state. */
+  blocking: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Inline RunRepository interface — only the methods needed by dependency checks
+// ---------------------------------------------------------------------------
+
+interface RunRepoForDeps {
+  findByTenantId(
+    tenantId: string,
+    options: { limit: number; pipelineId: string; filterStatus?: RunStatus },
+  ): Promise<Array<{ pipeline_id: string; status: RunStatus }>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +146,15 @@ export interface ScheduleService {
   listSchedules(tenantId: string, query: ScheduleListQuery): Promise<ScheduleListResult>;
   updateSchedule(tenantId: string, id: string, input: UpdateScheduleInput): Promise<ScheduleRow>;
   deleteSchedule(tenantId: string, id: string): Promise<void>;
+  /**
+   * Checks whether all pipelines in dependsOn have a latest run in 'completed'
+   * state. The cron tick calls this before triggering a scheduled run; it is
+   * also exposed here for manual inspection and testing.
+   *
+   * This is a basic DAG guard, not a full orchestration engine. It reads the
+   * most recent run for each dependency pipeline and checks its status.
+   */
+  checkDependencies(tenantId: string, dependsOn: string[]): Promise<DependencyCheckResult>;
   startCronLoop(): void;
   stop(): void;
 }
@@ -116,6 +163,12 @@ export interface ScheduleServiceDeps {
   scheduleRepo: ScheduleRepository;
   pipelineRepo: PipelineRepo;
   runService: RunService;
+  /**
+   * Run repository used by checkDependencies to look up the latest run for
+   * each dependency pipeline. Injected separately from RunService because
+   * the service-layer interface does not expose a latest-run-by-pipeline query.
+   */
+  runRepo: RunRepoForDeps;
   logger: Logger;
 }
 
@@ -171,7 +224,7 @@ function computeNextRunAt(cronExpr: string, timezone: string): Date {
 // ---------------------------------------------------------------------------
 
 export function createScheduleService(deps: ScheduleServiceDeps): ScheduleService {
-  const { scheduleRepo, pipelineRepo, runService, logger } = deps;
+  const { scheduleRepo, pipelineRepo, runService, runRepo, logger } = deps;
 
   let cronLoopTimer: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
@@ -208,6 +261,7 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
       timezone: input.timezone,
       enabled: input.enabled,
       input_template: input.inputTemplate,
+      depends_on: input.dependsOn ?? [],
       next_run_at: nextRunAt,
     });
 
@@ -280,6 +334,9 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
     if (input.inputTemplate !== undefined) {
       updateData.input_template = input.inputTemplate;
     }
+    if (input.dependsOn !== undefined) {
+      updateData.depends_on = input.dependsOn;
+    }
 
     // Recompute next_run_at if cron or timezone changed
     const newCronExpr = input.cronExpr ?? existing.cron_expr;
@@ -309,6 +366,56 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
     await getSchedule(tenantId, id);
     await scheduleRepo.delete(id);
     logger.info("Schedule deleted", { tenantId, scheduleId: id });
+  }
+
+  // -------------------------------------------------------------------------
+  // checkDependencies — basic DAG guard for pipeline dependency management
+  //
+  // WHY: The scheduler must not trigger pipeline B if pipeline A (a declared
+  // dependency) has not completed its latest run. This prevents running
+  // downstream pipelines on stale data. It is a best-effort check, not a
+  // transactional lock — a dependency run could start after this check and
+  // before the trigger, but that race is acceptable for scheduled workflows.
+  // -------------------------------------------------------------------------
+
+  async function checkDependencies(
+    tenantId: string,
+    dependsOn: string[],
+  ): Promise<DependencyCheckResult> {
+    if (dependsOn.length === 0) {
+      return { satisfied: true, blocking: [] };
+    }
+
+    const blocking: string[] = [];
+
+    for (const depPipelineId of dependsOn) {
+      // Fetch the single most recent run for this dependency pipeline.
+      // The repo sorts by created_at DESC so the first row is the latest run.
+      let latestRuns: Array<{ pipeline_id: string; status: RunStatus }>;
+      try {
+        latestRuns = await runRepo.findByTenantId(tenantId, {
+          limit: 1,
+          pipelineId: depPipelineId,
+        });
+      } catch (err) {
+        // If we cannot determine the dependency status, treat it as blocking
+        // to prevent accidental runs on unknown dependency state.
+        logger.warn("checkDependencies: failed to query latest run for dependency", {
+          depPipelineId,
+          tenantId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        blocking.push(depPipelineId);
+        continue;
+      }
+
+      const latestRun = latestRuns[0];
+      if (latestRun === undefined || latestRun.status !== "completed") {
+        blocking.push(depPipelineId);
+      }
+    }
+
+    return { satisfied: blocking.length === 0, blocking };
   }
 
   // -------------------------------------------------------------------------
@@ -349,6 +456,25 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
         if (!claimed) {
           // Another instance claimed this tick first
           continue;
+        }
+
+        // Check pipeline dependencies before triggering. If any dependency's
+        // latest run is not 'completed', skip this tick and log why. The
+        // schedule's next_run_at has already been advanced above so the next
+        // cron tick will re-evaluate the dependencies at the next scheduled
+        // time rather than re-checking on every 30s poll.
+        const dependsOn = schedule.depends_on ?? [];
+        if (dependsOn.length > 0) {
+          const depCheck = await checkDependencies(schedule.tenant_id, dependsOn);
+          if (!depCheck.satisfied) {
+            logger.info("Cron schedule skipped: dependencies not completed", {
+              scheduleId: schedule.id,
+              pipelineId: schedule.pipeline_id,
+              tenantId: schedule.tenant_id,
+              blockingPipelines: depCheck.blocking,
+            });
+            continue;
+          }
         }
 
         await runService.triggerRun(
@@ -420,6 +546,7 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
     listSchedules,
     updateSchedule,
     deleteSchedule,
+    checkDependencies,
     startCronLoop,
     stop,
   };

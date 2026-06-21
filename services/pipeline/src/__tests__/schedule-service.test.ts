@@ -87,6 +87,12 @@ function makeRunService(): MockRunService {
 const UUID_PIPELINE = "550e8400-e29b-41d4-a716-446655440000";
 const UUID_TENANT = "550e8400-e29b-41d4-a716-446655440001";
 
+function makeRunRepo() {
+  return {
+    findByTenantId: vi.fn().mockResolvedValue([]),
+  };
+}
+
 function makeScheduleRow(overrides?: Partial<ScheduleRow>): ScheduleRow {
   return {
     id: "sched-001",
@@ -96,6 +102,7 @@ function makeScheduleRow(overrides?: Partial<ScheduleRow>): ScheduleRow {
     timezone: "UTC",
     enabled: true,
     input_template: {},
+    depends_on: [],
     last_run_at: null,
     next_run_at: new Date("2026-01-01T01:00:00Z"),
     created_at: new Date("2026-01-01T00:00:00Z"),
@@ -139,6 +146,7 @@ describe("createSchedule — valid cron expressions", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo,
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger,
     });
     pipelineRepo.findById.mockResolvedValue(makePipelineRow());
@@ -229,6 +237,7 @@ describe("createSchedule — invalid cron expressions", () => {
       scheduleRepo: makeScheduleRepo() as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger: makeLogger(),
     });
   });
@@ -276,6 +285,7 @@ describe("createSchedule — invalid cron expressions", () => {
       scheduleRepo: makeScheduleRepo() as unknown as ScheduleRepository,
       pipelineRepo,
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger: makeLogger(),
     });
 
@@ -297,6 +307,7 @@ describe("createSchedule — invalid cron expressions", () => {
       scheduleRepo: makeScheduleRepo() as unknown as ScheduleRepository,
       pipelineRepo,
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger: makeLogger(),
     });
 
@@ -326,6 +337,7 @@ describe("getSchedule", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger: makeLogger(),
     });
   });
@@ -367,6 +379,7 @@ describe("listSchedules", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger: makeLogger(),
     });
   });
@@ -402,6 +415,7 @@ describe("updateSchedule", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger,
     });
   });
@@ -485,6 +499,7 @@ describe("deleteSchedule", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger,
     });
   });
@@ -545,6 +560,7 @@ describe("startCronLoop and stop", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger,
     });
   });
@@ -596,6 +612,7 @@ describe("cronTick — due schedule triggering", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo: makePipelineRepo(),
       runService: runService as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger,
     });
   });
@@ -691,6 +708,7 @@ describe("computeNextRunAt timezone handling (via createSchedule)", () => {
       scheduleRepo: scheduleRepo as unknown as ScheduleRepository,
       pipelineRepo,
       runService: makeRunService() as unknown as RunService,
+      runRepo: makeRunRepo(),
       logger: makeLogger(),
     });
   });

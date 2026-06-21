@@ -397,7 +397,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   {
     type: "KPICard",
     label: "KPI Card",
-    description: "Key performance indicator with optional sparkline.",
+    description: "Key performance indicator with optional sparkline. Supports auto-calculation from bound entity data.",
     category: "Charts",
     icon: "Activity",
     defaultProps: {
@@ -407,10 +407,31 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
       trend: "up",
       sparklineData: [3200, 3800, 3500, 4200, 4000, 4800, 4600, 5100, 4900, 5400],
       format: "currency",
+      // Auto-calculation defaults: off so existing manual cards are unaffected
+      autoCalculate: false,
+      aggregation: "sum",
+      aggregationField: "",
     },
     propSchema: [
       { key: "title", label: "Title", inputType: "text", defaultValue: "Monthly Revenue" },
-      { key: "value", label: "Display value", inputType: "text", defaultValue: "$48,250" },
+      // autoCalculate controls whether value is static or derived from entity data
+      { key: "autoCalculate", label: "Auto-calculate from data", inputType: "boolean", defaultValue: false, description: "When enabled, the value is computed from an entity data field rather than entered manually." },
+      { key: "value", label: "Display value (manual)", inputType: "text", defaultValue: "$48,250", description: "Used when auto-calculate is off." },
+      {
+        key: "aggregation",
+        label: "Aggregation function",
+        inputType: "select",
+        defaultValue: "sum",
+        description: "How to aggregate the selected field when auto-calculate is on.",
+        options: [
+          { label: "Count", value: "count" },
+          { label: "Sum", value: "sum" },
+          { label: "Average", value: "avg" },
+          { label: "Min", value: "min" },
+          { label: "Max", value: "max" },
+        ],
+      },
+      { key: "aggregationField", label: "Aggregation field", inputType: "text", defaultValue: "", description: "Entity data field to aggregate (e.g. revenue, quantity). Required when auto-calculate is on." },
       { key: "change", label: "Change (%)", inputType: "number", defaultValue: 12.4, description: "Positive or negative percentage change" },
       {
         key: "trend",

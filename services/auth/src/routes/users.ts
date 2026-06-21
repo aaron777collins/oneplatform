@@ -14,7 +14,11 @@ import type { Redis } from "ioredis";
 import type pg from "pg";
 import type { UserRepository, RoleRepository } from "../repositories/index.js";
 import type { PasswordService } from "../services/password-service.js";
-import { createUserRequest, updateUserRequest } from "../schemas/index.js";
+import {
+  createUserRequest,
+  updateUserRequest,
+  bulkCreateUsersRequest,
+} from "../schemas/index.js";
 
 export interface UserRouteDeps {
   userRepository: UserRepository;
@@ -102,6 +106,122 @@ export function createUserRoutes(deps: UserRouteDeps): Hono<{ Variables: AppVari
       lastLoginAt: null,
       createdAt: created.created_at.toISOString(),
     }, 201);
+  });
+
+  // POST /api/v1/users/bulk — create up to 100 users in a single request
+  //
+  // All users are validated up-front before any inserts begin. Individual
+  // failures (duplicate email, invalid role) do not abort the entire batch —
+  // callers receive a per-entry error list alongside the created count so they
+  // can retry only the failed rows. This partial-success model is intentional:
+  // a single duplicate should not block the remaining 99 users in a CSV import.
+  //
+  // Requires users:manage scope.
+  routes.post("/api/v1/users/bulk", async (c) => {
+    const caller = c.var.user;
+    const canManage =
+      caller.scopes.includes("users:manage") || caller.scopes.includes("admin");
+    if (!canManage) {
+      throw new ForbiddenError("users:manage scope is required to bulk-create users.");
+    }
+
+    const body = await c.req.json();
+    const parsed = bulkCreateUsersRequest.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid bulk create-user request", parsed.error.issues);
+    }
+
+    const { users } = parsed.data;
+
+    // Privilege escalation guard (same invariant as single-user creation).
+    const callerIsAdmin = caller.scopes.includes("admin");
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i]!;
+      if ((u.roles as string[]).includes("platform-admin") && !callerIsAdmin) {
+        throw new ForbiddenError(
+          `users[${i}]: Only platform-admin users can assign the platform-admin role.`
+        );
+      }
+    }
+
+    // Pre-flight role validation — load tenant roles once, check all entries.
+    const tenantRoles = await roleRepository.findByTenantId(caller.tenantId);
+    const knownRoleNames = new Set(tenantRoles.map((r) => r.name));
+
+    // Detect duplicate emails within the request body itself before hitting the DB.
+    const seenEmails = new Set<string>();
+    const intraRequestDuplicates = new Set<string>();
+    for (const u of users) {
+      const email = (u.email as string).toLowerCase();
+      if (seenEmails.has(email)) {
+        intraRequestDuplicates.add(email);
+      }
+      seenEmails.add(email);
+    }
+
+    // Process each user sequentially — parallel inserts risk deadlocks on the
+    // unique(tenant_id, lower(email)) index and make error attribution harder.
+    let created = 0;
+    const errors: Array<{ index: number; email: string; error: string }> = [];
+
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i]!;
+      const email = (u.email as string).toLowerCase();
+
+      // Reject intra-request duplicates with a clear, index-attributed message.
+      if (intraRequestDuplicates.has(email)) {
+        errors.push({ index: i, email, error: "Duplicate email within request." });
+        continue;
+      }
+
+      // Role existence check — surfaced per-entry rather than aborting the batch.
+      const unknownRoles = (u.roles as string[]).filter((r) => !knownRoleNames.has(r));
+      if (unknownRoles.length > 0) {
+        errors.push({
+          index: i,
+          email,
+          error: `Unknown roles: ${unknownRoles.join(", ")}`,
+        });
+        continue;
+      }
+
+      // Duplicate email check against existing tenant users.
+      const existing = await userRepository.findByEmail(caller.tenantId, email);
+      if (existing) {
+        errors.push({
+          index: i,
+          email,
+          error: "A user with this email already exists in the tenant.",
+        });
+        continue;
+      }
+
+      try {
+        let passwordHash: string | undefined;
+        if (u.temporaryPassword !== undefined) {
+          passwordHash = await passwordService.hash(u.temporaryPassword);
+        }
+
+        await userRepository.create({
+          tenant_id: caller.tenantId,
+          email,
+          display_name: u.displayName ?? "",
+          roles: u.roles,
+          email_verified: false,
+          ...(passwordHash !== undefined ? { password_hash: passwordHash } : {}),
+        });
+
+        created++;
+      } catch (err) {
+        errors.push({
+          index: i,
+          email,
+          error: err instanceof Error ? err.message : "Unexpected error during creation.",
+        });
+      }
+    }
+
+    return c.json({ created, errors }, 207);
   });
 
   // GET /api/v1/users — list users in the caller's tenant

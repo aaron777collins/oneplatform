@@ -2,10 +2,11 @@
 // All routes require a valid JWT (c.var.user set by authMiddleware).
 // Users can only manage their own API keys — the userId comes from the token,
 // not from the request body, to prevent IDOR attacks.
+// Admin routes (GET/DELETE /api/v1/admin/api-keys) additionally require admin scope.
 
 import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
-import { ValidationError } from "@oneplatform/core";
+import { ValidationError, ForbiddenError } from "@oneplatform/core";
 import type { ApiKeyService } from "../services/index.js";
 import { createApiKeyRequest } from "../schemas/index.js";
 
@@ -124,6 +125,77 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
       scopes: keyRecord.scopes,
       createdAt: keyRecord.createdAt.toISOString(),
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Admin endpoints — require admin scope. These allow platform admins to audit
+  // and revoke API keys belonging to any user, which is required for compliance
+  // and incident response scenarios where the key owner is unavailable.
+  // ---------------------------------------------------------------------------
+
+  // GET /api/v1/admin/api-keys — list all API keys across all users
+  //
+  // Response never includes the key hash or full key value — only the 8-char
+  // prefix is returned so admins can correlate keys without being able to use them.
+  //
+  // Query params: status (active|revoked|all), limit (1-200), offset
+  routes.get("/api/v1/admin/api-keys", async (c) => {
+    const user = c.var.user;
+    if (!user.scopes.includes("admin")) {
+      throw new ForbiddenError("admin scope is required to list all API keys.");
+    }
+
+    const rawStatus = c.req.query("status") ?? "active";
+    const status = (["active", "revoked", "all"] as const).includes(
+      rawStatus as "active" | "revoked" | "all"
+    )
+      ? (rawStatus as "active" | "revoked" | "all")
+      : "active";
+
+    const rawLimit = c.req.query("limit");
+    const rawOffset = c.req.query("offset");
+    const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 50;
+    const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : 0;
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new ValidationError("limit must be an integer between 1 and 200", []);
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new ValidationError("offset must be a non-negative integer", []);
+    }
+
+    const { keys, total } = await apiKeyService.listAllKeys({ status, limit, offset });
+
+    const data = keys.map((k) => ({
+      keyId: k.id,
+      // key_prefix allows identification without exposing the usable key value
+      prefix: k.keyPrefix,
+      userId: k.userId,
+      displayName: k.displayName,
+      scopes: k.scopes,
+      expiresAt: k.expiresAt?.toISOString() ?? null,
+      lastUsedAt: k.lastUsedAt?.toISOString() ?? null,
+      createdAt: k.createdAt.toISOString(),
+      revokedAt: k.revokedAt?.toISOString() ?? null,
+    }));
+
+    return c.json({ data, pagination: { total, limit, offset } });
+  });
+
+  // DELETE /api/v1/admin/api-keys/:keyId — revoke any API key as a platform admin
+  //
+  // This bypasses the ownership check in the standard revoke() method.
+  // The audit event records adminRevocation: true for traceability.
+  routes.delete("/api/v1/admin/api-keys/:keyId", async (c) => {
+    const keyId = c.req.param("keyId");
+    const user = c.var.user;
+
+    if (!user.scopes.includes("admin")) {
+      throw new ForbiddenError("admin scope is required to revoke any API key.");
+    }
+
+    await apiKeyService.revokeAsAdmin(keyId, user.userId);
+    return new Response(null, { status: 204 });
   });
 
   return routes;

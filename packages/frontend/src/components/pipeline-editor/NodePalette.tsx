@@ -44,27 +44,17 @@ interface PaletteItem {
   iconClass: string;
 }
 
+// Visual/declarative steps are listed first so non-technical users see the
+// approachable options at the top. Code/script steps are moved to the bottom
+// since they require programming knowledge (NCP-010).
 const PALETTE_ITEMS: PaletteItem[] = [
-  {
-    type: "code",
-    label: "Code",
-    description: "Run custom code (JavaScript, Python)",
-    icon: Code2,
-    iconClass: "text-blue-500",
-  },
+  // --- Visual / declarative steps (no code required) ---
   {
     type: "connector",
     label: "Connector",
     description: "Pull data from a source",
     icon: Plug,
     iconClass: "text-cyan-500",
-  },
-  {
-    type: "transformer",
-    label: "Transformer",
-    description: "Transform data with a plugin",
-    icon: ArrowLeftRight,
-    iconClass: "text-teal-500",
   },
   {
     type: "transform",
@@ -81,25 +71,11 @@ const PALETTE_ITEMS: PaletteItem[] = [
     iconClass: "text-yellow-500",
   },
   {
-    type: "parallel",
-    label: "Parallel",
-    description: "Run steps at the same time",
-    icon: Layers,
-    iconClass: "text-violet-500",
-  },
-  {
     type: "webhook",
     label: "Webhook",
     description: "Send data to an external service",
     icon: Webhook,
     iconClass: "text-pink-500",
-  },
-  {
-    type: "wait",
-    label: "Wait",
-    description: "Wait for a set time",
-    icon: Clock,
-    iconClass: "text-gray-500",
   },
   {
     type: "approval",
@@ -109,11 +85,41 @@ const PALETTE_ITEMS: PaletteItem[] = [
     iconClass: "text-orange-500",
   },
   {
+    type: "wait",
+    label: "Wait",
+    description: "Wait for a set time",
+    icon: Clock,
+    iconClass: "text-gray-500",
+  },
+  {
+    type: "parallel",
+    label: "Parallel",
+    description: "Run steps at the same time",
+    icon: Layers,
+    iconClass: "text-violet-500",
+  },
+  {
     type: "sub_workflow",
     label: "Sub-workflow",
     description: "Run another pipeline",
     icon: Workflow,
     iconClass: "text-purple-500",
+  },
+  // --- Advanced: plugin transformers ---
+  {
+    type: "transformer",
+    label: "Transformer",
+    description: "Transform data with a plugin",
+    icon: ArrowLeftRight,
+    iconClass: "text-teal-500",
+  },
+  // --- Advanced: code step (requires programming knowledge) ---
+  {
+    type: "code",
+    label: "Code",
+    description: "Run custom code (JavaScript, Python)",
+    icon: Code2,
+    iconClass: "text-blue-500",
   },
 ];
 

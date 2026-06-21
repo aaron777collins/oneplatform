@@ -30,8 +30,26 @@ export default function WizardPage({ bootstrapToken }: WizardPageProps) {
             OnePlatform
           </p>
           <h1 className="mt-1 text-3xl font-bold text-[var(--color-foreground)]">
-            Initial setup
+            Welcome to OnePlatform
           </h1>
+          <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
+            Your all-in-one data platform for connecting, transforming, and visualizing your data — no coding required.
+          </p>
+          {/* Brief benefit list so first-time users know what they're setting up */}
+          <ul className="mt-4 flex flex-col items-center gap-1.5 text-sm text-[var(--color-muted-foreground)]">
+            <li className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" aria-hidden="true" />
+              Connect your data sources
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" aria-hidden="true" />
+              Build pipelines visually
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" aria-hidden="true" />
+              Create dashboards instantly
+            </li>
+          </ul>
         </div>
 
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-8 shadow-sm">
