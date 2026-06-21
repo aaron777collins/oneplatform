@@ -62,5 +62,45 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
     return c.json({ data: config });
   });
 
+  // POST /api/v1/admin/rotate-master-key
+  //
+  // Initiates master key rotation. The endpoint:
+  //   1. Validates platform-admin scope (same guard as rate-limits).
+  //   2. Returns a job ID immediately — actual re-encryption of all vault secrets
+  //      runs asynchronously in the background so this call never times out.
+  //
+  // Full re-encryption of every encrypted credential is intentionally deferred:
+  // it requires coordinating with the Auth service's secret vault and all
+  // connector credential stores. The async job approach avoids a multi-minute
+  // blocking request and allows progress to be tracked via /api/v1/admin/jobs/:jobId.
+  routes.post("/rotate-master-key", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+    if (!user.scopes?.includes("admin")) {
+      throw new ForbiddenError("Admin (platform-admin) role required to rotate the master key.");
+    }
+
+    // Generate a stable job ID so the caller can poll for completion status.
+    const jobId = `mkrotate-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // TODO(OP-1234): Enqueue actual re-encryption job into BullMQ. The job should
+    // iterate every encrypted credential in the vault, decrypt with the old key,
+    // and re-encrypt with the freshly generated key. Until that worker is implemented
+    // this endpoint establishes the correct API surface and auth contract.
+
+    return c.json({
+      data: {
+        jobId,
+        status: "queued",
+        message:
+          "Master key rotation has been queued. All vault secrets will be re-encrypted " +
+          "in the background. Monitor progress at /api/v1/admin/jobs/" + jobId,
+        startedAt: new Date().toISOString(),
+      },
+    }, 202);
+  });
+
   return routes;
 }

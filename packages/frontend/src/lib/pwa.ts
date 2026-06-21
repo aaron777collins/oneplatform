@@ -286,6 +286,233 @@ export async function enqueueMutation(mutation: Omit<QueuedMutation, "id" | "que
   }
 }
 
+// ---------------------------------------------------------------------------
+// MU-011: Web Push Notification Subscriptions
+//
+// Web Push allows the server to send notifications to the user even when the
+// app is not open, using the browser's push service as an intermediary. The
+// client-side flow is:
+//   1. Check push support (isPushSupported).
+//   2. Request Notification permission.
+//   3. Subscribe via the PushManager API using the server's VAPID public key.
+//   4. Send the resulting PushSubscription endpoint to the API so the server
+//      can target this browser for future push messages.
+//
+// The server-side push (calling the push service, encrypting the payload) is
+// NOT implemented here — these functions are the client-side plumbing only.
+// Server implementation requires:
+//   - web-push npm package (or equivalent)
+//   - VAPID key pair (generate once with `npx web-push generate-vapid-keys`)
+//   - OP_VAPID_PUBLIC_KEY and OP_VAPID_PRIVATE_KEY environment variables
+//   - A /api/push/subscriptions endpoint to store and manage subscriptions
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the current browser supports Web Push notifications.
+ *
+ * Checks for:
+ * - Service Worker support (required as the push event fires in the SW)
+ * - PushManager support (the subscription API)
+ * - Notification support (permission API)
+ */
+export function isPushSupported(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window
+  );
+}
+
+/**
+ * The shape of a push subscription persisted to the API.
+ * Mirrors the W3C PushSubscription JSON serialisation.
+ */
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: {
+    /** Base64url-encoded public key (P-256). */
+    p256dh: string;
+    /** Base64url-encoded authentication secret. */
+    auth: string;
+  };
+  /** ISO timestamp — lets the server expire stale subscriptions. */
+  subscribedAt: string;
+  /** User-Agent string — for diagnostics, never used for targeting. */
+  userAgent: string;
+}
+
+/**
+ * Converts a VAPID public key string (Base64url) to the ArrayBuffer that
+ * PushManager.subscribe() expects as `applicationServerKey`.
+ *
+ * Returns ArrayBuffer rather than Uint8Array to avoid the
+ * Uint8Array<ArrayBufferLike> vs Uint8Array<ArrayBuffer> mismatch under
+ * TypeScript's strict generic variance — ArrayBuffer satisfies BufferSource
+ * directly.
+ */
+function vapidKeyToArrayBuffer(base64UrlKey: string): ArrayBuffer {
+  // Replace URL-safe chars and add padding so atob() can decode it.
+  const base64 = base64UrlKey.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  const raw = window.atob(padded);
+  const buffer = new ArrayBuffer(raw.length);
+  const view = new Uint8Array(buffer);
+  for (let i = 0; i < raw.length; i++) {
+    view[i] = raw.charCodeAt(i);
+  }
+  return buffer;
+}
+
+/**
+ * Requests Notification permission and subscribes to Web Push.
+ *
+ * @param vapidPublicKey - The VAPID public key from OP_VAPID_PUBLIC_KEY.
+ *   Obtain it via GET /api/push/vapid-public-key (the server exposes it).
+ * @param apiEndpoint - URL to POST the subscription payload to.
+ *   Defaults to "/api/push/subscriptions".
+ *
+ * @returns The saved PushSubscriptionPayload, or null when:
+ *   - Push is not supported in this browser
+ *   - The user denied notification permission
+ *   - Service worker registration is unavailable
+ *
+ * @throws When the API call to save the subscription fails (non-2xx response).
+ *   The caller should surface a recoverable error to the user — the push
+ *   subscription is still active in the browser even if the API save fails,
+ *   so a retry is correct rather than re-subscribing.
+ */
+export async function subscribeToPush(
+  vapidPublicKey: string,
+  apiEndpoint = "/api/push/subscriptions",
+): Promise<PushSubscriptionPayload | null> {
+  if (!isPushSupported()) {
+    return null;
+  }
+
+  // Request permission before subscribing — the subscribe() call will also
+  // prompt but requesting here gives us a clean "denied" check first.
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    return null;
+  }
+
+  // Wait for an active service worker registration.
+  // `navigator.serviceWorker.ready` resolves once a SW controls the page.
+  let registration: ServiceWorkerRegistration;
+  try {
+    registration = await navigator.serviceWorker.ready;
+  } catch {
+    // Service worker registration failed or was never set up.
+    return null;
+  }
+
+  // Subscribe. The browser generates a unique endpoint URL and key pair for
+  // this (origin, service worker, VAPID key) combination. userVisibleOnly=true
+  // is required by Chrome — the push service will reject subscriptions that do
+  // not show a notification for every push message received.
+  let subscription: PushSubscription;
+  try {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidKeyToArrayBuffer(vapidPublicKey),
+    });
+  } catch (err) {
+    // Most common causes: VAPID key is invalid, or the user blocked push in
+    // browser settings after granting permission in the Notification prompt.
+    throw new Error(
+      `Push subscription failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Serialise the PushSubscription to the shape our API expects.
+  const json = subscription.toJSON();
+  if (json.endpoint === undefined || json.keys === undefined) {
+    // Malformed subscription from the browser — should not happen in practice.
+    throw new Error("Push subscription is missing endpoint or keys — cannot save.");
+  }
+
+  const payload: PushSubscriptionPayload = {
+    endpoint: json.endpoint,
+    keys: {
+      p256dh: json.keys["p256dh"] ?? "",
+      auth: json.keys["auth"] ?? "",
+    },
+    subscribedAt: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+  };
+
+  // Persist the subscription to the API so the server can send push messages.
+  const response = await fetch(apiEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    // Credentials are needed so the server can associate the subscription with
+    // the authenticated user's account.
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `Failed to save push subscription to API (${response.status}): ${body}`,
+    );
+  }
+
+  return payload;
+}
+
+/**
+ * Unsubscribes from Web Push and optionally removes the subscription from
+ * the API.
+ *
+ * @param apiEndpoint - URL to DELETE the subscription from. When provided, a
+ *   DELETE request is sent with the endpoint in the body. Omit to only
+ *   unsubscribe locally without contacting the server.
+ */
+export async function unsubscribeFromPush(apiEndpoint?: string): Promise<void> {
+  if (!isPushSupported()) return;
+
+  let registration: ServiceWorkerRegistration;
+  try {
+    registration = await navigator.serviceWorker.ready;
+  } catch {
+    return;
+  }
+
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription === null) return;
+
+  const endpoint = subscription.endpoint;
+  await subscription.unsubscribe();
+
+  if (apiEndpoint !== undefined) {
+    // Best-effort — the browser-side unsubscription already invalidated the
+    // endpoint. The server will naturally drop stale subscriptions on next use.
+    await fetch(apiEndpoint, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+      credentials: "include",
+    }).catch(() => undefined);
+  }
+}
+
+/**
+ * Returns the current push subscription for this browser, or null when not
+ * subscribed. Useful for showing a toggle in settings UI without re-prompting.
+ */
+export async function getCurrentPushSubscription(): Promise<PushSubscription | null> {
+  if (!isPushSupported()) return null;
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    return await registration.pushManager.getSubscription();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Registers a callback that fires when the service worker reports a
  * sync-complete event. Used in tests and for UI feedback (e.g. toast).

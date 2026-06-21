@@ -9,6 +9,20 @@ import type { Logger } from "@oneplatform/core";
 // then runs a daily check at 03:00 UTC. Drops old partitions beyond the
 // retention window without table scans — this is the primary value of
 // range partitioning for high-volume execution records.
+//
+// DE-014: Ingestion raw tables are NOT yet covered by this manager.
+// Raw tables live in the `ingestion` schema and are high-volume enough to
+// benefit from the same monthly range partitioning strategy. They cannot be
+// partitioned at runtime (ALTER TABLE on non-empty tables is not supported
+// without pg_partman or a migration window with a table rename + copy).
+//
+// To add partitioning for raw ingestion tables, apply the migration template
+// located at:
+//   docker/init/migrations/partition_ingestion_raw_tables.sql.template
+//
+// That template converts `ingestion.raw_<connector_id>` tables to
+// PARTITION BY RANGE (ingested_at) using a zero-downtime rename+copy strategy.
+// See the template for full instructions and the required maintenance window.
 // ---------------------------------------------------------------------------
 
 export interface PartitionManager {

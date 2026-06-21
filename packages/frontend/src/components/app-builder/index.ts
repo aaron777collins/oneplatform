@@ -56,4 +56,7 @@ export type {
   DragState,
   DropTarget,
   ComponentCategory,
+  ComponentConnection,
+  SourceEvent,
+  TargetAction,
 } from "./types.js";

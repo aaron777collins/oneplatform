@@ -10,7 +10,7 @@
 
 import { create } from "zustand";
 import { nanoid } from "nanoid";
-import type { AppLayout, PlacedComponent, DataBinding, BuilderMode } from "./types.js";
+import type { AppLayout, PlacedComponent, DataBinding, BuilderMode, ComponentConnection } from "./types.js";
 import {
   createEmptyLayout,
   addRow,
@@ -45,6 +45,19 @@ interface BuilderState {
 
   selectedComponentId: string | null;
   mode: BuilderMode;
+
+  /**
+   * Directed connections between components.
+   * Each entry means: when sourceId emits sourceEvent → apply targetAction to targetId.
+   * Connections are NOT part of layout history because they are configuration-level
+   * metadata that survives layout mutations like column resizing.
+   */
+  connections: ComponentConnection[];
+
+  // ---- Connection actions ----
+  addConnection: (connection: Omit<ComponentConnection, "id">) => void;
+  removeConnection: (connectionId: string) => void;
+  updateConnection: (connectionId: string, partial: Partial<Omit<ComponentConnection, "id">>) => void;
 
   // ---- Layout actions ----
   addRow: () => void;
@@ -90,6 +103,26 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
   future: [],
   selectedComponentId: null,
   mode: "edit",
+  connections: [],
+
+  addConnection: (connection) => {
+    const id = nanoid();
+    set((s) => ({ connections: [...s.connections, { id, ...connection }] }));
+  },
+
+  removeConnection: (connectionId) => {
+    set((s) => ({
+      connections: s.connections.filter((c) => c.id !== connectionId),
+    }));
+  },
+
+  updateConnection: (connectionId, partial) => {
+    set((s) => ({
+      connections: s.connections.map((c) =>
+        c.id === connectionId ? { ...c, ...partial } : c,
+      ),
+    }));
+  },
 
   // ---- Mutation helper (private) ---- captured in closure below
   addRow: () => {
@@ -136,6 +169,11 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
     set((s) => ({
       ...mutate(s, removeComponent(layout, componentId)),
       selectedComponentId: s.selectedComponentId === componentId ? null : s.selectedComponentId,
+      // Prune connections that reference the deleted component so the
+      // connection list never points at phantom component IDs.
+      connections: s.connections.filter(
+        (c) => c.sourceId !== componentId && c.targetId !== componentId,
+      ),
     }));
   },
 
@@ -202,7 +240,7 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
   },
 
   loadLayout: (layout: AppLayout) => {
-    set({ layout, history: [], future: [], selectedComponentId: null });
+    set({ layout, history: [], future: [], selectedComponentId: null, connections: [] });
   },
 
   resetLayout: () => {
@@ -211,6 +249,7 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
       history: [],
       future: [],
       selectedComponentId: null,
+      connections: [],
     });
   },
 }));

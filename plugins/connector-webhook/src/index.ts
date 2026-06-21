@@ -428,6 +428,11 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
     additionalProperties: true,
   },
   supportsIncremental: false,
+  // Webhooks are push-based: the external system calls us, so events arrive in
+  // real time. Real-time pipeline mode could be supported by routing incoming
+  // webhook payloads directly into a live pipeline run instead of queuing them.
+  // Set supportsRealtime: true once the Execution Service live-ingest path is
+  // wired up to the webhook ingestion endpoint.
   supportsRealtime: false,
   tags: ["webhook", "api", "events", "ingestion", "http"],
 };

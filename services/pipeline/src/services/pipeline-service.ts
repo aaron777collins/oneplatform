@@ -243,6 +243,37 @@ export interface PipelineOptions {
   allowConcurrentRuns?: boolean;
   stepTimeout?: number;
   retainRunsCount?: number;
+  // DE-015: Top-level pipeline steps execute serially by default — each step
+  // waits for the previous step to complete before starting. This is the safest
+  // default because steps commonly read from the output of prior steps.
+  //
+  // To run independent top-level steps concurrently, use the built-in
+  // `parallel` step type, which fans out named branches and merges their
+  // outputs before continuing the main sequence. The parallel step is the
+  // recommended approach because it gives each branch its own identity, retry
+  // config, and error handling.
+  //
+  // `parallelSteps` is an escape hatch for pipelines where the parallel step
+  // type is inconvenient: list the zero-based indices of top-level steps that
+  // should execute concurrently. The execution engine groups consecutive runs
+  // of parallel-marked indices into a single Promise.all() call.
+  //
+  // Example: steps at indices [1, 2] will both start after step 0 completes
+  // and step 3 will start only after both 1 and 2 have completed:
+  //   parallelSteps: [[1, 2]]
+  //
+  // Constraints:
+  //   - Steps in a parallelSteps group may NOT reference each other's output
+  //     via InputSource (the output is unavailable until both complete).
+  //   - If any step in a group fails with onError="fail", the entire group
+  //     fails and remaining groups are not executed.
+  //   - Conditional steps inside a parallelSteps group are unsupported and
+  //     will throw a StepExecutionError at runtime.
+  //
+  // NOTE: The execution engine reads this field but currently only validates
+  // the structure. Full parallel-group scheduling is tracked in the engine's
+  // processRun function and will be enabled in a follow-up release.
+  parallelSteps?: number[][];
 }
 
 export interface PipelineDefinition {

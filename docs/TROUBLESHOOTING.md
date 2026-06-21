@@ -1422,6 +1422,76 @@ docker compose -f docker/docker-compose.yml build --no-cache
 docker compose -f docker/docker-compose.yml up -d --build auth-service
 ```
 
+### 7.X Vector container log collection fails on Docker Desktop (Mac / Windows / WSL2)
+
+**Symptom**
+
+The `oneplatform-vector` container starts but logs no output, or exits with:
+
+```
+Error reading directory: /var/lib/docker/containers — No such file or directory
+```
+
+**Cause**
+
+`/var/lib/docker/containers` is the host path where Docker on **native Linux**
+writes container JSON log files. On **Docker Desktop for Mac, Windows, and
+WSL2**, the Docker daemon runs inside a hidden Linux VM and its container
+filesystem is not mounted at this path on the host.
+
+**Fix — Option A: Set `OP_DOCKER_DATA_ROOT` (WSL2 only)**
+
+In WSL2, Docker Desktop may expose the container log directory via the WSL
+virtual filesystem. Find the actual path:
+
+```bash
+# Run inside WSL2
+ls /mnt/wsl/docker-desktop-data/data/docker/containers
+```
+
+If that directory exists, add to your `.env` file:
+
+```
+OP_DOCKER_DATA_ROOT=/mnt/wsl/docker-desktop-data/data/docker/containers
+```
+
+Then restart the stack:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d vector
+```
+
+**Fix — Option B: Docker Desktop for Mac (Apple Silicon / Intel)**
+
+The Docker VM filesystem is not directly accessible on macOS. You have two
+options:
+
+1. **Accept the limitation**: Vector log collection is disabled. Use
+   `docker compose logs -f <service>` for local development. The application
+   works fully without Vector.
+
+2. **Use a syslog driver**: Configure the Docker logging driver in
+   `docker-compose.yml` to write to a syslog socket that Vector can read via a
+   Unix socket source. This requires changes to the Vector config and is only
+   recommended if you specifically need structured log aggregation locally.
+
+**Fix — Option C: Override `OP_DOCKER_DATA_ROOT` to an empty bind mount**
+
+If you want Vector to run without errors but accept that it won't collect logs:
+
+```bash
+mkdir -p /tmp/docker-containers-empty
+echo "OP_DOCKER_DATA_ROOT=/tmp/docker-containers-empty" >> .env
+docker compose -f docker/docker-compose.yml up -d vector
+```
+
+**Verification**
+
+```bash
+docker compose -f docker/docker-compose.yml logs vector
+# Should show Vector starting successfully with a "sources" line for docker_logs
+```
+
 ---
 
 ## 8. Performance Issues

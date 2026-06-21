@@ -1512,6 +1512,31 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       }
 
       // Step 6: Traverse the step graph
+      //
+      // DE-015: Top-level steps are executed serially — each step awaits the
+      // previous before starting. This is intentional: most pipeline steps
+      // consume the output of a prior step and serial execution is the safest
+      // default with the lowest cognitive overhead.
+      //
+      // WORKAROUND for independent steps that must run concurrently:
+      //   Use the `parallel` step type. It fans out named branches and
+      //   merges their outputs before continuing the main sequence. Each
+      //   branch has full step support including retries and error handling.
+      //
+      // FUTURE (DE-015): `definition.options.parallelSteps` lists groups of
+      // step indices to execute concurrently. The schema is already defined in
+      // PipelineOptions. Scheduling support is planned; until then the field is
+      // parsed and validated but not acted upon — all steps remain serial.
+      //
+      // DE-018: Transform steps (step.type === "transform") call
+      // executeTransformStep(), which uses the pure functions imported from
+      // transform-engine.ts (dedup, filter, mapFields, aggregate, pivot,
+      // unpivot, join, sort, limit, rename). All per-record operations (filter,
+      // map, rename, limit) are available as *Stream variants in transform-engine
+      // for callers that can supply records incrementally. The execution engine
+      // operates on in-memory record arrays received from prior steps, so the
+      // streaming variants are not used here; the MAX_IN_MEMORY_RECORDS guard in
+      // transform-engine.ts is the safety net for oversized datasets.
       const stepMap = new Map(allSteps.map((s) => [s.id, s]));
       let currentStepId: string | null = definition.entryStepId;
       let failedStepId: string | null = null;

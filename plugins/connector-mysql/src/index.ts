@@ -683,6 +683,10 @@ class MySqlConnector implements Connector {
         additionalProperties: false,
       },
       supportsIncremental: true,
+      // Real-time support could be added via MySQL binary log (binlog) change
+      // data capture, similar to Debezium's MySQL connector. This requires a
+      // binlog reader exposed through the platform DB proxy. Set
+      // supportsRealtime: true once that proxy integration is available.
       supportsRealtime: false,
     };
   }

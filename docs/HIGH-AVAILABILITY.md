@@ -19,6 +19,8 @@ For sizing guidance before committing to an HA deployment, read
 | Caddy upstream configuration | [§4 Load Balancing](#4-load-balancing) |
 | RTO/RPO targets, backup schedules, recovery runbooks | [§5 Disaster Recovery](#5-disaster-recovery) |
 | Network topology | [§6 Network Architecture](#6-network-architecture) |
+| Automated backup solution | [§8 Automated Backups](#8-automated-backups) |
+| SLA tiers, uptime definition, maintenance windows | [§7 SLA Template](#7-service-level-agreement-sla-template) |
 
 ---
 
@@ -1183,3 +1185,213 @@ For a reduced-complexity HA setup, use DNS-based failover:
 
 This approach trades simplicity for slower failover (bounded by DNS TTL +
 PgBouncer reconnect time vs. Patroni's 10–15 second failover).
+
+---
+
+## 7. Service Level Agreement (SLA) Template
+
+This section defines uptime tiers and operational commitments. Operators should
+review and customise these targets to match contractual obligations with their
+customers before deploying to production.
+
+### 7.1 Tier definitions
+
+| Tier | Target uptime | Allowed downtime / month | Typical use case |
+|---|---|---|---|
+| **Development** | No SLA | Unlimited | Local development, CI, staging |
+| **Standard** | 99.5% | ≈ 3.65 hours | Small/medium production deployments |
+| **Enterprise** | 99.9% | ≈ 43 minutes | Business-critical workloads |
+| **Enterprise Plus** | 99.95% | ≈ 22 minutes | High-value, contractually committed |
+
+Uptime is measured as a rolling 30-day window from the first day of each
+calendar month.
+
+### 7.2 What counts toward uptime
+
+**In scope — downtime is counted when:**
+
+- The Gateway API (`/api/v1/**`) returns HTTP 5xx for > 1% of requests over any
+  5-minute window (error rate threshold).
+- The Gateway API p99 latency exceeds 10 seconds for > 5 minutes continuously.
+- Data pipeline execution is blocked for > 15 minutes (no pipeline runs complete
+  that were scheduled within the measurement window).
+- The frontend application (`/`) is unreachable for > 2 minutes.
+
+**Out of scope — the following do not count as downtime:**
+
+- Scheduled maintenance windows (see §7.4).
+- Degraded performance that does not breach the error rate or latency thresholds.
+- Failures caused by customer misconfiguration (invalid connector credentials,
+  malformed pipeline YAML, resource quota exhaustion).
+- External dependency outages (upstream databases, third-party APIs) beyond the
+  platform's control.
+- Force majeure events (natural disasters, widespread cloud-provider outages
+  affecting multiple availability zones simultaneously).
+
+### 7.3 Measurement methodology
+
+Uptime is measured using the `/healthz` endpoint on the Gateway service.
+A synthetic probe checks every 60 seconds from an external location. A
+check is considered failed when:
+
+1. The probe receives no HTTP response within 5 seconds, **or**
+2. The response HTTP status is not 2xx.
+
+Two consecutive failed checks (120 seconds) open a downtime incident. The
+incident closes when two consecutive checks succeed.
+
+Operators should configure an uptime monitoring service (e.g., Grafana Cloud,
+Datadog Synthetics, UptimeRobot) pointing at `https://<your-domain>/healthz`.
+
+### 7.4 Planned maintenance windows
+
+Planned maintenance is excluded from SLA calculations when:
+
+1. Customers are notified at least **48 hours in advance** for Standard tier
+   or **5 business days** for Enterprise tier.
+2. The maintenance window does not exceed **4 hours** per calendar month.
+3. Maintenance is performed between **02:00–06:00 UTC** on weekdays or any
+   time on weekends (unless otherwise agreed).
+
+During maintenance, the platform should serve HTTP 503 with a
+`Retry-After` header. Caddy can be configured to serve a maintenance page:
+
+```caddyfile
+# Add before the reverse_proxy directive to activate maintenance mode
+respond /api/* "Service temporarily unavailable for maintenance" 503 {
+    header Retry-After "3600"
+}
+```
+
+### 7.5 Incident response targets
+
+| Severity | Description | Initial response | Update frequency |
+|---|---|---|---|
+| **P1 — Critical** | Full outage, SLA breach in progress | 15 minutes | Every 30 minutes |
+| **P2 — High** | Partial outage, >50% of API calls failing | 30 minutes | Every 60 minutes |
+| **P3 — Medium** | Degraded performance, SLA at risk | 2 hours | Every 4 hours |
+| **P4 — Low** | Minor issues, no SLA impact | Next business day | As resolved |
+
+Response targets apply from the time an alert fires in the monitoring system,
+not from when a customer reports the issue.
+
+### 7.6 Backup and recovery commitments
+
+| Metric | Target |
+|---|---|
+| Recovery Point Objective (RPO) | ≤ 1 hour (Standard), ≤ 15 minutes (Enterprise) |
+| Recovery Time Objective (RTO) | ≤ 4 hours (Standard), ≤ 1 hour (Enterprise) |
+| Backup retention | 7 days (Standard), 30 days (Enterprise) |
+| Backup verification | Restore test performed monthly |
+
+Backup procedures are documented in `docker/scripts/backup.sh`. Operators
+should schedule automated backups (see §EE-019 in the HA guide) and perform
+periodic restore drills to validate RPO/RTO targets.
+
+### 7.7 Customisation checklist
+
+Before publishing this SLA to customers, operators should:
+
+- [ ] Confirm uptime tier with legal/commercial team and update §7.1.
+- [ ] Agree maintenance window schedule with operations team and update §7.4.
+- [ ] Configure external uptime monitoring pointed at `/healthz`.
+- [ ] Set up incident escalation paths and update §7.5 contact information.
+- [ ] Verify backup schedule meets the RPO in §7.6.
+- [ ] Add this document (or a customer-facing version) to the service agreement.
+
+---
+
+## 8. Automated Backups
+
+OnePlatform ships a backup script at `docker/scripts/backup.sh` that handles
+all three data stores in a single run. The Docker Compose stack includes an
+optional `op-backup` service that runs this script on a cron schedule.
+
+### 8.1 What is backed up
+
+| Data store | Method | Output |
+|---|---|---|
+| PostgreSQL | `pg_dump` (custom format, compressed) | `<timestamp>/postgres.dump` |
+| Redis | `BGSAVE` + RDB file copy | `<timestamp>/redis.rdb` |
+| MinIO | `mc mirror` (all buckets) | `<timestamp>/minio/` |
+| init-data volume | `tar` via alpine container | `<timestamp>/init-data/init-data.tar` |
+
+The init-data backup is critical — it contains the master key, JWT signing
+keys, and bootstrap secrets generated by `op-init`. Losing this volume without
+a backup makes recovery impossible even with a full Postgres dump.
+
+### 8.2 Manual backup
+
+Run the backup script manually from the repository root:
+
+```bash
+# Output goes to ./backups/<timestamp>/
+./docker/scripts/backup.sh
+
+# Custom output directory
+./docker/scripts/backup.sh /mnt/nas/oneplatform-backups
+
+# Required for MinIO backup
+OP_MINIO_USER=minioadmin OP_MINIO_PASSWORD=<password> ./docker/scripts/backup.sh
+```
+
+### 8.3 Automated backup with Docker Compose
+
+The `op-backup` service in `docker-compose.yml` runs the backup on a cron
+schedule. Enable it by starting with the `backup` profile:
+
+```bash
+# Start the full stack including automated daily backups at 02:00 UTC
+docker compose --profile backup up -d
+
+# Override the schedule (e.g. every 6 hours)
+OP_BACKUP_CRON="0 */6 * * *" docker compose --profile backup up -d
+
+# Override the output directory
+OP_BACKUP_DIR=/mnt/nas/backups docker compose --profile backup up -d
+```
+
+View backup logs:
+
+```bash
+docker compose logs op-backup -f
+```
+
+### 8.4 Off-host backup transfer
+
+Backup files on the host are a single point of failure. Transfer completed
+backups to a separate location:
+
+```bash
+# Example: rsync to a remote backup server
+rsync -avz --remove-source-files ./backups/ backup-server:/data/oneplatform/
+
+# Example: upload to S3-compatible storage
+aws s3 sync ./backups/ s3://your-bucket/oneplatform-backups/ --storage-class STANDARD_IA
+```
+
+### 8.5 Restore procedure
+
+See `docker/scripts/restore.sh` and [§5 Disaster Recovery](#5-disaster-recovery)
+in this guide for full restore runbooks. Quick reference:
+
+```bash
+# Restore PostgreSQL from a specific backup
+docker compose exec -T postgres pg_restore \
+  -U postgres -d oneplatform -F custom \
+  /tmp/postgres.dump < ./backups/<timestamp>/postgres.dump
+
+# Verify backup integrity without restoring
+pg_restore --list ./backups/<timestamp>/postgres.dump | head -20
+```
+
+### 8.6 Backup verification schedule
+
+Automated backups are only valuable if they can be restored. Establish a
+regular restore drill schedule:
+
+| Frequency | Activity |
+|---|---|
+| Weekly | Verify backup files exist and are non-zero |
+| Monthly | Restore PostgreSQL dump to a test container, run `SELECT count(*) FROM ...` |
+| Quarterly | Full DR drill: restore all data stores to a test environment, verify app starts |

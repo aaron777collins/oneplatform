@@ -167,6 +167,60 @@ services:
     restart: unless-stopped
 
   docker-socket-proxy:
+    # SA-010: Security boundary documentation for the Docker socket proxy.
+    #
+    # THREAT MODEL
+    # ------------
+    # Exposing the raw Docker socket (/var/run/docker.sock) to any container
+    # grants that container root-equivalent access to the host — it can create
+    # privileged containers, mount host paths, and escape isolation entirely.
+    # This proxy interposes on the Docker API and allows only the specific HTTP
+    # verbs and resource types that the execution service genuinely needs.
+    #
+    # WHAT THE EXECUTION SERVICE NEEDS
+    # ----------------------------------
+    # The execution service creates ephemeral sandbox containers for each
+    # plugin/user code execution, starts them, waits for completion, reads
+    # their exit codes, and then deletes them. It also pulls sandbox images
+    # on first use. These are the minimal required operations:
+    #
+    #   GET  /containers/*   — inspect, list (to verify sandbox labels)
+    #   POST /containers/*   — create (docker create) and start (docker start)
+    #   DELETE /containers/* — remove after execution or on timeout
+    #   GET  /images/*       — list available sandbox images
+    #   POST /images/*       — pull (docker pull) when image is absent
+    #
+    # WHAT IS NOT PERMITTED (not enabled)
+    # -------------------------------------
+    # NETWORKS, VOLUMES, SERVICES, TASKS, SWARM, SECRETS, CONFIGS, NODES,
+    # DISTRIBUTION, PLUGINS — all disabled (default=0 in docker-socket-proxy).
+    # This prevents the execution service from modifying the stack's networking,
+    # creating persistent volumes, or reading secrets from Swarm.
+    #
+    # RESIDUAL RISK
+    # -------------
+    # tecnativa/docker-socket-proxy 0.2.0 enforces resource-level ACLs
+    # (CONTAINERS, IMAGES) but not per-path ACLs within a resource. An
+    # attacker who compromises the execution service container could use
+    # POST /containers/create to create a *new* container with arbitrary
+    # HostConfig (e.g. mounting the host root filesystem). Mitigations:
+    #   (a) The execution service runs on the isolated oneplatform-sandbox
+    #       network, not reachable from public or internal app networks.
+    #   (b) All sandbox containers are created with no-new-privileges,
+    #       cap_drop: ALL, read_only, and resource limits via HostConfig,
+    #       making lateral movement from within a sandbox harder.
+    #   (c) The execution service verifies container labels before any
+    #       DELETE call and tracks created container IDs in memory.
+    #   (d) Future proxy versions with path-level ACLs should be evaluated
+    #       to restrict create/start/delete to labelled sandbox containers only.
+    #
+    # DISABLING CONTAINER CREATION IS NOT SUPPORTED
+    # -----------------------------------------------
+    # CONTAINERS_CREATE=0 / CONTAINERS_DELETE=0 are not valid environment
+    # variables for tecnativa/docker-socket-proxy. The proxy only supports
+    # resource-level enable/disable (CONTAINERS=0|1), not per-verb sub-controls.
+    # Upgrading to a proxy that supports per-verb or per-label ACLs (e.g.
+    # docker-socket-proxy with path regex) is the correct long-term fix.
     image: tecnativa/docker-socket-proxy:0.2.0
     environment:
       # CONTAINERS=1 allows the execution service to list, inspect, and create
@@ -759,6 +813,26 @@ services:
     # Vector has no network access to the Docker daemon and cannot create containers.
     user: "65534:0"
     volumes:
+      # FTU-008: The host path /var/lib/docker/containers only exists on native
+      # Linux Docker (including Linux VMs). On Docker Desktop for Mac, Windows,
+      # or WSL2, the Docker daemon runs inside a Linux VM and its container log
+      # files are not accessible at this path on the host.
+      #
+      # Fix options (choose one):
+      #
+      # 1. Set OP_DOCKER_DATA_ROOT in your .env file to the WSL2 internal path:
+      #    OP_DOCKER_DATA_ROOT=/mnt/wsl/docker-desktop-data/data/docker/containers
+      #    (path varies by Docker Desktop version — check your Docker Desktop settings)
+      #
+      # 2. On Docker Desktop for Mac (Apple Silicon / Intel), the VM filesystem is
+      #    not directly accessible. Use a Docker Desktop extension or configure
+      #    Vector to read from the Docker socket instead (requires CONTAINERS=1 on
+      #    the docker-socket-proxy, which has security implications — see SA-010).
+      #
+      # 3. Accept that Vector log collection will not work on Docker Desktop and
+      #    rely on `docker compose logs` for local development.
+      #
+      # See docs/TROUBLESHOOTING.md § "Vector container log collection" for details.
       - ${OP_DOCKER_DATA_ROOT:-/var/lib/docker/containers}:/var/lib/docker/containers:ro
       - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
       - log-data:/var/log/oneplatform
@@ -843,6 +917,66 @@ services:
         limits:
           memory: 128m
           cpus: "0.25"
+
+  # ── Automated backup service ────────────────────────────────────────────────
+  # Runs docker/scripts/backup.sh on a cron schedule (default: daily at 02:00 UTC).
+  # Requires access to the Docker socket to exec into sibling containers and copy
+  # files out. Uses docker-socket-proxy for limited Docker API access.
+  #
+  # Override OP_BACKUP_DIR to change the output directory (default: ./backups
+  # relative to the repo root). Set OP_BACKUP_CRON to change the schedule.
+  #
+  # SECURITY: The backup directory contains all platform data including encrypted
+  # secrets. Protect it: chmod 700 ./backups, and consider encrypting backups
+  # at rest before transferring off-host.
+  #
+  # Disable by setting COMPOSE_PROFILES (or commenting out this service) when
+  # running in environments where scheduled backups are handled externally.
+  op-backup:
+    image: docker:27-cli
+    container_name: op-backup
+    restart: unless-stopped
+    environment:
+      # Cron expression (5 fields). Default: daily at 02:00 UTC.
+      OP_BACKUP_CRON: ${OP_BACKUP_CRON:-0 2 * * *}
+      OP_BACKUP_DIR: ${OP_BACKUP_DIR:-/backups}
+      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-}
+    volumes:
+      # Docker socket — needed to exec into postgres/redis/minio containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Backup script
+      - ./scripts/backup.sh:/usr/local/bin/op-backup.sh:ro
+      # Output directory (host path) where timestamped backup archives are written
+      - ${OP_BACKUP_DIR:-./backups}:/backups
+    networks:
+      - oneplatform-internal
+    # The backup container installs crond at startup, writes a crontab entry
+    # from OP_BACKUP_CRON, then runs crond in the foreground.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "$${OP_BACKUP_CRON} /usr/local/bin/op-backup.sh /backups >> /var/log/op-backup.log 2>&1" > /etc/crontabs/root
+        echo "[op-backup] Backup scheduled: $${OP_BACKUP_CRON}"
+        crond -f -L /var/log/op-backup.log
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
+    profiles:
+      - backup
 
 volumes:
   # Data store persistence

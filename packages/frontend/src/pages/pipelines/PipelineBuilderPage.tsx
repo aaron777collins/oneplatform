@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton.js";
 import { Input } from "@/components/ui/input.js";
 import { Label } from "@/components/ui/label.js";
 import { Button } from "@/components/ui/button.js";
+import { Separator } from "@/components/ui/separator.js";
 import {
   Select,
   SelectContent,
@@ -40,12 +41,20 @@ import { graphToPipelineDefinition } from "@/components/pipeline-editor/graph-co
 // Types
 // ---------------------------------------------------------------------------
 
+interface PipelineNotifications {
+  notifyOnFailure: boolean;
+  /** Comma-separated list of email addresses. */
+  emailRecipients: string;
+  webhookUrl: string;
+}
+
 interface PipelineConfig {
   id: string;
   name: string;
   triggerType: TriggerType;
   cronExpression?: string;
   steps: PipelineStep[];
+  notifications?: PipelineNotifications;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +75,11 @@ export function PipelineBuilderPage() {
   const [initialSteps, setInitialSteps] = React.useState<PipelineStep[]>([]);
   const [loaded, setLoaded] = React.useState(isNew);
   const [editorMode, setEditorMode] = React.useState<"visual" | "steps">("visual");
+
+  // Notification settings (NCP-015)
+  const [notifyOnFailure, setNotifyOnFailure] = React.useState(false);
+  const [emailRecipients, setEmailRecipients] = React.useState("");
+  const [webhookUrl, setWebhookUrl] = React.useState("");
 
   // When creating a new pipeline, the wizard is shown until the user completes
   // or skips it. Once dismissed, wizardDismissed stays true for the session.
@@ -98,12 +112,17 @@ export function PipelineBuilderPage() {
       setTriggerType(p.triggerType);
       if (p.cronExpression !== undefined) setCronExpression(p.cronExpression);
       setInitialSteps(p.steps);
+      if (p.notifications !== undefined) {
+        setNotifyOnFailure(p.notifications.notifyOnFailure);
+        setEmailRecipients(p.notifications.emailRecipients);
+        setWebhookUrl(p.notifications.webhookUrl);
+      }
       setLoaded(true);
     }
   }, [pipelineData, loaded]);
 
   const createPipeline = useMutation({
-    mutationFn: (body: { name: string; triggerType: TriggerType; cronExpression?: string; steps: PipelineStep[] }) =>
+    mutationFn: (body: { name: string; triggerType: TriggerType; cronExpression?: string; steps: PipelineStep[]; notifications: PipelineNotifications }) =>
       client.post<ApiResponse<{ id: string }>>("/v1/pipelines", body),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ["pipelines"] });
@@ -117,7 +136,7 @@ export function PipelineBuilderPage() {
   });
 
   const updatePipeline = useMutation({
-    mutationFn: (body: { name: string; triggerType: TriggerType; cronExpression?: string; steps: PipelineStep[] }) =>
+    mutationFn: (body: { name: string; triggerType: TriggerType; cronExpression?: string; steps: PipelineStep[]; notifications: PipelineNotifications }) =>
       client.patch<ApiResponse<PipelineConfig>>(`/v1/pipelines/${id}`, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pipelines"] });
@@ -145,6 +164,11 @@ export function PipelineBuilderPage() {
         ? { cronExpression: cronExpression.trim() }
         : {}),
       steps,
+      notifications: {
+        notifyOnFailure,
+        emailRecipients: emailRecipients.trim(),
+        webhookUrl: webhookUrl.trim(),
+      },
     };
     if (isNew) {
       createPipeline.mutate(body);
@@ -275,6 +299,61 @@ export function PipelineBuilderPage() {
                   />
                 </div>
               )}
+            </div>
+
+            {/* Notifications section (NCP-015) */}
+            <div>
+              <Separator className="mb-4" />
+              <h2 className="text-sm font-semibold mb-3">Notifications</h2>
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="notify-on-failure"
+                    type="checkbox"
+                    checked={notifyOnFailure}
+                    onChange={(e) => setNotifyOnFailure(e.target.checked)}
+                    className="h-4 w-4 rounded accent-[var(--color-primary)]"
+                  />
+                  <Label htmlFor="notify-on-failure" className="cursor-pointer">
+                    Notify on failure
+                  </Label>
+                </div>
+
+                {notifyOnFailure && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="notify-emails">
+                        Email recipients
+                      </Label>
+                      <Input
+                        id="notify-emails"
+                        placeholder="alice@example.com, bob@example.com"
+                        value={emailRecipients}
+                        onChange={(e) => setEmailRecipients(e.target.value)}
+                      />
+                      <p className="text-xs text-[var(--color-muted-foreground)]">
+                        Comma-separated list of addresses that receive failure alerts.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="notify-webhook">
+                        Webhook URL <span className="text-[var(--color-muted-foreground)] font-normal">(optional)</span>
+                      </Label>
+                      <Input
+                        id="notify-webhook"
+                        type="url"
+                        placeholder="https://hooks.example.com/pipeline-alerts"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                      />
+                      <p className="text-xs text-[var(--color-muted-foreground)]">
+                        A POST request with the failure payload is sent to this URL on each failed run.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Editor mode toggle */}

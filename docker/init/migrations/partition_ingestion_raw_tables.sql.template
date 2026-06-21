@@ -1,0 +1,113 @@
+-- DE-014: Monthly range partitioning for ingestion raw tables
+-- ============================================================
+--
+-- PURPOSE
+-- -------
+-- Raw ingestion tables (ingestion.raw_<connector_id>) accumulate one row per
+-- ingested record.  On busy connectors this exceeds millions of rows per month.
+-- Monthly range partitioning on the `ingested_at` column:
+--   (a) makes retention cleanup a DROP TABLE partition (microseconds vs hours),
+--   (b) enables partition pruning on date-range queries in dashboards.
+--
+-- PREREQUISITE
+-- ------------
+-- This migration requires a maintenance window because it renames and recreates
+-- the table.  Ingestion jobs for the target connector must be paused before
+-- running steps 1–4 and resumed after step 5.
+--
+-- ZERO-DOWNTIME APPROACH
+-- ----------------------
+-- PostgreSQL does not support converting a non-empty heap table to a
+-- partitioned table in place (ALTER TABLE ... PARTITION BY is blocked on
+-- non-empty tables).  The strategy is:
+--   1. Create the new partitioned parent alongside the old table.
+--   2. Copy existing rows.
+--   3. Swap names atomically inside a transaction.
+--   4. Drop the old (now renamed) table.
+--
+-- HOW TO USE
+-- ----------
+-- Replace {{CONNECTOR_ID}} with the connector's UUID, then run each numbered
+-- step individually.  Never run the entire script as a single transaction —
+-- step 2 (COPY) can take minutes on large tables and should not hold locks.
+--
+-- Managed by: PartitionManager (services/execution/src/services/partition-manager.ts)
+-- Tracking:   DE-014
+
+-- Step 0: Verify the connector ID and current row count before proceeding.
+SELECT
+    table_name,
+    pg_size_pretty(pg_total_relation_size('ingestion.' || table_name)) AS size
+FROM information_schema.tables
+WHERE table_schema = 'ingestion'
+  AND table_name = 'raw_{{CONNECTOR_ID}}';
+
+-- Step 1: Create the new partitioned parent table.
+-- The column list must match the existing raw table exactly.
+-- Adjust column definitions if the connector has a custom schema.
+CREATE TABLE ingestion.raw_{{CONNECTOR_ID}}_partitioned (
+    id              UUID        NOT NULL DEFAULT gen_random_uuid(),
+    batch_id        UUID        NOT NULL,
+    record_hash     TEXT,
+    data            JSONB       NOT NULL,
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ,
+    source_cursor   TEXT,
+    PRIMARY KEY (id, ingested_at)
+) PARTITION BY RANGE (ingested_at);
+
+-- Step 2: Create the initial monthly partition covering the oldest data.
+-- Repeat this block for each month present in the existing table.
+-- Use the output of the diagnostic query below to determine the date range.
+SELECT
+    date_trunc('month', MIN(ingested_at)) AS oldest_month,
+    date_trunc('month', MAX(ingested_at)) AS newest_month
+FROM ingestion.raw_{{CONNECTOR_ID}};
+
+-- For each month YYYY-MM that appears in the result above, run:
+--
+-- CREATE TABLE ingestion.raw_{{CONNECTOR_ID}}_YYYY_MM
+--     PARTITION OF ingestion.raw_{{CONNECTOR_ID}}_partitioned
+--     FOR VALUES FROM ('YYYY-MM-01') TO ('YYYY-(MM+1)-01');
+--
+-- Example for June 2026:
+CREATE TABLE ingestion.raw_{{CONNECTOR_ID}}_2026_06
+    PARTITION OF ingestion.raw_{{CONNECTOR_ID}}_partitioned
+    FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+
+-- Step 3: Copy rows from the old table into the new partitioned parent.
+-- This runs outside a transaction to avoid lock exhaustion on large tables.
+-- Monitor progress via pg_stat_user_tables.
+INSERT INTO ingestion.raw_{{CONNECTOR_ID}}_partitioned
+SELECT * FROM ingestion.raw_{{CONNECTOR_ID}};
+
+-- Step 4: Atomic rename swap inside a single transaction.
+BEGIN;
+    ALTER TABLE ingestion.raw_{{CONNECTOR_ID}}
+        RENAME TO raw_{{CONNECTOR_ID}}_old;
+    ALTER TABLE ingestion.raw_{{CONNECTOR_ID}}_partitioned
+        RENAME TO raw_{{CONNECTOR_ID}};
+COMMIT;
+
+-- Step 5: Drop the old (non-partitioned) table after verifying row counts match.
+SELECT
+    (SELECT COUNT(*) FROM ingestion.raw_{{CONNECTOR_ID}})     AS new_count,
+    (SELECT COUNT(*) FROM ingestion.raw_{{CONNECTOR_ID}}_old) AS old_count;
+
+-- Only run DROP when new_count = old_count:
+DROP TABLE ingestion.raw_{{CONNECTOR_ID}}_old;
+
+-- Step 6: Register the PartitionManager equivalent for this connector so future
+-- monthly partitions are created automatically.  Add an entry to the
+-- PARTITIONED_INGESTION_TABLES constant in partition-manager.ts, or wire the
+-- connector ID into a scheduled partition-creation job.
+--
+-- For now, create the next 2 months manually:
+--
+-- CREATE TABLE ingestion.raw_{{CONNECTOR_ID}}_2026_07
+--     PARTITION OF ingestion.raw_{{CONNECTOR_ID}}
+--     FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
+--
+-- CREATE TABLE ingestion.raw_{{CONNECTOR_ID}}_2026_08
+--     PARTITION OF ingestion.raw_{{CONNECTOR_ID}}
+--     FOR VALUES FROM ('2026-08-01') TO ('2026-09-01');

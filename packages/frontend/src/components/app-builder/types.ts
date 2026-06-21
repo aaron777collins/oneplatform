@@ -107,6 +107,38 @@ export interface PropDescriptor {
 }
 
 // ---------------------------------------------------------------------------
+// Component connections — wire events from one component to actions on another
+// ---------------------------------------------------------------------------
+
+/**
+ * Events a source component can emit.
+ * "onChange" fires on every value change (e.g. each keystroke in FilterBar).
+ * "onSubmit" fires when the user explicitly submits (e.g. presses Enter/Search).
+ */
+export type SourceEvent = "onChange" | "onSubmit";
+
+/**
+ * Actions a target component can receive.
+ * "filter"  — filter the target's data client-side using the source value.
+ * "refresh" — trigger a data reload on the target.
+ * "setData" — replace the target's data prop entirely with the source value.
+ */
+export type TargetAction = "filter" | "refresh" | "setData";
+
+/**
+ * A single directed connection between two placed components.
+ * When the source emits `sourceEvent`, the builder runtime applies
+ * `targetAction` to the target component.
+ */
+export interface ComponentConnection {
+  id: string;
+  sourceId: string;
+  sourceEvent: SourceEvent;
+  targetId: string;
+  targetAction: TargetAction;
+}
+
+// ---------------------------------------------------------------------------
 // Builder mode
 // ---------------------------------------------------------------------------
 

@@ -5,7 +5,7 @@
 import React from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, Pencil, Trash2 } from "lucide-react";
+import { Play, Pencil, Trash2, Bell, BellOff } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.js";
@@ -27,6 +27,12 @@ import type { PipelineRun } from "@/components/pipelines/RunHistoryTable.js";
 // API types
 // ---------------------------------------------------------------------------
 
+interface PipelineNotifications {
+  notifyOnFailure: boolean;
+  emailRecipients: string;
+  webhookUrl: string;
+}
+
 interface PipelineDetail {
   id: string;
   name: string;
@@ -37,6 +43,7 @@ interface PipelineDetail {
   nextRunAt?: string;
   stepCount: number;
   createdAt: string;
+  notifications?: PipelineNotifications;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +159,7 @@ export function PipelineDetailPage() {
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="runs">Run History</TabsTrigger>
+              <TabsTrigger value="notifications">Notifications</TabsTrigger>
             </TabsList>
 
             {/* Overview */}
@@ -236,6 +244,53 @@ export function PipelineDetailPage() {
             {/* Runs */}
             <TabsContent value="runs" className="mt-4">
               <RunHistoryTable query={runsQuery} />
+            </TabsContent>
+
+            {/* Notifications */}
+            <TabsContent value="notifications" className="mt-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    {pipeline.notifications?.notifyOnFailure ? (
+                      <Bell className="h-4 w-4 text-[var(--color-primary)]" aria-hidden />
+                    ) : (
+                      <BellOff className="h-4 w-4 text-[var(--color-muted-foreground)]" aria-hidden />
+                    )}
+                    Failure notifications
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {pipeline.notifications === undefined || !pipeline.notifications.notifyOnFailure ? (
+                    <p className="text-[var(--color-muted-foreground)]">
+                      Failure notifications are disabled for this pipeline.
+                      Edit the pipeline to configure alerts.
+                    </p>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-xs font-medium text-[var(--color-muted-foreground)] uppercase tracking-wide mb-1">
+                          Email recipients
+                        </p>
+                        <p>
+                          {pipeline.notifications.emailRecipients.length > 0
+                            ? pipeline.notifications.emailRecipients
+                            : <span className="text-[var(--color-muted-foreground)]">None configured</span>}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-[var(--color-muted-foreground)] uppercase tracking-wide mb-1">
+                          Webhook URL
+                        </p>
+                        <p className="font-mono text-xs break-all">
+                          {pipeline.notifications.webhookUrl.length > 0
+                            ? pipeline.notifications.webhookUrl
+                            : <span className="text-[var(--color-muted-foreground)] font-sans">Not configured</span>}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
         ) : null}

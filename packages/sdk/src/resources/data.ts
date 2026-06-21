@@ -197,8 +197,55 @@ function createEntityResource<T>(
  * Namespace for ontology-typed entity CRUD operations.
  *
  * Accessible as `client.data`. Supports two calling styles:
- * - `client.data.entity('Product')` — explicit, works with any string type name
- * - `client.data.Product` — Proxy shorthand, identical behaviour
+ * - `client.data.entity('Product')` — explicit method, works with any string type name
+ * - `client.data.Product` — Proxy shorthand, identical runtime behaviour
+ *
+ * ## Typed access with generics
+ *
+ * Both styles accept a TypeScript generic `<T>` so you can pass your own interface:
+ *
+ * ```ts
+ * interface Product {
+ *   id: string;
+ *   name: string;
+ *   price: number;
+ * }
+ *
+ * // Explicit form — cast to EntityResource<Product>
+ * const products = client.data.entity('Product') as EntityResource<Product>;
+ * const page = await products.list().next();
+ * // page.value.items is Product[]
+ *
+ * // Proxy shorthand — works identically at runtime
+ * const product = await (client.data.Product as EntityResource<Product>).get('prod-1');
+ * // product is typed as Product
+ * ```
+ *
+ * ## Generated typed clients (recommended for large codebases)
+ *
+ * Run `op sdk generate-types` to generate `op-types.d.ts` from your ontology schema.
+ * The generated file augments `EntityTypeMap` so the Proxy shorthand is fully typed
+ * without any casting:
+ *
+ * ```ts
+ * // After adding op-types.d.ts to your tsconfig "include":
+ * import type { EntityTypeMap } from '@oneplatform/app-sdk';
+ * import type { DataNamespace } from '@oneplatform/sdk';
+ *
+ * // Helper type to access a typed resource from the namespace
+ * type TypedEntity<K extends keyof EntityTypeMap> = EntityResource<EntityTypeMap[K]>;
+ *
+ * const products = client.data.entity('Product') as TypedEntity<'Product'>;
+ * const list = await products.list().next();
+ * // list.value.items is EntityTypeMap['Product'][]
+ * ```
+ *
+ * ## Current limitation
+ *
+ * The Proxy shorthand (`client.data.Product`) returns `EntityResource<Record<string,unknown>>`
+ * in the TypeScript type system because the index signature cannot be parameterised on
+ * the string key. Cast the result to `EntityResource<YourType>` or use the `entity()`
+ * method with a type assertion. Full mapped-type shorthand support is tracked in M-13.
  */
 export interface DataNamespace {
   /**
@@ -209,15 +256,29 @@ export interface DataNamespace {
    *
    * @example
    * ```ts
+   * // Untyped — fields are Record<string, unknown>
    * const products = client.data.entity('Product').list();
    * for await (const page of products) {
    *   console.log(page.items);
    * }
+   *
+   * // Typed — cast the result to your interface
+   * interface Product { id: string; name: string; price: number }
+   * const typed = client.data.entity('Product') as EntityResource<Product>;
+   * const product = await typed.get('prod-1');
+   * // product.price is typed as number
    * ```
    */
   entity(entityType: string): EntityResource<Record<string, unknown>>;
 
-  /** Index signature enables generated typed clients to add named accessors. */
+  /**
+   * Index signature that enables the Proxy shorthand `client.data.Product`.
+   *
+   * TypeScript cannot parameterise the return type on the string key, so the
+   * Proxy shorthand always returns `EntityResource<Record<string,unknown>>`.
+   * Cast to `EntityResource<YourType>` when you need type safety. See the
+   * DataNamespace JSDoc for a full typed-client example.
+   */
   [entityType: string]: EntityResource<Record<string, unknown>> | ((entityType: string) => EntityResource<Record<string, unknown>>);
 }
 

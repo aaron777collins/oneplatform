@@ -30,6 +30,7 @@ const RUN_COLUMNS = [
 
 interface ListOpts { status?: string }
 interface TriggerOpts { input?: string; wait?: boolean; pollTimeout?: string }
+interface TriggerBatchOpts { input?: string; concurrency?: string }
 interface RunsOpts { limit?: string; status?: string }
 interface RunLogsOpts { follow?: boolean; step?: string; level?: string }
 
@@ -83,11 +84,20 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
 
   if (!opts.wait) return;
 
-  // Poll status and stream logs to stderr while waiting
+  // Poll with exponential backoff so fast pipelines are caught quickly (2s start)
+  // while long-running ones don't generate excessive API traffic (30s ceiling).
+  // Backoff: 2s → 4s → 8s → 16s → 30s (capped), then 30s for all subsequent polls.
+  const POLL_INITIAL_MS = 2_000;
+  const POLL_MAX_MS = 30_000;
   const pollTimeoutSec = parseInt(opts.pollTimeout ?? "600", 10);
   const deadline = Date.now() + pollTimeoutSec * 1000;
+  let pollIntervalMs = POLL_INITIAL_MS;
+
   while (true) {
-    await new Promise((r) => setTimeout(r, 3000));
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    // Double the interval after each poll, capped at POLL_MAX_MS.
+    pollIntervalMs = Math.min(pollIntervalMs * 2, POLL_MAX_MS);
+
     if (Date.now() > deadline) {
       throw new CliError(
         `Poll timeout: pipeline run did not complete within ${pollTimeoutSec}s.`,
@@ -97,11 +107,76 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
     const status = await ctx.http.get<{ status: string }>(
       `/api/v1/pipeline-runs/${resp.runId}`,
     );
-    process.stderr.write(`Run status: ${status.status}\n`);
+    process.stderr.write(`Run status: ${status.status} (next poll in ${Math.round(pollIntervalMs / 1000)}s)\n`);
     if (status.status === "completed") return;
     if (status.status === "failed" || status.status === "cancelled") {
       throw new CliError(`Pipeline run ${status.status}.`, EXIT.GENERAL);
     }
+  }
+}
+
+async function triggerBatchAction(ids: string[], opts: TriggerBatchOpts, ctx: CommandContext): Promise<void> {
+  if (ids.length === 0) {
+    throw new CliError("At least one pipeline ID is required.", EXIT.GENERAL);
+  }
+
+  let sharedInput: unknown = undefined;
+  if (opts.input) {
+    try {
+      sharedInput = JSON.parse(opts.input) as unknown;
+    } catch {
+      throw new CliError("--input must be valid JSON.", EXIT.GENERAL);
+    }
+  }
+
+  const body: Record<string, unknown> = {};
+  if (sharedInput !== undefined) body["input"] = sharedInput;
+
+  // All triggers fire concurrently. Promise.allSettled guarantees every result
+  // is collected regardless of individual failures — a single bad pipeline ID
+  // does not abort the others.
+  const results = await Promise.allSettled(
+    ids.map((id) =>
+      ctx.http.post<{ runId: string }>(
+        `/api/v1/pipelines/${encodeURIComponent(id)}/trigger`,
+        body,
+      ).then((resp) => ({ id, runId: resp.runId, success: true as const }))
+       .catch((err: unknown) => ({
+         id,
+         runId: null,
+         success: false as const,
+         error: err instanceof Error ? err.message : String(err),
+       })),
+    ),
+  );
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const result of results) {
+    // Promise.allSettled fulfils all items; the inner .catch converts
+    // individual failures to { success: false } so outer status is always
+    // "fulfilled". We still handle "rejected" defensively.
+    if (result.status === "rejected") {
+      ctx.renderer.error(`[UNKNOWN] Unexpected rejection: ${String(result.reason)}`);
+      failCount++;
+      continue;
+    }
+
+    const { id, runId, success } = result.value;
+    if (success && runId !== null) {
+      ctx.renderer.success(`[${id}] Triggered — run ID: ${runId}`);
+      successCount++;
+    } else {
+      const errorMsg = "error" in result.value ? result.value.error : "unknown error";
+      ctx.renderer.error(`[${id}] Failed — ${errorMsg}`);
+      failCount++;
+    }
+  }
+
+  ctx.renderer.info(`Batch complete: ${successCount} triggered, ${failCount} failed.`);
+  if (failCount > 0) {
+    process.exitCode = EXIT.GENERAL;
   }
 }
 
@@ -187,6 +262,15 @@ export function registerPipeline(program: Command): void {
     .option("--wait", "Block until the run reaches a terminal state (completed/failed/cancelled). The run ID is printed to stdout immediately so it can be captured with RUN_ID=$(op pipeline trigger <id> --wait). Status updates stream to stderr. Combine with --poll-timeout to cap wait duration.")
     .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600). If the run has not finished by this deadline the command exits with an error.")
     .action(withContext<[string, TriggerOpts]>(triggerAction));
+
+  pipeline.command("trigger-batch").description("Trigger multiple pipelines concurrently and report per-pipeline results")
+    .argument("<ids...>", "One or more pipeline IDs (space-separated). Alternatively pass a single comma-separated string: 'id1,id2,id3'.")
+    .option("--input <json>", "JSON object passed as runtime input to every triggered pipeline")
+    .action(withContext<[string[], TriggerBatchOpts]>((rawIds, opts, ctx) => {
+      // Support both "id1 id2" (multiple Commander args) and "id1,id2" (single comma-separated arg)
+      const ids = rawIds.flatMap((id) => id.split(",").map((s) => s.trim()).filter(Boolean));
+      return triggerBatchAction(ids, opts, ctx);
+    }));
 
   pipeline.command("runs").description("List runs for a pipeline")
     .argument("<id>", "Pipeline ID")

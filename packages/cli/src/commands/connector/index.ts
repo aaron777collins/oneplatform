@@ -38,6 +38,7 @@ interface UpdateOpts {
   scheduleCron?: string;
 }
 interface TriggerOpts { wait?: boolean; mode?: "full" | "incremental"; force?: boolean; pollTimeout?: string }
+interface CreateBatchOpts { file: string; stopOnError?: boolean }
 
 // Validates that a cron expression has exactly 5 space-separated fields.
 // Full semantic validation is performed server-side; this catches obvious typos
@@ -53,6 +54,24 @@ function validateCronFieldCount(expr: string): void {
     );
   }
 }
+
+// ─── Batch manifest shape ──────────────────────────────────────────────────────
+
+/**
+ * A single connector entry in the batch manifest file.
+ * Mirrors the fields accepted by the single-connector create endpoint.
+ */
+interface ConnectorManifestEntry {
+  plugin: string;
+  name: string;
+  config?: Record<string, unknown>;
+  credentials?: Record<string, string>;
+  syncMode?: "full" | "incremental";
+  isEnabled?: boolean;
+  scheduleCron?: string;
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
 
 async function listAction(opts: ListOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -211,6 +230,78 @@ async function triggerAction(id: string, opts: TriggerOpts, ctx: CommandContext)
   }
 }
 
+async function createBatchAction(opts: CreateBatchOpts, ctx: CommandContext): Promise<void> {
+  const { load } = await import("js-yaml");
+  const rawContent = readFileSync(opts.file, "utf8");
+
+  // Accept both JSON and YAML manifests. js-yaml parses both (JSON is valid YAML).
+  const parsed = load(rawContent) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new CliError(
+      `Batch manifest at '${opts.file}' must be a JSON or YAML array of connector definitions.`,
+      EXIT.GENERAL,
+    );
+  }
+
+  const entries = parsed as ConnectorManifestEntry[];
+  if (entries.length === 0) {
+    ctx.renderer.info("Manifest is empty — nothing to create.");
+    return;
+  }
+
+  ctx.renderer.info(`Creating ${entries.length} connector(s) from '${opts.file}'...`);
+
+  let successCount = 0;
+  let failCount = 0;
+
+  // Create connectors sequentially so failures are easy to attribute and the
+  // API is not flooded. Using --stop-on-error stops on the first failure.
+  for (const [index, entry] of entries.entries()) {
+    const position = `[${index + 1}/${entries.length}]`;
+
+    if (typeof entry.plugin !== "string" || entry.plugin.trim() === "") {
+      ctx.renderer.error(`${position} Skipped — 'plugin' field is required.`);
+      failCount++;
+      if (opts.stopOnError) break;
+      continue;
+    }
+    if (typeof entry.name !== "string" || entry.name.trim() === "") {
+      ctx.renderer.error(`${position} Skipped — 'name' field is required.`);
+      failCount++;
+      if (opts.stopOnError) break;
+      continue;
+    }
+
+    if (entry.scheduleCron !== undefined) {
+      validateCronFieldCount(entry.scheduleCron);
+    }
+
+    try {
+      const resp = await ctx.http.post<{ id: string; name: string }>("/api/v1/connectors", {
+        pluginId: entry.plugin,
+        name: entry.name,
+        config: entry.config ?? {},
+        credentials: entry.credentials ?? {},
+        ...(entry.syncMode !== undefined ? { syncMode: entry.syncMode } : {}),
+        isEnabled: entry.isEnabled ?? true,
+        ...(entry.scheduleCron !== undefined ? { scheduleCron: entry.scheduleCron } : {}),
+      });
+      ctx.renderer.success(`${position} '${resp.name}' created (ID: ${resp.id})`);
+      successCount++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.renderer.error(`${position} '${entry.name}' failed — ${message}`);
+      failCount++;
+      if (opts.stopOnError) break;
+    }
+  }
+
+  ctx.renderer.info(`Batch complete: ${successCount} created, ${failCount} failed.`);
+  if (failCount > 0) {
+    process.exitCode = EXIT.GENERAL;
+  }
+}
+
 export function registerConnector(program: Command): void {
   const connector = program.command("connector").description("Data connector management (scope: pipelines:manage)");
 
@@ -275,4 +366,14 @@ export function registerConnector(program: Command): void {
     .option("--force", "Force sync even if one is already running")
     .option("--poll-timeout <seconds>", "Maximum seconds to wait when --wait is set (default: 600)")
     .action(withContext<[string, TriggerOpts]>(triggerAction));
+
+  connector.command("create-batch")
+    .description(
+      "Create multiple connectors from a JSON or YAML manifest file.\n" +
+      "The manifest must be an array of connector objects with 'plugin' and 'name' fields.\n" +
+      "Each connector is created sequentially. Failures are reported per-connector.",
+    )
+    .requiredOption("--file <manifest.json|yaml>", "Path to JSON or YAML manifest file containing an array of connector definitions")
+    .option("--stop-on-error", "Stop processing after the first connector creation failure")
+    .action(withContext<[CreateBatchOpts]>(createBatchAction));
 }

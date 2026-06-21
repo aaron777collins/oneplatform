@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/cjs",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // CommonJS output so consumers using require() can import the SDK without
+    // a bundler. The ESM build (tsconfig.json) remains the primary output.
+    // Module is CommonJS; moduleResolution switches to Node classic because
+    // NodeNext resolution enforces .js extensions on relative imports, which
+    // are not valid in a CJS context where extensions are resolved at runtime.
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["src/**/*"]
+}

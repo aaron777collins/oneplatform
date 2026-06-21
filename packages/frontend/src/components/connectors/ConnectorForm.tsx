@@ -13,7 +13,7 @@ import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, HelpCircle } from "lucide-react";
+import { Database, Eye, EyeOff, HelpCircle, Key, Lock, Server, Settings, type LucideIcon } from "lucide-react";
 import {
   Form,
   FormControl,
@@ -124,6 +124,50 @@ function isPasswordField(key: string, prop: JsonSchemaProperty): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// NCP-007: Fallback helpers for low-quality plugin schemas
+//
+// Plugins that ship minimal schemas (no descriptions, no titles) produce
+// confusing forms. These functions add generic-but-useful guidance so the
+// form remains usable even when the plugin author omitted schema metadata.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a generic description for a field based on common field name patterns.
+ * Only called when the plugin schema provides no description — never overrides
+ * explicit schema descriptions.
+ */
+export function inferFieldDescription(key: string): string | undefined {
+  const k = key.toLowerCase();
+  if (/\b(host|hostname|server)\b/.test(k)) return "Database server hostname or IP address";
+  if (/\bport\b/.test(k)) return "Connection port number";
+  if (/\b(password|passwd|pwd)\b/.test(k)) return "Connection password (stored securely and never displayed)";
+  if (/\b(user|username|login)\b/.test(k)) return "Authentication username";
+  if (/\b(database|db|dbname|schema)\b/.test(k)) return "Target database or schema name";
+  if (/\b(api[_-]?key|apikey)\b/.test(k)) return "API key for authentication (stored securely)";
+  if (/\b(token|access[_-]?token)\b/.test(k)) return "Authentication token (stored securely)";
+  if (/\b(secret|client[_-]?secret)\b/.test(k)) return "Client secret (stored securely)";
+  if (/\b(url|endpoint|connection[_-]?string)\b/.test(k)) return "Connection URL or endpoint";
+  if (/\b(region)\b/.test(k)) return "Cloud provider region (e.g. us-east-1)";
+  if (/\b(bucket|container)\b/.test(k)) return "Storage bucket or container name";
+  if (/\b(timeout)\b/.test(k)) return "Connection timeout in milliseconds";
+  if (/\b(ssl|tls)\b/.test(k)) return "Enable TLS/SSL encrypted connection";
+  return undefined;
+}
+
+/**
+ * Returns a Lucide icon component appropriate for the field, or undefined when
+ * no mapping exists. Icons give users a fast visual scan to locate fields.
+ */
+export function inferFieldIcon(key: string): LucideIcon | undefined {
+  const k = key.toLowerCase();
+  if (/\b(host|hostname|server)\b/.test(k)) return Server;
+  if (/\b(port|database|db|dbname|schema)\b/.test(k)) return Database;
+  if (/\b(password|passwd|pwd|secret|client[_-]?secret)\b/.test(k)) return Lock;
+  if (/\b(api[_-]?key|apikey|token|access[_-]?token)\b/.test(k)) return Key;
+  return Settings;
+}
+
+// ---------------------------------------------------------------------------
 // Field hint — tooltip icon + inline examples
 //
 // MU-013: CSS-only hover tooltips are inaccessible on mobile where there is no
@@ -132,8 +176,11 @@ function isPasswordField(key: string, prop: JsonSchemaProperty): boolean {
 // again, pressing Escape, or clicking anywhere outside the icon.
 // ---------------------------------------------------------------------------
 
-function FieldHint({ prop }: { prop: JsonSchemaProperty }) {
+function FieldHint({ prop, fallbackDescription }: { prop: JsonSchemaProperty; fallbackDescription?: string }) {
   const hasExamples = prop.examples !== undefined && prop.examples.length > 0;
+  // Use the plugin-supplied description when present; fall back to the inferred
+  // description for low-quality schemas (NCP-007).
+  const description = prop.description ?? fallbackDescription;
   const [open, setOpen] = React.useState(false);
 
   // Dismiss on Escape key — standard tooltip interaction pattern
@@ -146,11 +193,11 @@ function FieldHint({ prop }: { prop: JsonSchemaProperty }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open]);
 
-  if (!prop.description && !hasExamples) return null;
+  if (!description && !hasExamples) return null;
 
   return (
     <>
-      {prop.description !== undefined && (
+      {description !== undefined && (
         <span className="relative ml-1 inline-flex">
           <button
             type="button"
@@ -161,7 +208,7 @@ function FieldHint({ prop }: { prop: JsonSchemaProperty }) {
             onMouseEnter={() => setOpen(true)}
             onMouseLeave={() => setOpen(false)}
             className="cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded"
-            aria-label={`Help: ${prop.description}`}
+            aria-label={`Help: ${description}`}
             aria-expanded={open}
           >
             <HelpCircle className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />
@@ -171,7 +218,7 @@ function FieldHint({ prop }: { prop: JsonSchemaProperty }) {
               role="tooltip"
               className="absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-popover)] px-2 py-1 text-xs text-[var(--color-popover-foreground)] shadow-md"
             >
-              {prop.description}
+              {description}
             </span>
           )}
         </span>
@@ -202,6 +249,18 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
   const label = prop.title ?? fieldKey;
   const isPassword = isPasswordField(fieldKey, prop);
 
+  // NCP-007: enrich the field with inferred metadata when the plugin schema
+  // omits descriptions or icons. These are safety-net defaults — plugin-supplied
+  // values always take precedence (see FieldHint and the icon render below).
+  //
+  // exactOptionalPropertyTypes: only spread fallbackDescription when defined so
+  // we never assign `undefined` to the optional prop (TS2375).
+  const inferredDescription = inferFieldDescription(fieldKey);
+  const fallbackHintProps = inferredDescription !== undefined
+    ? ({ fallbackDescription: inferredDescription } as const)
+    : ({} as const);
+  const FieldIcon = inferFieldIcon(fieldKey);
+
   if (prop.type === "boolean") {
     return (
       <FormField
@@ -219,7 +278,11 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
               />
             </FormControl>
             <div>
-              <FormLabel>{label}<FieldHint prop={prop} /></FormLabel>
+              <FormLabel>
+                {FieldIcon !== undefined && <FieldIcon className="mr-1 inline h-3.5 w-3.5 opacity-60" aria-hidden />}
+                {label}
+                <FieldHint prop={prop} {...fallbackHintProps} />
+              </FormLabel>
             </div>
           </FormItem>
         )}
@@ -235,9 +298,10 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
         render={({ field }) => (
           <FormItem>
             <FormLabel>
+              {FieldIcon !== undefined && <FieldIcon className="mr-1 inline h-3.5 w-3.5 opacity-60" aria-hidden />}
               {label}
               {isRequired && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
-              <FieldHint prop={prop} />
+              <FieldHint prop={prop} {...fallbackHintProps} />
             </FormLabel>
             <Select
               onValueChange={field.onChange}
@@ -271,9 +335,10 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
         render={({ field }) => (
           <FormItem>
             <FormLabel>
+              {FieldIcon !== undefined && <FieldIcon className="mr-1 inline h-3.5 w-3.5 opacity-60" aria-hidden />}
               {label}
               {isRequired && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
-              <FieldHint prop={prop} />
+              <FieldHint prop={prop} {...fallbackHintProps} />
             </FormLabel>
             <FormControl>
               <Input
@@ -299,9 +364,10 @@ function FieldRenderer({ fieldKey, prop, isRequired, control }: FieldRendererPro
       render={({ field }) => (
         <FormItem>
           <FormLabel>
+            {FieldIcon !== undefined && <FieldIcon className="mr-1 inline h-3.5 w-3.5 opacity-60" aria-hidden />}
             {label}
             {isRequired && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
-            <FieldHint prop={prop} />
+            <FieldHint prop={prop} {...fallbackHintProps} />
           </FormLabel>
           <FormControl>
             <div className="relative">

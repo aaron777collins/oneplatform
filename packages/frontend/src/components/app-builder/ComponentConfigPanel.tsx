@@ -14,8 +14,9 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyStart, Plus, Trash2, ChevronDown, ChevronUp, type LucideIcon } from "lucide-react";
 import { useApiClient } from "@/lib/api-client.js";
-import type { PlacedComponent, DataBinding, PropDescriptor } from "./types.js";
+import type { PlacedComponent, DataBinding, PropDescriptor, ComponentConnection, SourceEvent, TargetAction } from "./types.js";
 import { getPaletteEntry } from "./palette-registry.js";
+import { useBuilderStore } from "./builder.store.js";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -41,7 +42,7 @@ export function ComponentConfigPanel({
   onClose,
 }: ComponentConfigPanelProps) {
   const entry = getPaletteEntry(component.type);
-  const [activeTab, setActiveTab] = React.useState<"props" | "data" | "style">("props");
+  const [activeTab, setActiveTab] = React.useState<"props" | "data" | "style" | "connect">("props");
 
   return (
     <div className="flex h-full flex-col border-l border-[var(--color-border,#e5e7eb)] bg-[var(--color-background,#fff)] w-72 shrink-0">
@@ -67,7 +68,7 @@ export function ComponentConfigPanel({
 
       {/* Tab bar */}
       <div className="flex border-b border-[var(--color-border,#e5e7eb)]">
-        {(["props", "data", "style"] as const).map((tab) => (
+        {(["props", "data", "style", "connect"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -78,7 +79,7 @@ export function ComponentConfigPanel({
                 : "text-[var(--color-muted-foreground,#6b7280)] hover:text-[var(--color-foreground,#111)]"
             }`}
           >
-            {tab === "data" ? "Data" : tab === "style" ? "Style" : "Props"}
+            {tab === "data" ? "Data" : tab === "style" ? "Style" : tab === "connect" ? "Wire" : "Props"}
           </button>
         ))}
       </div>
@@ -105,6 +106,9 @@ export function ComponentConfigPanel({
             component={component}
             onUpdateStyles={onUpdateStyles}
           />
+        )}
+        {activeTab === "connect" && (
+          <ConnectionsTab sourceComponent={component} />
         )}
       </div>
     </div>
@@ -856,6 +860,162 @@ function FieldPicker({ propKey, fields, selectedField, onSelect }: FieldPickerPr
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Connections tab — wire this component's events to other components' actions
+// ---------------------------------------------------------------------------
+
+const SOURCE_EVENTS: Array<{ value: SourceEvent; label: string }> = [
+  { value: "onChange", label: "On change (every keystroke)" },
+  { value: "onSubmit", label: "On submit (Enter / Search)" },
+];
+
+const TARGET_ACTIONS: Array<{ value: TargetAction; label: string }> = [
+  { value: "filter", label: "Filter data" },
+  { value: "refresh", label: "Refresh data" },
+  { value: "setData", label: "Replace data" },
+];
+
+interface ConnectionsTabProps {
+  sourceComponent: PlacedComponent;
+}
+
+/**
+ * Lists all placed components (except the current one) as connection targets.
+ * The user picks: which event this component emits → which action to apply to which target.
+ * At runtime (preview mode) these connections are read from the store and wired
+ * via React state propagation between the preview wrappers.
+ */
+function ConnectionsTab({ sourceComponent }: ConnectionsTabProps) {
+  const { layout, connections, addConnection, removeConnection, updateConnection } = useBuilderStore();
+
+  // Collect all placed components in the layout excluding the current source.
+  const availableTargets = React.useMemo(() => {
+    const targets: Array<{ id: string; label: string }> = [];
+    for (const row of layout.rows) {
+      for (const col of row.columns) {
+        if (col.component && col.component.id !== sourceComponent.id) {
+          targets.push({ id: col.component.id, label: `${col.component.type} (${col.component.id.slice(0, 6)})` });
+        }
+      }
+    }
+    return targets;
+  }, [layout, sourceComponent.id]);
+
+  // Connections where this component is the source
+  const myConnections = connections.filter((c) => c.sourceId === sourceComponent.id);
+
+  function handleAdd() {
+    const defaultTarget = availableTargets[0];
+    if (defaultTarget === undefined) return;
+    addConnection({
+      sourceId: sourceComponent.id,
+      sourceEvent: "onChange",
+      targetId: defaultTarget.id,
+      targetAction: "filter",
+    });
+  }
+
+  if (availableTargets.length === 0) {
+    return (
+      <p className="text-xs text-[var(--color-muted-foreground,#6b7280)]">
+        Add other components to the canvas to create connections. A connection forwards events from this component to another.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] text-[var(--color-muted-foreground,#6b7280)]">
+        When this component emits an event, the connected component reacts. For example: FilterBar onChange → DataTable filter.
+      </p>
+
+      {myConnections.length === 0 && (
+        <p className="text-xs text-[var(--color-muted-foreground,#6b7280)]">No connections defined.</p>
+      )}
+
+      <div className="space-y-3">
+        {myConnections.map((conn) => (
+          <div
+            key={conn.id}
+            className="rounded-md border border-[var(--color-border,#e5e7eb)] bg-[var(--color-muted,#f9fafb)] p-2 space-y-1.5"
+          >
+            {/* Source event */}
+            <div>
+              <label className="block text-[9px] font-medium text-[var(--color-muted-foreground,#6b7280)] mb-0.5 uppercase tracking-wide">
+                When
+              </label>
+              <select
+                value={conn.sourceEvent}
+                onChange={(e) => updateConnection(conn.id, { sourceEvent: e.target.value as SourceEvent })}
+                aria-label="Source event"
+                className={inputClass}
+              >
+                {SOURCE_EVENTS.map((ev) => (
+                  <option key={ev.value} value={ev.value}>{ev.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Target component */}
+            <div>
+              <label className="block text-[9px] font-medium text-[var(--color-muted-foreground,#6b7280)] mb-0.5 uppercase tracking-wide">
+                Target
+              </label>
+              <select
+                value={conn.targetId}
+                onChange={(e) => updateConnection(conn.id, { targetId: e.target.value })}
+                aria-label="Target component"
+                className={inputClass}
+              >
+                {availableTargets.map((t) => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Target action */}
+            <div>
+              <label className="block text-[9px] font-medium text-[var(--color-muted-foreground,#6b7280)] mb-0.5 uppercase tracking-wide">
+                Action
+              </label>
+              <select
+                value={conn.targetAction}
+                onChange={(e) => updateConnection(conn.id, { targetAction: e.target.value as TargetAction })}
+                aria-label="Target action"
+                className={inputClass}
+              >
+                {TARGET_ACTIONS.map((a) => (
+                  <option key={a.value} value={a.value}>{a.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Remove */}
+            <button
+              type="button"
+              onClick={() => removeConnection(conn.id)}
+              className="mt-1 flex items-center gap-1 text-[10px] text-red-500 hover:text-red-700"
+              aria-label="Remove connection"
+            >
+              <Trash2 className="h-2.5 w-2.5" aria-hidden />
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={handleAdd}
+        className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-[var(--color-border,#e5e7eb)] py-1.5 text-[10px] text-[var(--color-muted-foreground,#6b7280)] hover:border-[var(--color-primary,#6366f1)]/50 hover:text-[var(--color-primary,#6366f1)] transition-colors"
+      >
+        <Plus className="h-3 w-3" aria-hidden />
+        Add connection
+      </button>
     </div>
   );
 }

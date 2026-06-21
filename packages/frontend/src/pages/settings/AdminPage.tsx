@@ -262,10 +262,22 @@ export function AdminPage() {
   });
 
   const rotateMasterKeyMutation = useMutation({
+    // POST /api/v1/admin/rotate-master-key — requires platform-admin scope.
+    // The backend validates admin auth and enqueues a re-encryption job.
+    // Actual re-encryption of all stored secrets runs asynchronously in the
+    // background; the endpoint returns immediately with a job ID.
     mutationFn: () =>
-      Promise.reject(new Error("Master key rotation API is not yet available")),
-    onError: () => {
-      toast({ title: "Not available", description: "Master key rotation is coming soon.", variant: "destructive" });
+      client.post<{ jobId: string; message: string }>("/v1/admin/rotate-master-key"),
+    onSuccess: (result) => {
+      toast({
+        title: "Key rotation started",
+        description: result.message ?? "Master key rotation is running in the background. All secrets will be re-encrypted.",
+      });
+      setRotateKeyOpen(false);
+    },
+    onError: (error) => {
+      const message = error instanceof ApiError ? error.message : "Failed to start key rotation.";
+      toast({ title: "Rotation failed", description: message, variant: "destructive" });
       setRotateKeyOpen(false);
     },
   });
@@ -497,27 +509,21 @@ export function AdminPage() {
           <div className="rounded-lg border border-[var(--color-destructive)]/30 p-4 space-y-4">
             <h2 id="danger-zone-heading" className="text-sm font-semibold text-[var(--color-destructive)]">Danger zone</h2>
 
-            {/* Coming Soon banner — only for master key rotation */}
-            <div className="flex items-start gap-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-3">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
-              <p className="text-xs text-[var(--color-muted-foreground)]">
-                Master key rotation is under active development and will be available in a future release.
-              </p>
-            </div>
-
             <div>
               <p className="mb-2 text-sm text-[var(--color-muted-foreground)]">
                 Rotate the platform master key. All secrets encrypted with the current key will be
-                re-encrypted automatically. This operation may take several minutes.
+                re-encrypted automatically. This operation runs in the background and may take
+                several minutes. Platform functionality is not interrupted during rotation.
               </p>
               <Button
                 variant="destructive"
                 size="sm"
-                disabled
-                aria-disabled="true"
+                onClick={() => setRotateKeyOpen(true)}
+                disabled={rotateMasterKeyMutation.isPending}
+                aria-busy={rotateMasterKeyMutation.isPending}
               >
                 <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-                Rotate master key
+                {rotateMasterKeyMutation.isPending ? "Rotating..." : "Rotate master key"}
               </Button>
             </div>
           </div>

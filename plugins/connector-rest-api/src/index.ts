@@ -501,6 +501,10 @@ class RestApiConnector implements Connector {
         },
       },
       supportsIncremental: true,
+      // Real-time support could be added via polling the incrementalField on a
+      // short interval, or via a server-sent events / WebSocket endpoint if the
+      // target API supports it. Set supportsRealtime: true once the platform's
+      // Execution Service poll-loop or SSE integration is wired up.
       supportsRealtime: false,
     };
   }

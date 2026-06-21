@@ -314,6 +314,10 @@ class CsvConnector implements Connector {
         additionalProperties: true,
       },
       supportsIncremental: false,
+      // Real-time support could be added via polling: re-fetch the CSV on an
+      // interval and diff against the previously seen rows using the idColumn.
+      // This is not implemented — set supportsRealtime: true once the Execution
+      // Service poll-loop integration is wired up.
       supportsRealtime: false,
       configSchema: {
         type: "object",

@@ -9,6 +9,8 @@ import { CliError, EXIT } from "../../lib/errors.js";
 import { writeFileSync } from "node:fs";
 import { generateEntityTypes } from "../../lib/generate-entity-types.js";
 import type { OntologyEntitySchema } from "../../lib/generate-entity-types.js";
+import { generateTypesFromOpenApi } from "../../lib/openapi-type-generator.js";
+import type { OpenApiSpec } from "../../lib/openapi-type-generator.js";
 
 interface GenerateOpts { out?: string; lang?: string }
 interface GenerateTypesOpts { out?: string }
@@ -50,24 +52,25 @@ async function generateAction(opts: GenerateOpts, ctx: CommandContext): Promise<
   }
 
   ctx.renderer.info("Fetching OpenAPI spec from platform...");
-  const spec = await ctx.http.get<unknown>("/api/v1/openapi.json");
+  const spec = await ctx.http.get<OpenApiSpec>("/api/v1/openapi.json");
 
-  // In a real implementation, this would invoke @hey-api/openapi-ts against the spec.
-  // Placeholder: emit a minimal type file with the fetched spec as a comment.
-  const preamble = [
-    "// Auto-generated OnePlatform SDK client",
-    `// Generated: ${new Date().toISOString()}`,
-    "// Generator: op sdk generate",
-    "",
-    "// Full OpenAPI spec was fetched from the platform.",
-    "// Install @hey-api/openapi-ts and re-run for a complete typed client.",
-    "",
-    "export type {}; // placeholder",
-    "",
-  ].join("\n");
+  // Generate TypeScript interfaces directly from the OpenAPI components.schemas
+  // section without requiring @hey-api/openapi-ts. The generator handles object
+  // schemas with properties, primitive type aliases, enum unions, and array types.
+  // Complex combiners (allOf/anyOf/oneOf) and $ref cycles are emitted as `unknown`
+  // with a comment pointing to @hey-api/openapi-ts for full resolution.
+  const content = generateTypesFromOpenApi(spec);
+  const schemaCount = Object.keys(spec.components?.schemas ?? {}).length;
 
-  writeFileSync(out, preamble, "utf8");
-  ctx.renderer.success(`SDK generated at ${out}`);
+  writeFileSync(out, content, "utf8");
+  ctx.renderer.success(
+    `TypeScript types generated at ${out} (${schemaCount} schema${schemaCount === 1 ? "" : "s"})`,
+  );
+  if (schemaCount === 0) {
+    ctx.renderer.info(
+      "No schemas found in components.schemas. The platform may not expose a typed spec at this endpoint.",
+    );
+  }
 }
 
 export function registerSdk(program: Command): void {

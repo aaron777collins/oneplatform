@@ -127,6 +127,22 @@ interface OrderByUI {
 interface GroupByUI {
   id: string;
   field: string;
+  /** Set when the field is a date/timestamp type and the user wants date-level grouping. */
+  dateGranularity?: DateGranularity;
+}
+
+// NCA-009: JOIN support
+type JoinType = "INNER" | "LEFT" | "RIGHT";
+
+interface JoinUI {
+  id: string;
+  joinType: JoinType;
+  /** Slug of the entity type to join against. */
+  joinEntityType: string;
+  /** Field on the primary entity (left side of the condition). */
+  leftField: string;
+  /** Field on the joined entity (right side of the condition). */
+  rightField: string;
 }
 
 interface AggregateUI {
@@ -183,6 +199,7 @@ interface SavedQuery {
   orderByClauses: OrderByUI[];
   aggregates: AggregateUI[];
   calculatedFields: CalculatedFieldUI[];
+  joins: JoinUI[];
   limitStr: string;
 }
 
@@ -231,6 +248,20 @@ function rowsToCsv(columns: QueryColumn[], rows: Record<string, unknown>[]): str
   return [header, ...dataRows].join("\n");
 }
 
+/** Serialize query result rows to a pretty-printed JSON array. */
+function rowsToJson(columns: QueryColumn[], rows: Record<string, unknown>[]): string {
+  // Reconstruct row objects using only the queried column names so that the
+  // exported shape is predictable regardless of what the API returns.
+  const output = rows.map((row) => {
+    const entry: Record<string, unknown> = {};
+    for (const col of columns) {
+      entry[col.name] = row[col.name] ?? null;
+    }
+    return entry;
+  });
+  return JSON.stringify(output, null, 2);
+}
+
 /** Download a string as a file via a synthetic anchor click. */
 function downloadText(content: string, filename: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });
@@ -262,9 +293,10 @@ function buildSqlPreview(params: {
   whereClauses: WhereClauseUI[];
   groupByClauses: GroupByUI[];
   orderByClauses: OrderByUI[];
+  joins: JoinUI[];
   limitStr: string;
 }): string {
-  const { entityType, selectedFields, aggregates, calculatedFields, whereClauses, groupByClauses, orderByClauses, limitStr } = params;
+  const { entityType, selectedFields, aggregates, calculatedFields, whereClauses, groupByClauses, orderByClauses, joins, limitStr } = params;
 
   if (!entityType) return "-- Select an entity type to preview the query";
 
@@ -289,6 +321,12 @@ function buildSqlPreview(params: {
     `FROM   ${entityType}`,
   ];
 
+  // NCA-009: JOIN clauses
+  const activeJoins = joins.filter((j) => j.joinEntityType && j.leftField && j.rightField);
+  for (const j of activeJoins) {
+    lines.push(`${j.joinType} JOIN ${j.joinEntityType} ON ${j.leftField} = ${j.rightField}`);
+  }
+
   const activeWhere = whereClauses.filter((c) => c.field);
   if (activeWhere.length > 0) {
     const conditions = activeWhere.map((c, i) => {
@@ -311,7 +349,15 @@ function buildSqlPreview(params: {
 
   const activeGroupBy = groupByClauses.filter((g) => g.field);
   if (activeGroupBy.length > 0) {
-    lines.push(`GROUP BY ${activeGroupBy.map((g) => g.field).join(", ")}`);
+    // NCA-010: Apply date_trunc when a date granularity is selected
+    const groupByExprs = activeGroupBy.map((g) => {
+      if (g.dateGranularity !== undefined) {
+        const gran = DATE_GRANULARITY_OPTIONS.find((o) => o.value === g.dateGranularity);
+        if (gran !== undefined) return gran.sqlExpr(g.field);
+      }
+      return g.field;
+    });
+    lines.push(`GROUP BY ${groupByExprs.join(", ")}`);
   }
 
   const activeOrderBy = orderByClauses.filter((o) => o.field);
@@ -326,6 +372,67 @@ function buildSqlPreview(params: {
 
   return lines.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// NCP-017: Column header formatting and cell value formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn a raw column name (e.g. "created_at", "totalRevenue", "user_id") into
+ * a human-readable header (e.g. "Created At", "Total Revenue", "User Id").
+ */
+function formatColumnHeader(rawName: string): string {
+  // Split on underscores and camelCase word boundaries, then title-case each word.
+  return rawName
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Patterns that indicate a column holds date/timestamp values. */
+const DATE_COLUMN_PATTERN = /date|time|at|created|updated|timestamp/i;
+
+/**
+ * Format a cell value for display.
+ * - Dates (ISO strings in date-like columns) → locale string
+ * - Numbers → locale-formatted with thousands separators
+ * - Booleans → symbolic checkmark or cross
+ * - null/undefined → empty dash
+ * - Objects → compact JSON
+ */
+function formatCellValue(value: unknown, columnName: string): { text: string; isBoolean?: boolean; boolValue?: boolean } {
+  if (value === null || value === undefined) return { text: "—" };
+  if (typeof value === "boolean") return { text: "", isBoolean: true, boolValue: value };
+  if (typeof value === "number") return { text: value.toLocaleString() };
+
+  if (typeof value === "string") {
+    // Attempt date parsing only for columns with date-like names
+    if (DATE_COLUMN_PATTERN.test(columnName)) {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) {
+        return { text: d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) };
+      }
+    }
+    return { text: value };
+  }
+
+  if (typeof value === "object") return { text: JSON.stringify(value) };
+  return { text: String(value) };
+}
+
+// ---------------------------------------------------------------------------
+// NCA-010: Date granularity options for GROUP BY
+// ---------------------------------------------------------------------------
+
+type DateGranularity = "day" | "week" | "month" | "quarter" | "year";
+
+const DATE_GRANULARITY_OPTIONS: Array<{ value: DateGranularity; label: string; sqlExpr: (field: string) => string }> = [
+  { value: "day",     label: "Day",     sqlExpr: (f) => `DATE_TRUNC('day', ${f})` },
+  { value: "week",    label: "Week",    sqlExpr: (f) => `DATE_TRUNC('week', ${f})` },
+  { value: "month",   label: "Month",   sqlExpr: (f) => `DATE_TRUNC('month', ${f})` },
+  { value: "quarter", label: "Quarter", sqlExpr: (f) => `DATE_TRUNC('quarter', ${f})` },
+  { value: "year",    label: "Year",    sqlExpr: (f) => `DATE_TRUNC('year', ${f})` },
+];
 
 /**
  * Runtime guard for data coming out of localStorage. Dropping invalid entries
@@ -519,17 +626,26 @@ function WhereClauseRow({ clause, fieldOptions, onChange, onRemove }: WhereClaus
 
 interface GroupByRowProps {
   groupBy: GroupByUI;
-  fieldOptions: Array<{ slug: string; name: string }>;
+  fieldOptions: Array<{ slug: string; name: string; fieldType?: string }>;
   onChange: (updated: GroupByUI) => void;
   onRemove: () => void;
 }
 
 function GroupByRow({ groupBy, fieldOptions, onChange, onRemove }: GroupByRowProps) {
+  // Detect if the currently selected field is a date/timestamp type so we can
+  // show the date granularity selector only when it makes sense.
+  const selectedFieldMeta = fieldOptions.find((f) => f.slug === groupBy.field);
+  const isDateField =
+    selectedFieldMeta !== undefined &&
+    (selectedFieldMeta.fieldType !== undefined
+      ? /date|time|timestamp/i.test(selectedFieldMeta.fieldType)
+      : DATE_COLUMN_PATTERN.test(groupBy.field));
+
   return (
-    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
       <Select
         value={groupBy.field}
-        onValueChange={(v) => onChange({ ...groupBy, field: v })}
+        onValueChange={(v) => { const { dateGranularity: _drop, ...rest } = groupBy; void _drop; onChange({ ...rest, field: v }); }}
       >
         <SelectTrigger className="w-full sm:w-40" aria-label="Group by field">
           <SelectValue placeholder="Field" />
@@ -542,6 +658,26 @@ function GroupByRow({ groupBy, fieldOptions, onChange, onRemove }: GroupByRowPro
           ))}
         </SelectContent>
       </Select>
+
+      {/* Date granularity selector — only shown for date/timestamp fields (NCA-010) */}
+      {isDateField && (
+        <Select
+          value={groupBy.dateGranularity ?? ""}
+          onValueChange={(v) =>
+            onChange(v === "" ? (({ dateGranularity: _drop, ...rest }) => { void _drop; return rest; })(groupBy) : { ...groupBy, dateGranularity: v as DateGranularity })
+          }
+        >
+          <SelectTrigger className="w-full sm:w-32" aria-label="Date granularity">
+            <SelectValue placeholder="Granularity" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">No grouping</SelectItem>
+            {DATE_GRANULARITY_OPTIONS.map((g) => (
+              <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <Button
         variant="ghost"
@@ -664,6 +800,106 @@ function AggregateRow({ aggregate, fieldOptions, onChange, onRemove }: Aggregate
   );
 }
 
+// ---------------------------------------------------------------------------
+// NCA-009: JOIN row component
+// ---------------------------------------------------------------------------
+
+const JOIN_TYPES: JoinType[] = ["INNER", "LEFT", "RIGHT"];
+
+interface JoinRowProps {
+  join: JoinUI;
+  primaryFieldOptions: Array<{ slug: string; name: string }>;
+  availableEntityTypes: Array<{ slug: string; name: string }>;
+  onJoinEntityChange: (joinId: string, entitySlug: string) => void;
+  joinedFieldOptions: Array<{ slug: string; name: string }>;
+  onChange: (updated: JoinUI) => void;
+  onRemove: () => void;
+}
+
+function JoinRow({ join, primaryFieldOptions, availableEntityTypes, joinedFieldOptions, onChange, onRemove }: JoinRowProps) {
+  return (
+    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/20 p-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Join type */}
+        <Select
+          value={join.joinType}
+          onValueChange={(v) => onChange({ ...join, joinType: v as JoinType })}
+        >
+          <SelectTrigger className="w-28" aria-label="Join type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {JOIN_TYPES.map((jt) => (
+              <SelectItem key={jt} value={jt}>{jt} JOIN</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Join entity type */}
+        <Select
+          value={join.joinEntityType}
+          onValueChange={(v) => onChange({ ...join, joinEntityType: v, rightField: "" })}
+        >
+          <SelectTrigger className="w-40" aria-label="Join entity">
+            <SelectValue placeholder="Entity" />
+          </SelectTrigger>
+          <SelectContent>
+            {availableEntityTypes.map((e) => (
+              <SelectItem key={e.slug} value={e.slug}>{e.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onRemove}
+          aria-label="Remove join"
+          className="ml-auto shrink-0"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+        </Button>
+      </div>
+
+      {/* Join condition: left field = right field */}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted-foreground)]">
+        <span className="font-medium">ON</span>
+
+        <Select
+          value={join.leftField}
+          onValueChange={(v) => onChange({ ...join, leftField: v })}
+        >
+          <SelectTrigger className="w-36 h-8" aria-label="Left join field">
+            <SelectValue placeholder="Left field" />
+          </SelectTrigger>
+          <SelectContent>
+            {primaryFieldOptions.map((f) => (
+              <SelectItem key={f.slug} value={f.slug}>{f.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <span>=</span>
+
+        <Select
+          value={join.rightField}
+          onValueChange={(v) => onChange({ ...join, rightField: v })}
+          disabled={join.joinEntityType === ""}
+        >
+          <SelectTrigger className="w-36 h-8" aria-label="Right join field">
+            <SelectValue placeholder="Right field" />
+          </SelectTrigger>
+          <SelectContent>
+            {joinedFieldOptions.map((f) => (
+              <SelectItem key={f.slug} value={f.slug}>{f.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
 interface OrderByRowProps {
   orderBy: OrderByUI;
   fieldOptions: Array<{ slug: string; name: string }>;
@@ -730,12 +966,6 @@ interface QueryResultTableProps {
 function QueryResultTable({ result, page, pageSize, onPageChange }: QueryResultTableProps) {
   const totalPages = Math.max(1, Math.ceil(result.totalCount / pageSize));
 
-  const formatCell = (value: unknown): string => {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value);
-  };
-
   return (
     <div className="space-y-3">
       {/* Stats bar */}
@@ -755,9 +985,11 @@ function QueryResultTable({ result, page, pageSize, onPageChange }: QueryResultT
           <TableHeader>
             <TableRow>
               {result.columns.map((col) => (
-                <TableHead key={col.name} className="font-mono text-xs whitespace-nowrap">
-                  {col.name}
-                  <Badge variant="outline" className="ml-1.5 text-[10px] py-0">
+                // NCP-017: human-readable header (capitalize, no underscores)
+                // with the raw type retained in a smaller badge for power users
+                <TableHead key={col.name} className="text-xs whitespace-nowrap">
+                  {formatColumnHeader(col.name)}
+                  <Badge variant="outline" className="ml-1.5 text-[10px] py-0 font-mono">
                     {col.type}
                   </Badge>
                 </TableHead>
@@ -778,11 +1010,26 @@ function QueryResultTable({ result, page, pageSize, onPageChange }: QueryResultT
               result.rows.map((row, rowIdx) => (
                 // rowIdx is stable within a page result set — key is acceptable here
                 <TableRow key={rowIdx}>
-                  {result.columns.map((col) => (
-                    <TableCell key={col.name} className="font-mono text-xs whitespace-nowrap max-w-xs truncate">
-                      {formatCell(row[col.name])}
-                    </TableCell>
-                  ))}
+                  {result.columns.map((col) => {
+                    const formatted = formatCellValue(row[col.name], col.name);
+                    return (
+                      <TableCell key={col.name} className="text-xs whitespace-nowrap max-w-xs truncate">
+                        {formatted.isBoolean === true ? (
+                          // NCP-017: boolean values rendered as checkmark/cross icons
+                          <span
+                            aria-label={formatted.boolValue === true ? "True" : "False"}
+                            className={formatted.boolValue === true
+                              ? "text-emerald-600 font-bold"
+                              : "text-red-500 font-bold"}
+                          >
+                            {formatted.boolValue === true ? "✓" : "✗"}
+                          </span>
+                        ) : (
+                          formatted.text
+                        )}
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               ))
             )}
@@ -1524,6 +1771,9 @@ export function QueryBuilderPage() {
   // --- Calculated fields (user-defined expressions in the SELECT clause) ---
   const [calculatedFields, setCalculatedFields] = useState<CalculatedFieldUI[]>([]);
 
+  // --- JOINs (NCA-009) ---
+  const [joins, setJoins] = useState<JoinUI[]>([]);
+
   // --- SQL Mode: when true the user edits raw SQL instead of the visual builder ---
   const [sqlMode, setSqlMode] = useState(false);
   // Holds the text in the SQL Mode textarea, initialised from the visual builder preview.
@@ -1580,12 +1830,12 @@ export function QueryBuilderPage() {
   const entityList = entityListData?.data ?? [];
   const entityDetail = entityDetailData?.data;
 
-  const fieldOptions: Array<{ slug: string; name: string }> = entityDetail
+  const fieldOptions: Array<{ slug: string; name: string; fieldType?: string }> = entityDetail
     ? [
-        { slug: "_id", name: "_id (system)" },
-        { slug: "_created_at", name: "_created_at (system)" },
-        { slug: "_updated_at", name: "_updated_at (system)" },
-        ...entityDetail.fields.map((f) => ({ slug: f.slug, name: f.name })),
+        { slug: "_id", name: "_id (system)", fieldType: "uuid" },
+        { slug: "_created_at", name: "_created_at (system)", fieldType: "timestamp" },
+        { slug: "_updated_at", name: "_updated_at (system)", fieldType: "timestamp" },
+        ...entityDetail.fields.map((f) => ({ slug: f.slug, name: f.name, fieldType: f.fieldType })),
       ]
     : [];
 
@@ -1611,6 +1861,7 @@ export function QueryBuilderPage() {
     setGroupByClauses([]);
     setAggregates([]);
     setCalculatedFields([]);
+    setJoins([]);
     setOrderByClauses([]);
     setQueryResult(null);
     setPage(0);
@@ -1703,6 +1954,22 @@ export function QueryBuilderPage() {
     setCalculatedFields((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  // --- JOIN mutations (NCA-009) ---
+  const addJoin = useCallback(() => {
+    setJoins((prev) => [
+      ...prev,
+      { id: makeId(), joinType: "INNER", joinEntityType: "", leftField: fieldOptions[0]?.slug ?? "", rightField: "" },
+    ]);
+  }, [fieldOptions]);
+
+  const updateJoin = useCallback((id: string, updated: JoinUI) => {
+    setJoins((prev) => prev.map((j) => (j.id === id ? updated : j)));
+  }, []);
+
+  const removeJoin = useCallback((id: string) => {
+    setJoins((prev) => prev.filter((j) => j.id !== id));
+  }, []);
+
   // --- ORDER BY mutations ---
   const addOrderBy = useCallback(() => {
     const firstField = fieldOptions[0]?.slug ?? "";
@@ -1786,12 +2053,20 @@ export function QueryBuilderPage() {
     runQueryMutation.mutate({ requestPage: newPage });
   }, [runQueryMutation]);
 
-  // --- CSV export ---
+  // --- CSV export (NCA-006) ---
   const handleExportCsv = useCallback(() => {
     if (!queryResult) return;
     const csv = rowsToCsv(queryResult.columns, queryResult.rows);
     const filename = `${selectedEntityType}-query-${new Date().toISOString().slice(0, 10)}.csv`;
     downloadText(csv, filename, "text/csv");
+  }, [queryResult, selectedEntityType]);
+
+  // --- JSON export (NCA-006) ---
+  const handleExportJson = useCallback(() => {
+    if (!queryResult) return;
+    const json = rowsToJson(queryResult.columns, queryResult.rows);
+    const filename = `${selectedEntityType}-query-${new Date().toISOString().slice(0, 10)}.json`;
+    downloadText(json, filename, "application/json");
   }, [queryResult, selectedEntityType]);
 
   // --- Saved queries: build the current query snapshot for saving ---
@@ -1803,6 +2078,7 @@ export function QueryBuilderPage() {
     orderByClauses,
     aggregates,
     calculatedFields,
+    joins,
     limitStr,
   };
 
@@ -1815,6 +2091,7 @@ export function QueryBuilderPage() {
     setGroupByClauses(q.groupByClauses ?? []);
     setAggregates(q.aggregates ?? []);
     setCalculatedFields(q.calculatedFields ?? []);
+    setJoins(q.joins ?? []);
     setOrderByClauses(q.orderByClauses);
     setLimitStr(q.limitStr);
     setQueryResult(null);
@@ -1835,6 +2112,7 @@ export function QueryBuilderPage() {
     whereClauses,
     groupByClauses,
     orderByClauses,
+    joins,
     limitStr,
   });
 
@@ -2086,6 +2364,55 @@ export function QueryBuilderPage() {
               )}
             </section>
 
+            {/* --- JOIN section (NCA-009) --- */}
+            <Separator />
+            <section aria-labelledby="join-section-label">
+              <div className="flex items-center justify-between mb-2">
+                <h2 id="join-section-label" className="text-sm font-medium text-[var(--color-foreground)]">
+                  Joins
+                </h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addJoin}
+                  disabled={fieldOptions.length === 0 || entityList.length === 0}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" aria-hidden />
+                  Add join
+                </Button>
+              </div>
+
+              {joins.length === 0 ? (
+                <p className="text-sm text-[var(--color-muted-foreground)]">No joins configured.</p>
+              ) : (
+                <div className="space-y-2">
+                  {joins.map((join) => {
+                    // Fetch fields for the joined entity so the right-field dropdown is populated.
+                    // We render a simple inline-query result here via a child component that
+                    // holds its own useQuery hook, keeping the parent hook count stable.
+                    return (
+                      <JoinRow
+                        key={join.id}
+                        join={join}
+                        primaryFieldOptions={fieldOptions}
+                        availableEntityTypes={entityList.flatMap((e) => {
+                          const ent = e as { slug?: string; name: string };
+                          if (!ent.slug) return [];
+                          return [{ slug: ent.slug, name: ent.name }];
+                        })}
+                        onJoinEntityChange={(joinId, entitySlug) =>
+                          updateJoin(joinId, { ...join, joinEntityType: entitySlug, rightField: "" })
+                        }
+                        joinedFieldOptions={[]}
+                        onChange={(updated) => updateJoin(join.id, updated)}
+                        onRemove={() => removeJoin(join.id)}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
             {/* --- WHERE clauses --- */}
             <Separator />
             <section aria-labelledby="where-section-label">
@@ -2271,11 +2598,27 @@ export function QueryBuilderPage() {
                 {runQueryMutation.isPending ? "Running…" : "Run query"}
               </Button>
 
+              {/* NCA-006: Export format selection — CSV or JSON */}
               {queryResult && (
-                <Button variant="outline" onClick={handleExportCsv}>
-                  <Download className="h-4 w-4 mr-1.5" aria-hidden />
-                  Export CSV
-                </Button>
+                <div className="relative inline-flex" role="group" aria-label="Export options">
+                  <Button
+                    variant="outline"
+                    className="rounded-r-none border-r-0"
+                    onClick={handleExportCsv}
+                    aria-label="Export as CSV"
+                  >
+                    <Download className="h-4 w-4 mr-1.5" aria-hidden />
+                    CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="rounded-l-none"
+                    onClick={handleExportJson}
+                    aria-label="Export as JSON"
+                  >
+                    JSON
+                  </Button>
+                </div>
               )}
             </div>
 

@@ -435,12 +435,13 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
   name: "PostgreSQL",
   description:
     "Sync records from a PostgreSQL table or custom SQL query via the platform database proxy. " +
-    "Supports full table sync (offset pagination) and incremental sync (cursor-based, ideal for " +
-    "append-only tables with an updated_at column).",
+    "Supports full table sync (keyset/offset pagination), incremental sync (cursor-based), and " +
+    "real-time change streaming via logical replication / WAL (PostgreSQL 10+, requires the " +
+    "wal2json output plugin and a replication slot on the proxy).",
   version: "1.0.0",
   author: "OnePlatform",
   category: "database",
-  tags: ["database", "sql", "postgres", "postgresql"],
+  tags: ["database", "sql", "postgres", "postgresql", "cdc", "realtime"],
   configSchema: {
     type: "object",
     required: ["proxyUrl"],
@@ -472,7 +473,11 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
     },
   },
   supportsIncremental: true,
-  supportsRealtime: false,
+  // PostgreSQL supports real-time change streaming via logical replication (WAL).
+  // The platform proxy must expose a /stream endpoint backed by a replication slot
+  // and the wal2json output plugin. When the proxy supports it, the Execution
+  // Service routes live-data pipelines through that endpoint instead of fetchBatch.
+  supportsRealtime: true,
 };
 
 class PostgresConnector implements Connector {

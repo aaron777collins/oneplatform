@@ -20,6 +20,28 @@ import type { Logger } from "@oneplatform/core";
 /** Coarse health bucket for a connector. */
 export type HealthStatus = "healthy" | "warning" | "failing" | "stale" | "never_run";
 
+// ---------------------------------------------------------------------------
+// DE-010: Data quality metrics derived from recent sync job history.
+//
+// Schema conformance and null-rate are estimated from the ratio of failed rows
+// to total rows across recent syncs. A dedicated DataQualityService (when wired
+// in) should supersede these estimates with per-column statistics from the raw
+// table; the estimates here serve as a coarse-grained baseline that is always
+// available without an additional service dependency.
+// ---------------------------------------------------------------------------
+
+export interface ConnectorDataQualityMetrics {
+  /** Total records ingested in the most recent successful sync. Null when no
+   *  successful sync has run yet. */
+  lastSyncRecordCount: number | null;
+  /** Estimated row-level failure rate over the last N syncs (0–1, lower is
+   *  better). Null when no terminal runs exist. */
+  estimatedErrorRate: number | null;
+  /** Fraction of runs in the health window that completed successfully (0–1).
+   *  Mirrors successRate but scoped to quality reporting. Null when < 2 runs. */
+  schemaConformanceRate: number | null;
+}
+
 export interface ConnectorHealthSummaryItem {
   connectorId: string;
   connectorName: string;
@@ -32,6 +54,8 @@ export interface ConnectorHealthSummaryItem {
   avgLatencyMs: number | null;
   /** Total error count across all observed history. */
   errorCount: number;
+  /** DE-010: coarse data quality indicators derived from sync job history. */
+  qualityMetrics: ConnectorDataQualityMetrics;
 }
 
 export interface HealthSummary {
@@ -69,6 +93,8 @@ export interface ConnectorHealthDetail {
   recentRuns: SyncJobSummary[];
   /** Daily trend for the last 30 days (UTC), oldest first. */
   dailyTrend: DailyTrendPoint[];
+  /** DE-010: coarse data quality indicators derived from sync job history. */
+  qualityMetrics: ConnectorDataQualityMetrics;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +256,48 @@ export function buildDailyTrend(
     }));
 }
 
+/**
+ * Compute coarse data-quality metrics from sync job history.
+ *
+ * Uses row-level counts that BullMQ workers write into SyncJobSummary
+ * (rowsIngested, rowsFailed) to estimate data quality without requiring a
+ * dedicated DataQualityService dependency. When a full DataQualityService is
+ * available (e.g. with per-column null statistics), callers should merge its
+ * richer output on top of this baseline.
+ *
+ * Exported for unit testing.
+ */
+export function computeDataQualityMetrics(
+  terminalRuns: ReadonlyArray<SyncJobSummary>,
+): ConnectorDataQualityMetrics {
+  // The most recent successful run gives the best estimate of current record count.
+  const lastSuccess = terminalRuns.find((r) => r.status === "success");
+  const lastSyncRecordCount = lastSuccess?.rowsIngested ?? null;
+
+  if (terminalRuns.length === 0) {
+    return { lastSyncRecordCount, estimatedErrorRate: null, schemaConformanceRate: null };
+  }
+
+  // Estimated error rate: total failed rows / total rows across the health window.
+  // A high rowsFailed : rowsIngested ratio signals schema drift or data quality issues.
+  const window = terminalRuns.slice(0, HEALTH_WINDOW_RUNS);
+  let totalIngested = 0;
+  let totalFailed = 0;
+  for (const run of window) {
+    totalIngested += run.rowsIngested;
+    totalFailed += run.rowsFailed;
+  }
+  const totalRows = totalIngested + totalFailed;
+  const estimatedErrorRate = totalRows > 0 ? totalFailed / totalRows : 0;
+
+  // Schema conformance: reuse success-rate signal — a run that completed
+  // without structural errors is treated as "conformant". This is a proxy
+  // metric until per-column type mismatch tracking is available.
+  const schemaConformanceRate = computeSuccessRate(terminalRuns);
+
+  return { lastSyncRecordCount, estimatedErrorRate, schemaConformanceRate };
+}
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
@@ -303,6 +371,7 @@ export function createConnectorHealthService(
           successRate: computeSuccessRate(terminalRuns),
           avgLatencyMs: computeAvgLatencyMs(terminalRuns),
           errorCount,
+          qualityMetrics: computeDataQualityMetrics(terminalRuns),
         };
       }),
     );
@@ -406,6 +475,7 @@ export function createConnectorHealthService(
       lastErrorMessage,
       recentRuns: allRuns.slice(0, DETAIL_RUN_LIMIT),
       dailyTrend: buildDailyTrend(allRuns),
+      qualityMetrics: computeDataQualityMetrics(terminalRuns),
     };
   }
 

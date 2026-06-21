@@ -32,6 +32,7 @@ import { registerConfig } from "./commands/config/index.js";
 import { registerStatus } from "./commands/status/index.js";
 import { registerService } from "./commands/service/index.js";
 import { registerSdk } from "./commands/sdk/index.js";
+import { registerUsage } from "./commands/usage/index.js";
 import { registerVersion } from "./commands/version/index.js";
 import { registerCompletion } from "./commands/completion/index.js";
 
@@ -77,6 +78,7 @@ export function buildProgram(): Command {
         "    config        CLI configuration profiles",
         "    status        Platform health status",
         "    service       Service management",
+        "    usage         API usage statistics and quotas",
         "    sdk           SDK code generation",
         "    version       Print version information",
         "    completion    Shell completion scripts",
@@ -116,6 +118,7 @@ export function buildProgram(): Command {
   registerStatus(program);
   registerService(program);
   registerSdk(program);
+  registerUsage(program);
   registerVersion(program);
   registerCompletion(program);
 
