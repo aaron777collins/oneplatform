@@ -3,22 +3,28 @@
 #
 # One-shot initialization container. Runs as Layer 0 before any data store.
 # Generates all secrets that services need at runtime. Secrets are written
-# to /data/init/ on the init-data volume with mode 0444 (world-readable) so that
-# service containers (UID 1001) and postgres (UID 70) can read them. The volume
-# is mounted :ro in docker-compose.yml, preventing writes regardless of mode.
+# to /data/init/ on the init-data volume with mode 0440 (owner+group read only)
+# so that other users on the host cannot read them even if they share the volume.
+# The volume is mounted :ro in docker-compose.yml, preventing writes regardless
+# of mode.
 #
 # SECURITY NOTE — file permissions:
-#   All secret files are written 0444 (world-readable within a container) because
-#   Docker named volumes do not provide a guaranteed shared GID across containers
-#   with different UIDs (postgres=70, app services=1001). A compromised service
-#   container that mounts this volume could read secrets intended for other services.
-#   Mitigations in place:
-#     1. The init-data volume is mounted :ro — services cannot modify or delete secrets.
-#     2. Each service only reads the specific files its service-entrypoint.sh names;
-#        the platform does not expose raw secret paths via API.
-#     3. For production deployments with stronger isolation requirements, replace
-#        this volume approach with Docker Swarm Secrets or Kubernetes Secrets, which
-#        provide per-service secret scoping at the orchestration layer.
+#   Secret files are written 0440 (owner=root:0, group=GID 1001) with group
+#   read permission. All application service containers run as UID 1001 / GID 1001
+#   (Dockerfile.service), so they can read via the group bit. The postgres
+#   container (UID 70) runs in a separate namespace and reads its password via
+#   the postgres-init-passwords sidecar which runs as root, so 0440 is safe.
+#
+#   Under 0440:
+#     - Owner (root) — can read.
+#     - Group (GID 1001 = service group) — can read.
+#     - World — cannot read. This closes the cross-service read risk where a
+#       compromised container running under a different UID could slurp every
+#       secret on the shared volume.
+#
+#   For production deployments with stronger isolation, replace this volume
+#   approach with Docker Swarm Secrets or Kubernetes Secrets, which provide
+#   per-service secret scoping at the orchestration layer.
 #
 # Ref spec §2 "Startup Sequence" step 1 and §4 "First-Run Bootstrap".
 
@@ -31,22 +37,38 @@ KEYS_DIR="/data/init/keys"
 # inside each application container.
 PUBKEYS_DIR="/data/service-keys"
 
+# GID 1001 matches the service group in Dockerfile.service (addgroup -g 1001 app).
+# All application service containers run as UID 1001 / GID 1001, so they can
+# read files with mode 0440 + group ownership 1001.
+SECRET_GID=1001
+
 mkdir -p "$INIT_DIR"
 mkdir -p "$PUBKEYS_DIR"
+
+# Ensure the init directory itself is group-readable by service containers.
+chgrp "$SECRET_GID" "$INIT_DIR" 2>/dev/null || true
+chmod 0750 "$INIT_DIR"
+
+# lock_secret <path> — sets owner=root, group=SECRET_GID, mode=0440.
+# 0440 means: owner read-only, group read-only, world no-access.
+lock_secret() {
+  chown "0:${SECRET_GID}" "$1" 2>/dev/null || true
+  chmod 0440 "$1"
+}
 
 # ── Master Key ──────────────────────────────────────────────────────────────
 # Step 1a: Check for externally-injected Docker secret (production path).
 if [ -f "/run/secrets/op_master_key" ]; then
   echo "[op-init] Using Docker secret for OP_MASTER_KEY"
   cp /run/secrets/op_master_key "$INIT_DIR/master.key"
-  chmod 0444 "$INIT_DIR/master.key"
+  lock_secret "$INIT_DIR/master.key"
 else
   # Step 1b: No pre-existing secret — generate a new AES-256-GCM master key.
   # openssl rand -base64 32 produces 32 random bytes encoded as base64 (44 chars).
   if [ ! -f "$INIT_DIR/master.key" ]; then
     echo "[op-init] Generating OP_MASTER_KEY"
     openssl rand -base64 32 > "$INIT_DIR/master.key"
-    chmod 0444 "$INIT_DIR/master.key"
+    lock_secret "$INIT_DIR/master.key"
   else
     echo "[op-init] OP_MASTER_KEY already exists, skipping"
   fi
@@ -58,7 +80,7 @@ fi
 if [ ! -f "$INIT_DIR/bootstrap.token" ]; then
   echo "[op-init] Generating bootstrap token"
   openssl rand -hex 32 > "$INIT_DIR/bootstrap.token"
-  chmod 0444 "$INIT_DIR/bootstrap.token"
+  lock_secret "$INIT_DIR/bootstrap.token"
 else
   echo "[op-init] Bootstrap token already exists, skipping"
 fi
@@ -69,7 +91,7 @@ fi
 if [ ! -f "$INIT_DIR/jwt.secret" ]; then
   echo "[op-init] Generating OP_JWT_SECRET"
   openssl rand -hex 32 > "$INIT_DIR/jwt.secret"
-  chmod 0444 "$INIT_DIR/jwt.secret"
+  lock_secret "$INIT_DIR/jwt.secret"
 else
   echo "[op-init] OP_JWT_SECRET already exists, skipping"
 fi
@@ -81,7 +103,7 @@ fi
 if [ ! -f "$INIT_DIR/cursor.secret" ]; then
   echo "[op-init] Generating OP_CURSOR_SECRET"
   openssl rand -hex 32 > "$INIT_DIR/cursor.secret"
-  chmod 0444 "$INIT_DIR/cursor.secret"
+  lock_secret "$INIT_DIR/cursor.secret"
 else
   echo "[op-init] OP_CURSOR_SECRET already exists, skipping"
 fi
@@ -136,7 +158,7 @@ for SERVICE in auth gateway ingestion ontology pipeline execution app logging pl
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating DB password for ${SERVICE}_service_role"
     gen_password > "$PW_FILE"
-    chmod 0444 "$PW_FILE"
+    lock_secret "$PW_FILE"
   else
     echo "[op-init] DB password for ${SERVICE}_service_role already exists, skipping"
   fi
@@ -150,7 +172,7 @@ for PGBUSER in pgbouncer_admin pgbouncer_stats; do
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating password for ${PGBUSER}"
     gen_password > "$PW_FILE"
-    chmod 0444 "$PW_FILE"
+    lock_secret "$PW_FILE"
   else
     echo "[op-init] Password for ${PGBUSER} already exists, skipping"
   fi
@@ -162,7 +184,7 @@ done
 if [ ! -f "$INIT_DIR/db_password_postgres_superuser.txt" ]; then
   echo "[op-init] Generating Postgres superuser password"
   gen_password > "$INIT_DIR/db_password_postgres_superuser.txt"
-  chmod 0444 "$INIT_DIR/db_password_postgres_superuser.txt"
+  lock_secret "$INIT_DIR/db_password_postgres_superuser.txt"
 else
   echo "[op-init] Postgres superuser password already exists, skipping"
 fi
@@ -177,7 +199,7 @@ for REDIS_USER in admin auth pipeline logging gateway ingestion ontology app plu
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating Redis password for op_${REDIS_USER}"
     gen_password > "$PW_FILE"
-    chmod 0444 "$PW_FILE"
+    lock_secret "$PW_FILE"
   else
     echo "[op-init] Redis password for op_${REDIS_USER} already exists, skipping"
   fi
@@ -190,8 +212,8 @@ done
 # Ref spec §4 "Service-to-Service Auth".
 #
 # Key naming convention:
-#   Private:  $KEYS_DIR/<service-name>/private.pem   (mode 0444, volume is :ro)
-#   Public:   $PUBKEYS_DIR/<service-name>.pub         (mode 0444, all services)
+#   Private:  $KEYS_DIR/<service-name>/private.pem   (mode 0440, group=SECRET_GID)
+#   Public:   $PUBKEYS_DIR/<service-name>.pub         (mode 0440, group=SECRET_GID)
 #
 # The public key filename must match the JWT sub claim (e.g. "gateway-service")
 # because service-auth.ts does: keys[serviceName] where serviceName = f.replace('.pub','')
@@ -203,20 +225,22 @@ for SERVICE in gateway auth ingestion ontology pipeline execution app logging pl
   PUBLIC_KEY_PATH="${PUBKEYS_DIR}/${SERVICE_NAME}.pub"
 
   mkdir -p "$PRIVATE_KEY_DIR"
+  chgrp "$SECRET_GID" "$PRIVATE_KEY_DIR" 2>/dev/null || true
+  chmod 0750 "$PRIVATE_KEY_DIR"
 
   if [ ! -f "$PRIVATE_KEY_PATH" ]; then
     echo "[op-init] Generating Ed25519 key pair for ${SERVICE_NAME}"
     openssl genpkey -algorithm Ed25519 -out "$PRIVATE_KEY_PATH"
-    chmod 0444 "$PRIVATE_KEY_PATH"
+    lock_secret "$PRIVATE_KEY_PATH"
     openssl pkey -in "$PRIVATE_KEY_PATH" -pubout -out "$PUBLIC_KEY_PATH"
-    chmod 0444 "$PUBLIC_KEY_PATH"
+    lock_secret "$PUBLIC_KEY_PATH"
   else
     echo "[op-init] Ed25519 key pair for ${SERVICE_NAME} already exists, skipping"
     # Ensure public key is always present even if only private key survived a partial run
     if [ ! -f "$PUBLIC_KEY_PATH" ]; then
       echo "[op-init] Re-deriving public key for ${SERVICE_NAME} from existing private key"
       openssl pkey -in "$PRIVATE_KEY_PATH" -pubout -out "$PUBLIC_KEY_PATH"
-      chmod 0444 "$PUBLIC_KEY_PATH"
+      lock_secret "$PUBLIC_KEY_PATH"
     fi
   fi
 done

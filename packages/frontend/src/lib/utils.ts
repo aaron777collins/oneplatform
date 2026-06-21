@@ -67,6 +67,114 @@ export function debounce<TArgs extends unknown[]>(
 }
 
 /**
+ * Converts a 5-field cron expression to a plain-English description suitable
+ * for display to non-technical users. Handles the common patterns produced by
+ * ScheduleBuilder; falls back to "Custom schedule" for unusual expressions.
+ *
+ * WHY here instead of inside ScheduleBuilder: other components (PipelineCard,
+ * PipelineDetailPage, ApiKeysPage) also need to display cron expressions in
+ * human-readable form, so this belongs in the shared utility layer.
+ */
+export function cronToHuman(cron: string): string {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return "Custom schedule";
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+
+  // Every minute
+  if (cron.trim() === "* * * * *") return "Every minute";
+  // Every hour on the hour
+  if (cron.trim() === "0 * * * *") return "Every hour";
+
+  // Step patterns: */N minute/hour/day intervals
+  if (
+    minute?.startsWith("*/") &&
+    hour === "*" &&
+    dayOfMonth === "*" &&
+    month === "*" &&
+    dayOfWeek === "*"
+  ) {
+    const n = parseInt(minute.slice(2), 10);
+    if (!isNaN(n) && n > 0) return `Every ${n} minute${n === 1 ? "" : "s"}`;
+  }
+
+  if (
+    minute === "0" &&
+    hour?.startsWith("*/") &&
+    dayOfMonth === "*" &&
+    month === "*" &&
+    dayOfWeek === "*"
+  ) {
+    const n = parseInt(hour.slice(2), 10);
+    if (!isNaN(n) && n > 0) return `Every ${n} hour${n === 1 ? "" : "s"}`;
+  }
+
+  if (
+    minute === "0" &&
+    hour === "0" &&
+    dayOfMonth?.startsWith("*/") &&
+    month === "*" &&
+    dayOfWeek === "*"
+  ) {
+    const n = parseInt(dayOfMonth.slice(2), 10);
+    if (!isNaN(n) && n > 0)
+      return `Every ${n} day${n === 1 ? "" : "s"} at midnight`;
+  }
+
+  // Fixed time patterns
+  if (dayOfMonth === "*" && month === "*" && minute !== "*" && hour !== "*") {
+    const h = `${hour?.padStart(2, "0")}:${minute?.padStart(2, "0")}`;
+
+    if (dayOfWeek === "*") {
+      return `Daily at ${h}`;
+    }
+
+    const DAY_NAMES: Record<string, string> = {
+      "0": "Sunday",
+      "1": "Monday",
+      "2": "Tuesday",
+      "3": "Wednesday",
+      "4": "Thursday",
+      "5": "Friday",
+      "6": "Saturday",
+      "7": "Sunday",
+    };
+    if (dayOfWeek !== undefined && DAY_NAMES[dayOfWeek] !== undefined) {
+      return `Every ${DAY_NAMES[dayOfWeek]} at ${h}`;
+    }
+  }
+
+  // Monthly: specific day-of-month at a fixed time
+  if (
+    month === "*" &&
+    dayOfWeek === "*" &&
+    dayOfMonth !== undefined &&
+    dayOfMonth !== "*" &&
+    minute !== "*" &&
+    hour !== "*"
+  ) {
+    const h = `${hour?.padStart(2, "0")}:${minute?.padStart(2, "0")}`;
+    const n = parseInt(dayOfMonth, 10);
+    if (!isNaN(n)) {
+      const teenException = n >= 11 && n <= 13;
+      const lastDigit = n % 10;
+      const suffix = teenException
+        ? "th"
+        : lastDigit === 1
+          ? "st"
+          : lastDigit === 2
+            ? "nd"
+            : lastDigit === 3
+              ? "rd"
+              : "th";
+      return `Monthly on the ${n}${suffix} at ${h}`;
+    }
+  }
+
+  return "Custom schedule";
+}
+
+/**
  * Formats a byte count into a human-readable string (e.g., "1.2 MB").
  * Used in the file tree and build output panels.
  */

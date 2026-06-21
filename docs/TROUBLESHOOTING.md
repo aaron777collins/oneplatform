@@ -1347,7 +1347,9 @@ is configured to allow:
 - `CONTAINERS=1` — create, list, inspect containers
 - `IMAGES=1` — list and pull images
 - `POST=1` — container creation
-- `DELETE=0` — deletion explicitly blocked
+- `DELETE=1` — container deletion (the execution service explicitly removes
+  sandbox containers after each run; `--rm` is not used because the service
+  controls teardown timing to capture exit codes first)
 
 If the execution service requests a Docker API endpoint the proxy is not
 configured to allow (e.g., volume management, network management), the proxy
@@ -1372,8 +1374,7 @@ docker compose -f docker/docker-compose.yml exec execution-service \
 
 # If proxy is logging a 403 for a legitimate container operation,
 # check the proxy's environment variables in docker-compose.yml:
-# CONTAINERS=1, POST=1, IMAGES=1 must all be set.
-# DELETE=0 is intentional — sandbox containers use --rm for auto-cleanup.
+# CONTAINERS=1, POST=1, IMAGES=1, DELETE=1 must all be set.
 ```
 
 ---

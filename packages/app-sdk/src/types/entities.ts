@@ -119,6 +119,12 @@ export interface SubscriptionResult<T> {
   lastEvent: EntityEvent<T> | null;
   isConnected: boolean;
   reconnectAttempts: number;
+  /**
+   * True when the WebSocket manager has exhausted all reconnect attempts.
+   * When true, surface a "Reconnect" button that calls the manager's connect()
+   * method so the user can retry without a page reload.
+   */
+  reconnectExhausted: boolean;
 }
 
 // ─── User context ─────────────────────────────────────────────────────────────

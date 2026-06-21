@@ -14,6 +14,12 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
   const routes = new Hono<{ Variables: AppVariables }>();
   const { proxyService, circuitBreakers, serviceToken } = deps;
 
+  // SECURITY BOUNDARY: /internal/* routes must never be reachable from external
+  // traffic. This catch-all returns 404 (not 403) to avoid leaking that an
+  // internal API surface exists. Service-to-service calls on these paths happen
+  // directly between containers on the internal Docker/K8s network — they never
+  // transit the Gateway. Each downstream service additionally guards /internal/*
+  // with Ed25519 JWT via serviceAuthMiddleware (defense-in-depth).
   routes.all("/internal/*", (_c) => {
     throw new NotFoundError("Internal routes are not accessible via the Gateway.");
   });

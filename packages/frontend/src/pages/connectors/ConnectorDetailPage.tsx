@@ -295,7 +295,7 @@ export function ConnectorDetailPage() {
               <TabsTrigger value="schema" className="relative">
                 Schema
                 {connector.schemaDrift?.detected === true && (
-                  <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-[var(--color-status-warning)]" aria-label="Schema drift detected" />
+                  <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-[var(--color-status-warning)]" aria-label="Data structure changed" />
                 )}
               </TabsTrigger>
               <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -368,32 +368,32 @@ export function ConnectorDetailPage() {
                     <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-status-warning)]" aria-hidden />
                     <div>
                       <p className="text-sm font-semibold text-[var(--color-foreground)]">
-                        Schema drift detected
+                        Your data structure changed
                       </p>
                       <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-                        The source schema has changed since the last sync.
+                        The fields coming from your data source look different from the last time we synced.
                         {connector.schemaDrift.detectedAt !== undefined && (
                           <>
-                            {" "}Detected <RelativeTime value={connector.schemaDrift.detectedAt} className="text-sm" />.
+                            {" "}First noticed <RelativeTime value={connector.schemaDrift.detectedAt} className="text-sm" />.
                           </>
                         )}
-                        {" "}Review the changes below and re-sync to apply updates.
+                        {" "}Review the field changes below, then re-sync to bring everything up to date.
                       </p>
                     </div>
                   </div>
 
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-base">Field Changes</CardTitle>
+                      <CardTitle className="text-base">What changed in your data</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Field</TableHead>
-                            <TableHead>Change</TableHead>
-                            <TableHead>Previous Type</TableHead>
-                            <TableHead>Current Type</TableHead>
+                            <TableHead>Field name</TableHead>
+                            <TableHead>What happened</TableHead>
+                            <TableHead>Was</TableHead>
+                            <TableHead>Now</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -403,7 +403,7 @@ export function ConnectorDetailPage() {
                                 colSpan={4}
                                 className="py-8 text-center text-sm text-[var(--color-muted-foreground)]"
                               >
-                                Drift detected but no field-level details available.
+                                Changes detected but no field-level details are available.
                               </TableCell>
                             </TableRow>
                           ) : (

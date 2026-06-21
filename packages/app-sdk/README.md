@@ -68,6 +68,61 @@ function App() {
 The provider performs no configuration — authentication is handled by the
 platform sandbox at the transport layer.
 
+## Development Setup
+
+In production, `AppProvider` reads runtime configuration from
+`window.__OP_APP_CONFIG__`, which is injected by the App Service HTML shell.
+This global is **not** present when running your app standalone with `vite dev`
+or a custom dev server.
+
+### Option 1: config prop (recommended)
+
+Pass a `config` prop directly to `AppProvider`. It takes precedence over
+`window.__OP_APP_CONFIG__` and avoids any need to set window globals.
+
+```tsx
+// src/dev-entry.tsx — dev entry point only, not imported in production
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { AppProvider } from '@oneplatform/app-sdk';
+import { App } from './App.js';
+
+const devConfig = {
+  appId: 'my-app-dev',      // any string; matched against platform config
+  tenantId: 'dev-tenant',   // your development tenant ID
+  appSlug: 'my-app',        // optional; used for WebSocket URL
+};
+
+createRoot(document.getElementById('root')!).render(
+  <AppProvider config={devConfig} bffBaseUrl="http://localhost:4000">
+    <App />
+  </AppProvider>,
+);
+```
+
+Configure `vite.config.ts` to use `dev-entry.tsx` as the entry point in dev
+mode and `src/main.tsx` (which uses `<AppProvider>` without a config prop) for
+production builds.
+
+### Option 2: window global in dev HTML
+
+Alternatively, set `window.__OP_APP_CONFIG__` in your dev `index.html` before
+the app bundle loads:
+
+```html
+<!-- index.html (dev only) -->
+<script>
+  window.__OP_APP_CONFIG__ = {
+    appId: "my-app-dev",
+    tenantId: "dev-tenant",
+    appSlug: "my-app"
+  };
+</script>
+```
+
+This mirrors exactly what the production App Service shell injects, making the
+dev environment behave identically to production.
+
 ## Hooks
 
 ### `useQuery`

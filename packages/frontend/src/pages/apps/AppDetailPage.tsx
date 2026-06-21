@@ -201,14 +201,16 @@ export function AppDetailPage() {
               <h3 className="text-sm font-semibold">Configuration</h3>
               <dl className="space-y-2 text-sm">
                 <div className="flex gap-2">
-                  <dt className="w-28 shrink-0 text-[var(--color-muted-foreground)]">Access mode</dt>
+                  <dt className="w-28 shrink-0 text-[var(--color-muted-foreground)]">Who can access</dt>
                   <dd className="flex items-center gap-1.5">
                     <AccessIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                    {app.accessMode === "public" ? "Public" : "Platform users only"}
+                    {app.accessMode === "public"
+                      ? "Anyone with the link"
+                      : "My team (logged-in users)"}
                   </dd>
                 </div>
                 <div className="flex gap-2">
-                  <dt className="w-28 shrink-0 text-[var(--color-muted-foreground)]">URL slug</dt>
+                  <dt className="w-28 shrink-0 text-[var(--color-muted-foreground)]">App ID (URL)</dt>
                   <dd className="font-mono text-xs">/{app.slug}</dd>
                 </div>
                 <div className="flex gap-2">
@@ -295,8 +297,8 @@ export function AppDetailPage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="platform-user">Platform users only</SelectItem>
-                          <SelectItem value="public">Public</SelectItem>
+                          <SelectItem value="platform-user">My team (logged-in users)</SelectItem>
+                          <SelectItem value="public">Anyone with the link</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

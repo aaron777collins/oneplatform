@@ -88,10 +88,22 @@ const ROLE_BADGE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
 // TeamsPage component
 // ---------------------------------------------------------------------------
 
+// Pending role change — captured before the confirmation dialog is shown
+interface PendingRoleChange {
+  member: Member;
+  newRoles: string[];
+  addedRole: Role | null;
+  removedRole: Role | null;
+}
+
 export function TeamsPage() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [removeTarget, setRemoveTarget] = React.useState<Member | null>(null);
+  // Role change confirmation: we capture the intended change and only apply it
+  // after the user confirms, preventing accidental permission changes from misclicks.
+  const [pendingRoleChange, setPendingRoleChange] =
+    React.useState<PendingRoleChange | null>(null);
 
   // Use /v1/users for member list since /v1/teams/* endpoints are not implemented
   const membersQuery = useQuery({
@@ -264,7 +276,8 @@ export function TeamsPage() {
                         {ROLE_LABELS[role as Role] ?? role}
                       </Badge>
                     ))}
-                    {/* Toggle buttons for quick role changes */}
+                    {/* Toggle buttons for quick role changes — clicking opens a confirmation
+                        dialog before any change is applied to prevent accidental misclicks. */}
                     <div className="mt-1 flex flex-wrap gap-1 border-t border-[var(--color-border)]/50 pt-1 w-full">
                       {ALL_ROLES.map((role) => {
                         const active = member.roles.includes(role);
@@ -283,7 +296,12 @@ export function TeamsPage() {
                                 : [...member.roles, role];
                               // Prevent removing the last role — every user needs at least one
                               if (next.length === 0) return;
-                              updateRoleMutation.mutate({ memberId: member.id, roles: next });
+                              setPendingRoleChange({
+                                member,
+                                newRoles: next,
+                                addedRole: active ? null : role,
+                                removedRole: active ? role : null,
+                              });
                             }}
                             aria-pressed={active}
                             aria-label={`${active ? "Remove" : "Add"} ${ROLE_LABELS[role]} role`}
@@ -325,6 +343,33 @@ export function TeamsPage() {
           if (removeTarget !== null) removeMutation.mutate(removeTarget.id);
         }}
         isLoading={removeMutation.isPending}
+      />
+
+      {/* Role change confirmation — prevents accidental permission changes from misclicks */}
+      <ConfirmDialog
+        open={pendingRoleChange !== null}
+        onOpenChange={(open) => { if (!open) setPendingRoleChange(null); }}
+        title="Change role?"
+        description={
+          pendingRoleChange !== null
+            ? pendingRoleChange.addedRole !== null
+              ? `Add the ${ROLE_LABELS[pendingRoleChange.addedRole]} role to ${pendingRoleChange.member.displayName ?? pendingRoleChange.member.email}?`
+              : pendingRoleChange.removedRole !== null
+              ? `Remove the ${ROLE_LABELS[pendingRoleChange.removedRole]} role from ${pendingRoleChange.member.displayName ?? pendingRoleChange.member.email}?`
+              : "Apply this role change?"
+            : "Apply this role change?"
+        }
+        confirmLabel="Confirm"
+        onConfirm={() => {
+          if (pendingRoleChange !== null) {
+            updateRoleMutation.mutate({
+              memberId: pendingRoleChange.member.id,
+              roles: pendingRoleChange.newRoles,
+            });
+            setPendingRoleChange(null);
+          }
+        }}
+        isLoading={updateRoleMutation.isPending}
       />
     </div>
   );

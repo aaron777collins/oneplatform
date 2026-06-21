@@ -160,14 +160,21 @@ export function useQuery<T = unknown>(
   const staleTime = options.staleTime ?? 30_000;
   const enabled = options.enabled !== false;
 
-  const cacheKey = React.useMemo(
-    () => buildCacheKey(entity, options),
-    // options dependency is intentionally coarse — if the caller passes a new
-    // options literal each render, staleTime prevents redundant network calls.
-    // App developers should memoize options objects for optimal performance.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entity, options.filter, options.sort, options.fields, options.limit],
-  );
+  // Build the serialized cache key from identity fields.
+  // Comparing to the previous key via ref ensures that a new options object
+  // reference with identical values reuses the existing key string — preventing
+  // the infinite-refetch loop that occurs when callers pass inline object literals.
+  const serializedKey = buildCacheKey(entity, options);
+  const stableKeyRef = React.useRef<string>(serializedKey);
+  if (stableKeyRef.current !== serializedKey) {
+    // Only update when the serialized representation actually differs, not merely
+    // when the options object reference changes. This is a synchronous ref mutation
+    // during render (not in an effect) which is valid when the new value is derived
+    // purely from the current render's props/args — analogous to useMemo but with
+    // an explicit equality check that useMemo's dependency array cannot express.
+    stableKeyRef.current = serializedKey;
+  }
+  const cacheKey = stableKeyRef.current;
 
   // useSyncExternalStore drives re-renders when QueryCache updates the entry.
   // This is the correct React 18 primitive for subscribing to an external mutable store.

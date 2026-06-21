@@ -37,15 +37,31 @@ function parseCidr(cidr: string): CidrBlock {
 }
 
 // These ranges must never be reachable from an outbound webhook delivery.
-// The 169.254.0.0/16 block covers AWS/GCP IMDS endpoints (169.254.169.254).
+// 169.254.0.0/16 covers AWS IMDSv1/v2 (169.254.169.254), Azure IMDS, and
+// GCP metadata (also reachable via 169.254.169.254 and metadata.google.internal).
 const BLOCKED_CIDR_BLOCKS: CidrBlock[] = [
   "0.0.0.0/8",
   "10.0.0.0/8",
   "172.16.0.0/12",
   "192.168.0.0/16",
   "127.0.0.0/8",
-  "169.254.0.0/16",
+  "169.254.0.0/16",  // link-local: AWS/GCP/Azure instance metadata service
+  "100.64.0.0/10",   // CGNAT shared address space (RFC 6598) — often used in K8s pods
 ].map(parseCidr);
+
+// Cloud-metadata hostnames that must be blocked regardless of their resolved IP.
+// DNS rebinding can make these point at unexpected IPs, so we block by name too.
+const BLOCKED_HOSTNAME_PATTERNS: Array<string | RegExp> = [
+  // AWS/Azure instance metadata endpoints
+  "169.254.169.254",
+  // GCP metadata endpoints
+  "metadata.google.internal",
+  "metadata.google.com",
+  // Kubernetes in-cluster API server default service name
+  "kubernetes.default",
+  "kubernetes.default.svc",
+  "kubernetes.default.svc.cluster.local",
+];
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -103,10 +119,15 @@ export function isBlockedIpRange(ip: string): boolean {
  * resolution happens in `validateWebhookUrl`.
  *
  * Blocked patterns:
- * - "localhost" (exact match, case-insensitive)
- * - "0.0.0.0"  (resolves to localhost on Linux)
- * - "*.local"   (mDNS names used on Docker/LAN networks)
- * - "*-service" (Docker Compose internal service names, e.g. auth-service)
+ * - "localhost"                    (exact match, case-insensitive)
+ * - "0.0.0.0"                     (resolves to localhost on Linux)
+ * - "169.254.169.254"             (AWS/GCP/Azure instance metadata service)
+ * - "metadata.google.internal"    (GCP metadata hostname)
+ * - "metadata.google.com"         (GCP metadata hostname)
+ * - "kubernetes.default*"         (K8s in-cluster API server)
+ * - any hostname containing "metadata" as a segment
+ * - "*.local"                     (mDNS names used on Docker/LAN networks)
+ * - "*-service"                   (Docker Compose internal service names)
  */
 export function isBlockedHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
@@ -114,6 +135,24 @@ export function isBlockedHostname(hostname: string): boolean {
   if (lower === "0.0.0.0") return true;
   if (lower.endsWith(".local")) return true;
   if (lower.endsWith("-service")) return true;
+
+  // Block all cloud metadata and K8s API-server hostnames by exact or prefix match.
+  for (const pattern of BLOCKED_HOSTNAME_PATTERNS) {
+    if (typeof pattern === "string") {
+      if (lower === pattern || lower.endsWith(`.${pattern}`)) return true;
+    } else {
+      if (pattern.test(lower)) return true;
+    }
+  }
+
+  // Block any hostname segment that is exactly "metadata" — catches
+  // customer-controlled subdomains like "my-metadata.example.com" that could
+  // be DNS-rebound to a cloud IMDS address.
+  if (lower.split(".").includes("metadata")) return true;
+
+  // Block kubernetes.default and any subdomain of it (e.g. kubernetes.default.svc).
+  if (lower === "kubernetes.default" || lower.startsWith("kubernetes.default.")) return true;
+
   return false;
 }
 

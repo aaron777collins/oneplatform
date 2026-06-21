@@ -129,10 +129,14 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
 
     if (!res.ok) {
       const errBody = await parseErrorBody(res);
+      const retryAfter = res.headers.get("Retry-After");
       if (verbose) {
         process.stderr.write(`[verbose] HTTP ${res.status}: ${JSON.stringify(errBody)}\n`);
+        if (retryAfter) {
+          process.stderr.write(`[verbose] Retry-After: ${retryAfter}\n`);
+        }
       }
-      throw httpErrorToCliError(res.status, errBody, verbose);
+      throw httpErrorToCliError(res.status, errBody, verbose, retryAfter);
     }
 
     if (res.status === 204) {
@@ -192,7 +196,8 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
 
       if (!res.ok) {
         const errBody = await parseErrorBody(res);
-        throw httpErrorToCliError(res.status, errBody, verbose);
+        const retryAfter = res.headers.get("Retry-After");
+        throw httpErrorToCliError(res.status, errBody, verbose, retryAfter);
       }
       return res.json() as Promise<T>;
     },
@@ -245,7 +250,8 @@ export function createHttpClient(cfg: HttpClientConfig): HttpClient {
       }
       if (!res.ok) {
         const errBody = await parseErrorBody(res);
-        throw httpErrorToCliError(res.status, errBody, verbose);
+        const retryAfter = res.headers.get("Retry-After");
+        throw httpErrorToCliError(res.status, errBody, verbose, retryAfter);
       }
       if (!res.body) return;
 

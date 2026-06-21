@@ -94,9 +94,9 @@ const newAppSchema = z.object({
   name: z.string().min(1, "Name is required").max(64),
   slug: z
     .string()
-    .min(1, "Slug is required")
+    .min(1, "URL-friendly name is required")
     .max(48)
-    .regex(/^[a-z0-9-]+$/, "Slug may only contain lowercase letters, numbers, and hyphens"),
+    .regex(/^[a-z0-9-]+$/, "URL-friendly name may only contain lowercase letters, numbers, and hyphens"),
   accessMode: z.enum(["public", "platform-user"]),
 });
 
@@ -321,7 +321,7 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                   : "New blank app"}
               </DialogTitle>
               <DialogDescription>
-                Give your app a name and URL slug.
+                Give your app a name. A URL-friendly ID will be generated automatically.
               </DialogDescription>
             </DialogHeader>
 
@@ -366,7 +366,7 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>
-                          App URL{" "}
+                          URL-friendly name (App ID){" "}
                           <span className="text-[var(--color-destructive)]" aria-hidden>*</span>
                         </FormLabel>
                         <FormControl>
@@ -379,6 +379,9 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                             }}
                           />
                         </FormControl>
+                        <p className="text-xs text-[var(--color-muted-foreground)]">
+                          Used in URLs and API calls. Letters, numbers, and hyphens only.
+                        </p>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -397,8 +400,8 @@ export function TemplatePickerDialog({ open, onOpenChange, onCreated }: Template
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="platform-user">Platform users only</SelectItem>
-                          <SelectItem value="public">Public (no auth required)</SelectItem>
+                          <SelectItem value="platform-user">My team (logged-in users)</SelectItem>
+                          <SelectItem value="public">Anyone with the link</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

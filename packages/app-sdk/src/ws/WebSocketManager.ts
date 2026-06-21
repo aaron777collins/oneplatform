@@ -31,6 +31,12 @@ export interface SubscriptionRegistration {
 export interface WsStatus {
   isConnected: boolean;
   reconnectAttempts: number;
+  /**
+   * True when the manager has exhausted all reconnect attempts and given up.
+   * The UI should surface a "Reconnect" button that calls WebSocketManager.connect()
+   * to give the user an explicit recovery path without requiring a page reload.
+   */
+  reconnectExhausted: boolean;
 }
 
 // ─── WebSocketManager ──────────────────────────────────────────────────────────
@@ -49,14 +55,23 @@ export class WebSocketManager {
   private readonly statusListeners = new Set<() => void>();
 
   private static readonly BASE_RECONNECT_MS = 1_000;
-  private static readonly MAX_RECONNECT_MS = 30_000;
   /**
-   * Maximum number of consecutive reconnect attempts before giving up.
-   * Prevents infinite retry loops when no WS endpoint exists (e.g. 404).
-   * After reaching this limit, reconnection is disabled until a manual
-   * call to connect() or a full remount of AppProvider.
+   * Backoff cap: 60 s gives at-most 1 reconnect/minute during long outages
+   * without flooding a recovering server.
    */
-  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private static readonly MAX_RECONNECT_MS = 60_000;
+  /**
+   * Maximum consecutive reconnect attempts before giving up.
+   *
+   * 20 attempts covers ~30 minutes of exponential backoff (1s, 2s, 4s …
+   * capped at 60s) without silently abandoning connections during transient
+   * outages that last tens of minutes. After exhaustion a "Reconnect" button
+   * is surfaced to the user via the `reconnectDisabled` status flag so they
+   * can explicitly retry without a full page reload.
+   *
+   * Callers can pass a custom value to the constructor to override this default.
+   */
+  private static readonly MAX_RECONNECT_ATTEMPTS = 20;
   /** When true, reconnection has been permanently disabled due to exhausted retries. */
   private reconnectDisabled = false;
 
@@ -148,6 +163,7 @@ export class WebSocketManager {
     return {
       isConnected: this.socket?.readyState === 1 /* WebSocket.OPEN */,
       reconnectAttempts: this.reconnectAttempts,
+      reconnectExhausted: this.reconnectDisabled,
     };
   }
 
@@ -243,9 +259,12 @@ export class WebSocketManager {
       this.reconnectDisabled = true;
       console.warn(
         `[app-sdk] WebSocket reconnection disabled after ${this.reconnectAttempts} failed attempts. ` +
-          "The WebSocket endpoint may not be available. " +
-          "Real-time updates will not function until the app is reloaded.",
+          "The WebSocket endpoint may be unavailable. " +
+          "Real-time updates are paused. " +
+          "Call WebSocketManager.connect() or click the 'Reconnect' button to retry.",
       );
+      // Notify status listeners so the UI can surface a "Reconnect" button.
+      // Callers check WsStatus.reconnectExhausted to determine whether to show it.
       this.notifyStatusListeners();
       return;
     }

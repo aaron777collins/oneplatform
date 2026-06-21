@@ -53,9 +53,9 @@ const TRIGGER_ICONS: Record<TriggerType, IconComponent> = {
 };
 
 const TRIGGER_LABELS: Record<TriggerType, string> = {
-  cron: "Scheduled",
-  event: "Event-driven",
-  manual: "Manual",
+  cron: "Runs on a schedule",
+  event: "Runs when data arrives",
+  manual: "Run manually",
 };
 
 // ---------------------------------------------------------------------------

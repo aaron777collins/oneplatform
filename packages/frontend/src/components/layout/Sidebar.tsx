@@ -79,7 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Data Models",
         to: "/ontology",
         icon: Layers,
-        description: "Define your data models and schemas. Create entity types that describe the shape of your data (like Customer, Order, or Product) and the relationships between them.",
+        description: "Define your data models and schemas. Create data tables that describe the shape of your data (like Customer, Order, or Product) and the relationships between them.",
       },
       {
         label: "Explore Data",

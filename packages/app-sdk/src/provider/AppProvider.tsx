@@ -75,17 +75,39 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 // ─── Config reader ────────────────────────────────────────────────────────────
 
 /**
- * Reads and validates window.__OP_APP_CONFIG__.
- * Throws a descriptive error if the config is absent or malformed so that
- * app developers see a clear message in the console rather than a null
- * reference error deep in the component tree.
+ * Resolves the OPAppConfig from (in precedence order):
+ *   1. The explicit `configProp` passed to AppProvider — useful for local dev
+ *      and tests where the platform HTML shell is not present.
+ *   2. The `testOverrides` (appId / tenantId) applied on top of window.__OP_APP_CONFIG__
+ *      — used by the test harness.
+ *   3. `window.__OP_APP_CONFIG__` — the standard production source injected by
+ *      the App Service HTML shell.
+ *
+ * Throws a descriptive error when no valid config can be resolved so that
+ * developers see a clear console message rather than a null-reference error
+ * deep in the component tree.
  */
-function readAppConfig(overrides?: { appId?: string; tenantId?: string }): OPAppConfig {
+function readAppConfig(
+  configProp?: OPAppConfig,
+  overrides?: { appId?: string; tenantId?: string },
+): OPAppConfig {
+  // The explicit config prop takes full precedence — skip window global entirely.
+  if (configProp) {
+    if (typeof configProp.appId !== "string" || typeof configProp.tenantId !== "string") {
+      throw new Error(
+        "[app-sdk] AppProvider config prop is missing required appId or tenantId fields.",
+      );
+    }
+    return configProp;
+  }
+
   const raw = (window as Window & { __OP_APP_CONFIG__?: unknown }).__OP_APP_CONFIG__;
   if (!raw || typeof raw !== "object") {
     throw new Error(
       "[app-sdk] window.__OP_APP_CONFIG__ is missing. " +
-        "Ensure the App Service HTML shell is serving the app correctly.",
+        "Ensure the App Service HTML shell is serving the app correctly, " +
+        "or pass a config prop to AppProvider for local development: " +
+        "<AppProvider config={{ appId: '...', tenantId: '...' }}>",
     );
   }
   const config = raw as Record<string, unknown>;
@@ -150,6 +172,7 @@ export function AppProvider({
   children,
   loadingFallback = null,
   bffBaseUrl,
+  config: configProp,
   _testAppId,
   _testTenantId,
 }: AppProviderProps): React.JSX.Element {
@@ -182,7 +205,9 @@ export function AppProvider({
         const overrides: { appId?: string; tenantId?: string } = {};
         if (_testAppId !== undefined) overrides.appId = _testAppId;
         if (_testTenantId !== undefined) overrides.tenantId = _testTenantId;
-        config = readAppConfig(overrides);
+        // configProp takes precedence over window.__OP_APP_CONFIG__ — used for
+        // local development where the platform HTML shell is not present.
+        config = readAppConfig(configProp, overrides);
         configRef.current = config;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

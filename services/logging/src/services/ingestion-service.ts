@@ -104,13 +104,38 @@ export class BatchAccumulator extends EventEmitter {
 
     const available = getMemoryBufferMax() - this.memoryBuffer.length;
     if (available <= 0) {
-      console.error("In-memory fallback buffer full — events discarded", {
-        discarded: batch.length,
-      });
+      // Memory buffer is full — events are permanently lost here.
+      // In production deployments route failed batches to a DLQ (e.g. a Redis
+      // list or BullMQ dead-letter queue) so operators can replay them after
+      // the DB recovers.
+      // TODO(OP-LOGGING-18): Route discarded log batches to a DLQ for replay.
+      console.error(
+        "In-memory fallback buffer full — events permanently discarded",
+        {
+          discarded: batch.length,
+          memoryBufferSize: this.memoryBuffer.length,
+          error: err.message,
+        },
+      );
       return;
     }
 
     const toBuffer = batch.slice(0, available);
+    const discarded = batch.length - toBuffer.length;
+
+    if (discarded > 0) {
+      // Partial discard: buffer absorbed what it could; the rest are lost.
+      console.error(
+        "In-memory fallback buffer partially full — some events permanently discarded",
+        {
+          discarded,
+          buffered: toBuffer.length,
+          memoryBufferSize: this.memoryBuffer.length,
+          error: err.message,
+        },
+      );
+    }
+
     this.memoryBuffer.push(...toBuffer);
     this.scheduleRetry();
   }

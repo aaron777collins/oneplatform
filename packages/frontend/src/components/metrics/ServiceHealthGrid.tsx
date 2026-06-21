@@ -35,17 +35,33 @@ interface HealthzResponse {
   [key: string]: unknown;
 }
 
-/** All platform services to check. The gateway is always included. */
-const ALL_SERVICES = [
-  "Gateway",
-  "Auth",
-  "Ingestion",
-  "Ontology",
-  "Pipeline",
-  "Execution",
-  "App",
-  "Logging",
-  "Plugin",
+/**
+ * Maps the API service key (lowercase) to a user-friendly display name.
+ * Keep in sync with SERVICE_LABELS in DashboardPage.
+ */
+const SERVICE_FRIENDLY_NAMES: Record<string, string> = {
+  gateway:   "API Gateway",
+  auth:      "Authentication",
+  ingestion: "Data Ingestion",
+  ontology:  "Data Models",
+  pipeline:  "Pipeline Engine",
+  execution: "Execution Engine",
+  app:       "App Runtime",
+  logging:   "Logging",
+  plugin:    "Plugin System",
+};
+
+/** Canonical API key names for all platform services (used for health lookups). */
+const ALL_SERVICE_KEYS = [
+  "gateway",
+  "auth",
+  "ingestion",
+  "ontology",
+  "pipeline",
+  "execution",
+  "app",
+  "logging",
+  "plugin",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -87,15 +103,15 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
 
         // If the gateway returns per-service status, use it
         if (result.services !== undefined && Object.keys(result.services).length > 0) {
-          const services: ServiceHealth[] = ALL_SERVICES.map((serviceName) => {
-            const key = serviceName.toLowerCase();
+          const services: ServiceHealth[] = ALL_SERVICE_KEYS.map((key) => {
+            const displayName = SERVICE_FRIENDLY_NAMES[key] ?? key;
             const entry = result.services?.[key];
             if (entry === undefined) {
-              return { name: serviceName, status: "unknown" as ServiceStatus };
+              return { name: displayName, status: "unknown" as ServiceStatus };
             }
             const isUp = entry.status === "ok" || entry.status === "healthy";
             return {
-              name: serviceName,
+              name: displayName,
               status: isUp ? "healthy" : entry.status === "degraded" ? "degraded" : "down",
               latencyMs: entry.latencyMs,
             } as ServiceHealth;
@@ -106,15 +122,16 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
         // Fallback: only gateway status available
         const isHealthy = result.status === "ok" || result.status === "healthy";
         return {
-          data: ALL_SERVICES.map((serviceName) => {
-            if (serviceName === "Gateway") {
+          data: ALL_SERVICE_KEYS.map((key) => {
+            const displayName = SERVICE_FRIENDLY_NAMES[key] ?? key;
+            if (key === "gateway") {
               return {
-                name: "Gateway",
+                name: displayName,
                 status: isHealthy ? "healthy" : "degraded",
                 latencyMs,
               } as ServiceHealth;
             }
-            return { name: serviceName, status: "unknown" as ServiceStatus };
+            return { name: displayName, status: "unknown" as ServiceStatus };
           }),
         };
       } catch (err) {
@@ -124,8 +141,8 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
           (err instanceof ApiError && err.statusCode >= 500);
         const status: ServiceStatus = isNetworkError ? "down" : "unknown";
         return {
-          data: ALL_SERVICES.map((serviceName) => ({
-            name: serviceName,
+          data: ALL_SERVICE_KEYS.map((key) => ({
+            name: SERVICE_FRIENDLY_NAMES[key] ?? key,
             status,
             latencyMs: Date.now() - start,
           })),
@@ -142,7 +159,7 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
     return (
       <div className={className}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {Array.from({ length: ALL_SERVICES.length }).map((_, i) => (
+          {Array.from({ length: ALL_SERVICE_KEYS.length }).map((_, i) => (
             <div key={i} className="flex items-center gap-2">
               <Skeleton className="h-2.5 w-2.5 rounded-full" />
               <Skeleton className="h-4 w-24" />

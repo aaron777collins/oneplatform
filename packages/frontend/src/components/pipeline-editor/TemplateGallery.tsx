@@ -78,20 +78,20 @@ interface TriggerOption {
 const TRIGGER_OPTIONS: TriggerOption[] = [
   {
     value: "manual",
-    label: "Manual",
-    description: "Run on demand via the UI or API",
+    label: "Run manually (on-demand)",
+    description: "Start the pipeline yourself via the UI or API whenever you're ready",
     icon: Plug,
   },
   {
     value: "cron",
-    label: "Schedule (cron)",
-    description: "Run automatically on a time schedule",
+    label: "Run on a schedule",
+    description: "Run automatically at a fixed time or interval (e.g. every hour, daily at 9 AM)",
     icon: Clock,
   },
   {
     value: "event",
-    label: "Webhook / Event",
-    description: "Run when an external event arrives",
+    label: "Run when data arrives",
+    description: "Trigger automatically whenever an event or webhook is received",
     icon: Webhook,
   },
 ];

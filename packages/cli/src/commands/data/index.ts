@@ -11,10 +11,38 @@ import { readFileSync, writeFileSync, createReadStream, statSync } from "node:fs
 
 interface QueryOpts {
   filter?: string; sort?: string; sortDir?: string;
-  limit?: string; cursor?: string;
+  limit?: string; cursor?: string; fields?: string;
 }
+interface UpdateOpts { file?: string }
 interface ImportOpts { file: string; format?: string; batchSize?: string; dryRun?: boolean }
 interface ExportOpts { filter?: string; format?: string; out?: string }
+
+/**
+ * Parse a comma-separated --fields string into an array of field names.
+ * Trims whitespace and discards empty tokens so "--fields id, name," works.
+ */
+function parseFieldsList(raw: string): string[] {
+  return raw.split(",").map((f) => f.trim()).filter(Boolean);
+}
+
+/**
+ * Filter a record to only include the requested fields.
+ * Fields not present in the record are silently omitted rather than included
+ * as undefined, so output rows are never padded with empty values.
+ */
+function projectRecord(record: unknown, fields: string[]): unknown {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) {
+    return record;
+  }
+  const obj = record as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(obj, field)) {
+      result[field] = obj[field];
+    }
+  }
+  return result;
+}
 
 async function queryAction(entityType: string, opts: QueryOpts, ctx: CommandContext): Promise<void> {
   const query: Record<string, unknown> = {};
@@ -24,11 +52,16 @@ async function queryAction(entityType: string, opts: QueryOpts, ctx: CommandCont
   if (opts.limit) query["limit"] = opts.limit;
   // cursor-based pagination: the API does not accept offset.
   if (opts.cursor) query["cursor"] = opts.cursor;
+  // Pass server-side field selection when the API supports it; client-side
+  // projection is also applied below so partial APIs still honour --fields.
+  if (opts.fields) query["fields"] = opts.fields;
 
   const results = await ctx.http.get<{ data?: unknown[]; nextCursor?: string | null } | unknown[]>(
     `/api/v1/data/${encodeURIComponent(entityType)}`,
     query,
   );
+
+  const requestedFields = opts.fields ? parseFieldsList(opts.fields) : null;
 
   // The API returns either a paginated envelope { data, nextCursor } or a plain array.
   // Handle both shapes so this command works regardless of transport unwrapping.
@@ -43,10 +76,16 @@ async function queryAction(entityType: string, opts: QueryOpts, ctx: CommandCont
     }));
   }
 
+  function applyFields(rows: unknown[]): unknown[] {
+    if (!requestedFields) return rows;
+    return rows.map((row) => projectRecord(row, requestedFields));
+  }
+
   if (Array.isArray(results)) {
-    ctx.renderer.render(results, autoDetectColumns(results));
+    const rows = applyFields(results);
+    ctx.renderer.render(rows, autoDetectColumns(rows));
   } else {
-    const data = results.data ?? [];
+    const data = applyFields(results.data ?? []);
     ctx.renderer.render(data, autoDetectColumns(data));
     // Print the next cursor to stderr so it can be captured separately from
     // the data output and passed to the next invocation via --cursor.
@@ -81,8 +120,19 @@ async function createAction(entityType: string, opts: { file?: string }, ctx: Co
   ctx.renderer.success(`Created record ${resp.id}.`);
 }
 
-async function updateAction(entityType: string, id: string, opts: { file: string }, ctx: CommandContext): Promise<void> {
-  const data = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
+async function updateAction(entityType: string, id: string, opts: UpdateOpts, ctx: CommandContext): Promise<void> {
+  let data: unknown;
+  if (opts.file === undefined || opts.file === "-") {
+    // No --file provided or explicitly set to '-': read JSON from stdin.
+    // This allows piping: echo '{"status":"active"}' | op data update Order abc123
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    }
+    data = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } else {
+    data = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
+  }
   await ctx.http.patch(
     `/api/v1/data/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}`,
     data,
@@ -160,6 +210,7 @@ export function registerData(program: Command): void {
     .option("--sort-dir <dir>", "Sort direction: asc|desc")
     .option("--limit <n>", "Maximum records to return")
     .option("--cursor <token>", "Pagination cursor from a previous response (replaces --offset)")
+    .option("--fields <fields>", "Comma-separated field names to include in output (e.g. id,name,status)")
     .action(withContext<[string, QueryOpts]>(queryAction));
 
   data.command("get")
@@ -178,8 +229,8 @@ export function registerData(program: Command): void {
     .description("Partially update a record")
     .argument("<entity-type>", "Entity type name")
     .argument("<id>", "Record ID")
-    .requiredOption("--file <data.json>", "JSON file with fields to update")
-    .action(withContext<[string, string, { file: string }]>(updateAction));
+    .option("--file <data.json>", "JSON file with fields to update. Reads from stdin if omitted or set to '-'.")
+    .action(withContext<[string, string, UpdateOpts]>(updateAction));
 
   data.command("delete")
     .description("Delete a record")

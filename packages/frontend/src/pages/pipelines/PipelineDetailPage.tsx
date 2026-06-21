@@ -17,6 +17,7 @@ import { RelativeTime } from "@/components/shared/RelativeTime.js";
 import { RunHistoryTable } from "@/components/pipelines/RunHistoryTable.js";
 import { RunStatusBadge } from "@/components/pipelines/RunStatusBadge.js";
 import { useApiClient, type ApiResponse, type PaginatedResponse, ApiError } from "@/lib/api-client.js";
+import { cronToHuman } from "@/lib/utils.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { RunStatus } from "@/components/pipelines/RunStatusBadge.js";
 import type { TriggerType } from "@/components/pipelines/PipelineCard.js";
@@ -182,11 +183,24 @@ export function PipelineDetailPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm capitalize">{pipeline.triggerType}</p>
+                    <p className="text-sm">
+                      {pipeline.triggerType === "cron"
+                        ? "Runs on a schedule"
+                        : pipeline.triggerType === "event"
+                        ? "Runs when data arrives"
+                        : "Run manually"}
+                    </p>
                     {pipeline.cronExpression !== undefined && (
-                      <p className="mt-0.5 font-mono text-xs text-[var(--color-muted-foreground)]">
-                        {pipeline.cronExpression}
-                      </p>
+                      <>
+                        {/* Plain-English schedule for non-technical users */}
+                        <p className="mt-0.5 text-xs text-[var(--color-muted-foreground)]">
+                          {cronToHuman(pipeline.cronExpression)}
+                        </p>
+                        {/* Raw expression retained for power users who need it */}
+                        <p className="mt-0.5 font-mono text-[10px] text-[var(--color-muted-foreground)]/70">
+                          {pipeline.cronExpression}
+                        </p>
+                      </>
                     )}
                   </CardContent>
                 </Card>

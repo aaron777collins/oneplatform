@@ -8,11 +8,12 @@
  * Connection state (`isConnected`, `reconnectAttempts`) reflects the shared
  * WebSocket connection — not per-subscription status.
  *
- * **Options stability:** `options.filter`, `options.events`, and `options.onEvent`
- * are intentionally excluded from the `useEffect` dependency array. This prevents
- * re-registering the subscription on every render when callers pass inline
- * object/function literals. App developers who need dynamic filter changes must
- * memoize their options object with `useMemo`.
+ * **Options reactivity:** `options.filter` and `options.events` are compared
+ * by serialized value (JSON.stringify) on every render. When their serialized
+ * form changes, the hook automatically unsubscribes from the old registration
+ * and re-subscribes with the new parameters. Callers do not need to memoize
+ * their options object — passing a new object literal with identical values
+ * does not trigger a re-registration.
  *
  * @param entity  - The ontology entity type name to subscribe to.
  * @param options - Optional event type filter and `onEvent` callback.
@@ -32,12 +33,12 @@ import { useAppContext } from "../provider/AppContext.js";
 import { useQueryInvalidation } from "./useQueryInvalidation.js";
 import type {
   EntityEvent,
+  EntityEventType,
+  FilterSpec,
   SubscriptionOptions,
   SubscriptionResult,
 } from "../types/entities.js";
 import type { WsStatus } from "../ws/WebSocketManager.js";
-
-declare const __OP_DEV__: boolean | undefined;
 
 export function useSubscription<T = unknown>(
   entity: string,
@@ -60,45 +61,22 @@ export function useSubscription<T = unknown>(
     React.useCallback(() => wsManager.getStatus(), [wsManager]),
   );
 
-  // Use a ref to hold the latest options so the effect closure does not go stale
-  // when options change, without needing to re-register the subscription.
-  const optionsRef = React.useRef(options);
-
-  // Track whether the component has mounted so we can detect post-mount changes
-  // to filter/events. Changes after mount are silently ignored by the server-side
-  // subscription (the registration is not re-sent), so we warn in development to
-  // help callers catch the mistake. Use a key prop or memoize the options object
-  // to force a clean remount when filter/events must change dynamically.
-  const isMountedRef = React.useRef(false);
-  const prevFilterRef = React.useRef(options.filter);
-  const prevEventsRef = React.useRef(options.events);
-
+  // Keep the latest onEvent ref so the registration closure does not go stale
+  // when the caller passes an inline function that changes reference each render.
+  const onEventRef = React.useRef(options.onEvent);
   React.useEffect(() => {
-    if (
-      isMountedRef.current &&
-      (typeof __OP_DEV__ !== "undefined" ? __OP_DEV__ : true)
-    ) {
-      const filterChanged = options.filter !== prevFilterRef.current;
-      const eventsChanged = options.events !== prevEventsRef.current;
-      if (filterChanged || eventsChanged) {
-        console.warn(
-          `[app-sdk] useSubscription("${entity}"): ` +
-            (filterChanged ? "filter " : "") +
-            (eventsChanged ? "events " : "") +
-            "changed after mount. The server-side subscription still uses the original values. " +
-            "Add a key prop or memoize the options object to force a clean remount when these values change.",
-        );
-      }
-    }
-    prevFilterRef.current = options.filter;
-    prevEventsRef.current = options.events;
-    optionsRef.current = options;
-    isMountedRef.current = true;
+    onEventRef.current = options.onEvent;
   });
 
+  // Serialize filter and events to stable strings so we only re-register when
+  // the values actually change — not just the object reference. This lets
+  // callers pass inline object literals without triggering spurious re-registrations.
+  const filterKey = JSON.stringify(options.filter ?? null);
+  const eventsKey = JSON.stringify(options.events ?? null);
+
   // autoInvalidate is read directly from the current render's options, not from
-  // optionsRef: it is a boolean consumed by useQueryInvalidation's dependency
-  // array and must reflect the caller's latest value at render time.
+  // a ref: it is a boolean consumed by useQueryInvalidation's dependency array
+  // and must reflect the caller's latest value at render time.
   const autoInvalidate = options.autoInvalidate !== false;
 
   // Delegate cache invalidation to its own hook (Single Responsibility).
@@ -112,29 +90,37 @@ export function useSubscription<T = unknown>(
       entity,
       onEvent: (event: EntityEvent<unknown>) => {
         setLastEvent(event as EntityEvent<T>);
-        optionsRef.current.onEvent?.(event);
+        onEventRef.current?.(event);
       },
     };
-    if (optionsRef.current.filter !== undefined) {
-      registration.filter = optionsRef.current.filter;
+
+    // Deserialize from the stable key strings so the registration always reflects
+    // the serialized values that triggered this effect, not a stale closure.
+    // Cast to the exact non-optional types — exactOptionalPropertyTypes requires
+    // that we never assign `T | undefined` to an optional property typed as `T`.
+    const parsedFilter = JSON.parse(filterKey) as FilterSpec | null;
+    const parsedEvents = JSON.parse(eventsKey) as EntityEventType[] | null;
+    if (parsedFilter !== null) {
+      registration.filter = parsedFilter;
     }
-    if (optionsRef.current.events !== undefined) {
-      registration.events = optionsRef.current.events;
+    if (parsedEvents !== null) {
+      registration.events = parsedEvents;
     }
+
     wsManager.register(id, registration);
 
     return () => {
       wsManager.unregister(id);
     };
-    // Intentional: only re-register when the entity or manager changes.
-    // filter/events/onEvent changes are handled via optionsRef without
-    // re-registration. This is documented in the spec as a design trade-off.
+    // Re-register whenever entity, manager, or the serialized filter/events values change.
+    // filterKey and eventsKey are stable strings that only change when the values change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, entity, wsManager]);
+  }, [id, entity, wsManager, filterKey, eventsKey]);
 
   return {
     lastEvent,
     isConnected: status.isConnected,
     reconnectAttempts: status.reconnectAttempts,
+    reconnectExhausted: status.reconnectExhausted,
   };
 }

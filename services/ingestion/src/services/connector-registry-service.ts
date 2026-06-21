@@ -133,7 +133,15 @@ interface RegistryRecord {
 // ---------------------------------------------------------------------------
 
 export function createConnectorRegistryService(): ConnectorRegistryService {
-  // type -> RegistryRecord. Built-ins are keyed by their stable type string.
+  // In-memory Map is intentional for single-instance deployments: the registry
+  // is rebuilt at startup from BUILTIN_CONNECTOR_MANIFESTS and populated at
+  // runtime via registerConnector(). State resets on process restart, which is
+  // acceptable because built-in descriptors are always re-registered.
+  //
+  // HA / multi-instance deployments should back this with Redis (HSET/HGETALL
+  // per connector type) or a Postgres table so registrations survive restarts
+  // and are consistent across replicas.
+  // TODO(OP-INFRA-42): Back ConnectorRegistryService with Redis for HA support.
   const registry = new Map<string, RegistryRecord>();
 
   // ---------------------------------------------------------------------------

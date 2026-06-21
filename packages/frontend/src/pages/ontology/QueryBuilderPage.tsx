@@ -13,7 +13,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   Plus, Trash2, Play, Download, ChevronLeft, ChevronRight,
   AlertCircle, X, BarChart3, LineChart as LineChartIcon,
-  PieChart as PieChartIcon, Save, FolderOpen, Eye, Layers,
+  PieChart as PieChartIcon, Save, FolderOpen, Eye, Layers, Code,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -127,6 +127,15 @@ interface AggregateUI {
   alias: string;
 }
 
+/** A user-defined computed column expressed as a raw expression string (e.g. "price * quantity"). */
+interface CalculatedFieldUI {
+  id: string;
+  /** Raw SQL-like expression the user types, e.g. "price * quantity" */
+  expression: string;
+  /** Column alias shown in results */
+  alias: string;
+}
+
 interface StructuredQuery {
   entityType: string;
   select: string[];
@@ -164,6 +173,7 @@ interface SavedQuery {
   groupByClauses: GroupByUI[];
   orderByClauses: OrderByUI[];
   aggregates: AggregateUI[];
+  calculatedFields: CalculatedFieldUI[];
   limitStr: string;
 }
 
@@ -239,12 +249,13 @@ function buildSqlPreview(params: {
   entityType: string;
   selectedFields: Set<string>;
   aggregates: AggregateUI[];
+  calculatedFields: CalculatedFieldUI[];
   whereClauses: WhereClauseUI[];
   groupByClauses: GroupByUI[];
   orderByClauses: OrderByUI[];
   limitStr: string;
 }): string {
-  const { entityType, selectedFields, aggregates, whereClauses, groupByClauses, orderByClauses, limitStr } = params;
+  const { entityType, selectedFields, aggregates, calculatedFields, whereClauses, groupByClauses, orderByClauses, limitStr } = params;
 
   if (!entityType) return "-- Select an entity type to preview the query";
 
@@ -255,6 +266,12 @@ function buildSqlPreview(params: {
       .map((a) => {
         const expr = `${a.fn}(${a.field})`;
         return a.alias ? `${expr} AS ${a.alias}` : expr;
+      }),
+    ...calculatedFields
+      .filter((c) => c.expression.trim())
+      .map((c) => {
+        const expr = c.expression.trim();
+        return c.alias.trim() ? `${expr} AS ${c.alias.trim()}` : expr;
       }),
   ];
 
@@ -522,6 +539,46 @@ function GroupByRow({ groupBy, fieldOptions, onChange, onRemove }: GroupByRowPro
         size="icon"
         onClick={onRemove}
         aria-label="Remove group"
+        className="shrink-0 self-end sm:self-auto"
+      >
+        <Trash2 className="h-4 w-4" aria-hidden />
+      </Button>
+    </div>
+  );
+}
+
+interface CalculatedFieldRowProps {
+  field: CalculatedFieldUI;
+  onChange: (updated: CalculatedFieldUI) => void;
+  onRemove: () => void;
+}
+
+function CalculatedFieldRow({ field, onChange, onRemove }: CalculatedFieldRowProps) {
+  return (
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+      {/* Raw expression input */}
+      <Input
+        className="flex-1 font-mono text-xs"
+        placeholder="Expression, e.g. price * quantity"
+        value={field.expression}
+        onChange={(e) => onChange({ ...field, expression: e.target.value })}
+        aria-label="Calculated field expression"
+      />
+
+      {/* Column alias */}
+      <Input
+        className="w-full sm:w-36"
+        placeholder="alias (required)"
+        value={field.alias}
+        onChange={(e) => onChange({ ...field, alias: e.target.value })}
+        aria-label="Calculated field alias"
+      />
+
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onRemove}
+        aria-label="Remove calculated field"
         className="shrink-0 self-end sm:self-auto"
       >
         <Trash2 className="h-4 w-4" aria-hidden />
@@ -1118,6 +1175,14 @@ export function QueryBuilderPage() {
   // --- Aggregate functions (only meaningful when groupBy is active) ---
   const [aggregates, setAggregates] = useState<AggregateUI[]>([]);
 
+  // --- Calculated fields (user-defined expressions in the SELECT clause) ---
+  const [calculatedFields, setCalculatedFields] = useState<CalculatedFieldUI[]>([]);
+
+  // --- SQL Mode: when true the user edits raw SQL instead of the visual builder ---
+  const [sqlMode, setSqlMode] = useState(false);
+  // Holds the text in the SQL Mode textarea, initialised from the visual builder preview.
+  const [rawSql, setRawSql] = useState("");
+
   // --- ORDER BY ---
   const [orderByClauses, setOrderByClauses] = useState<OrderByUI[]>([]);
 
@@ -1188,9 +1253,12 @@ export function QueryBuilderPage() {
     setWhereClauses([]);
     setGroupByClauses([]);
     setAggregates([]);
+    setCalculatedFields([]);
     setOrderByClauses([]);
     setQueryResult(null);
     setPage(0);
+    setSqlMode(false);
+    setRawSql("");
     resetChartConfig();
   }, [resetChartConfig]);
 
@@ -1262,6 +1330,22 @@ export function QueryBuilderPage() {
     setAggregates((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
+  // --- Calculated field mutations ---
+  const addCalculatedField = useCallback(() => {
+    setCalculatedFields((prev) => [
+      ...prev,
+      { id: makeId(), expression: "", alias: "" },
+    ]);
+  }, []);
+
+  const updateCalculatedField = useCallback((id: string, updated: CalculatedFieldUI) => {
+    setCalculatedFields((prev) => prev.map((c) => (c.id === id ? updated : c)));
+  }, []);
+
+  const removeCalculatedField = useCallback((id: string) => {
+    setCalculatedFields((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
   // --- ORDER BY mutations ---
   const addOrderBy = useCallback(() => {
     const firstField = fieldOptions[0]?.slug ?? "";
@@ -1285,7 +1369,7 @@ export function QueryBuilderPage() {
       const limit = Math.min(Math.max(parseInt(limitStr, 10) || PAGE_SIZE, 1), 1000);
       const offset = requestPage * limit;
 
-      // Regular field selects + aggregate expressions encoded as strings.
+      // Regular field selects + aggregate expressions + calculated fields encoded as strings.
       // The backend structuredQuerySchema accepts an array of strings in `select`;
       // aggregate functions are expressed as "COUNT(field) AS alias" strings.
       const selectFields = selectedFields.size === 0 ? ["*"] : Array.from(selectedFields);
@@ -1295,10 +1379,13 @@ export function QueryBuilderPage() {
           const expr = `${a.fn}(${a.field})`;
           return a.alias ? `${expr} AS ${a.alias}` : expr;
         });
+      const calculatedSelects = calculatedFields
+        .filter((c) => c.expression.trim() && c.alias.trim())
+        .map((c) => `${c.expression.trim()} AS ${c.alias.trim()}`);
 
       const query: StructuredQuery = {
         entityType: selectedEntityType,
-        select: [...selectFields, ...aggregateSelects],
+        select: [...selectFields, ...aggregateSelects, ...calculatedSelects],
         ...(whereClauses.length > 0 ? {
           where: whereClauses
             .filter((c) => c.field !== "")
@@ -1358,6 +1445,7 @@ export function QueryBuilderPage() {
     groupByClauses,
     orderByClauses,
     aggregates,
+    calculatedFields,
     limitStr,
   };
 
@@ -1369,10 +1457,13 @@ export function QueryBuilderPage() {
     setWhereClauses(q.whereClauses);
     setGroupByClauses(q.groupByClauses ?? []);
     setAggregates(q.aggregates ?? []);
+    setCalculatedFields(q.calculatedFields ?? []);
     setOrderByClauses(q.orderByClauses);
     setLimitStr(q.limitStr);
     setQueryResult(null);
     setPage(0);
+    setSqlMode(false);
+    setRawSql("");
     resetChartConfig();
     setShowSavedQueries(false);
     toast({ title: `Loaded query "${q.name}"` });
@@ -1383,11 +1474,24 @@ export function QueryBuilderPage() {
     entityType: selectedEntityType,
     selectedFields,
     aggregates,
+    calculatedFields,
     whereClauses,
     groupByClauses,
     orderByClauses,
     limitStr,
   });
+
+  // When the user enables SQL Mode, pre-populate the textarea with the current
+  // visual builder SQL so they can refine it rather than starting from scratch.
+  const handleToggleSqlMode = useCallback(() => {
+    setSqlMode((prev) => {
+      if (!prev) {
+        // Switching to SQL mode — pre-populate from the visual builder
+        setRawSql(sqlPreview);
+      }
+      return !prev;
+    });
+  }, [sqlPreview]);
 
   const hasGroupBy = groupByClauses.some((g) => g.field !== "");
 
@@ -1417,6 +1521,18 @@ export function QueryBuilderPage() {
               <FolderOpen className="h-4 w-4 mr-1.5" aria-hidden />
               Saved queries
             </Button>
+            {selectedEntityType && (
+              <Button
+                variant={sqlMode ? "default" : "outline"}
+                size="sm"
+                onClick={handleToggleSqlMode}
+                aria-pressed={sqlMode}
+                aria-label="Toggle SQL mode"
+              >
+                <Code className="h-4 w-4 mr-1.5" aria-hidden />
+                SQL mode
+              </Button>
+            )}
             <Button
               variant="outline"
               onClick={() => void navigate({ to: "/ontology" })}
@@ -1480,6 +1596,38 @@ export function QueryBuilderPage() {
         {/* --- All query configuration sections (only when entity type selected) --- */}
         {selectedEntityType && (
           <>
+            {/* --- SQL Mode textarea --- */}
+            {sqlMode && (
+              <>
+                <Separator />
+                <section aria-labelledby="sql-mode-section-label">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Code className="h-4 w-4 text-[var(--color-muted-foreground)]" aria-hidden />
+                    <h2 id="sql-mode-section-label" className="text-sm font-medium text-[var(--color-foreground)]">
+                      SQL Mode
+                    </h2>
+                    <span className="text-xs text-[var(--color-muted-foreground)]">
+                      — write raw SQL instead of using the visual builder
+                    </span>
+                  </div>
+                  <textarea
+                    className="w-full min-h-[180px] rounded-md border border-[var(--color-input)] bg-[var(--color-background)] p-3 text-xs font-mono text-[var(--color-foreground)] resize-y focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                    aria-label="Raw SQL query"
+                    value={rawSql}
+                    onChange={(e) => setRawSql(e.target.value)}
+                    placeholder="SELECT * FROM EntityType WHERE ..."
+                    spellCheck={false}
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--color-muted-foreground)]">
+                    This SQL is sent directly to the query engine. Switch off SQL mode to return to the visual builder.
+                  </p>
+                </section>
+              </>
+            )}
+
+            {/* --- Visual builder sections (hidden in SQL mode) --- */}
+            {!sqlMode && (
+            <>
             {/* --- Field selector --- */}
             <Separator />
             <section aria-labelledby="fields-section-label">
@@ -1531,6 +1679,42 @@ export function QueryBuilderPage() {
                 <p className="mt-1.5 text-xs text-[var(--color-muted-foreground)]">
                   Select at least one column to include in the query.
                 </p>
+              )}
+            </section>
+
+            {/* --- Calculated fields (expression columns) --- */}
+            <Separator />
+            <section aria-labelledby="calc-section-label">
+              <div className="flex items-center justify-between mb-2">
+                <h2 id="calc-section-label" className="text-sm font-medium text-[var(--color-foreground)]">
+                  Calculated fields
+                </h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addCalculatedField}
+                  disabled={!selectedEntityType}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" aria-hidden />
+                  Add calculated field
+                </Button>
+              </div>
+
+              {calculatedFields.length === 0 ? (
+                <p className="text-sm text-[var(--color-muted-foreground)]">
+                  No calculated fields. Add an expression column like <code className="font-mono text-xs">price * quantity</code>.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {calculatedFields.map((c) => (
+                    <CalculatedFieldRow
+                      key={c.id}
+                      field={c}
+                      onChange={(updated) => updateCalculatedField(c.id, updated)}
+                      onRemove={() => removeCalculatedField(c.id)}
+                    />
+                  ))}
+                </div>
               )}
             </section>
 
@@ -1704,6 +1888,10 @@ export function QueryBuilderPage() {
               </div>
             </section>
 
+            {/* End of visual builder — the sections below are shown in both visual and SQL modes */}
+            </>
+            )}
+
             {/* --- Run / Export row --- */}
             <Separator />
             <div className="flex items-center gap-3">
@@ -1805,8 +1993,8 @@ export function QueryBuilderPage() {
               </section>
             )}
 
-            {/* --- SQL preview also available before running --- */}
-            {!queryResult && selectedEntityType && (
+            {/* --- SQL preview available before running (visual mode only) --- */}
+            {!queryResult && selectedEntityType && !sqlMode && (
               <section aria-labelledby="sql-preview-section-label">
                 <div className="flex items-center gap-2 mb-2">
                   <Eye className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />

@@ -29,7 +29,7 @@ const mockUseAppContext = vi.mocked(useAppContext);
 function createMockWsManager() {
   const registrations = new Map<string, SubscriptionRegistration>();
   const statusListeners = new Set<() => void>();
-  let status: WsStatus = { isConnected: false, reconnectAttempts: 0 };
+  let status: WsStatus = { isConnected: false, reconnectAttempts: 0, reconnectExhausted: false };
 
   const manager = {
     register: vi.fn((id: string, reg: SubscriptionRegistration) => {
@@ -49,11 +49,11 @@ function createMockWsManager() {
     getStatus: vi.fn(() => status),
     // Test helper methods
     simulateConnect() {
-      status = { isConnected: true, reconnectAttempts: 0 };
+      status = { isConnected: true, reconnectAttempts: 0, reconnectExhausted: false };
       for (const l of statusListeners) l();
     },
     simulateDisconnect(attempts = 1) {
-      status = { isConnected: false, reconnectAttempts: attempts };
+      status = { isConnected: false, reconnectAttempts: attempts, reconnectExhausted: false };
       for (const l of statusListeners) l();
     },
     getRegistrations() {

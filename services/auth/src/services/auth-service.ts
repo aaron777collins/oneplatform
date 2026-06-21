@@ -35,7 +35,12 @@ import {
   VerifyTokenExpiredError,
   VerifyTokenUsedError,
   EmailAlreadyVerifiedError,
+  PasswordReuseError,
 } from "./errors.js";
+
+// Maximum number of previous password hashes retained per user.
+// Checked on every password change; new passwords matching any of these are rejected.
+const PASSWORD_HISTORY_DEPTH = 5;
 
 // ---------------------------------------------------------------------------
 // DB row types (internal — not exported)
@@ -52,6 +57,7 @@ interface UserRow {
   roles: string[];
   failed_login_count: number;
   locked_until: Date | null;
+  password_history: string[];
 }
 
 interface TenantRow {
@@ -626,17 +632,51 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       );
     }
 
-    // 4. Hash new password
+    // 4. Load current hash and history for reuse enforcement before hashing the
+    //    new password — that way we avoid a bcrypt.hash call on reused passwords.
+    const userResetResult = await db.query<Pick<UserRow, "password_hash" | "password_history">>(
+      `SELECT password_hash, password_history FROM auth.users WHERE id = $1`,
+      [userId],
+    );
+    const userResetRow = userResetResult.rows[0];
+    // If somehow the user was deleted between token issuance and here, fail safely.
+    if (!userResetRow) {
+      throw new ResetTokenInvalidError("User associated with this reset token no longer exists.");
+    }
+
+    // 4a. Hash new password
     const newHash = await passwordService.hash(newPassword);
 
-    // 5. Postgres transaction: update password, mark token used, revoke sessions
+    // 4b. Enforce password history — reject if new password matches any of the
+    //     last PASSWORD_HISTORY_DEPTH hashes (including the current one).
+    if (userResetRow.password_hash !== null) {
+      const resetHistoryToCheck = [
+        userResetRow.password_hash,
+        ...(userResetRow.password_history ?? []).slice(0, PASSWORD_HISTORY_DEPTH - 1),
+      ];
+      for (const historicHash of resetHistoryToCheck) {
+        if (await passwordService.compare(newPassword, historicHash)) {
+          throw new PasswordReuseError(
+            `Your new password matches one of your last ${PASSWORD_HISTORY_DEPTH} passwords. ` +
+              "Please choose a password you have not used recently.",
+          );
+        }
+      }
+    }
+
+    // 4c. Build updated history array (prepend current, trim to depth)
+    const updatedResetHistory = userResetRow.password_hash !== null
+      ? [userResetRow.password_hash, ...(userResetRow.password_history ?? [])].slice(0, PASSWORD_HISTORY_DEPTH)
+      : (userResetRow.password_history ?? []).slice(0, PASSWORD_HISTORY_DEPTH);
+
+    // 5. Postgres transaction: update password + history, mark token used, revoke sessions
     const client = await db.connect();
     try {
       await client.query("BEGIN");
 
       await client.query(
-        "UPDATE auth.users SET password_hash = $1 WHERE id = $2",
-        [newHash, userId]
+        "UPDATE auth.users SET password_hash = $1, password_history = $2 WHERE id = $3",
+        [newHash, updatedResetHistory, userId]
       );
 
       await client.query(
@@ -704,9 +744,9 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    // 1. Look up user
+    // 1. Look up user — include password_history for reuse enforcement
     const userResult = await db.query<UserRow>(
-      `SELECT id, tenant_id, password_hash
+      `SELECT id, tenant_id, password_hash, password_history
        FROM auth.users
        WHERE id = $1`,
       [userId],
@@ -727,16 +767,38 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       throw new UnauthorizedError("Current password is incorrect.");
     }
 
-    // 4. Hash new password and update
+    // 4. Hash new password
     const newHash = await passwordService.hash(newPassword);
+
+    // 5. Enforce password history — reject if the new password matches any of
+    //    the last PASSWORD_HISTORY_DEPTH hashes (including the current one).
+    //    bcrypt.compare is used for each entry so the check is timing-safe.
+    const historyToCheck = [
+      user.password_hash,
+      ...(user.password_history ?? []).slice(0, PASSWORD_HISTORY_DEPTH - 1),
+    ];
+    for (const historicHash of historyToCheck) {
+      if (await passwordService.compare(newPassword, historicHash)) {
+        throw new PasswordReuseError(
+          `Your new password matches one of your last ${PASSWORD_HISTORY_DEPTH} passwords. ` +
+            "Please choose a password you have not used recently.",
+        );
+      }
+    }
+
+    // 6. Build the updated history: prepend current hash, trim to depth limit
+    const updatedHistory = [
+      user.password_hash,
+      ...(user.password_history ?? []),
+    ].slice(0, PASSWORD_HISTORY_DEPTH);
 
     const client = await db.connect();
     try {
       await client.query("BEGIN");
 
       await client.query(
-        "UPDATE auth.users SET password_hash = $1 WHERE id = $2",
-        [newHash, userId],
+        "UPDATE auth.users SET password_hash = $1, password_history = $2 WHERE id = $3",
+        [newHash, updatedHistory, userId],
       );
 
       // Revoke all active sessions so the user must re-login

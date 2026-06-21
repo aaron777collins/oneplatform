@@ -1045,7 +1045,9 @@ async function fetchWithRetry(
     try {
       const response = await fetchFn();
       if (response.status === 503 && attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        // Jitter (0.5–1.0× multiplier) prevents thundering-herd when many
+        // connector instances retry simultaneously after a service blip.
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
@@ -1053,7 +1055,7 @@ async function fetchWithRetry(
     } catch (err) {
       lastError = err;
       if (attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }

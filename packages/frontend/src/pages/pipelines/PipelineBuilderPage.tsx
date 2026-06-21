@@ -260,9 +260,9 @@ export function PipelineBuilderPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="cron">Scheduled (cron)</SelectItem>
-                    <SelectItem value="event">Event-driven</SelectItem>
+                    <SelectItem value="manual">Run manually (on-demand)</SelectItem>
+                    <SelectItem value="cron">Run on a schedule</SelectItem>
+                    <SelectItem value="event">Run when data arrives</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

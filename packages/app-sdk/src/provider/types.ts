@@ -35,6 +35,20 @@ export interface AppProviderProps {
    */
   bffBaseUrl?: string;
   /**
+   * Explicit app configuration that takes precedence over `window.__OP_APP_CONFIG__`.
+   *
+   * Use this during local development to skip the platform HTML shell injection.
+   * When this prop is provided, `window.__OP_APP_CONFIG__` is ignored entirely.
+   *
+   * @example
+   * ```tsx
+   * // dev-entry.tsx — local development only
+   * const devConfig = { appId: 'my-app-id', tenantId: 'my-tenant-id' };
+   * root.render(<AppProvider config={devConfig}><App /></AppProvider>);
+   * ```
+   */
+  config?: OPAppConfig;
+  /**
    * Override appId for testing.
    * In production this is always read from window.__OP_APP_CONFIG__ and this prop is ignored.
    */

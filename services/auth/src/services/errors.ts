@@ -132,6 +132,17 @@ export class InsufficientScopeError extends AppError {
 }
 
 // ---------------------------------------------------------------------------
+// Password errors
+// ---------------------------------------------------------------------------
+
+export class PasswordReuseError extends AppError {
+  readonly code = "AUTH_PASSWORD_REUSE" as const;
+  // 422 Unprocessable — the request was valid but the new password matches a
+  // recent one and cannot be accepted per the password history policy.
+  readonly statusCode = 422;
+}
+
+// ---------------------------------------------------------------------------
 // OAuth errors
 // ---------------------------------------------------------------------------
 

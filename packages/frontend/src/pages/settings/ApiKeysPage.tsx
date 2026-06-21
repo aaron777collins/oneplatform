@@ -10,7 +10,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Trash2, Eye, EyeOff, RefreshCw, Search } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, RefreshCw, Search, AlertTriangle } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import {
   Form,
@@ -74,6 +74,53 @@ const createKeySchema = z.object({
 type CreateKeyValues = z.infer<typeof createKeySchema>;
 
 type ExpiryPreset = "never" | "30d" | "90d" | "1y" | "custom";
+
+/**
+ * Renders the expiry status for an API key.
+ * - No expiresAt → "Never"
+ * - Expired → "Expired" in red
+ * - Expiring within 7 days → date + orange warning badge
+ * - Otherwise → formatted date
+ */
+function ExpiryCell({ expiresAt }: { expiresAt: string | null | undefined }) {
+  if (expiresAt === undefined || expiresAt === null) {
+    return <span className="text-[var(--color-muted-foreground)]">Never</span>;
+  }
+
+  const expiry = new Date(expiresAt);
+  const now = new Date();
+  const msUntilExpiry = expiry.getTime() - now.getTime();
+  const daysUntilExpiry = msUntilExpiry / (1000 * 60 * 60 * 24);
+  const formattedDate = expiry.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+
+  if (daysUntilExpiry < 0) {
+    // Already expired
+    return (
+      <span className="font-medium text-[var(--color-destructive)]">Expired</span>
+    );
+  }
+
+  if (daysUntilExpiry <= 7) {
+    // Expiring soon — warn the user
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <AlertTriangle
+          className="h-3.5 w-3.5 text-[var(--color-status-warning)]"
+          aria-hidden="true"
+        />
+        <span className="text-[var(--color-status-warning)] font-medium">
+          {formattedDate}
+        </span>
+      </span>
+    );
+  }
+
+  return <span>{formattedDate}</span>;
+}
 
 function expiryPresetToDate(preset: ExpiryPreset): string | undefined {
   if (preset === "never" || preset === "custom") return undefined;
@@ -279,6 +326,7 @@ export function ApiKeysPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Scopes</TableHead>
+              <TableHead>Expires</TableHead>
               <TableHead>Last used</TableHead>
               <TableHead>Created</TableHead>
               <TableHead />
@@ -288,14 +336,14 @@ export function ApiKeysPage() {
             {keysQuery.isLoading ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 5 }).map((__, j) => (
+                  {Array.from({ length: 6 }).map((__, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : keys.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-sm text-[var(--color-muted-foreground)]">
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-[var(--color-muted-foreground)]">
                   No API keys. Create one to enable programmatic access.
                 </TableCell>
               </TableRow>
@@ -305,6 +353,9 @@ export function ApiKeysPage() {
                   <TableCell className="font-medium">{key.name}</TableCell>
                   <TableCell className="text-xs text-[var(--color-muted-foreground)]">
                     {key.scopes.join(", ") || "No scopes"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <ExpiryCell expiresAt={key.expiresAt} />
                   </TableCell>
                   <TableCell className="text-sm">
                     {key.lastUsedAt !== undefined
