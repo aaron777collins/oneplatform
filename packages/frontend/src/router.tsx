@@ -220,6 +220,16 @@ const queryBuilderRoute = createRoute({
   ),
 });
 
+// Data quality must also be registered before :entityType for the same reason.
+const dataQualityRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/ontology/data-quality",
+  component: lazyRouteComponent(
+    () => import("./pages/ontology/DataQualityPage.js"),
+    "DataQualityPage",
+  ),
+});
+
 const entityDetailRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/ontology/$entityType",
@@ -494,6 +504,7 @@ const routeTree = rootRoute.addChildren([
     ontologyRoute,
     migrationsRoute,
     queryBuilderRoute,
+    dataQualityRoute,
     entityDetailRoute,
     pipelinesRoute,
     // newPipelineRoute before $id so the literal "new" wins over the param wildcard

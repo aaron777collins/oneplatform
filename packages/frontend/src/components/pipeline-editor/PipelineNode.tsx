@@ -203,7 +203,22 @@ export function PipelineNode({
 
   return (
     <g role="group" aria-label={`Pipeline step: ${node.label}`}>
-      {/* Input port */}
+      {/* Input port — invisible touch target (44px diameter) sits behind the visible circle
+          to meet the WCAG 2.5.5 minimum touch target size on mobile devices. */}
+      <circle
+        cx={inputPortX}
+        cy={inputPortY}
+        r={22}
+        fill="transparent"
+        stroke="none"
+        aria-hidden="true"
+        onMouseUp={() => onPortDrop(node.id)}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          onPortDrop(node.id);
+        }}
+      />
+      {/* Input port — visible circle */}
       <circle
         cx={inputPortX}
         cy={inputPortY}
@@ -215,9 +230,39 @@ export function PipelineNode({
         strokeWidth={2}
         aria-label="Input port"
         onMouseUp={() => onPortDrop(node.id)}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          onPortDrop(node.id);
+        }}
       />
 
-      {/* Output port */}
+      {/* Output port — invisible touch target */}
+      <circle
+        cx={outputPortX}
+        cy={outputPortY}
+        r={22}
+        fill="transparent"
+        stroke="none"
+        aria-hidden="true"
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          onPortDragStart(node.id, e);
+        }}
+        onTouchStart={(e) => {
+          e.stopPropagation();
+          // Convert touch to a synthetic MouseEvent so onPortDragStart receives
+          // the position data it needs for the pending edge calculation.
+          const touch = e.touches[0];
+          if (touch !== undefined) {
+            onPortDragStart(node.id, {
+              clientX: touch.clientX,
+              clientY: touch.clientY,
+              stopPropagation: () => e.stopPropagation(),
+            } as unknown as React.MouseEvent);
+          }
+        }}
+      />
+      {/* Output port — visible circle */}
       <circle
         cx={outputPortX}
         cy={outputPortY}
@@ -231,6 +276,17 @@ export function PipelineNode({
         onMouseDown={(e) => {
           e.stopPropagation(); // prevent canvas pan on port drag
           onPortDragStart(node.id, e);
+        }}
+        onTouchStart={(e) => {
+          e.stopPropagation();
+          const touch = e.touches[0];
+          if (touch !== undefined) {
+            onPortDragStart(node.id, {
+              clientX: touch.clientX,
+              clientY: touch.clientY,
+              stopPropagation: () => e.stopPropagation(),
+            } as unknown as React.MouseEvent);
+          }
         }}
       />
 

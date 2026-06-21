@@ -13,7 +13,7 @@
  * selects — double-click opens the config panel.
  */
 import * as React from "react";
-import { Undo2, Redo2 } from "lucide-react";
+import { Undo2, Redo2, Plus, X } from "lucide-react";
 import { NodePalette } from "./NodePalette.js";
 import { PipelineCanvas } from "./PipelineCanvas.js";
 import { NodeConfigPanel } from "./NodeConfigPanel.js";
@@ -28,6 +28,7 @@ import {
   snapToGrid,
 } from "./graph-model.js";
 import { pipelineDefinitionToGraph, graphToPipelineDefinition, type ConvertibleDefinition } from "./graph-converter.js";
+import { useIsMobile } from "@/components/mobile/ResponsiveLayout.js";
 import { cn } from "@/lib/utils.js";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,11 @@ export function VisualPipelineEditor({
   onDefinitionChange,
   className,
 }: VisualPipelineEditorProps) {
+  const isMobile = useIsMobile();
+
+  // Mobile sheet state — palette and config panel become bottom sheets on small screens
+  const [mobileSheetOpen, setMobileSheetOpen] = React.useState<"palette" | "config" | null>(null);
+
   const [graph, setGraph] = React.useState<PipelineGraph>(() => {
     if (initialDefinition === undefined) return { nodes: [], edges: [] };
     try {
@@ -155,6 +161,10 @@ export function VisualPipelineEditor({
   function handleNodeDoubleClick(nodeId: string) {
     setSelection({ kind: "node", nodeId });
     setConfigPanelOpen(true);
+    // On mobile, open the config panel as a bottom sheet automatically
+    if (isMobile) {
+      setMobileSheetOpen("config");
+    }
   }
 
   // Called by NodePalette "add" keyboard action — add node at canvas centre
@@ -173,6 +183,49 @@ export function VisualPipelineEditor({
       ],
     });
     setSelection({ kind: "node", nodeId: id });
+  }
+
+  // MobileSheet — a full-width bottom sheet overlay for mobile screens.
+  // Rendered inside the editor so it is scoped to the editor's bounding box
+  // rather than the full viewport. A backdrop click closes the sheet.
+  function MobileSheet({
+    title,
+    onClose,
+    children,
+  }: {
+    title: string;
+    onClose: () => void;
+    children: React.ReactNode;
+  }) {
+    return (
+      <div className="absolute inset-0 z-20 flex flex-col justify-end" aria-modal="true" role="dialog" aria-label={title}>
+        {/* Backdrop */}
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/40"
+          onClick={onClose}
+          aria-label="Close"
+          tabIndex={-1}
+        />
+        {/* Sheet content */}
+        <div className="relative z-10 max-h-[75vh] flex flex-col rounded-t-xl border-t border-[var(--color-border)] bg-[var(--color-card)] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)] shrink-0">
+            <span className="text-sm font-semibold">{title}</span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 hover:bg-[var(--color-muted)] transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {children}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function handleNodeUpdate(nodeId: string, label: string, config: StepConfig) {
@@ -216,33 +269,76 @@ export function VisualPipelineEditor({
         >
           <Redo2 className="h-4 w-4" aria-hidden="true" />
         </button>
+
+        {/* Mobile: floating "+" button to open palette sheet */}
+        <button
+          type="button"
+          onClick={() => setMobileSheetOpen("palette")}
+          className="flex sm:hidden ml-auto items-center gap-1 rounded-md bg-[var(--color-primary)] px-3 py-1 text-xs font-medium text-[var(--color-primary-foreground)] transition-colors"
+          aria-label="Add step"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add step
+        </button>
       </div>
 
       {/* Editor panels */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left: step palette */}
-      <NodePalette onAdd={handlePaletteAdd} />
+        {/* Left: step palette — hidden on mobile, inline on sm+ */}
+        <div className="hidden sm:flex">
+          <NodePalette onAdd={handlePaletteAdd} />
+        </div>
 
-      {/* Centre: canvas */}
-      <PipelineCanvas
-        graph={graph}
-        selection={selection}
-        onSelectionChange={handleSelectionChange}
-        onGraphChange={handleGraphChange}
-        onNodeDoubleClick={handleNodeDoubleClick}
-        className="flex-1"
-      />
-
-      {/* Right: config panel (conditional) */}
-      {selectedNode !== undefined && (
-        <NodeConfigPanel
-          node={selectedNode}
-          allNodes={graph.nodes}
-          onUpdate={handleNodeUpdate}
-          onClose={() => setConfigPanelOpen(false)}
+        {/* Centre: canvas */}
+        <PipelineCanvas
+          graph={graph}
+          selection={selection}
+          onSelectionChange={handleSelectionChange}
+          onGraphChange={handleGraphChange}
+          onNodeDoubleClick={handleNodeDoubleClick}
+          className="flex-1"
         />
-      )}
+
+        {/* Right: config panel — inline on desktop, bottom sheet on mobile */}
+        {selectedNode !== undefined && !isMobile && (
+          <NodeConfigPanel
+            node={selectedNode}
+            allNodes={graph.nodes}
+            onUpdate={handleNodeUpdate}
+            onClose={() => setConfigPanelOpen(false)}
+          />
+        )}
       </div>
+
+      {/* Mobile bottom sheet — palette */}
+      {isMobile && mobileSheetOpen === "palette" && (
+        <MobileSheet
+          title="Add step"
+          onClose={() => setMobileSheetOpen(null)}
+        >
+          <NodePalette
+            onAdd={(type) => {
+              handlePaletteAdd(type);
+              setMobileSheetOpen(null);
+            }}
+          />
+        </MobileSheet>
+      )}
+
+      {/* Mobile bottom sheet — config panel */}
+      {isMobile && mobileSheetOpen === "config" && selectedNode !== undefined && (
+        <MobileSheet
+          title="Configure step"
+          onClose={() => { setConfigPanelOpen(false); setMobileSheetOpen(null); }}
+        >
+          <NodeConfigPanel
+            node={selectedNode}
+            allNodes={graph.nodes}
+            onUpdate={handleNodeUpdate}
+            onClose={() => { setConfigPanelOpen(false); setMobileSheetOpen(null); }}
+          />
+        </MobileSheet>
+      )}
     </div>
   );
 }

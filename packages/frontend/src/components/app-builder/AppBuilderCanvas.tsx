@@ -14,7 +14,7 @@
  */
 
 import * as React from "react";
-import { Plus, Undo2, Redo2, Eye, Pencil, Code2 } from "lucide-react";
+import { Plus, Undo2, Redo2, Eye, Pencil, Code2, Columns2 } from "lucide-react";
 import { useBuilderStore } from "./builder.store.js";
 import { ComponentPalette } from "./ComponentPalette.js";
 import { ComponentWrapper } from "./ComponentWrapper.js";
@@ -22,7 +22,10 @@ import { ComponentPreview } from "./ComponentPreview.js";
 import { ComponentConfigPanel } from "./ComponentConfigPanel.js";
 import { DropZone } from "./DropZone.js";
 import { layoutToReactCode } from "./code-generator.js";
-import type { DragState } from "./types.js";
+import { COLUMN_PRESETS } from "./layout-helpers.js";
+import type { ColumnPreset } from "./layout-helpers.js";
+import type { DragState, LayoutRow } from "./types.js";
+import { useIsMobile } from "@/components/mobile/ResponsiveLayout.js";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -40,6 +43,7 @@ interface AppBuilderCanvasProps {
 
 export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderCanvasProps) {
   const store = useBuilderStore();
+  const isMobile = useIsMobile();
 
   // Drag state is transient UI — lives in component state, not the builder store
   const [activeDrag, setActiveDrag] = React.useState<DragState | null>(null);
@@ -85,8 +89,28 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
   const canUndo = store.history.length > 0;
   const canRedo = store.future.length > 0;
 
+  // Mobile bottom sheet state — palette becomes a tap-to-add sheet on touch screens
+  const [mobilePaletteOpen, setMobilePaletteOpen] = React.useState(false);
+
+  // On mobile, add a component to the first available empty column.
+  // If all columns are occupied, a new row is added so the user can retry.
+  function handleMobilePaletteAdd(paletteType: string) {
+    for (const row of store.layout.rows) {
+      for (const col of row.columns) {
+        if (col.component === undefined) {
+          store.dropFromPalette(paletteType, row.id, col.id);
+          setMobilePaletteOpen(false);
+          return;
+        }
+      }
+    }
+    // No empty slot found — let the user know by closing and adding a row
+    store.addRow();
+    setMobilePaletteOpen(false);
+  }
+
   return (
-    <div className={`flex h-full flex-col overflow-hidden bg-[var(--color-background,#fff)] ${className}`}>
+    <div className={`relative flex h-full flex-col overflow-hidden bg-[var(--color-background,#fff)] ${className}`}>
       {/* Top toolbar */}
       <div className="flex items-center justify-between border-b border-[var(--color-border,#e5e7eb)] px-4 py-2 shrink-0">
         <div className="flex items-center gap-1">
@@ -140,12 +164,25 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
           <Code2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
           <span className="text-[10px]">Editor</span>
         </ToolbarButton>
+
+        {/* Mobile: "Add component" button — replaces the drag-and-drop palette on touch screens */}
+        {isMobile && store.mode === "edit" && (
+          <button
+            type="button"
+            onClick={() => setMobilePaletteOpen(true)}
+            className="ml-2 flex items-center gap-1 rounded-md bg-[var(--color-primary,#6366f1)] px-3 py-1.5 text-xs font-medium text-white transition-colors sm:hidden"
+            aria-label="Add component"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            Add
+          </button>
+        )}
       </div>
 
       {/* Three-panel body */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: component palette (edit mode only) */}
-        {store.mode === "edit" && (
+        {/* Left: component palette (edit mode, desktop only — mobile uses tap-to-add via the palette sheet) */}
+        {store.mode === "edit" && !isMobile && (
           <ComponentPalette
             onDragStart={setActiveDrag}
             onDragEnd={() => setActiveDrag(null)}
@@ -161,6 +198,14 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
           <div className="max-w-5xl mx-auto space-y-3">
             {store.layout.rows.map((row, rowIndex) => (
               <div key={row.id} className="group/row relative">
+                {/* Row layout preset toolbar — visible on hover in edit mode */}
+                {store.mode === "edit" && (
+                  <RowLayoutToolbar
+                    row={row}
+                    onApplyPreset={(preset) => store.applyRowPreset(row.id, preset)}
+                  />
+                )}
+
                 {/* Row container */}
                 <div
                   className="grid gap-3"
@@ -254,8 +299,8 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
           </div>
         </div>
 
-        {/* Right: config panel (shown when a component is selected in edit mode) */}
-        {store.mode === "edit" && selectedComponent !== null && (
+        {/* Right: config panel (shown when a component is selected in edit mode, desktop only) */}
+        {store.mode === "edit" && selectedComponent !== null && !isMobile && (
           <ComponentConfigPanel
             component={selectedComponent}
             onUpdateProps={(props) => store.updateProps(selectedComponent.id, props)}
@@ -267,6 +312,75 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
           />
         )}
       </div>
+
+      {/* Mobile: component palette as a tap-to-add bottom sheet */}
+      {isMobile && mobilePaletteOpen && (
+        <div
+          className="absolute inset-0 z-20 flex flex-col justify-end"
+          aria-modal="true"
+          role="dialog"
+          aria-label="Add component"
+        >
+          {/* Backdrop */}
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setMobilePaletteOpen(false)}
+            aria-label="Close"
+            tabIndex={-1}
+          />
+          <div className="relative z-10 max-h-[70vh] flex flex-col rounded-t-xl border-t border-[var(--color-border,#e5e7eb)] bg-[var(--color-background,#fff)] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[var(--color-border,#e5e7eb)] px-4 py-3 shrink-0">
+              <span className="text-sm font-semibold text-[var(--color-foreground,#111)]">Add component</span>
+              <button
+                type="button"
+                onClick={() => setMobilePaletteOpen(false)}
+                className="rounded p-1 hover:bg-[var(--color-muted,#f3f4f6)] transition-colors"
+                aria-label="Close"
+              >
+                <span aria-hidden="true" className="text-lg leading-none">&times;</span>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {/* Tap mode: clicking a component adds it directly instead of dragging */}
+              <ComponentPalette
+                onDragStart={() => undefined}
+                onDragEnd={() => undefined}
+                onTapAdd={handleMobilePaletteAdd}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile: config panel as a bottom sheet when a component is selected */}
+      {isMobile && store.mode === "edit" && selectedComponent !== null && (
+        <div
+          className="absolute inset-0 z-20 flex flex-col justify-end"
+          aria-modal="true"
+          role="dialog"
+          aria-label="Component settings"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => store.selectComponent(null)}
+            aria-label="Close"
+            tabIndex={-1}
+          />
+          <div className="relative z-10 max-h-[80vh] flex flex-col rounded-t-xl border-t border-[var(--color-border,#e5e7eb)] bg-[var(--color-background,#fff)] overflow-hidden">
+            <ComponentConfigPanel
+              component={selectedComponent}
+              onUpdateProps={(props) => store.updateProps(selectedComponent.id, props)}
+              onUpdateStyles={(styles) => store.updateStyles(selectedComponent.id, styles)}
+              onUpdateDataBinding={(binding) =>
+                store.updateDataBinding(selectedComponent.id, binding)
+              }
+              onClose={() => store.selectComponent(null)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -334,5 +448,42 @@ function RowControlButton({ children, danger = false, className = "", ...rest }:
     >
       {children}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row layout preset toolbar
+// ---------------------------------------------------------------------------
+
+interface RowLayoutToolbarProps {
+  row: LayoutRow;
+  onApplyPreset: (preset: ColumnPreset) => void;
+}
+
+function RowLayoutToolbar({ row, onApplyPreset }: RowLayoutToolbarProps) {
+  // Current column widths summary shown as e.g. "6 | 6"
+  const widthSummary = row.columns.map((c) => c.width).join(" | ");
+
+  return (
+    <div className="mb-1 flex items-center gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
+      <Columns2 className="h-3 w-3 text-[var(--color-muted-foreground,#6b7280)]" aria-hidden="true" />
+      <span className="text-[10px] text-[var(--color-muted-foreground,#6b7280)] font-mono mr-1">
+        [{widthSummary}]
+      </span>
+      {(Object.entries(COLUMN_PRESETS) as Array<[ColumnPreset, { label: string; widths: number[] }]>).map(
+        ([preset, { label }]) => (
+          <button
+            key={preset}
+            type="button"
+            onClick={() => onApplyPreset(preset)}
+            title={`Apply layout: ${label}`}
+            aria-label={`Set row to ${label}`}
+            className="rounded px-1.5 py-0.5 text-[9px] font-medium bg-[var(--color-muted,#f3f4f6)] text-[var(--color-muted-foreground,#6b7280)] hover:bg-[var(--color-primary,#6366f1)]/10 hover:text-[var(--color-primary,#6366f1)] transition-colors"
+          >
+            {label}
+          </button>
+        ),
+      )}
+    </div>
   );
 }

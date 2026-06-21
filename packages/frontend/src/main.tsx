@@ -9,6 +9,7 @@ import { createApiClient, ApiClientContext, configureAuthStore } from "@/lib/api
 import { queryClient, configureQueryClientAuth } from "@/lib/query-client.js";
 import { useAuthStore } from "@/stores/auth.store.js";
 import { createAppRouter } from "@/router.js";
+import { registerServiceWorker } from "@/lib/pwa.js";
 
 // ---------------------------------------------------------------------------
 // Bootstrap: wire up cross-module dependencies
@@ -42,3 +43,7 @@ createRoot(rootElement).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Register the service worker after first paint so it does not delay TTI.
+// The queryClient is passed so SW SYNC_COMPLETE messages can trigger refetches.
+void registerServiceWorker(queryClient);

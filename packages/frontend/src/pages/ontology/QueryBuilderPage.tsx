@@ -425,14 +425,14 @@ function WhereClauseRow({ clause, fieldOptions, onChange, onRemove }: WhereClaus
   const isNullary = NULLARY_OPERATORS.has(clause.operator);
 
   return (
-    <div className="flex items-center gap-2" role="group" aria-labelledby={labelId}>
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2" role="group" aria-labelledby={labelId}>
       <span id={labelId} className="sr-only">Where condition</span>
 
       <Select
         value={clause.field}
         onValueChange={(v) => onChange({ ...clause, field: v })}
       >
-        <SelectTrigger className="w-40" aria-label="Field">
+        <SelectTrigger className="w-full sm:w-40" aria-label="Field">
           <SelectValue placeholder="Field" />
         </SelectTrigger>
         <SelectContent>
@@ -448,7 +448,7 @@ function WhereClauseRow({ clause, fieldOptions, onChange, onRemove }: WhereClaus
         value={clause.operator}
         onValueChange={(v) => onChange({ ...clause, operator: v as WhereOperator, value: "" })}
       >
-        <SelectTrigger className="w-36" aria-label="Operator">
+        <SelectTrigger className="w-full sm:w-36" aria-label="Operator">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -466,11 +466,11 @@ function WhereClauseRow({ clause, fieldOptions, onChange, onRemove }: WhereClaus
           onChange={(tags) => onChange({ ...clause, value: tags.join(", ") })}
           placeholder="Type a value and press Enter"
           aria-label="Values"
-          className="w-48"
+          className="w-full sm:w-48"
         />
       ) : (
         <Input
-          className="w-48"
+          className="w-full sm:w-48"
           placeholder="value"
           value={clause.value}
           onChange={(e) => onChange({ ...clause, value: e.target.value })}
@@ -483,7 +483,7 @@ function WhereClauseRow({ clause, fieldOptions, onChange, onRemove }: WhereClaus
         size="icon"
         onClick={onRemove}
         aria-label="Remove condition"
-        className="shrink-0"
+        className="shrink-0 self-end sm:self-auto"
       >
         <Trash2 className="h-4 w-4" aria-hidden />
       </Button>
@@ -500,12 +500,12 @@ interface GroupByRowProps {
 
 function GroupByRow({ groupBy, fieldOptions, onChange, onRemove }: GroupByRowProps) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
       <Select
         value={groupBy.field}
         onValueChange={(v) => onChange({ ...groupBy, field: v })}
       >
-        <SelectTrigger className="w-40" aria-label="Group by field">
+        <SelectTrigger className="w-full sm:w-40" aria-label="Group by field">
           <SelectValue placeholder="Field" />
         </SelectTrigger>
         <SelectContent>
@@ -522,7 +522,7 @@ function GroupByRow({ groupBy, fieldOptions, onChange, onRemove }: GroupByRowPro
         size="icon"
         onClick={onRemove}
         aria-label="Remove group"
-        className="shrink-0"
+        className="shrink-0 self-end sm:self-auto"
       >
         <Trash2 className="h-4 w-4" aria-hidden />
       </Button>
@@ -607,12 +607,12 @@ interface OrderByRowProps {
 
 function OrderByRow({ orderBy, fieldOptions, onChange, onRemove }: OrderByRowProps) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
       <Select
         value={orderBy.field}
         onValueChange={(v) => onChange({ ...orderBy, field: v })}
       >
-        <SelectTrigger className="w-40" aria-label="Order by field">
+        <SelectTrigger className="w-full sm:w-40" aria-label="Order by field">
           <SelectValue placeholder="Field" />
         </SelectTrigger>
         <SelectContent>
@@ -628,7 +628,7 @@ function OrderByRow({ orderBy, fieldOptions, onChange, onRemove }: OrderByRowPro
         value={orderBy.direction}
         onValueChange={(v) => onChange({ ...orderBy, direction: v as "asc" | "desc" })}
       >
-        <SelectTrigger className="w-28" aria-label="Direction">
+        <SelectTrigger className="w-full sm:w-28" aria-label="Direction">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -642,7 +642,7 @@ function OrderByRow({ orderBy, fieldOptions, onChange, onRemove }: OrderByRowPro
         size="icon"
         onClick={onRemove}
         aria-label="Remove order"
-        className="shrink-0"
+        className="shrink-0 self-end sm:self-auto"
       >
         <Trash2 className="h-4 w-4" aria-hidden />
       </Button>

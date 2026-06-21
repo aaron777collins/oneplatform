@@ -25,6 +25,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.j
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils.js";
 import { useApiClient } from "@/lib/api-client.js";
+import { useIsMobile } from "@/components/mobile/ResponsiveLayout.js";
 import type { GraphNode, StepConfig } from "./graph-model.js";
 
 // ---------------------------------------------------------------------------
@@ -76,6 +77,7 @@ export function NodeConfigPanel({
   onClose,
   className,
 }: NodeConfigPanelProps) {
+  const isMobile = useIsMobile();
   const [label, setLabel] = React.useState(node.label);
   const [config, setConfig] = React.useState<StepConfig>({ ...node.config });
 
@@ -99,7 +101,11 @@ export function NodeConfigPanel({
   return (
     <aside
       className={cn(
-        "flex h-full w-72 shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-card)]",
+        // On mobile: absolute full-width overlay so it does not squeeze the canvas.
+        // On desktop: inline right-side panel at fixed width.
+        isMobile
+          ? "absolute inset-0 z-10 flex flex-col bg-[var(--color-card)]"
+          : "flex h-full w-72 shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-card)]",
         className
       )}
       aria-label="Step configuration"

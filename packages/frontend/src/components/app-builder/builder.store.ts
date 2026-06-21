@@ -21,7 +21,9 @@ import {
   updateComponentProps,
   updateComponentStyles,
   moveComponent,
+  applyRowPreset,
 } from "./layout-helpers.js";
+import type { ColumnPreset } from "./layout-helpers.js";
 import { getPaletteEntry } from "./palette-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +56,9 @@ interface BuilderState {
 
   /** Move an existing placed component to another column. */
   moveComponent: (fromColumnId: string, toColumnId: string) => void;
+
+  /** Apply a named column preset to a row, redistributing columns. */
+  applyRowPreset: (rowId: string, preset: ColumnPreset) => void;
 
   removeComponent: (componentId: string) => void;
   updateProps: (componentId: string, props: Record<string, unknown>) => void;
@@ -119,6 +124,11 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
   moveComponent: (fromColumnId: string, toColumnId: string) => {
     const { layout } = get();
     set((s) => mutate(s, moveComponent(layout, fromColumnId, toColumnId)));
+  },
+
+  applyRowPreset: (rowId: string, preset: ColumnPreset) => {
+    const { layout } = get();
+    set((s) => mutate(s, applyRowPreset(layout, rowId, preset)));
   },
 
   removeComponent: (componentId: string) => {

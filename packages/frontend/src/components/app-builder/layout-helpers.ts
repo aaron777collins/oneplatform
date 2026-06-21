@@ -16,6 +16,48 @@ import { nanoid } from "nanoid";
 import type { AppLayout, LayoutRow, LayoutColumn, PlacedComponent } from "./types.js";
 
 // ---------------------------------------------------------------------------
+// Preset column layouts
+// ---------------------------------------------------------------------------
+
+/** Named layout presets expressed as column width arrays (must sum to 12). */
+export type ColumnPreset = "1col" | "2col" | "3col" | "1-2" | "2-1";
+
+export const COLUMN_PRESETS: Record<ColumnPreset, { label: string; widths: number[] }> = {
+  "1col":  { label: "1 column",    widths: [12] },
+  "2col":  { label: "2 equal",     widths: [6, 6] },
+  "3col":  { label: "3 equal",     widths: [4, 4, 4] },
+  "1-2":   { label: "1/3 + 2/3",  widths: [4, 8] },
+  "2-1":   { label: "2/3 + 1/3",  widths: [8, 4] },
+};
+
+/**
+ * Apply a column preset to a row, preserving existing components where column
+ * indices overlap. Excess components are dropped (the user already saw a warning
+ * in the UI before committing). Each new column gets a fresh id.
+ */
+export function applyRowPreset(
+  layout: AppLayout,
+  rowId: string,
+  preset: ColumnPreset,
+): AppLayout {
+  const { widths } = COLUMN_PRESETS[preset];
+  return mapRow(layout, rowId, (row) => {
+    const existingComponents = row.columns
+      .filter((c) => c.component !== undefined)
+      .map((c) => c.component!);
+    const columns: LayoutColumn[] = widths.map((width, i) => {
+      const col: LayoutColumn = { id: nanoid(), width };
+      const kept = existingComponents[i];
+      if (kept !== undefined) {
+        return { ...col, component: kept };
+      }
+      return col;
+    });
+    return { ...row, columns };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Row operations
 // ---------------------------------------------------------------------------
 

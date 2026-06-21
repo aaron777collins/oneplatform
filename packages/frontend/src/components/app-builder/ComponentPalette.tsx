@@ -81,13 +81,19 @@ const ICON_MAP: Record<string, SimpleIcon> = {
 interface ComponentPaletteProps {
   onDragStart: (drag: DragState) => void;
   onDragEnd: () => void;
+  /**
+   * Called when the user taps a component on mobile (no drag available).
+   * When provided the cards render as tap targets instead of drag sources.
+   * Must be explicitly typed as `undefined` to satisfy exactOptionalPropertyTypes.
+   */
+  onTapAdd?: ((paletteType: string) => void) | undefined;
 }
 
 // ---------------------------------------------------------------------------
 // ComponentPalette
 // ---------------------------------------------------------------------------
 
-export function ComponentPalette({ onDragStart, onDragEnd }: ComponentPaletteProps) {
+export function ComponentPalette({ onDragStart, onDragEnd, onTapAdd }: ComponentPaletteProps) {
   const [search, setSearch] = React.useState("");
   const [expandedCategories, setExpandedCategories] = React.useState<Set<string>>(
     () => new Set(PALETTE_CATEGORIES),
@@ -162,15 +168,16 @@ export function ComponentPalette({ onDragStart, onDragEnd }: ComponentPalettePro
               onToggle={() => toggleCategory(category)}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
+              onTapAdd={onTapAdd}
             />
           ))
         )}
       </div>
 
-      {/* Usage hint */}
+      {/* Usage hint — adapts to the current interaction mode */}
       <div className="px-3 py-2 border-t border-[var(--color-border,#e5e7eb)]">
         <p className="text-[10px] text-[var(--color-muted-foreground,#6b7280)] text-center">
-          Drag components onto the canvas
+          {onTapAdd !== undefined ? "Tap a component to add it" : "Drag components onto the canvas"}
         </p>
       </div>
     </div>
@@ -188,6 +195,7 @@ interface PaletteGroupProps {
   onToggle: () => void;
   onDragStart: (drag: DragState) => void;
   onDragEnd: () => void;
+  onTapAdd?: ((paletteType: string) => void) | undefined;
 }
 
 function PaletteGroup({
@@ -197,6 +205,7 @@ function PaletteGroup({
   onToggle,
   onDragStart,
   onDragEnd,
+  onTapAdd,
 }: PaletteGroupProps) {
   return (
     <div className="mb-1">
@@ -220,6 +229,7 @@ function PaletteGroup({
               entry={entry}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
+              onTapAdd={onTapAdd}
             />
           ))}
         </div>
@@ -236,12 +246,16 @@ interface PaletteCardProps {
   entry: PaletteEntry;
   onDragStart: (drag: DragState) => void;
   onDragEnd: () => void;
+  onTapAdd?: ((paletteType: string) => void) | undefined;
 }
 
-function PaletteCard({ entry, onDragStart, onDragEnd }: PaletteCardProps) {
+function PaletteCard({ entry, onDragStart, onDragEnd, onTapAdd }: PaletteCardProps) {
   const Icon = ICON_MAP[entry.icon];
+  const isTapMode = onTapAdd !== undefined;
 
   function handleDragStart(e: React.DragEvent) {
+    // When onTapAdd is provided we are in tap mode (mobile sheet) — dragging
+    // is not expected but we allow the browser default rather than blocking it.
     e.dataTransfer.setData(
       "application/x-op-drag",
       JSON.stringify({ source: "palette", paletteType: entry.type }),
@@ -252,11 +266,15 @@ function PaletteCard({ entry, onDragStart, onDragEnd }: PaletteCardProps) {
 
   return (
     <div
-      draggable
-      onDragStart={handleDragStart}
-      onDragEnd={onDragEnd}
-      className="flex cursor-grab active:cursor-grabbing items-center gap-2 rounded-md border border-[var(--color-border,#e5e7eb)] bg-[var(--color-background,#fff)] px-2 py-1.5 hover:border-[var(--color-primary,#6366f1)]/50 hover:shadow-sm transition-all select-none"
-      aria-label={`${entry.label} — ${entry.description}`}
+      draggable={!isTapMode}
+      onDragStart={isTapMode ? undefined : handleDragStart}
+      onDragEnd={isTapMode ? undefined : onDragEnd}
+      role={isTapMode ? "button" : undefined}
+      tabIndex={isTapMode ? 0 : undefined}
+      onClick={isTapMode ? () => onTapAdd(entry.type) : undefined}
+      onKeyDown={isTapMode ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTapAdd(entry.type); } } : undefined}
+      className={`flex items-center gap-2 rounded-md border border-[var(--color-border,#e5e7eb)] bg-[var(--color-background,#fff)] px-2 py-1.5 hover:border-[var(--color-primary,#6366f1)]/50 hover:shadow-sm transition-all select-none ${isTapMode ? "cursor-pointer active:bg-[var(--color-muted,#f3f4f6)]" : "cursor-grab active:cursor-grabbing"}`}
+      aria-label={`${isTapMode ? "Add" : ""} ${entry.label} — ${entry.description}`}
       title={entry.description}
     >
       {Icon !== undefined ? (

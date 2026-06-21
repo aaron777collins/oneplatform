@@ -13,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Pencil, Code2, Trash2, Globe, Lock, ExternalLink, LayoutGrid } from "lucide-react";
+import { Pencil, Code2, Trash2, Globe, Lock, ExternalLink, LayoutGrid, Share2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.js";
 import { Button } from "@/components/ui/button.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
@@ -40,6 +40,7 @@ import { BuildHistoryTable } from "@/components/apps/BuildHistoryTable.js";
 import { BuildStatusBadge } from "@/components/apps/BuildStatusBadge.js";
 import { AppDeployButton } from "@/components/apps/AppDeployButton.js";
 import { AppRollbackDialog } from "@/components/apps/AppRollbackDialog.js";
+import { ShareDialog } from "@/components/apps/ShareDialog.js";
 import { useApiClient, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { AppCardData } from "@/components/apps/AppCard.js";
@@ -71,6 +72,7 @@ export function AppDetailPage() {
 
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [rollbackOpen, setRollbackOpen] = React.useState(false);
+  const [shareOpen, setShareOpen] = React.useState(false);
 
   const query = useQuery({
     queryKey: ["apps", id],
@@ -175,6 +177,10 @@ export function AppDetailPage() {
             >
               <Code2 className="mr-2 h-4 w-4" aria-hidden="true" />
               Code Editor (Advanced)
+            </Button>
+            <Button variant="outline" onClick={() => setShareOpen(true)}>
+              <Share2 className="mr-2 h-4 w-4" aria-hidden="true" />
+              Share
             </Button>
             <AppDeployButton appId={id} />
           </div>
@@ -337,6 +343,14 @@ export function AppDetailPage() {
         appId={id}
         open={rollbackOpen}
         onOpenChange={setRollbackOpen}
+      />
+
+      <ShareDialog
+        appId={id}
+        appSlug={app.slug}
+        currentAccessMode={app.accessMode}
+        open={shareOpen}
+        onOpenChange={setShareOpen}
       />
     </div>
   );

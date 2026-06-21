@@ -29,6 +29,7 @@ import {
   Settings,
   Store,
   Search,
+  ShieldCheck,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -84,6 +85,12 @@ const NAV_GROUPS: NavGroup[] = [
         to: "/ontology/query",
         icon: Search,
         description: "Query and explore your data models interactively. Build queries without writing code.",
+      },
+      {
+        label: "Data Quality",
+        to: "/ontology/data-quality",
+        icon: ShieldCheck,
+        description: "View data completeness and quality scores across all your entities.",
       },
       { label: "Pipelines", to: "/pipelines", icon: GitBranch },
       { label: "Apps", to: "/apps", icon: AppWindow },
