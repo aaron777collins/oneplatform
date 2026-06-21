@@ -287,7 +287,7 @@ try {
     console.error('Permission denied');
   } else if (err instanceof RateLimitError) {
     // 429 — back off
-    const retryAfter = err.retryAfter; // seconds hint, may be null
+    const retryAfter = err.retryAfterSeconds; // seconds hint, may be null
     console.error(`Rate limited. Retry after ${retryAfter}s`);
   } else if (err instanceof CursorExpiredError) {
     // 410 — cursor is older than 24 hours; restart from page 1
@@ -314,7 +314,7 @@ OnePlatformError
     ValidationError       422  — err.fields[], err.constraints[]
     ConfigurationError    SDK misconfiguration, never reaches the network
     PaginationLimitError  collect() maxItems exceeded
-  RateLimitError          429  — err.retryAfter: number | null
+  RateLimitError          429  — err.retryAfterSeconds: number | null
   ServerError             5xx
   NetworkError                 — err.reason: string
 ```

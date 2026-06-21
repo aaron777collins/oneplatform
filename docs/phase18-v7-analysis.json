@@ -1,0 +1,1329 @@
+{
+  "categories": [
+    {
+      "name": "No-Code/Low-Code UX",
+      "findings": [
+        {
+          "id": "NCP-006",
+          "severity": "CRITICAL",
+          "description": "When no connector plugins are installed, the NewConnectorPage shows 'No connector plugins installed' and sends users to a generic /plugins page with developer-facing terminology. The disconnect between 'I want to connect my REST API' and 'install a connector plugin first' is a significant barrier for non-technical users.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/connectors/NewConnectorPage.tsx:234-258",
+          "fix": "Either bundle essential connectors by default so this empty state never occurs, or replace the empty state with an in-line marketplace browser that lets the user install and configure in one flow. At minimum, add a direct 'Browse Connector Marketplace' button linking to /connectors/marketplace instead of the generic /plugins page."
+        },
+        {
+          "id": "NCP-009",
+          "severity": "CRITICAL",
+          "description": "The PipelineBuilderPage opens with an empty canvas and an empty form for name and trigger type. There are no pipeline templates, no quick-start wizard for common patterns like 'Source to Destination', and no guided flow. A non-technical user staring at an empty canvas with a palette of 10 unfamiliar node types has no idea where to begin.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/pipelines/PipelineBuilderPage.tsx:148-258",
+          "fix": "Add a 'Quick Create' wizard flow for new pipelines: Step 1 'Choose source', Step 2 'Choose destination', Step 3 'Configure schedule', Step 4 'Review and create'. Add a template gallery with pre-built patterns: 'API to Database', 'Database to Database', 'Webhook to Processing Pipeline'. Keep the visual editor as 'Advanced' mode."
+        },
+        {
+          "id": "NCD-006",
+          "severity": "CRITICAL",
+          "description": "While the layout model supports columns with widths 1-12, there is NO UI for resizing components on the canvas. The addColumn helper exists in layout-helpers.ts but is never exposed in the builder store or canvas UI. New rows always create a single full-width (12-column) cell. A sales manager cannot create a side-by-side layout without developer intervention.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/layout-helpers.ts:59",
+          "fix": "Add column split/resize controls to the canvas. Implement drag-to-resize handles on column borders. Add an 'Add column' button to each row (visible on hover). Provide preset layout options per row (e.g., '1 column', '2 equal', '3 equal', '1/3 + 2/3')."
+        },
+        {
+          "id": "NCD-007",
+          "severity": "CRITICAL",
+          "description": "The Data Binding tab requires users to understand 'ontology entity types', select from raw slugs, and manually type field names using dot-notation (e.g., 'orders.total_revenue'). There is no field browser, no autocomplete, no preview of available fields, and no sample data preview. If no entity types exist, the message says 'Create one in the Ontology section first'.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/ComponentConfigPanel.tsx:273",
+          "fix": "Replace raw text inputs with a visual field picker that fetches and displays available fields with data type icons. Add a live data preview panel showing sample rows. Replace 'Ontology' terminology with 'Data Sources' or 'Your Data'. Add a guided connection wizard for first-time users."
+        },
+        {
+          "id": "NCD-008",
+          "severity": "CRITICAL",
+          "description": "The component palette originally had ZERO chart/visualization components. Despite recharts being a dependency and chart components existing elsewhere (QueueDepthChart, ErrorRateChart in metrics), none were available in the visual builder palette. A sales manager wanting to build a KPI dashboard with charts could not do so through the visual builder. Note: recent code changes may have added Charts category -- verify current state.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/palette-registry.ts:13",
+          "fix": "Ensure a 'Charts' category exists in the palette registry with BarChart, LineChart, PieChart/DonutChart, AreaChart, and NumberGauge components. Each should have visual prop configuration for axes, colors, labels, legend, and title. Leverage the existing recharts dependency."
+        },
+        {
+          "id": "NCD-010",
+          "severity": "CRITICAL",
+          "description": "The PropField component handles inputTypes boolean, select, textarea, number, and text, but the palette registry defines props with inputType 'richtext' (HtmlBlock.html) and 'json' (DataTable.columns) that have NO corresponding handler. These fall through to the default text input, meaning DataTable column configuration requires typing raw JSON into a single-line text field.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/ComponentConfigPanel.tsx:160",
+          "fix": "Implement dedicated renderers for 'richtext' (embed a lightweight WYSIWYG editor like TipTap) and 'json' inputTypes (build a visual array/object editor with add/remove row buttons). The JSON editor for DataTable columns should use an 'Add Column' button with labeled inputs for header, field, width, and sortable toggle."
+        },
+        {
+          "id": "NCD-011",
+          "severity": "CRITICAL",
+          "description": "A FilterBar component exists with filter types (text search, select, date range, number range, boolean toggle) but there is NO mechanism to connect it to other components (DataTable, StatCard). The FilterBar's onChange is a no-op in preview mode. There is no event bus, no cross-component state linking, and no visual wiring UI.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/palette-registry.ts:152",
+          "fix": "Implement a cross-component event/state system. Add a 'Connections' tab or visual wiring interface where users draw connections from FilterBar outputs to DataTable/Chart inputs. Alternatively, implement automatic filter propagation where components sharing the same data binding entity are automatically filtered."
+        },
+        {
+          "id": "NCD-013",
+          "severity": "CRITICAL",
+          "description": "The AppDetailPage has NO sharing functionality. No 'Share' button, no invite-by-email, no shareable link generation, no role-based access control (viewer/editor/admin), and no team assignment. The only access control is a binary 'public' vs 'platform-user' toggle. A sales manager cannot share a KPI dashboard with specific team members.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/apps/AppDetailPage.tsx:57",
+          "fix": "Add a 'Share' button with a ShareDialog: invite by email with role selection (viewer/editor/admin), generate shareable link with optional expiry, list of current collaborators with role management, team/group sharing, and embed code generation."
+        },
+        {
+          "id": "NCD-015",
+          "severity": "CRITICAL",
+          "description": "The 'Analytics Dashboard' template generates raw React/TypeScript source files (App.tsx, KpiSection.tsx, BarChart.tsx) with inline styles, NOT a visual builder layout (AppLayout JSON). Choosing the dashboard template gives source code editable only in the Monaco code editor, not the visual builder. The template system is fundamentally disconnected from the visual builder.",
+          "file": "/home/ubuntu/topics/oneplatform/services/app/src/templates/dashboard.ts:22",
+          "fix": "Templates should generate AppLayout JSON (rows, columns, placed components with props and data bindings) that loads directly into the visual builder canvas, NOT raw source code. Pre-populate the canvas with StatCard components, chart components, and a FilterBar, all pre-wired to a sample data source."
+        },
+        {
+          "id": "NCP-003",
+          "severity": "HIGH",
+          "description": "QuickStart panel step 2 says 'Define your data model -- Create entity types to describe the shape of your data' which is jargon-heavy. A marketing analyst does not know what an 'entity type' is. The step links to /ontology which is an intimidating academic term.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/dashboard/DashboardPage.tsx:106-142",
+          "fix": "Rename step 2 to 'Set up your data structure' with description 'Tell the platform what your data looks like (e.g., customers, orders, events).' Rename 'Ontology' throughout the UI to 'Data Model' or 'Data Structure.' Add a quick-start template flow that auto-creates common entity types based on the connector chosen in step 1."
+        },
+        {
+          "id": "NCP-008",
+          "severity": "HIGH",
+          "description": "The NodePalette lists 10 step types with developer jargon: 'Execute JS/TS/Python/Go in sandbox', 'Apply a transformer plugin', 'Declarative data transformation'. Both 'Transformer' and 'Transform' are listed with no clear distinction. For a non-technical user wanting 'REST API to PostgreSQL', the palette offers no obvious 'Source' or 'Destination' concept.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/NodePalette.tsx:47-118",
+          "fix": "Reorganize into user-friendly categories: 'Data In' (Source/Connector), 'Process' (Transform, Filter, Map), 'Data Out' (Destination, Webhook), 'Flow Control' (Conditional, Parallel, Wait, Approval). Rename 'Code' to 'Custom Script' and mark it as 'Advanced'. Merge or clearly differentiate 'Transformer' vs 'Transform'."
+        },
+        {
+          "id": "NCP-010",
+          "severity": "HIGH",
+          "description": "The Code step is the first item in the palette and its templates generate TypeScript/JavaScript code. While template parameters are form-based, the generated output is raw TypeScript functions. A non-technical user cannot debug 'export default function transform(records: any[]) { return records.filter(...) }'. The Transform/declarative step type already has visual form builders that should be promoted instead.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/NodeConfigPanel.tsx:289-425",
+          "fix": "For the Transform/declarative step type, promote visual forms (TransformFields at line 1197) as the primary transformation mechanism. Move 'Code' step to an 'Advanced' section of the palette."
+        },
+        {
+          "id": "NCP-018",
+          "severity": "HIGH",
+          "description": "The pipeline canvas uses raw SVG with custom mouse event handlers for pan, zoom, node drag, and connection drawing. There are no on-canvas instructions, no 'Drop a step here to get started' placeholder, and no tutorial. The empty canvas shows only a dot grid pattern. A first-time user would not know how to interact with it.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/PipelineCanvas.tsx:1-20",
+          "fix": "Add an empty-state overlay when there are no nodes: 'Drag a step from the panel on the left to get started, or click a step to add it.' Add a short animated onboarding tooltip sequence. Add visual port labels ('in'/'out') on nodes."
+        },
+        {
+          "id": "NCD-002",
+          "severity": "HIGH",
+          "description": "Only 3 app templates exist: crud-admin, dashboard, and form-builder. The dashboard template is code-centric, generating raw React/TypeScript source files that require manual editing to wire up data, defeating the no-code promise. Competitors offer dozens of dashboard templates.",
+          "file": "/home/ubuntu/topics/oneplatform/services/app/src/templates/index.ts:22",
+          "fix": "Create at least 5-10 dashboard-specific templates (Sales KPI, Marketing Analytics, Support Metrics, Executive Summary, Team Performance). Each should pre-populate the visual builder layout with components already wired to sample data, not generate raw source code."
+        },
+        {
+          "id": "NCD-004",
+          "severity": "HIGH",
+          "description": "After creating an app from a template, the onCreated callback navigates to /apps/$id (the detail page), NOT to the visual builder. The user lands on an overview page showing build status, deploy controls, and settings. They must find and click the 'Visual Builder' button in the header actions.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/apps/TemplatePickerDialog.tsx:196",
+          "fix": "After creating an app (especially from a template), navigate directly to /apps/$id/build (the visual builder) instead of the detail page. Or show a choice: 'Open in Visual Builder' (primary) vs 'Go to app settings' (secondary)."
+        },
+        {
+          "id": "NCD-009",
+          "severity": "HIGH",
+          "description": "StatCard is the only KPI-type component available. It requires manual data entry -- the user must type the value as a string in a text field. There is no way to configure auto-calculation of aggregations (sum, count, average) from a data source.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/palette-registry.ts:57",
+          "fix": "Enhance StatCard with visual configuration for: data source selection, aggregation type (sum/count/avg/min/max), field to aggregate, comparison period, and auto-calculated trend arrow. Add a 'KPI Card' variant that pulls live data."
+        },
+        {
+          "id": "NCD-016",
+          "severity": "HIGH",
+          "description": "The AppDetailPage shows two editor buttons side by side: 'Visual Builder' and 'Edit in Monaco'. A non-technical user does not know what 'Monaco' is. The visual builder generates code via layoutToReactCode() and offers 'Open in Monaco editor', suggesting the visual builder is merely a code generation tool. The two modes appear disconnected.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/apps/AppDetailPage.tsx:164",
+          "fix": "For non-technical users, hide 'Edit in Monaco' behind an 'Advanced' menu or developer mode toggle. Make 'Visual Builder' the primary and default action, renamed to simply 'Edit Dashboard'. If both must coexist, add clear labels: 'Edit visually (no code)' vs 'Edit code (advanced)'."
+        },
+        {
+          "id": "NCD-017",
+          "severity": "HIGH",
+          "description": "The Style tab offers raw CSS concepts: Padding/Margin (raw CSS values like '4px'), Alignment ('flex-start', 'center', 'flex-end', 'stretch'). No visual style controls for background color, border, shadow, text size, or font weight. 'flex-start' and 'stretch' are meaningless to a non-technical user.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/ComponentConfigPanel.tsx:387",
+          "fix": "Replace CSS jargon with visual controls: draggable spacing editor, left/center/right alignment icons, color pickers for background and border, font size and weight controls, border radius and shadow presets. Show a live preview."
+        },
+        {
+          "id": "NCD-018",
+          "severity": "HIGH",
+          "description": "When configuring data binding, there is no preview of actual data. The user selects an entity type and manually types field names but never sees what data looks like or what fields are available. No sample data table, no field list with types, no 'test connection' button. The user works completely blind.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/ComponentConfigPanel.tsx:318",
+          "fix": "Add a data preview section showing 3-5 sample rows from the selected entity type. Display available fields as a clickable list with data types and sample values. Add a 'Preview with data' button that renders the component with real data inline."
+        },
+        {
+          "id": "NCP-002",
+          "severity": "MEDIUM",
+          "description": "The wizard heading says 'Initial setup' with no explanation of what OnePlatform does or what the user will accomplish after setup. No context about the product's value proposition.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/wizard/WizardPage.tsx:34",
+          "fix": "Add a brief value proposition to the WelcomeStep: 'Connect your data sources, build automated pipelines, and visualize your data -- all without writing code.' Include 2-3 example use cases."
+        },
+        {
+          "id": "NCP-004",
+          "severity": "MEDIUM",
+          "description": "The dashboard header just says 'Overview' with no greeting or guided next-action. The Recent Activity panel shows raw telemetry with service names like 'Data Ingestion', 'Pipeline Engine'. The Service Health panel shows colored dots for services like 'PgBouncer' which is meaningless to non-technical users.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/dashboard/DashboardPage.tsx:589",
+          "fix": "Add a greeting bar with prominent call-to-action. Replace raw activity feed with business-level events. Make Service Health collapsible and default-collapsed for non-admin users."
+        },
+        {
+          "id": "NCP-007",
+          "severity": "MEDIUM",
+          "description": "The ConnectorForm dynamically generates form fields from JSON Schema which works well, but quality depends entirely on the schema quality of each plugin. If a plugin author provides minimal schema, users see raw field keys with no guidance.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/connectors/ConnectorForm.tsx:79-113",
+          "fix": "Add a schema quality minimum: require connector schemas to include title, description, and examples. Add default-friendly labels for common field patterns. Add a 'Test Connection' button visible during configuration."
+        },
+        {
+          "id": "NCP-012",
+          "severity": "MEDIUM",
+          "description": "The trigger type dropdown shows 'Scheduled (cron)' and 'Event-driven' -- technical jargon. A marketing analyst does not know what 'cron' means. 'Event-driven' is vague without explanation.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/pipelines/PipelineBuilderPage.tsx:190-194",
+          "fix": "Rename to user-friendly labels: 'Run manually' ('You trigger it when needed'), 'Run on a schedule' ('Runs automatically at set times'), 'Run when data changes' ('Triggers when new data arrives'). Remove '(cron)' from display."
+        },
+        {
+          "id": "NCP-013",
+          "severity": "MEDIUM",
+          "description": "The PipelineDetailPage shows cron expressions as raw text (e.g., '0 9 * * 1') with no human-readable translation, even though ScheduleBuilder already has a describeCron function.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/pipelines/PipelineDetailPage.tsx:183-191",
+          "fix": "Reuse describeCron to display human-readable schedule. Show raw cron expression only in a smaller secondary line or tooltip."
+        },
+        {
+          "id": "NCP-019",
+          "severity": "MEDIUM",
+          "description": "The ConnectorDetailPage 'Schema' tab shows 'Schema drift detected' alerts with developer concepts like type changes from 'varchar' to 'text'. 'Schema drift' is jargon that would confuse non-technical users.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/connectors/ConnectorDetailPage.tsx:295-300",
+          "fix": "Rename 'Schema' tab to 'Data Structure'. Reword drift alert: 'Your data source has changed -- Some columns were added, removed, or changed since the last sync.' Use plain-English type names. Add one-click 'Accept changes and re-sync' button."
+        },
+        {
+          "id": "NCP-020",
+          "severity": "MEDIUM",
+          "description": "QuickStart step 2 uses 'entity types' jargon. A marketing analyst thinks in terms of 'tables' or 'contacts', not 'entity types'. The Ontology page continues this technical framing.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/dashboard/DashboardPage.tsx:115-120",
+          "fix": "Change to 'Describe your data' with description 'Define what your data looks like -- for example, Customers, Orders, or Events. Think of it like setting up columns in a spreadsheet.' Better yet, auto-infer the data model from the connector schema."
+        },
+        {
+          "id": "NCD-001",
+          "severity": "MEDIUM",
+          "description": "The 'New App' button exists but uses app-centric language. A sales manager looking for dashboards may not realize this is where dashboards live. No guided onboarding explains what apps and dashboards are.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/apps/AppsPage.tsx:62",
+          "fix": "Add dashboard-specific language or sub-label: 'Build dashboards, forms, and internal tools'. Consider a 'New Dashboard' shortcut that pre-selects the dashboard template category."
+        },
+        {
+          "id": "NCD-003",
+          "severity": "MEDIUM",
+          "description": "The configure step asks for a 'slug' (developer jargon). The access mode dropdown uses 'Platform users only' vs 'Public' which is unclear to non-technical users.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/apps/TemplatePickerDialog.tsx:93",
+          "fix": "Hide slug field by default. Replace 'Platform users only' with 'My team (requires login)' and 'Public' with 'Anyone with the link'. Add tooltips."
+        },
+        {
+          "id": "NCD-005",
+          "severity": "MEDIUM",
+          "description": "The visual builder uses HTML5 DnD which works but lacks polish. No drag preview, no snap-to-grid feedback, no animated transitions, no on-canvas tooltips. The DropZone 'Drop here' text is 10px font. Functional but bare-bones.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/AppBuilderCanvas.tsx:40",
+          "fix": "Add a custom drag preview. Add snap-to-grid animation. Show a prominent empty-state message. Consider click-to-add as an alternative to drag-and-drop for accessibility."
+        },
+        {
+          "id": "NCD-014",
+          "severity": "MEDIUM",
+          "description": "The access mode display shows 'Public' or 'Platform users only' which are platform-engineer concepts. No granularity for team-level or individual access.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/apps/AppDetailPage.tsx:199",
+          "fix": "Replace with 'Anyone with the link (no login required)' for public and 'Team members (login required)' for platform-user. Add 'Specific people only' option."
+        },
+        {
+          "id": "NCP-011",
+          "severity": "LOW",
+          "description": "The ScheduleBuilder is well-designed with presets, custom interval builder, human-readable descriptions, and Advanced cron toggle. Close to Fivetran-level simplicity. Minor improvements possible.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipelines/ScheduleBuilder.tsx:162-303",
+          "fix": "Add 'Next 3 runs' preview. Add time zone selection. Add day-of-week checkboxes for 'Weekly' preset."
+        },
+        {
+          "id": "NCP-014",
+          "severity": "LOW",
+          "description": "The RunDetailPage has an excellent classifyRunError function categorizing errors into Timeout, Permission, Connection, Validation, and Resource categories with plain-language titles and actionable suggestions. Better than raw stack traces.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/pipelines/RunDetailPage.tsx:66-109",
+          "fix": "Simplify suggestion language further. Add 'Get help' links to documentation for each error category."
+        },
+        {
+          "id": "NCP-016",
+          "severity": "LOW",
+          "description": "The QueryBuilderPage is entirely visual and requires zero SQL knowledge. Users select entity types, toggle column checkboxes, add filters with plain English operators, configure sort, and export CSV. Well-designed for non-technical users.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:474-907",
+          "fix": "Add a 'Save query' button. Add basic chart visualization options. Add natural-language query input powered by AI."
+        }
+      ]
+    },
+    {
+      "name": "Data Analysis & Visualization",
+      "findings": [
+        {
+          "id": "NCA-001",
+          "severity": "CRITICAL",
+          "description": "The sidebar navigation has no dedicated 'Query Builder' or 'Data Explorer' link. The Query Builder page exists at /ontology/query but is completely hidden from the main navigation. An analyst must manually know and type the URL. The OntologyPage also has no link to the query builder. The most important tool for a data analyst is invisible.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/layout/Sidebar.tsx:63-103",
+          "fix": "Add a 'Query Builder' or 'Explore Data' link to the sidebar under the Platform group. Also add a prominent 'Query Data' button to the OntologyPage header actions."
+        },
+        {
+          "id": "NCP-017",
+          "severity": "HIGH",
+          "description": "Query results are displayed as a raw data table with monospace font column headers showing data types like 'text', 'integer', 'timestamp'. No charts, graphs, or visual representations. The only export is CSV. Note: recent code changes may have added a ChartVisualization component -- verify current state at lines 754+.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:889-901",
+          "fix": "Add a 'Visualize' tab or toggle next to the results table with basic chart types: bar, line, pie, and table (current). Let users pick X/Y-axis columns from dropdowns. Use recharts."
+        },
+        {
+          "id": "NCP-015",
+          "severity": "HIGH",
+          "description": "No visible mechanism for failure notifications (email, Slack, webhook) on PipelineDetailPage or PipelineBuilderPage. A user who sets up a daily pipeline needs to know if it fails without manually checking the dashboard.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/pipelines/PipelineDetailPage.tsx:1-241",
+          "fix": "Add a 'Notifications' section where users can configure email alerts on failure. Support Slack webhook notifications. Provide a simple toggle: 'Email me when this pipeline fails' with an email input."
+        },
+        {
+          "id": "NCA-002",
+          "severity": "HIGH",
+          "description": "No data catalog or data dictionary. The OntologyPage shows entity names, field counts, and dates in a table but not field-level detail. To see fields, analysts must click into each entity one at a time. No searchable, browsable catalog showing all entities with their fields at a glance.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/OntologyPage.tsx:99-159",
+          "fix": "Build a Data Catalog page listing all entities with expandable rows showing field name, type, description, and sample values. Include global search spanning entity names, field names, and descriptions."
+        },
+        {
+          "id": "NCA-006",
+          "severity": "HIGH",
+          "description": "Export is limited to CSV only. No Excel (.xlsx), PDF, or JSON export. The CSV export only exports the current page of results (limited by 1000-row cap), not the full result set.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:646-652",
+          "fix": "Add Excel export using SheetJS, PDF export using jsPDF, and JSON export. For large result sets, implement server-side streaming export bypassing pagination. Add an 'Export' dropdown menu with format options."
+        },
+        {
+          "id": "NCA-009",
+          "severity": "HIGH",
+          "description": "No cross-entity JOIN support. The query builder operates on a single entity at a time. Despite the ontology supporting relationships between entities, the query service cannot join related data. An analyst cannot answer 'show me orders with customer names' without two separate queries.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:597-632",
+          "fix": "Add JOIN support to the query builder and backend query service. When an entity has relationships, show a 'Join Related Data' section that lets analysts include fields from related entities."
+        },
+        {
+          "id": "NCA-010",
+          "severity": "HIGH",
+          "description": "No date-based analysis grouping. No options to group results by day, week, month, quarter, or year. For 'monthly sales trends' or 'weekly active users', analysts must manually construct date filters for each period.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:474-907",
+          "fix": "When a date field is selected in GROUP BY, show a granularity picker (minute, hour, day, week, month, quarter, year). In the backend, apply PostgreSQL date_trunc() before grouping."
+        },
+        {
+          "id": "NCA-013",
+          "severity": "HIGH",
+          "description": "A data quality service exists on the backend calculating quality scores, null rates, type distributions, and anomaly detection. However, there is NO frontend dashboard to surface this. Quality data is stored and logged but invisible in the UI. Analysts have no way to assess data completeness.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/data-quality-service.ts:1-58",
+          "fix": "Build a Data Quality dashboard page accessible from the sidebar. Show per-entity quality scores, per-field null rates, volume trends, and active issues. Add quality indicators to the entity list on OntologyPage."
+        },
+        {
+          "id": "NCA-014",
+          "severity": "HIGH",
+          "description": "The EntityDetailPage is a schema editor, not a data browser. When an analyst clicks into an entity, they see a form to edit name, fields, and relationships -- not data records. No way to preview sample data, see record counts, or browse actual data.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/EntityDetailPage.tsx:119-154",
+          "fix": "Add a 'Data Preview' tab showing first 50-100 records with record count and field completeness. Add a 'Query this entity' button opening QueryBuilderPage pre-populated. Keep schema editor on a separate 'Schema' tab."
+        },
+        {
+          "id": "NCA-007",
+          "severity": "MEDIUM",
+          "description": "No scheduled report capability. An analyst cannot set up a query to run automatically and have results emailed or posted to Slack. The pipeline scheduling system exists but only for data pipelines, not for analyst queries.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:474-907",
+          "fix": "Build report scheduling: let analysts schedule saved queries with cron schedule and delivery via email (CSV/PDF attachment) or webhook. Leverage existing BullMQ infrastructure."
+        },
+        {
+          "id": "NCA-008",
+          "severity": "MEDIUM",
+          "description": "No SQL mode toggle. The query builder is visual-only with no option to switch to raw SQL. Intermediate analysts who know SQL often prefer writing queries directly. The page calls itself 'visual SQL query builder' but provides no SQL interface.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:77-84",
+          "fix": "Add a visual/SQL mode toggle. In SQL mode, show a Monaco editor pre-populated with generated SQL, with syntax highlighting and autocompletion for table/field names."
+        },
+        {
+          "id": "NCA-011",
+          "severity": "MEDIUM",
+          "description": "No calculated fields or expression builder. Analysts cannot create computed columns like 'unit_price * quantity AS total' or CASE/WHEN logic. The select clause only allows picking existing entity fields.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:474-907",
+          "fix": "Add a 'Calculated Fields' section supporting basic arithmetic, string functions, date functions, and CASE/WHEN. Use expression sandboxing to prevent injection."
+        },
+        {
+          "id": "NCA-012",
+          "severity": "MEDIUM",
+          "description": "No pivot table capability. Analysts cannot rotate data from rows to columns for cross-tabulation. Pivot tables are a fundamental Excel-like analytics feature expected by business analysts.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:474-907",
+          "fix": "Add a pivot table mode allowing drag of fields into row, column, and value positions with aggregation functions. Can be client-side or via PostgreSQL CROSSTAB for large datasets."
+        }
+      ]
+    },
+    {
+      "name": "Data Movement & ETL",
+      "findings": [
+        {
+          "id": "DE-002",
+          "severity": "CRITICAL",
+          "description": "No PostgreSQL destination connector exists. The Destination interface is defined in the plugin-sdk (write, writeStream methods) but zero plugins implement it. The connector-postgres plugin is source-only (fetchBatch). A data engineer cannot write transformed data back to a PostgreSQL target through the connector system.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/types/destination.ts:1-82",
+          "fix": "Implement a connector-postgres-destination plugin supporting batch upserts with configurable conflict resolution (INSERT ON CONFLICT), schema auto-detection, and connection pooling. This is the most critical gap for a production ETL platform."
+        },
+        {
+          "id": "DE-009",
+          "severity": "CRITICAL",
+          "description": "No built-in alerting system. The logging service ingests events but has no alert rules, no notification channels (email, Slack, PagerDuty), and no threshold-based triggers. The data quality service detects issues and assigns severities but reports are only stored, never triggering notifications.",
+          "file": "/home/ubuntu/topics/oneplatform/services/logging/src/services/ingestion-service.ts:1-288",
+          "fix": "Implement an AlertService allowing alert rule definition (e.g., 'notify when pipeline X fails 3 times'), integrating with notification channels (webhook, email, Slack via plugin), subscribing to platform events and data quality reports in real-time."
+        },
+        {
+          "id": "DE-001",
+          "severity": "HIGH",
+          "description": "PostgreSQL connector cannot connect directly to databases. It operates through an HTTP REST proxy (proxyUrl). The connectionString credential is validated but never used by the plugin. A data engineer expecting direct host:port connection will find this architecture non-obvious and must deploy a separate proxy.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/connector-postgres/src/index.ts:1-953",
+          "fix": "Document the proxy requirement prominently. Consider building a built-in platform DB proxy sidecar that auto-provisions when a PostgreSQL connector is created. Alternatively, add a direct-connection mode for non-sandbox execution."
+        },
+        {
+          "id": "DE-004",
+          "severity": "HIGH",
+          "description": "Full table sync uses LIMIT/OFFSET pagination which degrades to O(n^2) on large tables. PostgreSQL must scan and discard all rows before the offset on each page. For 10M rows at batchSize=1000, the final page scans 10M rows to return 1000.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/connector-postgres/src/index.ts:556-616",
+          "fix": "Replace OFFSET pagination with keyset pagination (WHERE id > last_seen_id ORDER BY id LIMIT n). This reduces every page to an O(log n) index seek."
+        },
+        {
+          "id": "DE-005",
+          "severity": "HIGH",
+          "description": "All transform operations (dedup, filter, map, aggregate, pivot, join, sort, rename, limit) operate entirely in-memory on the full record set. No streaming or chunked processing. For datasets exceeding Node.js heap limits, operations crash with OOM. No configurable memory cap or spill-to-disk.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/transform-engine.ts:1-498",
+          "fix": "Implement streaming transforms. At minimum: add a MAX_RECORDS guard rejecting transforms above a threshold, implement hash-partition-based joins for large datasets, and document per-operation memory requirements."
+        },
+        {
+          "id": "DE-007",
+          "severity": "HIGH",
+          "description": "The cron scheduler has optimistic locking for duplicate prevention but no pipeline dependency management. You cannot configure pipeline B to run only after pipeline A completes. No DAG-based orchestration. Multi-stage ETL requires manual sub_workflow chaining with no dependency graph visualization.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/schedule-service.ts:318-402",
+          "fix": "Implement pipeline dependency system: { dependsOn: [{ pipelineId: 'abc', requiredStatus: 'completed' }] }. Check upstream dependencies before triggering. Provide DAG visualization in the UI."
+        },
+        {
+          "id": "DE-012",
+          "severity": "HIGH",
+          "description": "Batch job payloads include records directly in BullMQ job payload rather than staging externally. A 10 MB size guard exists as warning only. Large batches (batchSize=10000 with wide rows) can bloat Redis memory. MAX_BATCH_SIZE of 10,000 records at ~1KB each produces ~10MB payloads routinely.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/sync-service.ts:56-75",
+          "fix": "Implement a staging store for batch payloads. When a batch exceeds threshold, write records to temporary blob storage and store only the reference in BullMQ. The batch worker fetches records from staging on processing."
+        },
+        {
+          "id": "DE-013",
+          "severity": "HIGH",
+          "description": "SandboxManager operates with a single primary sandbox instance. All executions share one isolated-vm process. Recycling after 1000 executions or 1 hour enters DRAINING_OLD state rejecting all new executions. warmPoolSize parameter exists but is not implemented, so recycle events create a brief outage for all pipeline executions.",
+          "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/sandbox-manager.ts:1-327",
+          "fix": "Implement the warm pool: maintain N pre-started sandbox instances so replacement is immediately promoted on recycle. Also implement sandbox partitioning so connectors and code steps run in separate instances."
+        },
+        {
+          "id": "DE-003",
+          "severity": "MEDIUM",
+          "description": "The fetchWithRetry function retries on HTTP 503 with exponential backoff but no jitter in the backoff calculation. Synchronized retries from multiple workers can create thundering-herd effects.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/connector-postgres/src/index.ts:866-893",
+          "fix": "Add random jitter: const jitter = Math.random() * delay * 0.5; await new Promise(resolve => setTimeout(resolve, delay + jitter))."
+        },
+        {
+          "id": "DE-006",
+          "severity": "MEDIUM",
+          "description": "Notable gaps in declarative transforms: no lookup/enrichment, no type casting/coercion, no date parsing/formatting, no string manipulation (trim, split, regex replace), no null coalescing. Data engineers must fall back to code steps for these common operations.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/pipeline-service.ts:103-148",
+          "fix": "Add common ETL transforms: 'coalesce' (default values), 'cast' (type conversion), 'split' (string to array), 'concat' (merge fields), 'dateFormat' (parse/format dates), 'lookup' (enrich from reference dataset)."
+        },
+        {
+          "id": "DE-010",
+          "severity": "MEDIUM",
+          "description": "ConnectorHealthService provides health status and trends but does not include data quality metrics. DataQualityService analyzes quality in parallel but metrics are not surfaced in health summary or MetricsDashboard. No single pane of glass for operational health and data quality.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/connector-health-service.ts:1-414",
+          "fix": "Extend ConnectorHealthSummaryItem to include qualityScore and activeIssueCount. Add a data quality panel to MetricsDashboard showing per-connector quality scores and trending null rates."
+        },
+        {
+          "id": "DE-011",
+          "severity": "MEDIUM",
+          "description": "The DLQ page provides bulk replay and discard but no individual record inspection, no error categorization display, no ability to edit and retry a single failed record, and no DLQ size alerting.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/dlq/DLQPage.tsx:1-194",
+          "fix": "Add a DLQ record detail drawer showing original payload, error message, stack trace, retry count, and a 'Retry single record' button with optional payload editing. Add error categorization."
+        },
+        {
+          "id": "DE-014",
+          "severity": "MEDIUM",
+          "description": "The PartitionManager handles execution tables well, but ingestion raw tables (one per connector) are not partitioned. For connectors ingesting millions of rows, unpartitioned tables suffer slow queries and expensive retention cleanup.",
+          "file": "/home/ubuntu/topics/oneplatform/services/execution/src/services/partition-manager.ts:1-213",
+          "fix": "Apply monthly partitioning to connector raw tables using the proven PartitionManager pattern. This makes retention cleanup a constant-time DROP TABLE instead of row-by-row DELETE."
+        },
+        {
+          "id": "DE-015",
+          "severity": "MEDIUM",
+          "description": "Top-level step sequence is strictly serial. While parallel steps exist for fan-out within a single step, there is no way to parallelize top-level steps without an explicit parallel step wrapper. The advisory lock prevents concurrent pipeline instances.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts:1375-1881",
+          "fix": "Document the pattern of using a parallel step at the top to extract from multiple sources concurrently. Consider adding a 'concurrent_runs' option allowing multiple instances (allowConcurrentRuns exists but defaults to false)."
+        },
+        {
+          "id": "DE-016",
+          "severity": "MEDIUM",
+          "description": "ConnectorRegistryService uses an in-memory Map. Install counts, version history, and entries are lost on restart. With multiple ingestion service replicas, inconsistent registry state across instances. Third-party connectors on one instance will not appear on another.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/connector-registry-service.ts:135-137",
+          "fix": "Back the connector registry with a PostgreSQL table. Built-in connectors seeded on startup, third-party registrations persisted and loaded from database."
+        },
+        {
+          "id": "DE-017",
+          "severity": "MEDIUM",
+          "description": "BatchAccumulator failure handling uses an in-memory fallback buffer capped at 10,000 events. Events beyond capacity are silently discarded. During shutdown, remaining buffered events are also silently discarded on write failure.",
+          "file": "/home/ubuntu/topics/oneplatform/services/logging/src/services/ingestion-service.ts:100-158",
+          "fix": "Add a disk-backed spillover queue that persists events when the buffer is full and database is unreachable. At minimum, emit a metric for discarded events."
+        },
+        {
+          "id": "DE-018",
+          "severity": "MEDIUM",
+          "description": "Transform step execution loads entire input record sets into memory. For chained transforms (dedup -> filter -> map -> aggregate), each step materializes the full intermediate dataset. 5 transforms on 1M records holds up to 5 copies simultaneously.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts:587-680",
+          "fix": "Implement transform fusion: fuse consecutive transform steps into a single pass without intermediate materialization. Alternatively, implement streaming via AsyncIterables consumed lazily by each step."
+        },
+        {
+          "id": "DE-008",
+          "severity": "LOW",
+          "description": "Cron validation is limited to 5-field standard cron. No support for second-level scheduling, @yearly/@monthly shorthand, or human-readable descriptions in the backend.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/schedule-service.ts:126-146",
+          "fix": "Add support for common cron aliases (@daily, @hourly, @weekly, @monthly) by mapping them to 5-field equivalents. Consider 6-field cron for sub-minute scheduling."
+        }
+      ]
+    },
+    {
+      "name": "Frontend UI/UX",
+      "findings": [
+        {
+          "id": "MU-001",
+          "severity": "CRITICAL",
+          "description": "AppShell main content area lacks bottom padding on mobile to account for the fixed MobileNavigation bottom tab bar. The <main> element has no paddingBottom on mobile, so the last 56px+ of page content is obscured behind the fixed bottom bar. Users must scroll past content end. Short pages may be completely hidden.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/layout/AppShell.tsx:79",
+          "fix": "Add isMobile-conditional bottom padding to AppShell's <main>: style={isMobile ? { paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' } : undefined}. Import and call useIsMobile."
+        },
+        {
+          "id": "MU-005",
+          "severity": "MEDIUM",
+          "description": "The mobile sidebar drawer has no slide animation or transition. Appears/disappears instantaneously via conditional render. Jarring on mobile where users expect slide-in/out behavior. No swipe-to-close gesture support.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/layout/AppShell.tsx:48",
+          "fix": "Add CSS transitions (transform: translateX). Use the useSwipe hook to support swipe-left-to-close. Keep drawer mounted but off-screen (translate-x-full) and toggle to translate-x-0 with transition."
+        },
+        {
+          "id": "MU-006",
+          "severity": "MEDIUM",
+          "description": "Sidebar navigation link tap targets are py-2 px-3 (~32px height), below the WCAG 2.5.5 recommended 44x44px minimum for touch targets. When used as the mobile drawer, undersized links make accurate tapping difficult.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/layout/Sidebar.tsx:152",
+          "fix": "Increase tap target height to min-h-[2.75rem] (44px). The MobileNavigation correctly implements min-h-[3rem] -- Sidebar should match in the mobile drawer variant."
+        },
+        {
+          "id": "MU-014",
+          "severity": "LOW",
+          "description": "PageHeader uses flex row layout that squeezes title area on narrow screens. Fixed px-6 padding (48px total) on a 375px viewport is significant. Action buttons can overflow or wrap awkwardly.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/layout/PageHeader.tsx:47",
+          "fix": "Stack vertically on mobile: 'flex flex-col sm:flex-row items-start sm:justify-between gap-2 sm:gap-4 px-4 sm:px-6'. Reduce title to text-xl on mobile."
+        }
+      ]
+    },
+    {
+      "name": "Backend & API",
+      "findings": [
+        {
+          "id": "FTU-002",
+          "severity": "CRITICAL",
+          "description": "PgBouncer healthcheck reads password from 'postgres_password_app.txt' but init.sh generates files named 'db_password_app.txt'. The healthcheck uses '-U oneplatform_app' but PgBouncer's userlist.txt only contains 'app_service_role'. Both the password file and username are wrong, so the healthcheck always fails.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/docker-compose.yml:227-228",
+          "fix": "Change PgBouncer healthcheck to use correct password file (db_password_app.txt) and correct username (app_service_role)."
+        },
+        {
+          "id": "FTU-003",
+          "severity": "CRITICAL",
+          "description": "DEPLOYMENT.md tells users to open http://localhost:8080, states UI is on port 8080 and API on port 3000. However, docker-compose routes everything through Caddy on ports 80/443 with TLS. The actual URL is https://localhost. A first-time user following DEPLOYMENT.md opens the wrong URL.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/DEPLOYMENT.md:36-39",
+          "fix": "Update DEPLOYMENT.md: change to 'open https://localhost', remove port 8080/3000 references, update OP_BASE_URL to https://localhost, note the self-signed certificate warning."
+        },
+        {
+          "id": "FTU-001",
+          "severity": "HIGH",
+          "description": "Caddy healthcheck queries http://localhost:2019/config/ but ALL Caddyfile variants set 'admin off'. The healthcheck always fails. 'docker compose ps' perpetually shows caddy as 'unhealthy'. Any future service depending on caddy health will deadlock.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/docker-compose.yml:827-828",
+          "fix": "Either remove 'admin off' from Caddyfiles, or change the healthcheck to test the actual HTTPS endpoint: test: [\"CMD-SHELL\", \"wget -qO- --no-check-certificate https://localhost/ || exit 1\"]."
+        },
+        {
+          "id": "FTU-004",
+          "severity": "HIGH",
+          "description": "DEPLOYMENT.md references OP_SERVICE_TOKEN_SECRET as a required security variable. This variable does not exist in .env.example, docker-compose.yml, or op-init. The actual service-to-service auth uses Ed25519 key pairs. Users waste time looking for a non-existent variable.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/DEPLOYMENT.md:119",
+          "fix": "Remove OP_SERVICE_TOKEN_SECRET from DEPLOYMENT.md. Replace with guidance about Ed25519 key pairs and backing up the init-data volume."
+        },
+        {
+          "id": "FTU-005",
+          "severity": "HIGH",
+          "description": "Troubleshooting guide section 7.2 states secret files are mode 0400, but init.sh writes mode 0444. Following the troubleshooting fix (chmod 0400) makes files readable only by root, but service containers run as UID 1001 -- breaking every service on restart.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/TROUBLESHOOTING.md:1293-1316",
+          "fix": "Update TROUBLESHOOTING.md section 7.2: change all references from 0400 to 0444 and the fix command to 'chmod 0444'."
+        },
+        {
+          "id": "FTU-007",
+          "severity": "HIGH",
+          "description": "DEPLOYMENT.md states minimum RAM is 4 GB, recommended 8 GB. But the sum of all container memory limits is ~11.9 GB (17 containers). Running with 4 GB will cause OOM kills. The 8 GB recommendation is also insufficient for declared limits.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/DEPLOYMENT.md:10-11",
+          "fix": "Update RAM requirements: minimum 8 GB, recommended 16 GB. Add note that docker-compose memory limits are upper bounds and typical idle usage is lower, but spikes under load can hit them."
+        },
+        {
+          "id": "FTU-006",
+          "severity": "MEDIUM",
+          "description": "Troubleshooting section 7.3 states 'DELETE=0 -- deletion explicitly blocked', but docker-compose.yml sets DELETE: 1. A user seeing a 403 on container delete would believe it is expected behavior per the docs.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/TROUBLESHOOTING.md:1350-1376",
+          "fix": "Update TROUBLESHOOTING.md section 7.3 to reflect actual config: DELETE=1, with note that it allows container deletion for sandbox cleanup."
+        },
+        {
+          "id": "FTU-008",
+          "severity": "MEDIUM",
+          "description": "Vector mounts ${OP_DOCKER_DATA_ROOT:-/var/lib/docker/containers} for log collection. On Docker Desktop for Mac/Windows and WSL2, this path does not exist, causing Vector to silently fail. No log aggregation with no error message.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/docker-compose.yml:759",
+          "fix": "Add OP_DOCKER_DATA_ROOT to .env.example with comment explaining it is Linux-only. Add note in DEPLOYMENT.md that Vector log aggregation requires Linux."
+        },
+        {
+          "id": "FTU-010",
+          "severity": "MEDIUM",
+          "description": "README lacks screenshots, demo links, or visual representation. For a self-hosted platform competing with Fivetran/n8n/Retool, visual proof-of-concept is essential. No mention of minimum hardware requirements or estimated deployment time.",
+          "file": "/home/ubuntu/topics/oneplatform/README.md:1-107",
+          "fix": "Add a 'Screenshots' section showing the bootstrap wizard, dashboard, pipeline editor, and app builder. Add 'Requirements' section with RAM, Docker version, and estimated deployment time."
+        },
+        {
+          "id": "FTU-009",
+          "severity": "LOW",
+          "description": "BootstrapErrorPage troubleshooting tells users to try 'curl -k https://localhost/api/v1/healthz' but the actual gateway healthcheck endpoint through Caddy is '/healthz' (not '/api/v1/healthz'). Users might get a 404 and think the gateway is down.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/BootstrapErrorPage.tsx:79",
+          "fix": "Update to 'curl -k https://localhost/healthz' matching the Caddyfile route configuration."
+        },
+        {
+          "id": "FTU-011",
+          "severity": "LOW",
+          "description": "Platform-admin quickstart instructs extracting bootstrap token from init container logs via grep/sed. But the wizard in the frontend automatically receives the token via GET /api/v1/bootstrap/status. The quickstart makes the process look CLI-only and complex.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/quickstart/platform-admin.md:29",
+          "fix": "Lead with browser-based wizard: 'After docker compose up, open https://localhost and follow the setup wizard.' Move CLI/curl flow to separate 'Headless / CLI bootstrap' section."
+        },
+        {
+          "id": "FTU-012",
+          "severity": "LOW",
+          "description": "The .env.example contains OP_DATABASE_URL and OP_REDIS_URL for local development outside Docker. If accidentally used with docker-compose, wrong connection strings could leak into containers.",
+          "file": "/home/ubuntu/topics/oneplatform/.env.example:54-55",
+          "fix": "Comment out or add clearer section header: '# WARNING: Do NOT set these when using docker-compose. service-entrypoint.sh generates per-service values automatically.'"
+        },
+        {
+          "id": "FTU-013",
+          "severity": "LOW",
+          "description": "Dockerfile.sandbox pins Node.js 20 while Dockerfile.service uses Node 22. Intentional for isolated-vm ABI compatibility but undocumented. Users upgrading Node globally for security could break isolated-vm.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/Dockerfile.sandbox:18",
+          "fix": "Add note in DEPLOYMENT.md: 'The sandbox container uses Node 20 (required by isolated-vm). Do not upgrade sandbox Node version without verifying isolated-vm compatibility.'"
+        }
+      ]
+    },
+    {
+      "name": "Security",
+      "findings": [
+        {
+          "id": "PA-005",
+          "severity": "CRITICAL",
+          "description": "No multi-factor authentication (MFA/2FA) support. Login is single-factor (email + password) only. For a platform managing sensitive data across 50+ users, the absence of TOTP, WebAuthn, or any second factor represents a significant security gap, especially for admin accounts.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/auth-service.ts:277-429",
+          "fix": "Implement TOTP-based MFA: add auth.mfa_secrets table, enroll/verify/disable endpoints, and modify login flow to return partial token requiring MFA completion. Add admin controls to enforce MFA for specific roles."
+        },
+        {
+          "id": "SA-001",
+          "severity": "HIGH",
+          "description": "MinIO root password defaults to hardcoded 'oneplatform_minio_dev_2024' in base docker-compose.yml and docker-compose.prod.yml does NOT override it. If an operator runs prod without setting OP_MINIO_PASSWORD, MinIO admin console is accessible with the well-known dev password.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/docker-compose.yml:153",
+          "fix": "Add minio override in docker-compose.prod.yml requiring OP_MINIO_PASSWORD with :? syntax. Add 'oneplatform_minio_dev_2024' to the reject list in service-entrypoint.sh for production."
+        },
+        {
+          "id": "SA-002",
+          "severity": "MEDIUM",
+          "description": "All secret files in /data/init/ are mode 0444 (world-readable). A compromised service container can read secrets for all other services including JWT signing secret and master encryption key, enabling full platform compromise.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/init/init.sh:1",
+          "fix": "Split init-data volume into per-service volumes where each service only mounts its own secrets, or implement a sidecar pattern copying only needed secrets into per-service tmpfs mounts."
+        },
+        {
+          "id": "SA-004",
+          "severity": "MEDIUM",
+          "description": "SSRF guard does not block cloud metadata hostnames like 'metadata.google.internal', Kubernetes internal names '*.svc.cluster.local', or bare IPv4 addresses in private ranges before DNS resolution.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/utils/ssrf-guard.ts:111",
+          "fix": "Extend isBlockedHostname to block: hostnames ending with '.internal', '.svc.cluster.local', 'metadata.google.internal', 'metadata.goog', and bare IPv4 addresses in private ranges for defense-in-depth."
+        },
+        {
+          "id": "SA-006",
+          "severity": "MEDIUM",
+          "description": "Auth middleware passes through /internal/* routes without user authentication, deferring to serviceAuthMiddleware. If any service forgets to wire serviceAuthMiddleware, /internal/* routes become completely unprotected. No defense-in-depth at middleware level.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/core/src/middleware/auth.ts:149",
+          "fix": "Add a fallback guard in authMiddleware: after calling next() for /internal/* paths, check that c.var.user has been set by downstream middleware. If not, return 401."
+        },
+        {
+          "id": "SA-010",
+          "severity": "MEDIUM",
+          "description": "Docker-socket-proxy grants POST and DELETE permissions for containers. Version 0.2.0 does not support per-path ACLs, so a compromised execution-service could create a privileged container bypassing security flags. Safety relies entirely on execution service code.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/docker-compose.yml:170",
+          "fix": "Add startup validation verifying containers can only be created with expected HostConfig (no-new-privileges, cap_drop ALL, read-only rootfs). Consider OPA for Docker authorization."
+        },
+        {
+          "id": "PA-004",
+          "severity": "MEDIUM",
+          "description": "No password history tracking or reuse prevention. Users can reuse previous passwords. No breach detection (HaveIBeenPwned) integration.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/password-service.ts:1-74",
+          "fix": "Add password_history table storing last N bcrypt hashes. Compare against historical hashes before accepting new password. Optionally integrate HaveIBeenPwned k-Anonymity API."
+        },
+        {
+          "id": "PA-018",
+          "severity": "MEDIUM",
+          "description": "Account lockout duration is hardcoded to 15 minutes after 10 failed attempts. No admin configurability, no admin unlock capability, and no notification when accounts are locked.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/auth-service.ts:277-310",
+          "fix": "Make lockout policy configurable per tenant. Add admin unlock endpoint (POST /api/v1/users/:id/unlock). Surface locked accounts in admin UI."
+        },
+        {
+          "id": "SA-003",
+          "severity": "LOW",
+          "description": "The .env.test file contains committed test secrets (OP_MASTER_KEY, OP_JWT_SECRET). While intentional for test infrastructure, OP_JWT_SECRET is only 40 chars versus 64 hex chars for production.",
+          "file": "/home/ubuntu/topics/oneplatform/.env.test:14",
+          "fix": "Accepted pattern for test infrastructure. Base config enforces min length and op-init generates 64-char hex secrets for real deployments."
+        },
+        {
+          "id": "SA-005",
+          "severity": "LOW",
+          "description": "SSRF guard does not block all IPv6-mapped forms beyond ::ffff: prefix. Does not block [::] (equivalent to 0.0.0.0) or IPv4-compatible IPv6 '::x.x.x.x' without ffff.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/utils/ssrf-guard.ts:59",
+          "fix": "Add explicit checks for '::' (IPv6 unspecified), '[::]', and IPv4-compatible IPv6 forms. Consider normalizing all IPv6 to canonical form before comparison."
+        },
+        {
+          "id": "SA-007",
+          "severity": "LOW",
+          "description": "Auth-service and token-service define separate getJwtSecret() functions. Purpose tokens (email verification, password reset) share the same signing key as access tokens, distinguished only by a 'purpose' claim.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/auth-service.ts:66",
+          "fix": "Consider using a derived key for purpose tokens (HMAC of OP_JWT_SECRET with domain-separation constant) for defense-in-depth against implementation bugs."
+        },
+        {
+          "id": "SA-008",
+          "severity": "LOW",
+          "description": "Account lockout is per-user (not per-IP), meaning an attacker can intentionally lock out a known user by submitting 10 bad passwords. The error message is generic (good), but lockout still denies access to the legitimate user.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/auth-service.ts:323",
+          "fix": "Consider CAPTCHA or progressive delay instead of hard lockout. Implement IP-based rate limiting in addition to account-based lockout."
+        },
+        {
+          "id": "SA-009",
+          "severity": "LOW",
+          "description": "The entityType URL parameter is reflected in error response messages without sanitization. While it is a JSON 404 response (not HTML), reflecting user input can contribute to log injection.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/routes/data.ts:61",
+          "fix": "Sanitize entityType before including in error messages: limit to max length and alphanumeric/underscore characters."
+        },
+        {
+          "id": "SA-011",
+          "severity": "LOW",
+          "description": "JWT verification reads algorithm from token header to decide which key to use. While currently safe (jose jwtVerify restricts to explicit algorithm arrays), this pattern requires careful review during future changes.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/token-service.ts:386",
+          "fix": "Add security comment noting that algorithms arrays in jwtVerify calls must never be broadened to include 'none' or unintended algorithms."
+        },
+        {
+          "id": "SA-012",
+          "severity": "LOW",
+          "description": "Grafana admin password defaults to 'admin' in base docker-compose.yml. Bound to 127.0.0.1:3100 (appropriate for dev). Prod compose enforces OP_GRAFANA_PASSWORD.",
+          "file": "/home/ubuntu/topics/oneplatform/docker/docker-compose.yml:715",
+          "fix": "Consider generating a random Grafana password in op-init similar to DB passwords, rather than using a well-known default for development."
+        }
+      ]
+    },
+    {
+      "name": "Documentation & Onboarding",
+      "findings": [
+        {
+          "id": "EE-021",
+          "severity": "HIGH",
+          "description": "No migration guides for transitioning from Fivetran, n8n, Retool, or other competitors. UPGRADE.md only covers OnePlatform version-to-version upgrades. Migration guides with connector mapping tables and workflow translation patterns are essential for enterprise adoption.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/UPGRADE.md:1",
+          "fix": "Create migration guides for top 3 competitors: 'Migrating from Fivetran' (connector mapping, sync config), 'Migrating from n8n' (workflow translator, node-to-step mapping), 'Migrating from Retool' (app export/import, query migration)."
+        },
+        {
+          "id": "EE-018",
+          "severity": "MEDIUM",
+          "description": "The HA guide documents PostgreSQL replication, PgBouncer routing, Redis Sentinel, multi-service replicas, and DR with RTO/RPO targets. But no formal SLA document with uptime commitment percentages and architecture requirements per tier.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/HIGH-AVAILABILITY.md:1",
+          "fix": "Create SLA reference mapping deployment tiers to uptime targets: Small (single node, 99.5%), Medium (HA, 99.9%), Large (multi-region, 99.99%). Include architecture requirements and example SLA language."
+        },
+        {
+          "id": "EE-019",
+          "severity": "MEDIUM",
+          "description": "HA guide includes DR sections and backup schedules are documented, but no automated backup solution ships with the platform. Relies on operator-managed PostgreSQL backups and MinIO policies.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/HIGH-AVAILABILITY.md:1",
+          "fix": "Ship a backup management CLI command (op backup create/restore/list) automating pg_dump, MinIO snapshots, and Redis backups. Include one-command DR test procedure."
+        },
+        {
+          "id": "EE-023",
+          "severity": "MEDIUM",
+          "description": "Published benchmark numbers comparing OnePlatform throughput against competitors are not available. Benchmark infrastructure exists but results are not published or run in CI.",
+          "file": "/home/ubuntu/topics/oneplatform/tests/benchmarks/pipeline.bench.ts:1",
+          "fix": "Publish benchmark results for standard workloads: ingestion throughput, pipeline execution latency (p50/p95/p99), concurrent app users. Run in CI to detect regressions."
+        },
+        {
+          "id": "EE-020",
+          "severity": "LOW",
+          "description": "Documentation is comprehensive (4 quickstarts, OpenAPI specs, CLI reference, TypeDoc, ADRs, 6 user story iterations, capacity planning, monitoring, operations, SOC2 mapping, upgrade, troubleshooting, HA, and 11 example projects). But text-heavy with no interactive tutorials or video content.",
+          "file": "/home/ubuntu/topics/oneplatform/docs/quickstart/platform-admin.md:1",
+          "fix": "Add interactive tutorials (guided walkthroughs), video content, and a searchable documentation site."
+        }
+      ]
+    },
+    {
+      "name": "Mobile & Responsive",
+      "findings": [
+        {
+          "id": "MU-002",
+          "severity": "CRITICAL",
+          "description": "The visual pipeline editor uses three-panel layout (224px + Canvas + 288px) with no responsive breakpoints. On 375px mobile, NodePalette consumes 60% of viewport. Canvas relies exclusively on mouse events with no touch equivalents. No pinch-to-zoom support. Pipeline editing is impossible on mobile.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/VisualPipelineEditor.tsx:222",
+          "fix": "Hide NodePalette behind a toggleable floating button on mobile. Add touch event handlers parallel to mouse handlers. Add pinch-to-zoom. Consider a simplified list/step view for mobile."
+        },
+        {
+          "id": "MU-003",
+          "severity": "CRITICAL",
+          "description": "The app builder uses HTML5 Drag and Drop API which is NOT supported on mobile browsers. iOS Safari and Chrome for Android do not fire HTML5 drag events from touch. Three-panel layout has no responsive behavior. Builder is completely non-functional on touch devices.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/app-builder/AppBuilderCanvas.tsx:146",
+          "fix": "Replace HTML5 DnD with a touch-compatible library like @dnd-kit. For mobile: replace palette with floating action button opening bottom sheet, use tap-to-place instead of drag-and-drop, collapse config panel into bottom sheet."
+        },
+        {
+          "id": "MU-004",
+          "severity": "HIGH",
+          "description": "Query builder WhereClauseRow uses horizontal flex with fixed-width elements totaling 496px minimum, exceeding 375px mobile viewport. Elements are pushed off-screen.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/ontology/QueryBuilderPage.tsx:247",
+          "fix": "Stack fields vertically on mobile: 'flex flex-col sm:flex-row items-stretch sm:items-center gap-2'. Change fixed widths to w-full sm:w-40."
+        },
+        {
+          "id": "MU-007",
+          "severity": "HIGH",
+          "description": "InfiniteTable and all table-based views have no mobile-friendly card/list alternative. On 375px, tables with 5-7 columns require horizontal scrolling with no visual indicator that scrolling is available.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/shared/InfiniteTable.tsx:112",
+          "fix": "Implement responsive card/list view below md breakpoint. For each table, create CardView stacking key fields vertically. As minimal fix, add horizontal scroll shadow/gradient indicators."
+        },
+        {
+          "id": "MU-008",
+          "severity": "HIGH",
+          "description": "Service worker registration function (registerServiceWorker in pwa.ts) is never called from main.tsx. The sw.js is never registered, so offline support, background sync, and the offline fallback page all fail. PWA install prompt will not appear.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/main.tsx:34",
+          "fix": "Import and call registerServiceWorker(queryClient) in main.tsx after createRoot().render() to avoid blocking TTI."
+        },
+        {
+          "id": "MU-009",
+          "severity": "HIGH",
+          "description": "index.html is missing critical PWA meta tags: no <link rel='manifest'>, no <meta name='theme-color'>, no Apple mobile web app tags, no apple-touch-icon. The manifest.json exists but is never referenced. The /public/icons/ directory referenced by manifest.json does not exist.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/index.html:1",
+          "fix": "Add manifest link, theme-color meta, Apple PWA meta tags, and apple-touch-icon to index.html head. Create /public/icons/ with properly sized icon-192.png and icon-512.png."
+        },
+        {
+          "id": "MU-012",
+          "severity": "HIGH",
+          "description": "Pipeline node port circles have small radius making them extremely difficult to tap on touch devices. Ports use onMouseDown/onMouseUp which do not fire on touch. Delete confirmation buttons are 10px font, far below 44px minimum tap target.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/PipelineNode.tsx:207",
+          "fix": "Render invisible larger circle (r=22, 44px min) behind each port for touch. Add onTouchStart/onTouchEnd handlers. Increase delete confirmation buttons to min-h-[2.75rem]."
+        },
+        {
+          "id": "MU-015",
+          "severity": "HIGH",
+          "description": "NodeConfigPanel is fixed w-72 (288px) inline beside canvas. On mobile, takes 77% of viewport leaving canvas invisible. No bottom sheet mode, no fullscreen overlay, no swipe-to-dismiss. Monaco editor (192px) is impractical for code editing on mobile.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/pipeline-editor/NodeConfigPanel.tsx:100",
+          "fix": "On mobile, render as fullscreen slide-up sheet or modal overlay. Add drag handle for swipe-down-to-close. For Monaco on mobile, consider fullscreen editing mode or plain textarea fallback."
+        },
+        {
+          "id": "MU-010",
+          "severity": "MEDIUM",
+          "description": "No PWA install prompt handling. The beforeinstallprompt event is never captured. On Android, Chrome shows a mini-infobar easily dismissed. On iOS, no native install prompt exists and users must manually use 'Add to Home Screen'.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/lib/pwa.ts:44",
+          "fix": "Create useInstallPrompt hook capturing beforeinstallprompt event. Add dismissible banner or Settings option. On iOS, show manual instructions."
+        },
+        {
+          "id": "MU-011",
+          "severity": "MEDIUM",
+          "description": "No push notification support. The Topbar notification system only works while the app is open in the foreground. No push event handler in service worker, no subscription management for Web Push API.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/lib/pwa.ts:1",
+          "fix": "Implement Web Push: add 'push' event handler in sw.js, subscribeToPush() function, send subscription to backend, notification preferences toggle in Settings."
+        },
+        {
+          "id": "MU-013",
+          "severity": "MEDIUM",
+          "description": "ConnectorForm tooltip hints use CSS hover which does not exist on touch devices. Field descriptions are inaccessible on mobile. Tooltip position may overflow viewport when field is near top of screen.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/connectors/ConnectorForm.tsx:130",
+          "fix": "Replace hover-based tooltip with tap-to-toggle on mobile. Consider showing descriptions inline below labels on mobile, or use Radix UI Tooltip which supports both hover and touch."
+        }
+      ]
+    },
+    {
+      "name": "Enterprise Features",
+      "findings": [
+        {
+          "id": "EE-001",
+          "severity": "CRITICAL",
+          "description": "OnePlatform ships only 5 data connectors (PostgreSQL, MySQL, CSV, REST API, Webhook) plus 1 CDC connector. Fivetran offers 300+. A 500-person enterprise typically needs 20-30 connectors on day one. The plugin SDK enables custom connectors but out-of-box coverage is a tiny fraction of competitors.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/:1",
+          "fix": "Prioritize building connectors for top 20 enterprise SaaS sources (Salesforce, HubSpot, Stripe, Jira, Snowflake, BigQuery, etc.). Consider adopting Singer/Airbyte protocol adapters to leverage existing open-source connector catalogs."
+        },
+        {
+          "id": "EE-024",
+          "severity": "CRITICAL",
+          "description": "All 5 connectors are source (ingestion) only. No destination/target connectors for loading data into warehouses (Snowflake, BigQuery, Redshift) or databases. Fivetran's core value is source-to-destination sync. Without destination connectors, OnePlatform cannot serve as a complete ELT/ETL solution.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/:1",
+          "fix": "Implement destination connector support and build connectors for top 5 enterprise destinations: Snowflake, BigQuery, Redshift, S3/Parquet, and PostgreSQL (as target)."
+        },
+        {
+          "id": "EE-003",
+          "severity": "HIGH",
+          "description": "CDC is implemented only for PostgreSQL via WAL. Fivetran supports CDC for MySQL (binlog), SQL Server (CT), Oracle (LogMiner), MongoDB (change streams). The CDC connector also has a known security issue: database passwords stored in plain-text config rather than via CredentialAccessor.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/connectors/postgres-cdc/postgres-cdc-connector.ts:1",
+          "fix": "Extend CDC to MySQL (binlog), MongoDB (change streams), and SQL Server (change tracking). Fix credential security by migrating to CredentialAccessor.get('password')."
+        },
+        {
+          "id": "EE-006",
+          "severity": "HIGH",
+          "description": "OnePlatform's step types are general-purpose but lack zero-code convenience of n8n's 400+ service-specific nodes (e.g., 'Send Slack message', 'Create Jira ticket' as drag-and-drop nodes). The code step can do anything but requires coding knowledge.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/pipeline-service.ts:35",
+          "fix": "Create a curated library of pre-built 'action' step templates (Slack notification, email send, HTTP POST with template, Jira ticket creation) that wrap code steps with pre-configured logic."
+        },
+        {
+          "id": "EE-012",
+          "severity": "HIGH",
+          "description": "Data binding exists via app-sdk hooks (useQuery, useMutation, useSubscription) but these are programmatic React hooks requiring TypeScript. No visual declarative binding layer like Retool's {{query.data}} syntax. No computed field system in the app builder.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/hooks/useQuery.ts:1",
+          "fix": "Implement declarative data binding allowing template expressions (e.g., {{connectors.postgres.users.data}}) in component properties. Add computed fields system with auto-updating derived values."
+        },
+        {
+          "id": "EE-015",
+          "severity": "HIGH",
+          "description": "OIDC SSO is implemented (Okta, Azure AD, Auth0, Google Workspace, Keycloak) and LDAP plugin exists. However, SAML 2.0 has no concrete implementation despite being declared in the plugin-sdk interface. Many large enterprises require SAML 2.0 for legacy IdPs.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/auth-provider-oidc/src/index.ts:1",
+          "fix": "Implement a SAML 2.0 auth provider plugin handling SP-initiated SSO, assertion parsing, signature validation, and attribute-to-role mapping. Plugin SDK already has interface slots."
+        },
+        {
+          "id": "EE-004",
+          "severity": "MEDIUM",
+          "description": "All 5 plugin connectors declare supportsRealtime=false. Only real-time capability is Postgres CDC via WAL. Webhook connector provides near-real-time but batches payloads. Fivetran offers real-time sync across many connectors.",
+          "file": "/home/ubuntu/topics/oneplatform/plugins/connector-postgres/src/index.ts:413",
+          "fix": "Implement real-time streaming framework in plugin SDK. Enable real-time mode for webhook connector (immediate processing) and REST API connector (configurable polling interval)."
+        },
+        {
+          "id": "EE-007",
+          "severity": "MEDIUM",
+          "description": "Strong conditional logic (11 operators, JSONata skipIf, Conditions, parallel branches, sub-workflows with depth 5). But no explicit loop/iterator step type. Pipelines cannot iterate over an array executing steps for each item.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/condition-evaluator.ts:1",
+          "fix": "Add a 'forEach' or 'iterate' step type executing child steps for each element in an array input."
+        },
+        {
+          "id": "PA-001",
+          "severity": "HIGH",
+          "description": "Team invitation UI is a placeholder stub displaying 'Team invitations coming soon'. No working invite flow. Only user creation path is via POST /api/v1/users API endpoint. Admin managing 50+ users has no way to invite through the UI.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/settings/TeamsPage.tsx:107-117",
+          "fix": "Implement invite flow: form calling POST /api/v1/users with email, roles, and optional temporaryPassword. Include email invitation sending and re-send support."
+        },
+        {
+          "id": "PA-002",
+          "severity": "HIGH",
+          "description": "No bulk user creation or CSV import endpoint. POST /api/v1/users creates one user at a time. Onboarding 50+ users requires repetitive manual API calls.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/users.ts:39",
+          "fix": "Add POST /api/v1/users/bulk accepting array of user objects or CSV upload. Surface in frontend with CSV upload component and bulk invite dialog."
+        },
+        {
+          "id": "PA-010",
+          "severity": "HIGH",
+          "description": "No admin-level view of all API keys across users. Each user can only see/manage their own keys. Platform admin has no way to audit or revoke keys created by other users without database access.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/api-key-service.ts:130-184",
+          "fix": "Add admin-scoped GET /api/v1/api-keys/all and DELETE /api/v1/api-keys/:id/admin endpoints. Surface in admin API keys management page."
+        },
+        {
+          "id": "PA-012",
+          "severity": "HIGH",
+          "description": "No audit event export endpoint. The logging service has streaming export for log events but no equivalent for audit events. Compliance workflows requiring SIEM export have no API to call.",
+          "file": "/home/ubuntu/topics/oneplatform/services/logging/src/routes/audit.ts:29-91",
+          "fix": "Add GET /api/v1/audit-events/export endpoint with streaming JSONL/CSV output, date range and filter support. Essential for SOC 2 and ISO 27001 compliance."
+        },
+        {
+          "id": "PA-020",
+          "severity": "HIGH",
+          "description": "AdminPage is extremely minimal: only a tenant name edit field and disabled master key rotation button. No system overview, user count, session count, storage usage, API metrics, activity feed, or system configuration beyond tenant name.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/settings/AdminPage.tsx:60-216",
+          "fix": "Expand into admin dashboard with: system statistics, recent activity feed, tenant-wide settings (password policy, MFA enforcement), user search inline, and links to audit logs."
+        },
+        {
+          "id": "PA-006",
+          "severity": "MEDIUM",
+          "description": "Role assignment is inline toggle buttons with no confirmation dialog. A single misclick immediately mutates roles via PUT. No confirmation step, no undo, no audit trail visible in UI.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/settings/TeamsPage.tsx:155-179",
+          "fix": "Add confirmation dialog before role changes, especially for sensitive roles. Show permission change summary. Add batch role assignment and visible audit trail link."
+        },
+        {
+          "id": "PA-007",
+          "severity": "MEDIUM",
+          "description": "RBAC is well-structured with entity-level, field-level, and row-level permissions. Backend API endpoints exist for role/permission management but no frontend page surfaces them. Admins must use raw API calls.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/rbac-service.ts:1-254",
+          "fix": "Build a Role Management page with: list of all roles, create/edit custom role form, entity permission matrix with field restriction and row filter editors."
+        },
+        {
+          "id": "PA-009",
+          "severity": "MEDIUM",
+          "description": "No tenant-specific configuration beyond name and opaque settings JSON. No predefined settings for rate limits, storage quotas, user count limits, feature flags, allowed OAuth providers, or password policy overrides.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/tenants.ts:1-235",
+          "fix": "Define typed tenant settings schema: maxUsers, maxApiKeys, passwordPolicy, rateLimitOverrides, allowedOAuthProviders, featureFlags. Surface in AdminPage with labeled fields."
+        },
+        {
+          "id": "PA-011",
+          "severity": "MEDIUM",
+          "description": "No expiry indicator or warning for API keys approaching expiration. Table shows scopes, last used, and created dates but omits expiresAt. Admins cannot see which keys are about to expire.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/settings/ApiKeysPage.tsx:281-306",
+          "fix": "Add 'Expires' column with visual warnings (yellow <30 days, red <7 days). Add 'Expiring soon' filter. Consider email notifications for approaching expiry."
+        },
+        {
+          "id": "PA-013",
+          "severity": "MEDIUM",
+          "description": "Audit event retention is hard-coded to 365 days with hard deletion and no archive-before-delete. Many compliance frameworks (HIPAA, SOX) require longer retention or verifiable archival.",
+          "file": "/home/ubuntu/topics/oneplatform/services/logging/src/services/retention-service.ts:98-189",
+          "fix": "Implement archive step before hard-deleting: export events to S3-compatible storage. Support 'archive after X days, hard-delete after Y days' with Y > X."
+        },
+        {
+          "id": "PA-014",
+          "severity": "MEDIUM",
+          "description": "Audit log search is client-side only, filtering already-loaded results. No server-side full-text search on audit events. For compliance investigations across large audit trails, this is inadequate.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/logs/AuditLogTable.tsx:82-92",
+          "fix": "Wire the search input to trigger server-side queries using the existing audit route filter parameters instead of filtering locally."
+        },
+        {
+          "id": "PA-016",
+          "severity": "MEDIUM",
+          "description": "Service health polling relies on a single gateway /healthz endpoint with no historical data. No uptime history, SLA tracking, incident timeline, or stored health data. Admin cannot answer 'Was pipeline service down last Tuesday?'",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/components/metrics/ServiceHealthGrid.tsx:77-137",
+          "fix": "Store health check results in time-series table. Build historical health view with uptime percentage per service over configurable windows. Add incident timeline."
+        },
+        {
+          "id": "PA-017",
+          "severity": "MEDIUM",
+          "description": "Master key rotation is completely unimplemented. The mutation immediately rejects with 'not yet available'. Button is disabled. Inability to rotate encryption keys is a security concern if master key is suspected compromised.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/frontend/src/pages/settings/AdminPage.tsx:102-109",
+          "fix": "Implement master key rotation API: generate new key, re-encrypt all secrets in background job, atomic key version swap, UI progress indicator. Until then, document manual rotation procedure."
+        },
+        {
+          "id": "PA-019",
+          "severity": "MEDIUM",
+          "description": "No SCIM provisioning endpoint for automated user lifecycle management from identity providers. For 50+ users across departments, managing users manually is operationally expensive.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/services/auth-service.ts:1-907",
+          "fix": "Implement SCIM 2.0 provisioning endpoints (/scim/v2/Users, /scim/v2/Groups) for automated provisioning from enterprise IdPs."
+        },
+        {
+          "id": "PA-008",
+          "severity": "LOW",
+          "description": "Tenant update is restricted to platform-admin but AdminPage checks tenant-admin permission. Tenant-admins see the form but PATCH requests fail with 403 at API level.",
+          "file": "/home/ubuntu/topics/oneplatform/services/auth/src/routes/tenants.ts:156-189",
+          "fix": "Either allow tenant-admin to update their own tenant, or hide the form for users lacking 'admin' scope."
+        },
+        {
+          "id": "EE-002",
+          "severity": "LOW",
+          "description": "Strong schema drift detection: captures snapshots per connector, detects added/removed/changed fields, tracks type changes and nullability shifts, maintains history. Competitive with Fivetran and exceeds it in some ways.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/schema-drift-service.ts:1",
+          "fix": "Add configurable auto-remediation policies (auto-add columns, auto-pause on breaking changes, notification webhooks for drift events)."
+        },
+        {
+          "id": "EE-005",
+          "severity": "LOW",
+          "description": "Robust DataQualityService analyzing null_rate_spike, volume_drop/spike, type_mismatch, missing/new fields. Computes quality score (0-1.0) with severity-weighted deductions. Competitive with Fivetran's freshness monitoring.",
+          "file": "/home/ubuntu/topics/oneplatform/services/ingestion/src/services/data-quality-service.ts:1",
+          "fix": "Add data quality dashboard in frontend with trend charts, configurable alert thresholds, and PagerDuty/Slack/email integration."
+        },
+        {
+          "id": "EE-008",
+          "severity": "LOW",
+          "description": "Each step supports onError, per-step retry with configurable backoff, fallbackStepId, and per-step timeout. Replay capability for failed runs. Competitive with n8n's error handling.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/pipeline-service.ts:68",
+          "fix": "Consider adding a 'catch' error handler step type similar to try/catch blocks for more flexible error handling."
+        },
+        {
+          "id": "EE-009",
+          "severity": "LOW",
+          "description": "Webhook triggers, cron scheduling, and manual triggers are well-implemented. SSRF protection on webhook steps. HMAC verification supports SHA-256 and SHA-1. On par with n8n's webhook functionality.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/trigger-service.ts:1",
+          "fix": "Consider event-driven triggers reacting to platform events (e.g., 'when new record ingested by connector X, trigger pipeline Y')."
+        },
+        {
+          "id": "EE-010",
+          "severity": "LOW",
+          "description": "Sub-workflows fully implemented with max depth 5, circular dependency detection, input mapping, sync and fire-and-forget modes, timeout handling, and error propagation. Exceeds n8n's sub-workflow support.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/services/execution-engine.ts:269",
+          "fix": "Consider adding visual call-graph view in pipeline editor showing full sub-workflow dependency tree."
+        },
+        {
+          "id": "EE-013",
+          "severity": "LOW",
+          "description": "Strong permission model: app-level roles, cross-tenant sharing, secret encryption (AES-256-GCM), canTenantAccessApp checks, usePermission hook. Competitive with Retool and cross-tenant sharing exceeds it.",
+          "file": "/home/ubuntu/topics/oneplatform/services/app/src/services/permission-service.ts:1",
+          "fix": "Add row-level security integration so app queries are automatically scoped by authenticated user's permissions."
+        },
+        {
+          "id": "EE-014",
+          "severity": "LOW",
+          "description": "Comprehensive embed support: signed JWT tokens, configurable allowed origins, read/read-write modes, 24h default TTL, token revocation, auto HTML snippet generation. Matches Retool's embedding.",
+          "file": "/home/ubuntu/topics/oneplatform/services/app/src/services/embed-service.ts:1",
+          "fix": "Add embed analytics (view count, unique users, origin breakdown) and support for passing custom parameters via URL query strings."
+        },
+        {
+          "id": "EE-016",
+          "severity": "LOW",
+          "description": "Excellent audit logging: structured events with mandatory fields, BullMQ async delivery with retry, append-only table, job-id dedup, DLQ, field-level audit tracking with purpose tagging, monthly partitioning, SOC2 mapping. Exceeds most competitors.",
+          "file": "/home/ubuntu/topics/oneplatform/services/logging/src/services/audit-service.ts:1",
+          "fix": "Add SIEM export (Splunk, Datadog) and immutable forwarding to write-once storage (S3 with object lock) for tamper-proof audit trails."
+        },
+        {
+          "id": "EE-017",
+          "severity": "LOW",
+          "description": "Comprehensive data residency: 6 predefined regions, gateway-level fail-closed enforcement, per-tenant policies, configurable cross-region transfer rules, compliance audit logging, multi-region deployment guides.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/services/data-residency-service.ts:1",
+          "fix": "Add automated compliance reports for auditors. Integrate with cloud provider region-specific services for infrastructure-layer enforcement."
+        },
+        {
+          "id": "EE-022",
+          "severity": "LOW",
+          "description": "Production-grade Helm chart with Bitnami subcharts, pod security contexts, PDBs, NetworkPolicies, Ingress, per-service Deployments. Terraform modules for multi-region. Enterprise-ready for Kubernetes.",
+          "file": "/home/ubuntu/topics/oneplatform/deploy/helm/oneplatform/Chart.yaml:1",
+          "fix": "Add HPA configurations per service with CPU/memory thresholds. Consider adding an Operator (CRD-based) for lifecycle management."
+        },
+        {
+          "id": "EE-025",
+          "severity": "LOW",
+          "description": "Approximately 850 test files across unit, integration, and E2E suites. Strong test coverage indicating engineering maturity. Each connector plugin has comprehensive tests.",
+          "file": "/home/ubuntu/topics/oneplatform/services/pipeline/src/__tests__/:1",
+          "fix": "Add chaos/resilience testing and load testing with realistic enterprise-scale data volumes."
+        }
+      ]
+    },
+    {
+      "name": "Developer Experience",
+      "findings": [
+        {
+          "id": "AD-003",
+          "severity": "CRITICAL",
+          "description": "The scaffolded App.tsx uses 'const { data, loading, error } = useQuery(...)' but the actual useQuery hook returns 'isLoading' not 'loading'. The scaffolded code fails to compile with TypeScript. Running 'op app init' gives immediately broken code.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/app-scaffold.ts:145",
+          "fix": "Change from 'const { data, loading, error } = useQuery(...)' to 'const { data, isLoading, error } = useQuery(...)' and update 'if (loading)' to 'if (isLoading)'."
+        },
+        {
+          "id": "AD-004",
+          "severity": "CRITICAL",
+          "description": "The scaffolded App.tsx calls 'data.map(...)' directly, but useQuery returns 'data: T[] | null'. When data is null, this causes a runtime 'Cannot read properties of null' crash. The app-sdk README correctly uses 'data?.map(...)' but the scaffold does not.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/app-scaffold.ts:152",
+          "fix": "Change from '{data.map((item) => (' to '{data?.map((item) => (' to use optional chaining."
+        },
+        {
+          "id": "AD-002",
+          "severity": "HIGH",
+          "description": "TODO left in production code: 'Add createTypedClient<T>() factory for typed query methods'. EntityResource generic T defaults to Record<string, unknown>, meaning all entity operations return untyped data requiring manual casting. No way to get per-entity type narrowing from the SDK alone.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/resources/data.ts:224",
+          "fix": "Implement createTypedClient<EntityMap>() accepting mapped types from 'op sdk generate-types', so client.data.Product returns EntityResource<Product> with full autocompletion."
+        },
+        {
+          "id": "AD-005",
+          "severity": "HIGH",
+          "description": "The app-sdk README useUser example destructures 'tenantName' but the UserContext interface only has 'tenantId'. This causes TypeScript error and renders 'undefined'. The documented UserContext type block is also missing the 'isLoaded' field.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/README.md:248",
+          "fix": "Change 'tenantName' to 'tenantId' in the README. Add 'isLoaded: boolean' to the documented UserContext shape."
+        },
+        {
+          "id": "AD-006",
+          "severity": "HIGH",
+          "description": "SDK README shows 'err.retryAfter' but the actual property is 'retryAfterSeconds'. Developers following the README get undefined.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/README.md:290",
+          "fix": "Update README from 'err.retryAfter' to 'err.retryAfterSeconds' at lines 290 and 317."
+        },
+        {
+          "id": "AD-011",
+          "severity": "HIGH",
+          "description": "The entity() method always returns EntityResource<Record<string, unknown>>, losing any generic type parameter. Developers cannot write 'client.data.entity<Product>(\"Product\")'. Every SDK operation returns untyped data requiring manual casting.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/resources/data.ts:218",
+          "fix": "Add generic parameter: 'entity<T = Record<string, unknown>>(entityType: string): EntityResource<T>'. This one-line change enables type-safe entity access."
+        },
+        {
+          "id": "PU-001",
+          "severity": "HIGH",
+          "description": "The data import command buffers the entire file in memory (readFileSync) with only a 50MB warning. For large datasets (hundreds of MB or GB), this will OOM the CLI process. No streaming upload, no chunked processing, no progress indicator.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/data/index.ts:101",
+          "fix": "Implement streaming upload using chunked transfer encoding. Read file in 10MB chunks. Add a progress bar showing bytes uploaded vs total."
+        },
+        {
+          "id": "PU-002",
+          "severity": "HIGH",
+          "description": "The CLI has no 'data bulk' subcommand despite the SDK having a fully implemented bulk() method supporting transactional bulk create/update/delete. Power users needing atomic batch operations must write custom SDK scripts.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/data/index.ts:152",
+          "fix": "Add 'op data bulk' accepting JSON file with BulkOperation payload. Wire to POST /api/v1/data/{entityType}/bulk. Display per-item results and summary. Support --dry-run."
+        },
+        {
+          "id": "PU-005",
+          "severity": "HIGH",
+          "description": "The data query command does not support automatic pagination. Returns a single page and prints cursor to stderr. Users must manually loop capturing cursor from stderr -- error-prone in scripts. The SDK has elegant auto-pagination but the CLI has no --all flag.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/data/index.ts:19",
+          "fix": "Add --all flag that internally loops using cursor-based pagination. With -o json emit single array; with -o jsonl stream records. Add --max-pages safety limit (default 100)."
+        },
+        {
+          "id": "PU-011",
+          "severity": "HIGH",
+          "description": "The CLI's HTTP client does not parse rate limit headers from API responses. The SDK transport layer parses Retry-After for automatic retry, but the CLI has its own HTTP client without retry logic. CI/CD pipelines hitting rate limits fail hard.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/http-client.ts:130",
+          "fix": "Add automatic retry with exponential backoff for 429 and 5xx responses. Parse Retry-After header. Port retry logic from SDK's retry-handler.ts."
+        },
+        {
+          "id": "AD-001",
+          "severity": "MEDIUM",
+          "description": "SDK only provides ESM exports (no CommonJS). Developers using Node.js with CommonJS modules (default for many tools, Jest without ESM flag, older projects) get 'require is not supported' errors.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/package.json:20-25",
+          "fix": "Add a 'require' condition to exports map pointing to CJS build. Or add clear README note that ESM is required. Consider CJS build via tsup or rollup."
+        },
+        {
+          "id": "AD-007",
+          "severity": "MEDIUM",
+          "description": "useSubscription silently ignores filter and events changes after initial mount. Dynamic filter values do not update the subscription. A dev-only console.warn is emitted but easy to miss. The key-prop workaround is not documented in README.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/hooks/useSubscription.ts:65-97",
+          "fix": "Document key-prop workaround in README: '<LiveFeed key={selectedCategory} />'. Consider supporting dynamic filter changes by re-registering the subscription."
+        },
+        {
+          "id": "AD-008",
+          "severity": "MEDIUM",
+          "description": "useQuery requires developers to manually useMemo their options object to avoid refetch loops. The naive usage 'useQuery(\"Product\", { filter: { status: { eq: \"active\" } } })' triggers infinite refetches. Other data-fetching libraries compare options by value, not reference.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/hooks/useQuery.ts:155-169",
+          "fix": "Implement deep equality comparison for options (useDeepMemo or JSON.stringify-based memoization internally) so inline object literals work without explicit useMemo."
+        },
+        {
+          "id": "AD-009",
+          "severity": "MEDIUM",
+          "description": "The 'op sdk generate' command is a placeholder -- fetches the spec but writes only 'export type {}; // placeholder'. Comment says to install @hey-api/openapi-ts but no integration exists. Developers expecting a typed client get an empty file.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/sdk/index.ts:55-66",
+          "fix": "Either implement @hey-api/openapi-ts integration, or remove the command and label it as not-yet-implemented. Keep 'op sdk generate-types' which works."
+        },
+        {
+          "id": "AD-010",
+          "severity": "MEDIUM",
+          "description": "AppProvider requires window.__OP_APP_CONFIG__ injected by the platform's app shell. During local development outside 'op app dev', this global does not exist and the provider throws. No documented way to mock this for standalone development.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/provider/AppProvider.tsx:84-109",
+          "fix": "Add a 'config' prop to AppProvider for local development. The _testAppId and _testTenantId props exist but are hidden. Rename to devAppId/devTenantId and document."
+        },
+        {
+          "id": "AD-012",
+          "severity": "MEDIUM",
+          "description": "WebSocketManager has MAX_RECONNECT_ATTEMPTS of only 5 before permanently disabling reconnection. After 5 failures (~32 seconds), real-time updates are permanently disabled until full app reload. A brief network interruption permanently breaks live updates.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/ws/WebSocketManager.ts:59",
+          "fix": "Increase MAX_RECONNECT_ATTEMPTS to 10-15. Add public reconnect() method resetting attempt counter so components can offer a 'Reconnect' button."
+        },
+        {
+          "id": "PU-003",
+          "severity": "MEDIUM",
+          "description": "No way to trigger multiple pipelines in parallel from CLI. 'pipeline trigger' handles one pipeline per invocation. No 'pipeline trigger-batch' or multi-ID support for CI/CD scenarios.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/pipeline/index.ts:70",
+          "fix": "Add 'op pipeline trigger-batch' accepting multiple pipeline IDs (--ids p1,p2,p3). Trigger all, optionally --wait for all, print summary table."
+        },
+        {
+          "id": "PU-004",
+          "severity": "MEDIUM",
+          "description": "No --fields flag to select specific fields for output. When a record has 20+ fields, table output is unreadable. The SDK has field projection but the CLI does not expose it.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/data/index.ts:46",
+          "fix": "Add --fields <field1,field2,...> to 'op data query' and 'op data get' for server-side projection and limited table columns."
+        },
+        {
+          "id": "PU-006",
+          "severity": "MEDIUM",
+          "description": "No exit code for 'resource not found' (404) -- maps to EXIT.GENERAL (1), indistinguishable from validation errors (400) or conflicts (409). CI/CD scripts cannot differentiate without parsing stderr.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/errors.ts:25",
+          "fix": "Add EXIT.NOT_FOUND = 7. Map HTTP 404 to this new code. Document all exit codes in CLI help."
+        },
+        {
+          "id": "PU-007",
+          "severity": "MEDIUM",
+          "description": "'data update' requires --file as requiredOption and does NOT support stdin (no '-' handling). This breaks pipe patterns. Inconsistent stdin handling across commands is a scripting trap.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/data/index.ts:65",
+          "fix": "Make --file optional and add stdin-reading logic matching 'data create'. Apply to all commands accepting JSON input."
+        },
+        {
+          "id": "PU-009",
+          "severity": "MEDIUM",
+          "description": "Usage/billing API routes exist but have no CLI commands. Power users cannot check API usage, export billing data, or monitor rate limit consumption from command line.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/routes/usage.ts:1",
+          "fix": "Add 'op usage' command group: 'op usage summary', 'op usage history', 'op usage export'. Wire to existing /api/v1/usage/* endpoints."
+        },
+        {
+          "id": "PU-010",
+          "severity": "MEDIUM",
+          "description": "The rate limiter returns proper headers (X-RateLimit-*) but the CLI does not expose them. On 429, users get terse 'Rate limited. Wait and retry.' with no indication of when window resets or requests remaining.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/utils/sliding-window-rate-limiter.ts:1",
+          "fix": "Parse Retry-After header from 429 responses: 'Rate limited. Retry after N seconds.' In verbose mode, print all X-RateLimit-* headers."
+        },
+        {
+          "id": "PU-012",
+          "severity": "MEDIUM",
+          "description": "No batch connector configuration command. Creating 10 connectors requires 10 separate invocations. No 'connector create-batch' reading YAML/JSON manifest.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/connector/index.ts:214",
+          "fix": "Add 'op connector create-batch --file connectors.yaml' accepting array of definitions. Process sequentially with per-connector error reporting. Support --dry-run."
+        },
+        {
+          "id": "PU-018",
+          "severity": "MEDIUM",
+          "description": "Pipeline trigger --wait uses fixed 3-second polling interval with no backoff. For long-running pipelines (hours), generates 1,200 unnecessary API calls per hour. Neither respects rate limits nor adapts frequency.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/pipeline/index.ts:88",
+          "fix": "Implement adaptive polling: 2s intervals initially, increasing to 5s after 30s, 10s after 2min, 30s after 10min. Consider SSE streaming for push-based updates."
+        },
+        {
+          "id": "PU-020",
+          "severity": "MEDIUM",
+          "description": "SDK DataNamespace uses Proxy for shorthand but typed client generation (M-13 milestone) is incomplete. 'op sdk generate-types' works but generated types are not integrated with SDK client. Power users wanting type safety must manually wire types.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/resources/data.ts:225",
+          "fix": "Complete M-13: implement createTypedClient<T>() accepting output of 'op sdk generate-types' for fully typed DataNamespace."
+        },
+        {
+          "id": "AD-013",
+          "severity": "LOW",
+          "description": "useQueryInvalidation is exported publicly but documented as 'internal'. Its parameters assume it is driven by useSubscription, not standalone. Confusing API surface.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/app-sdk/src/index.ts:44",
+          "fix": "Remove from public exports. Provide dedicated useInvalidateQuery('entityName') if manual cache invalidation is needed."
+        },
+        {
+          "id": "AD-014",
+          "severity": "LOW",
+          "description": "SDK has zero runtime dependencies (excellent), but requires Node 18+ for globalThis.fetch without runtime validation. Node 16 users get confusing 'fetch is not defined' on first API call.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/package.json:1-48",
+          "fix": "Add top-level check warning if typeof globalThis.fetch is undefined, suggesting Node upgrade or custom fetch."
+        },
+        {
+          "id": "AD-015",
+          "severity": "LOW",
+          "description": "EntityResource.create() accepts Partial<T>, making all fields optional at type level even if schema requires them. TypeScript will not warn about missing required fields.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/sdk/src/resources/data.ts:48",
+          "fix": "Consider CreateInput<T> type preserving required/optional distinctions. Document that Partial<T> is intentionally loose and server validates."
+        },
+        {
+          "id": "PU-008",
+          "severity": "LOW",
+          "description": "GraphQL endpoint is functional but supports only POST. No GET for persisted queries, no query batching, no subscription support (WebSocket/SSE). Schema is dynamically generated from ontology.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/routes/graphql.ts:64",
+          "fix": "Add GraphQL query batching. Consider persisted query cache. GraphQL subscriptions could use existing SSE infrastructure."
+        },
+        {
+          "id": "PU-013",
+          "severity": "LOW",
+          "description": "Plugin dev server watches dist/ not src/. Developers need a separate build tool running alongside. Two-process requirement is undocumented.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/dev-server/plugin-dev-server.ts:99",
+          "fix": "Document the two-process workflow in help text. Consider --build-cmd flag or integrated esbuild builder."
+        },
+        {
+          "id": "PU-014",
+          "severity": "LOW",
+          "description": "Plugin-sdk has comprehensive testing toolkit but no 'op plugin test' command. Plugin developers must configure their own test framework from scratch.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/plugin-sdk/src/testing/index.ts:1",
+          "fix": "Add 'op plugin test' discovering test files and running with built-in Node test runner or vitest, pre-configured with mock-context."
+        },
+        {
+          "id": "PU-015",
+          "severity": "LOW",
+          "description": "When non-array data is used with format=table, it silently falls back to JSON. 'op ontology get MyType -o table' outputs JSON instead of a single-row table with no warning.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/output.ts:159",
+          "fix": "Emit warning to stderr when format cannot be applied. Better: wrap single records in one-element array so table rendering always works."
+        },
+        {
+          "id": "PU-016",
+          "severity": "LOW",
+          "description": "Shell completions for bash, zsh, and fish are comprehensive and well-implemented covering all 22 command groups. Production-grade completion support. Positive finding.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/commands/completion/index.ts:1",
+          "fix": "Consider generating completion scripts from Commander program definition to prevent drift with static strings."
+        },
+        {
+          "id": "PU-017",
+          "severity": "LOW",
+          "description": "Comprehensive API surface: all operations via REST, plus GraphQL and gRPC-Web. Gateway provides thorough coverage of auth, connectors, webhooks, ontology, pipelines, apps, logs, audit, GDPR, lineage, storage, usage. Positive finding.",
+          "file": "/home/ubuntu/topics/oneplatform/services/gateway/src/services/proxy-service.ts:12",
+          "fix": "Consider OpenAPI-generated client alongside hand-crafted SDK to ensure API surface stays in sync."
+        },
+        {
+          "id": "PU-019",
+          "severity": "LOW",
+          "description": "CLI supports OP_API_KEY and OP_PLATFORM_URL for CI/CD. Three-tier encryption for credential storage (keychain, machine-id HKDF, env vars). File permissions enforced at 600. Production-grade. Positive finding.",
+          "file": "/home/ubuntu/topics/oneplatform/packages/cli/src/lib/credentials.ts:1",
+          "fix": "Consider adding OP_API_KEY_FILE for environments where env vars are logged but file mounts are secure."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 181,
+    "critical": 22,
+    "high": 53,
+    "medium": 67,
+    "low": 39,
+    "refuted": 10
+  }
+}

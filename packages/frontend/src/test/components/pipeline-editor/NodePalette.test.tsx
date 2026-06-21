@@ -108,9 +108,9 @@ describe("NodePalette", () => {
       renderPalette();
       await user.type(
         screen.getByRole("textbox", { name: /filter step types/i }),
-        "sandbox"
+        "javascript"
       );
-      // "Code" description mentions "sandbox"
+      // "Code" description mentions "JavaScript"
       expect(screen.getByText("Code")).toBeInTheDocument();
     });
   });

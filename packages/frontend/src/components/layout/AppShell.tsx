@@ -16,12 +16,14 @@ import { Outlet, useRouterState } from "@tanstack/react-router";
 import { Sidebar } from "@/components/layout/Sidebar.js";
 import { Topbar } from "@/components/layout/Topbar.js";
 import { MobileNavigation } from "@/components/mobile/MobileNavigation.js";
+import { useIsMobile } from "@/components/mobile/ResponsiveLayout.js";
 import { Toaster } from "@/components/ui/toaster.js";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 
 export function AppShell() {
   const mainRef = React.useRef<HTMLElement>(null);
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
+  const isMobile = useIsMobile();
 
   // useRouterState gives us the resolved pathname so we can key focus management
   // on actual route changes rather than triggering on every re-render.
@@ -77,6 +79,14 @@ export function AppShell() {
             // tabIndex={-1} allows programmatic focus without being in the tab order
             tabIndex={-1}
             className="flex-1 overflow-y-auto outline-none"
+            // On mobile the MobileNavigation bar is fixed at the bottom (~56px).
+            // Padding prevents content from being obscured behind it.
+            // env(safe-area-inset-bottom) accounts for devices with home indicators.
+            style={
+              isMobile
+                ? { paddingBottom: "calc(3.5rem + env(safe-area-inset-bottom, 0px))" }
+                : undefined
+            }
             id="main-content"
           >
             <Outlet />

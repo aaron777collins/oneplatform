@@ -162,8 +162,8 @@ export function AppDetailPage() {
         description={`/${app.slug}`}
         actions={
           <div className="flex gap-2">
+            {/* Visual Builder is the primary editing path for most users */}
             <Button
-              variant="outline"
               onClick={() => void navigate({ to: "/apps/$id/build", params: { id } })}
             >
               <LayoutGrid className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -174,7 +174,7 @@ export function AppDetailPage() {
               onClick={() => void navigate({ to: "/apps/$id/edit", params: { id } })}
             >
               <Code2 className="mr-2 h-4 w-4" aria-hidden="true" />
-              Edit in Monaco
+              Code Editor (Advanced)
             </Button>
             <AppDeployButton appId={id} />
           </div>

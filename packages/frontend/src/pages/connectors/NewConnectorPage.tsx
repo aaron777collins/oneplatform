@@ -236,24 +236,24 @@ export function NewConnectorPage() {
                 <div className="flex items-center gap-3">
                   <Puzzle className="h-8 w-8 text-[var(--color-muted-foreground)]" aria-hidden />
                   <div>
-                    <p className="text-sm font-medium">No connector plugins installed</p>
+                    <p className="text-sm font-medium">No connectors set up yet</p>
                     <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
-                      Connector plugins add support for specific data sources (databases,
-                      SaaS APIs, file systems, etc.). You need to install at least one
-                      before creating a connector.
+                      Browse the marketplace to find and install a connector.
+                      Connectors let you bring in data from databases, SaaS apps,
+                      file systems, and more.
                     </p>
                   </div>
                 </div>
                 <Link
-                  to="/plugins"
+                  to="/connectors/marketplace"
                   className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-2 text-sm font-medium text-[var(--color-primary-foreground)] hover:opacity-90 transition-opacity"
                 >
                   <Puzzle className="h-4 w-4" aria-hidden />
-                  Install connector plugins
+                  Browse Connector Marketplace
                 </Link>
                 <p className="text-xs text-[var(--color-muted-foreground)]">
-                  Find connector plugins in the Plugins section. Look for plugins with
-                  type &quot;connector&quot;. After installing, return here to create your connector.
+                  After installing a connector from the marketplace, return here to
+                  create your first connection.
                 </p>
               </div>
             ) : (

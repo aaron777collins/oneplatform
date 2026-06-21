@@ -32,6 +32,14 @@
 
 services:
 
+  # ── MinIO: require a strong root password ────────────────────────────────
+  # The base compose uses a dev default (oneplatform_minio_dev_2024). The :?
+  # syntax causes Docker Compose to fail at startup if OP_MINIO_PASSWORD is
+  # unset, preventing accidental production deployments with the default value.
+  minio:
+    environment:
+      OP_MINIO_PASSWORD: "${OP_MINIO_PASSWORD:?Must set a strong OP_MINIO_PASSWORD for production. Generate with: openssl rand -hex 32}"
+
   # ── Postgres: require a strong superuser password ──────────────────────────
   postgres:
     environment:

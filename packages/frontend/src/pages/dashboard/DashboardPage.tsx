@@ -114,8 +114,8 @@ function QuickStartPanel({
     },
     {
       id: "entity",
-      label: "Define your data model",
-      description: "Create entity types to describe the shape of your data.",
+      label: "Set up your data structure",
+      description: "Tell the platform what your data looks like (customers, orders, events).",
       done: entityCount > 0,
       href: "/ontology",
       icon: DatabaseIcon,

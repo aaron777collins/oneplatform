@@ -1290,11 +1290,11 @@ auth-service | Error: EACCES: permission denied, open '/data/app/uploads/...'
 **Cause**
 
 All secret files on `init-data` are written by `op-init` (running as root in
-Alpine) with mode `0400`. Application service containers run as UID 1001 (set
+Alpine) with mode `0444`. Application service containers run as UID 1001 (set
 in `Dockerfile.service`). The `init-data` volume is mounted read-only (`ro`),
 and `service-entrypoint.sh` runs as the entrypoint shell before the Node.js
-process inherits the UID. The shell can read 0400 files only if it runs as
-root, but containers should not run as root.
+process inherits the UID. Mode `0444` (world-readable) allows the non-root
+service UID to read secret files without running as root.
 
 In practice, `service-entrypoint.sh` runs as the container's default user
 (typically UID 1001 from the Dockerfile). If the file permissions on the init
@@ -1309,11 +1309,11 @@ docker compose -f docker/docker-compose.yml run --rm \
   -v oneplatform_init-data:/data/init:ro \
   alpine ls -la /data/init/
 
-# Expected permissions: -r-------- (0400) owned by root (UID 0)
+# Expected permissions: -r--r--r-- (0444) owned by root (UID 0)
 # If permissions are wrong, fix them via op-init re-run:
 docker compose -f docker/docker-compose.yml run --rm \
   -v oneplatform_init-data:/data/init \
-  alpine chmod 0400 /data/init/*.txt /data/init/*.key /data/init/*.secret /data/init/*.token
+  alpine chmod 0444 /data/init/*.txt /data/init/*.key /data/init/*.secret /data/init/*.token
 
 # For app-data volume (UID 1001 must own it):
 docker compose -f docker/docker-compose.yml run --rm \
@@ -1614,7 +1614,7 @@ docker compose -f docker/docker-compose.yml stop
 # 2. Replace the master.key on the volume with the original:
 docker compose -f docker/docker-compose.yml run --rm \
   -v oneplatform_init-data:/data/init \
-  alpine sh -c "echo '<original-key-value>' > /data/init/master.key && chmod 0400 /data/init/master.key"
+  alpine sh -c "echo '<original-key-value>' > /data/init/master.key && chmod 0444 /data/init/master.key"
 
 # 3. Restart services
 docker compose -f docker/docker-compose.yml start

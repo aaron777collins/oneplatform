@@ -28,6 +28,7 @@ import {
   Puzzle,
   Settings,
   Store,
+  Search,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -77,6 +78,12 @@ const NAV_GROUPS: NavGroup[] = [
         to: "/ontology",
         icon: Layers,
         description: "Define your data models and schemas. Create entity types that describe the shape of your data (like Customer, Order, or Product) and the relationships between them.",
+      },
+      {
+        label: "Explore Data",
+        to: "/ontology/query",
+        icon: Search,
+        description: "Query and explore your data models interactively. Build queries without writing code.",
       },
       { label: "Pipelines", to: "/pipelines", icon: GitBranch },
       { label: "Apps", to: "/apps", icon: AppWindow },

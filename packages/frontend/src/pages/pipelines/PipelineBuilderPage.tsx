@@ -1,6 +1,14 @@
 /**
  * PipelineBuilderPage — full-page pipeline builder.
  * Route: /pipelines/$id/edit (id === "new" for creation)
+ *
+ * When creating a new pipeline (id === "new") we show the TemplateGallery
+ * wizard first. The wizard collects the trigger type, name, and optionally a
+ * starting template graph. Once the user completes the wizard we move to the
+ * standard visual editor pre-populated with that data.
+ *
+ * Editing an existing pipeline skips the wizard entirely and goes straight to
+ * the editor with the data loaded from the API.
  */
 import React from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
@@ -19,11 +27,14 @@ import {
 } from "@/components/ui/select.js";
 import { PipelineBuilder } from "@/components/pipelines/PipelineBuilder.js";
 import { VisualPipelineEditor } from "@/components/pipeline-editor/VisualPipelineEditor.js";
+import { TemplateGallery, type TemplateGalleryResult } from "@/components/pipeline-editor/TemplateGallery.js";
 import { ScheduleBuilder } from "@/components/pipelines/ScheduleBuilder.js";
 import { useApiClient, type ApiResponse, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { PipelineStep } from "@/components/pipelines/PipelineStepNode.js";
 import type { TriggerType } from "@/components/pipelines/PipelineCard.js";
+import type { PipelineGraph } from "@/components/pipeline-editor/graph-model.js";
+import { graphToPipelineDefinition } from "@/components/pipeline-editor/graph-converter.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,6 +66,14 @@ export function PipelineBuilderPage() {
   const [initialSteps, setInitialSteps] = React.useState<PipelineStep[]>([]);
   const [loaded, setLoaded] = React.useState(isNew);
   const [editorMode, setEditorMode] = React.useState<"visual" | "steps">("visual");
+
+  // When creating a new pipeline, the wizard is shown until the user completes
+  // or skips it. Once dismissed, wizardDismissed stays true for the session.
+  const [wizardDismissed, setWizardDismissed] = React.useState(false);
+  // Template graph chosen in the wizard (undefined = start blank)
+  const [templateGraph, setTemplateGraph] = React.useState<PipelineGraph | undefined>(undefined);
+
+  const showWizard = isNew && !wizardDismissed;
 
   // Listen for "Switch to Visual Editor" event from PipelineBuilder component
   React.useEffect(() => {
@@ -132,6 +151,60 @@ export function PipelineBuilderPage() {
     } else {
       updatePipeline.mutate(body);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Wizard completion handler
+  // -------------------------------------------------------------------------
+
+  function handleWizardComplete(result: TemplateGalleryResult) {
+    setName(result.name);
+    setTriggerType(result.triggerType);
+    setTemplateGraph(result.graph);
+    setWizardDismissed(true);
+  }
+
+  function handleWizardCancel() {
+    void navigate({ to: "/pipelines" });
+  }
+
+  // -------------------------------------------------------------------------
+  // Derive the initialDefinition for the VisualPipelineEditor.
+  // When a template graph was chosen, convert it to a ConvertibleDefinition.
+  // When steps were loaded from the API, use those.
+  // -------------------------------------------------------------------------
+
+  const initialDefinition = React.useMemo(() => {
+    if (templateGraph !== undefined) {
+      try {
+        return graphToPipelineDefinition(templateGraph);
+      } catch {
+        // Malformed template graph — fall back to empty editor
+        return undefined;
+      }
+    }
+    if (initialSteps.length > 0) {
+      return {
+        version: 1 as const,
+        entryStepId: initialSteps[0]!.id,
+        steps: initialSteps.map((s) => ({ id: s.id, type: s.type, name: s.name })),
+      };
+    }
+    return undefined;
+  }, [templateGraph, initialSteps]);
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  // Show the wizard overlay for new pipelines before the user has made choices
+  if (showWizard) {
+    return (
+      <TemplateGallery
+        onComplete={handleWizardComplete}
+        onCancel={handleWizardCancel}
+      />
+    );
   }
 
   return (
@@ -231,17 +304,9 @@ export function PipelineBuilderPage() {
             <div>
               {loaded && editorMode === "visual" && (
                 <div className="h-[500px] rounded-md border border-[var(--color-border)]">
-                  {initialSteps.length > 0 ? (
-                    <VisualPipelineEditor
-                      initialDefinition={{
-                        version: 1,
-                        entryStepId: initialSteps[0]!.id,
-                        steps: initialSteps.map((s) => ({ id: s.id, type: s.type, name: s.name })),
-                      }}
-                    />
-                  ) : (
-                    <VisualPipelineEditor />
-                  )}
+                  <VisualPipelineEditor
+                    {...(initialDefinition !== undefined ? { initialDefinition } : {})}
+                  />
                 </div>
               )}
               {loaded && editorMode === "steps" && (

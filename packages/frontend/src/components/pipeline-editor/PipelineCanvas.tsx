@@ -19,6 +19,7 @@
  *   - Delete key when node selected → remove node
  */
 import * as React from "react";
+import { MousePointerClick } from "lucide-react";
 import { PipelineNode } from "./PipelineNode.js";
 import { ConnectionLine, ArrowheadDef } from "./ConnectionLine.js";
 import {
@@ -481,6 +482,32 @@ export function PipelineCanvas({
 
       {/* Rubber-band connection line — rendered in screen space */}
       {rubberBandLine}
+
+      {/* Empty-state overlay — shown when there are no nodes yet.
+          Uses a foreignObject so we can use HTML/Tailwind inside the SVG
+          without converting pixel dimensions to SVG units. The overlay sits
+          in screen space (outside the viewport transform group) so it always
+          appears centred regardless of pan/zoom. */}
+      {graph.nodes.length === 0 && (
+        <foreignObject x="0" y="0" width="100%" height="100%" style={{ pointerEvents: "none" }}>
+          <div
+            // @ts-expect-error — xmlns required for foreignObject content in some SVG renderers
+            xmlns="http://www.w3.org/1999/xhtml"
+            className="flex h-full w-full items-center justify-center"
+          >
+            <div className="flex flex-col items-center gap-3 rounded-xl bg-[var(--color-background)]/80 px-8 py-6 text-center backdrop-blur-sm">
+              <MousePointerClick
+                className="h-8 w-8 text-[var(--color-muted-foreground)]"
+                aria-hidden="true"
+              />
+              <p className="max-w-xs text-sm text-[var(--color-muted-foreground)]">
+                Drag a step from the panel on the left, or click a step to add it
+                to your pipeline.
+              </p>
+            </div>
+          </div>
+        </foreignObject>
+      )}
     </svg>
   );
 }

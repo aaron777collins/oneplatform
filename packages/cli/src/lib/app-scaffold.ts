@@ -142,14 +142,14 @@ function buildAppTsx(opts: AppScaffoldOptions): string {
 // Replace "example" with the slug of an entity type from your ontology.
 // Run \`op sdk generate-types\` to get TypeScript types for your entities.
 function ExampleList() {
-  const { data, loading, error } = useQuery("example", { limit: 20 });
+  const { data, isLoading, error } = useQuery("example", { limit: 20 });
 
-  if (loading) return <p>Loading…</p>;
+  if (isLoading) return <p>Loading…</p>;
   if (error) return <p>Error: {error.message}</p>;
 
   return (
     <ul>
-      {data.map((item) => (
+      {data?.map((item) => (
         <li key={String(item["id"])}>{JSON.stringify(item)}</li>
       ))}
     </ul>

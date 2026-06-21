@@ -5,6 +5,10 @@
  * Specific sub-components are also exported for testing and embedding.
  */
 export { VisualPipelineEditor } from "./VisualPipelineEditor.js";
+export { TemplateGallery } from "./TemplateGallery.js";
+export { PIPELINE_TEMPLATES } from "./pipeline-templates.js";
+export type { PipelineTemplate } from "./pipeline-templates.js";
+export type { TemplateGalleryProps, TemplateGalleryResult } from "./TemplateGallery.js";
 export { PipelineCanvas } from "./PipelineCanvas.js";
 export { PipelineNode } from "./PipelineNode.js";
 export { ConnectionLine, ArrowheadDef } from "./ConnectionLine.js";

@@ -245,12 +245,12 @@ Returns the current user context, populated by `AppProvider` at mount from
 import { useUser } from '@oneplatform/app-sdk';
 
 function Header() {
-  const { displayName, email, roles, tenantName } = useUser();
+  const { displayName, email, roles, tenantId } = useUser();
 
   return (
     <header>
       <span>{displayName}</span>
-      <span>{tenantName}</span>
+      <span>{tenantId}</span>
     </header>
   );
 }

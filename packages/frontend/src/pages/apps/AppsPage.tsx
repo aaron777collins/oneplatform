@@ -137,7 +137,10 @@ export function AppsPage() {
         onOpenChange={setDialogOpen}
         onCreated={(app) => {
           void queryClient.invalidateQueries({ queryKey: ["apps"] });
-          void navigate({ to: "/apps/$id", params: { id: app.id } });
+          // Take the user directly into the visual builder — they just chose a
+          // template and should start building immediately rather than landing
+          // on the detail overview page.
+          void navigate({ to: "/apps/$id/build", params: { id: app.id } });
         }}
       />
     </div>
