@@ -80,14 +80,14 @@ describe("command registration", () => {
   });
 
   it("does not lose any commands relative to the full expected set", () => {
-    // Authoritative list of all 22 top-level commands (excluding auto-added "help").
+    // Authoritative list of all 23 top-level commands (excluding auto-added "help").
     const expectedCommands = [
       "auth", "profile", "user", "role",
       "ontology", "data", "connector", "mapping", "webhook-out",
       "pipeline", "schedule", "dlq", "exec",
       "app", "plugin",
       "logs", "config", "status", "service", "sdk",
-      "version", "completion",
+      "usage", "version", "completion",
     ];
 
     const commands = getTopLevelCommands();

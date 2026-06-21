@@ -511,7 +511,12 @@ describe("AuthService.resetPassword()", () => {
       release: vi.fn(),
     };
     const db = {
-      query: vi.fn().mockResolvedValue({ rows: [] }),
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (typeof sql === "string" && sql.includes("password_hash") && sql.includes("password_history")) {
+          return { rows: [{ password_hash: null, password_history: [] }] };
+        }
+        return { rows: [] };
+      }),
       connect: vi.fn().mockResolvedValue(mockClient),
     } as unknown as pg.Pool;
 

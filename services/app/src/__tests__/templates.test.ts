@@ -45,8 +45,8 @@ function assertFileSizes(files: Record<string, string>): void {
 // ---------------------------------------------------------------------------
 
 describe("Template registry", () => {
-  it("exports three templates", () => {
-    expect(ALL_TEMPLATES).toHaveLength(3);
+  it("exports all templates", () => {
+    expect(ALL_TEMPLATES).toHaveLength(8);
   });
 
   it("all template IDs are unique", () => {

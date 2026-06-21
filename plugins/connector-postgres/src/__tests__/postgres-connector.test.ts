@@ -34,6 +34,8 @@ const VALID_CONFIG = {
   batchSize: 2,
 };
 
+const OFFSET_CONFIG = { ...VALID_CONFIG, paginationStrategy: "offset" as const };
+
 /**
  * Minimal schema response from the proxy's /schema endpoint.
  * Matches ProxySchemaResponse shape from the implementation.
@@ -83,10 +85,10 @@ describe("metadata()", () => {
     expect(meta.description.length).toBeGreaterThanOrEqual(10);
   });
 
-  it("declares supportsIncremental=true and supportsRealtime=false", () => {
+  it("declares supportsIncremental=true and supportsRealtime=true", () => {
     const meta = connector.metadata();
     expect(meta.supportsIncremental).toBe(true);
-    expect(meta.supportsRealtime).toBe(false);
+    expect(meta.supportsRealtime).toBe(true);
   });
 
   it("is categorized as 'database'", () => {
@@ -214,7 +216,7 @@ describe("fetchBatch() — offset pagination", () => {
       credentials: { connectionString: "postgresql://user:pw@localhost/db" },
       fetchHandler,
     });
-    const handle = await connector.connect({ ...VALID_CONFIG, ...overrides }, ctx);
+    const handle = await connector.connect({ ...OFFSET_CONFIG, ...overrides }, ctx);
     return handle;
   }
 
@@ -239,7 +241,7 @@ describe("fetchBatch() — offset pagination", () => {
       },
     });
 
-    const handle = await connector.connect(VALID_CONFIG, ctx);
+    const handle = await connector.connect(OFFSET_CONFIG, ctx);
     const result = await connector.fetchBatch(handle, null, ctx);
 
     expect(result.records).toHaveLength(2);
@@ -266,7 +268,7 @@ describe("fetchBatch() — offset pagination", () => {
       },
     });
 
-    const handle = await connector.connect(VALID_CONFIG, ctx);
+    const handle = await connector.connect(OFFSET_CONFIG, ctx);
     const result = await connector.fetchBatch(handle, null, ctx);
 
     expect(result.hasMore).toBe(true);
@@ -284,7 +286,7 @@ describe("fetchBatch() — offset pagination", () => {
       },
     });
 
-    const handle = await connector.connect(VALID_CONFIG, ctx);
+    const handle = await connector.connect(OFFSET_CONFIG, ctx);
     const result = await connector.fetchBatch(handle, null, ctx);
 
     expect(result.hasMore).toBe(false);
@@ -300,7 +302,7 @@ describe("fetchBatch() — offset pagination", () => {
       },
     });
 
-    const handle = await connector.connect(VALID_CONFIG, ctx);
+    const handle = await connector.connect(OFFSET_CONFIG, ctx);
     const result = await connector.fetchBatch(handle, null, ctx);
 
     expect(result.hasMore).toBe(false);
@@ -335,7 +337,7 @@ describe("fetchBatch() — offset pagination", () => {
       },
     });
 
-    const handle = await connector.connect(VALID_CONFIG, ctx);
+    const handle = await connector.connect(OFFSET_CONFIG, ctx);
 
     const batch1 = await connector.fetchBatch(handle, null, ctx);
     expect(batch1.records).toHaveLength(2);
@@ -358,7 +360,7 @@ describe("fetchBatch() — offset pagination", () => {
       },
     });
 
-    const handle = await connector.connect(VALID_CONFIG, ctx);
+    const handle = await connector.connect(OFFSET_CONFIG, ctx);
     const result = await connector.fetchBatch(handle, null, ctx);
 
     expect(() => new Date(result.fetchedAt)).not.toThrow();
