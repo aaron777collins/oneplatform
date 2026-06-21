@@ -21,13 +21,21 @@ import type { Page, Route } from "@playwright/test";
 // Mock data
 // ---------------------------------------------------------------------------
 
+// MOCK_USER mirrors the Session type from auth.store.ts so that setSession()
+// receives a valid object and the auth store is properly populated.
+// The previous shape used `id` and `role` (singular) which are the server's raw
+// user-record fields — the auth/me endpoint returns the Session envelope instead.
 const MOCK_USER = {
-  id: "user-e2e-001",
-  email: "e2e-tester@oneplatform.test",
-  name: "E2E Tester",
-  role: "tenant-admin",
+  // Session fields (auth.store.ts Session interface)
+  userId: "user-e2e-001",
   tenantId: "tenant-e2e-001",
-  createdAt: "2025-01-01T00:00:00.000Z",
+  roles: ["tenant-admin"],
+  scopes: ["read:all", "write:all"],
+  isGuest: false,
+  emailVerified: true,
+  email: "e2e-tester@oneplatform.test",
+  displayName: "E2E Tester",
+  tenantName: "E2E Tenant",
 };
 
 const MOCK_PIPELINES = [
@@ -176,14 +184,13 @@ const ROUTE_TABLE: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/auth\/login/,
     method: "POST",
+    // LoginForm calls client.post<ApiResponse<Session>>("/v1/auth/login") then
+    // setSession(result.data). The data field must be a Session object so
+    // setSession() can populate the auth store correctly.
     response: () => ({
       status: 200,
       body: {
-        data: {
-          user: MOCK_USER,
-          accessToken: "mock-access-token-e2e",
-          expiresIn: 3600,
-        },
+        data: MOCK_USER,
       },
     }),
   },
@@ -191,6 +198,13 @@ const ROUTE_TABLE: RouteEntry[] = [
     pattern: /\/api\/v1\/auth\/logout/,
     method: "POST",
     response: () => ({ status: 200, body: { data: { success: true } } }),
+  },
+  {
+    // The api-client attempts a token refresh on the first 401 before giving up.
+    // Return 200 so the retry can proceed rather than immediately redirecting to /login.
+    pattern: /\/api\/v1\/auth\/refresh/,
+    method: "POST",
+    response: () => ({ status: 200, body: { data: MOCK_USER } }),
   },
 
   // Health
