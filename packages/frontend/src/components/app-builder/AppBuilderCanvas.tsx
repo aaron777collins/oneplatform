@@ -189,9 +189,16 @@ export function AppBuilderCanvas({ onOpenInEditor, className = "" }: AppBuilderC
           />
         )}
 
-        {/* Center: canvas */}
+        {/* Center: canvas.
+            In edit mode a subtle dotted grid is shown as a snap-to-grid visual guide
+            (NCD-005). The grid is 24px — matching the 12-column layout at typical
+            widths. It disappears in preview mode to avoid distracting end-users. */}
         <div
-          className="flex-1 overflow-auto p-4"
+          className={`flex-1 overflow-auto p-4 ${
+            store.mode === "edit"
+              ? "[background-image:radial-gradient(circle,var(--color-border,#e5e7eb)_1px,transparent_1px)] [background-size:24px_24px]"
+              : ""
+          }`}
           onClick={handleCanvasClick}
           onDragOver={(e) => e.preventDefault()}
         >

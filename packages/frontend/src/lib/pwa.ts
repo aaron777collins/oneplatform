@@ -14,6 +14,111 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
+// PWA Install Prompt
+// ---------------------------------------------------------------------------
+
+// The BeforeInstallPromptEvent is a non-standard extension defined in the
+// Chrome/Edge PWA spec. TypeScript's lib.dom.d.ts does not include it, so we
+// declare a minimal interface to avoid `any` casts throughout.
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  prompt(): Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
+/**
+ * Module-level storage for the deferred install prompt event.
+ *
+ * The browser fires `beforeinstallprompt` once (before the user has installed
+ * the PWA). We capture it here so that UI components can call
+ * `promptInstall()` at any later point — e.g. when the user clicks an
+ * "Install App" button — without needing to be mounted at the exact moment
+ * the event fires.
+ */
+let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
+
+/** Callback set by `onInstallAvailable`; invoked when the prompt is captured. */
+let installAvailableCallback: (() => void) | null = null;
+
+/**
+ * Initialises the install prompt listener.
+ *
+ * Must be called once during app boot (e.g. in main.tsx). It is idempotent —
+ * calling it multiple times registers duplicate listeners but the module-level
+ * `deferredInstallPrompt` reference is replaced each time, so only the most
+ * recent prompt event is retained.
+ */
+export function registerInstallPromptListener(): void {
+  if (typeof window === "undefined") return;
+
+  window.addEventListener("beforeinstallprompt", (event: Event) => {
+    // Prevent the browser's default mini-infobar so we can show our own UI.
+    event.preventDefault();
+    deferredInstallPrompt = event as BeforeInstallPromptEvent;
+
+    if (installAvailableCallback) {
+      installAvailableCallback();
+    }
+  });
+
+  // Clear the stored prompt once the app is installed so the "Install" button
+  // is hidden after a successful install.
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+  });
+}
+
+/**
+ * Returns true when a deferred install prompt is available, meaning the app
+ * meets the PWA installability criteria and has not yet been installed.
+ */
+export function isInstallPromptAvailable(): boolean {
+  return deferredInstallPrompt !== null;
+}
+
+/**
+ * Triggers the browser's native install dialog.
+ *
+ * Resolves with the user's choice ("accepted" | "dismissed") or `null` when
+ * no deferred prompt is available (e.g. already installed, or browser does
+ * not support installation).
+ *
+ * The deferred prompt is single-use — the browser clears it after `prompt()`
+ * is called, so we also null the module reference.
+ */
+export async function promptInstall(): Promise<"accepted" | "dismissed" | null> {
+  if (!deferredInstallPrompt) return null;
+
+  const prompt = deferredInstallPrompt;
+  // Clear immediately; if the user dismisses and re-visits, the browser may
+  // fire a new beforeinstallprompt later.
+  deferredInstallPrompt = null;
+
+  const result = await prompt.prompt();
+  return result.outcome;
+}
+
+/**
+ * Registers a callback that fires once when an install prompt becomes
+ * available. Returns an unsubscribe function.
+ *
+ * Useful for React components: call this in a useEffect and unsubscribe on
+ * unmount to avoid stale callbacks keeping component instances alive.
+ */
+export function onInstallAvailable(callback: () => void): () => void {
+  installAvailableCallback = callback;
+  // If the prompt was already captured before this call (race during
+  // hydration), invoke the callback synchronously.
+  if (deferredInstallPrompt) {
+    callback();
+  }
+  return () => {
+    if (installAvailableCallback === callback) {
+      installAvailableCallback = null;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 

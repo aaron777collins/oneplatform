@@ -165,6 +165,8 @@ function StepTypeFields({ node, allNodes, config, onConfigChange }: StepTypeFiel
       return <CodeFields config={config} onConfigChange={onConfigChange} />;
     case "conditional":
       return <ConditionalFields config={config} onConfigChange={onConfigChange} currentNodeId={node.id} allNodes={allNodes} />;
+    case "loop":
+      return <LoopFields config={config} onConfigChange={onConfigChange} />;
     case "wait":
       return <WaitFields config={config} onConfigChange={onConfigChange} />;
     case "approval":
@@ -565,6 +567,63 @@ function ConditionalFields({
             onChange={(e) => onConfigChange("elseStepId", e.target.value)}
           />
         )}
+      </FormField>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loop step fields
+// ---------------------------------------------------------------------------
+
+const MAX_LOOP_ITERATIONS = 10_000;
+
+function LoopFields({
+  config,
+  onConfigChange,
+}: {
+  config: StepConfig;
+  onConfigChange: (k: string, v: unknown) => void;
+}) {
+  const iterateOver = (config["iterateOver"] as string | undefined) ?? "";
+  const maxIterations = (config["maxIterations"] as number | undefined) ?? 1000;
+
+  return (
+    <>
+      <FormField label="Loop over field" htmlFor="cfg-loop-field">
+        <Input
+          id="cfg-loop-field"
+          placeholder="e.g. data.items"
+          value={iterateOver}
+          onChange={(e) => onConfigChange("iterateOver", e.target.value)}
+        />
+        <p className="text-[10px] text-[var(--color-muted-foreground)] mt-1">
+          Dot-notation path to an array field in the pipeline data
+          (e.g. <code className="font-mono">output.records</code>).
+          Each element is passed to the child steps as <code className="font-mono">item</code>.
+        </p>
+      </FormField>
+
+      <FormField label={`Max iterations (1–${MAX_LOOP_ITERATIONS.toLocaleString()})`} htmlFor="cfg-loop-max">
+        <Input
+          id="cfg-loop-max"
+          type="number"
+          min={1}
+          max={MAX_LOOP_ITERATIONS}
+          value={maxIterations}
+          onChange={(e) => {
+            const v = parseInt(e.target.value, 10);
+            onConfigChange(
+              "maxIterations",
+              Number.isNaN(v) ? 1000 : Math.min(Math.max(1, v), MAX_LOOP_ITERATIONS),
+            );
+          }}
+          className="w-36"
+        />
+        <p className="text-[10px] text-[var(--color-muted-foreground)] mt-1">
+          Safety cap. Execution stops after this many iterations even if the
+          array is longer, to prevent infinite loops.
+        </p>
       </FormField>
     </>
   );

@@ -711,6 +711,9 @@ services:
     container_name: op-grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
+      # DEV ONLY — the "admin" fallback password is intentional for local development.
+      # In production (docker-compose.prod.yml) this variable is mandatory and
+      # must be set to a strong random value (e.g. openssl rand -hex 32).
       GF_SECURITY_ADMIN_PASSWORD: ${OP_GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       # Disable analytics and update checks — this stack is air-gapped by default.

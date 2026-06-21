@@ -131,6 +131,99 @@ function describeCron(cron: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Next run time preview
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the next `count` future run timestamps for a 5-field cron expression.
+ *
+ * This is a lightweight implementation that handles the subset of cron syntax
+ * used by the ScheduleBuilder presets and interval builder:
+ *   - `*`         any value
+ *   - `N`         exact value
+ *   - `*\/N`      step (every N units)
+ *
+ * It does NOT handle ranges (1-5), lists (1,3,5), or L/W/# extensions.
+ * For complex expressions entered in advanced mode those tokens remain
+ * unparsed and the function returns an empty array instead of crashing.
+ *
+ * Approach: advance a Date one minute at a time (maximum 1 year look-ahead)
+ * until `count` matching times are found. The loop is capped so malformed
+ * expressions cannot spin indefinitely.
+ */
+export function getNextCronRuns(expr: string, count: number): Date[] {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return [];
+
+  const [minutePart, hourPart, domPart, monthPart, dowPart] = parts as [string, string, string, string, string];
+
+  function parseField(
+    part: string,
+    min: number,
+    max: number,
+  ): (value: number) => boolean {
+    if (part === "*") return () => true;
+
+    // */N — step from min
+    const stepMatch = part.match(/^\*\/(\d+)$/);
+    if (stepMatch) {
+      const step = parseInt(stepMatch[1] ?? "1", 10);
+      if (step < 1) return () => false;
+      return (v) => (v - min) % step === 0;
+    }
+
+    // Exact integer
+    const exact = parseInt(part, 10);
+    if (!isNaN(exact)) return (v) => v === exact;
+
+    // Unsupported syntax — bail out by never matching
+    return () => false;
+  }
+
+  // Month in Date is 0-based; cron month field is 1-based (1–12).
+  const matchMinute = parseField(minutePart, 0, 59);
+  const matchHour = parseField(hourPart, 0, 23);
+  const matchDom = parseField(domPart, 1, 31);
+  const matchMonth = parseField(monthPart, 1, 12);
+  const matchDow = parseField(dowPart, 0, 6);
+
+  const results: Date[] = [];
+
+  // Start at the next whole minute to avoid returning "now" as a result.
+  const cursor = new Date();
+  cursor.setSeconds(0, 0);
+  cursor.setMinutes(cursor.getMinutes() + 1);
+
+  // Safety cap: scan at most one year ahead (525,600 minutes).
+  const MAX_ITERATIONS = 525_600;
+  let iterations = 0;
+
+  while (results.length < count && iterations < MAX_ITERATIONS) {
+    iterations++;
+
+    const minute = cursor.getMinutes();
+    const hour = cursor.getHours();
+    const dom = cursor.getDate();
+    const month = cursor.getMonth() + 1; // convert to 1-based
+    const dow = cursor.getDay();         // 0=Sunday
+
+    if (
+      matchMinute(minute) &&
+      matchHour(hour) &&
+      matchDom(dom) &&
+      matchMonth(month) &&
+      matchDow(dow)
+    ) {
+      results.push(new Date(cursor));
+    }
+
+    cursor.setMinutes(cursor.getMinutes() + 1);
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // Detect which mode we are in from a cron string
 // ---------------------------------------------------------------------------
 
@@ -173,6 +266,10 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
 
   const activePreset = PRESETS.find((p) => p.cron === value.trim());
   const description = value.trim() ? describeCron(value) : "No schedule set";
+  const nextRuns = React.useMemo(
+    () => (value.trim() ? getNextCronRuns(value, 3) : []),
+    [value],
+  );
 
   return (
     <div className="space-y-3">
@@ -181,11 +278,34 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
         Schedule
       </Label>
 
-      {/* Human-readable description */}
+      {/* Human-readable description + next 3 run preview */}
       {value.trim() && (
-        <div className="rounded-md bg-[var(--color-muted)] px-3 py-2">
+        <div className="rounded-md bg-[var(--color-muted)] px-3 py-2 space-y-1.5">
           <p className="text-xs text-[var(--color-foreground)]">{description}</p>
-          <p className="text-[10px] text-[var(--color-muted-foreground)] mt-0.5 font-mono">{value}</p>
+          <p className="text-[10px] text-[var(--color-muted-foreground)] font-mono">{value}</p>
+          {nextRuns.length > 0 && (
+            <div>
+              <p className="text-[10px] font-medium text-[var(--color-muted-foreground)]">
+                Next runs:
+              </p>
+              <ul className="mt-0.5 space-y-0.5">
+                {nextRuns.map((d) => (
+                  <li
+                    key={d.toISOString()}
+                    className="text-[10px] text-[var(--color-muted-foreground)] font-mono"
+                  >
+                    {d.toLocaleString(undefined, {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 

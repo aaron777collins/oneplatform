@@ -11,6 +11,7 @@
 
 // Step types mirror the pipeline service schema's discriminated union.
 // "parallel" is included here but rendered as a special compound node.
+// "loop" iterates over an array field, executing child steps for each item.
 export type GraphStepType =
   | "code"
   | "connector"
@@ -18,6 +19,7 @@ export type GraphStepType =
   | "transform"
   | "conditional"
   | "parallel"
+  | "loop"
   | "webhook"
   | "wait"
   | "approval"

@@ -4,8 +4,13 @@ import type pg from "pg";
 // Retention configuration from environment variables
 // ---------------------------------------------------------------------------
 
-function getRetentionDays(key: string, defaultDays: number): number {
-  return parseInt(process.env[key] ?? String(defaultDays), 10);
+function getRetentionDays(key: string, defaultDays: number, aliasKey?: string): number {
+  // Check primary key first, then optional alias, then default.
+  // The alias lets us support both historical and documented env var names
+  // without breaking existing deployments.
+  const raw = process.env[key] ?? (aliasKey !== undefined ? process.env[aliasKey] : undefined);
+  const parsed = parseInt(raw ?? String(defaultDays), 10);
+  return Number.isNaN(parsed) || parsed < 1 ? defaultDays : parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +113,9 @@ export class RetentionService {
     const debugDays = getRetentionDays("OP_RETENTION_DEBUG_DAYS", 7);
     const infoDays = getRetentionDays("OP_RETENTION_INFO_DAYS", 30);
     const errorDays = getRetentionDays("OP_RETENTION_ERROR_DAYS", 90);
-    const auditDays = getRetentionDays("OP_RETENTION_AUDIT_DAYS", 365);
+    // OP_AUDIT_RETENTION_DAYS is the documented name (PA-013).
+    // OP_RETENTION_AUDIT_DAYS is the legacy alias kept for backward compatibility.
+    const auditDays = getRetentionDays("OP_AUDIT_RETENTION_DAYS", 365, "OP_RETENTION_AUDIT_DAYS");
 
     try {
       // 1. Row-level delete for debug (monthly partitions span all levels; we

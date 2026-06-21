@@ -15,6 +15,19 @@ export interface MappingRuleRouteDeps {
 const REQUIRED_READ_SCOPE = "ontology:read";
 const REQUIRED_WRITE_SCOPE = "ontology:write";
 
+// Allowlist for entityType URL path segments — alphanumeric, hyphens, underscores
+// only. This mirrors the validation in entities.ts (SA-009).
+const ENTITY_TYPE_SLUG_RE = /^[a-z0-9_-]+$/i;
+
+function validateEntityTypeParam(entityType: string): void {
+  if (!ENTITY_TYPE_SLUG_RE.test(entityType)) {
+    throw new ValidationError(
+      "entityType must contain only alphanumeric characters, hyphens, and underscores.",
+      [],
+    );
+  }
+}
+
 export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { mappingRuleRepo, mappingErrorRepo, entityRepo } = deps;
@@ -25,6 +38,7 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
       throw new ForbiddenError("ontology:read scope is required.");
     }
 
+    validateEntityTypeParam(c.req.param("entityType"));
     const entity = await entityRepo.findBySlug(user.tenantId, c.req.param("entityType"));
     if (!entity) throw new NotFoundError("Entity not found.");
 
@@ -51,6 +65,7 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    validateEntityTypeParam(c.req.param("entityType"));
     const entity = await entityRepo.findBySlug(user.tenantId, c.req.param("entityType"));
     if (!entity) throw new NotFoundError("Entity not found.");
 
@@ -88,6 +103,7 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    validateEntityTypeParam(c.req.param("entityType"));
     // Tenant isolation: verify the rule belongs to this tenant before updating.
     const existingRule = await mappingRuleRepo.findById(c.req.param("ruleId"));
     if (!existingRule) throw new NotFoundError("Mapping rule not found.");
@@ -128,6 +144,7 @@ export function createMappingRuleRoutes(deps: MappingRuleRouteDeps): Hono<{ Vari
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    validateEntityTypeParam(c.req.param("entityType"));
     // Tenant isolation: verify the rule belongs to this tenant before deleting.
     const ruleToDelete = await mappingRuleRepo.findById(c.req.param("ruleId"));
     if (!ruleToDelete) throw new NotFoundError("Mapping rule not found.");

@@ -151,6 +151,8 @@ export interface LogQueryParams {
 }
 
 export interface AuditQueryParams {
+  /** Full-text search across the action field and the JSON metadata blob (PA-014). */
+  search?: string;
   actorId?: string;
   actorType?: "user" | "service" | "system";
   tenantId?: string;
@@ -158,7 +160,9 @@ export interface AuditQueryParams {
   resourceType?: string;
   resourceId?: string;
   result?: "success" | "failure";
+  /** Inclusive lower bound on created_at. Alias: startDate. */
   from?: string;
+  /** Exclusive upper bound on created_at. Alias: endDate. */
   to?: string;
   cursor?: string;
   limit: number;

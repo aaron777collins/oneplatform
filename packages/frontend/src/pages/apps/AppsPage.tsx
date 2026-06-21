@@ -8,7 +8,7 @@
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Plus, Search, LayoutGrid } from "lucide-react";
+import { Plus, Search, LayoutGrid, Sparkles, Code2 } from "lucide-react";
 
 // Cast Lucide icons to avoid exactOptionalPropertyTypes conflict on className
 type IconComponent = React.ComponentType<{ className?: string }>;
@@ -108,15 +108,41 @@ export function AppsPage() {
             <Skeleton key={i} className="h-40 w-full rounded-lg" />
           ))}
         </div>
+      ) : filtered.length === 0 && apps.length === 0 ? (
+        /* First-run empty state — give new users clear guidance on what apps
+           are and two distinct paths: templates vs. blank canvas. */
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--color-primary)]/10">
+            <LayoutGridIcon className="h-8 w-8 text-[var(--color-primary)]" />
+          </div>
+          <h2 className="mb-2 text-xl font-semibold">Create your first app</h2>
+          <p className="mb-8 max-w-md text-sm text-[var(--color-muted-foreground)]">
+            Apps are custom dashboards and internal tools built on top of your data.
+            Connect to your pipelines, visualise metrics, and share insights — all without
+            leaving OnePlatform.
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+              Create from template
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Code2 className="h-4 w-4" aria-hidden="true" />
+              Start from scratch
+            </Button>
+          </div>
+        </div>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={LayoutGridIcon}
-          title={apps.length === 0 ? "No apps yet" : "No apps match your filters"}
-          {...(apps.length === 0 ? {
-            description: "Create your first app to get started.",
-            actionLabel: "New App",
-            onAction: () => setDialogOpen(true),
-          } : {})}
+          title="No apps match your filters"
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

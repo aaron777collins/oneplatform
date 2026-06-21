@@ -71,14 +71,14 @@ export function DropZone({
   }
 
   const highlightClass = isDragOver
-    ? "bg-[var(--color-primary,#6366f1)]/10 border-[var(--color-primary,#6366f1)] border-2"
+    ? "bg-[var(--color-primary,#6366f1)]/10 border-[var(--color-primary,#6366f1)] border-2 scale-[1.01]"
     : isDropCandidate
-    ? "border-dashed border border-[var(--color-primary,#6366f1)]/30 bg-[var(--color-primary,#6366f1)]/5"
+    ? "border-dashed border border-[var(--color-primary,#6366f1)]/40 bg-[var(--color-primary,#6366f1)]/5"
     : "";
 
   return (
     <div
-      className={`relative h-full min-h-[60px] rounded transition-all ${highlightClass}`}
+      className={`relative h-full min-h-[60px] rounded transition-all duration-100 ${highlightClass}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -86,7 +86,7 @@ export function DropZone({
       data-row-id={rowId}
       data-col-id={columnId}
     >
-      {/* Empty placeholder label */}
+      {/* Static "Drop here" label — shown in empty columns when no drag is in progress */}
       {!isOccupied && activeDrag === null && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="text-[10px] text-[var(--color-muted-foreground,#9ca3af)] border border-dashed border-[var(--color-border,#e5e7eb)] rounded px-2 py-1">
@@ -95,10 +95,24 @@ export function DropZone({
         </div>
       )}
 
+      {/* Ghost placeholder — shown while a drag is hovering over this target.
+          The animated bars simulate a component skeleton so the user can
+          preview approximately what will be placed before releasing (NCD-005). */}
       {isDragOver && isDropCandidate && (
+        <div className="absolute inset-1 flex flex-col gap-1.5 items-stretch justify-center pointer-events-none rounded-sm border-2 border-dashed border-[var(--color-primary,#6366f1)] bg-[var(--color-primary,#6366f1)]/8 animate-pulse">
+          <div className="mx-3 h-2 rounded-full bg-[var(--color-primary,#6366f1)]/30" />
+          <div className="mx-3 h-2 rounded-full bg-[var(--color-primary,#6366f1)]/20 w-3/4" />
+          <p className="text-center text-[10px] font-semibold text-[var(--color-primary,#6366f1)] mt-1">
+            {isOccupied ? "Swap" : "Place here"}
+          </p>
+        </div>
+      )}
+
+      {/* Non-hovered drop candidate indicator — subtle pulsing ring */}
+      {!isDragOver && isDropCandidate && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded">
-          <span className="text-xs font-medium text-[var(--color-primary,#6366f1)]">
-            {isOccupied ? "Swap" : "Place"}
+          <span className="text-[10px] font-medium text-[var(--color-primary,#6366f1)]/70">
+            {isOccupied ? "Swap" : "Drop"}
           </span>
         </div>
       )}

@@ -656,6 +656,223 @@ export function rename(
 }
 
 // ---------------------------------------------------------------------------
+// Type cast
+// ---------------------------------------------------------------------------
+
+export type CastTargetType = "string" | "number" | "boolean" | "date";
+
+export interface TypeCastSpec {
+  field: string;
+  targetType: CastTargetType;
+  /** Output field name. Defaults to the same as field (in-place cast). */
+  outputField?: string;
+}
+
+/**
+ * Converts field values to the target type.
+ *
+ * Conversion rules:
+ *   string  → String(value)
+ *   number  → parseFloat; NaN yields null
+ *   boolean → truthy strings ("true","1","yes") → true; anything else → false
+ *   date    → new Date(value).toISOString(); invalid dates yield null
+ *
+ * Unknown target types throw TransformError at construction time so pipelines
+ * fail loudly rather than silently dropping data.
+ */
+export function typeCast(records: DataRecord[], specs: TypeCastSpec[]): DataRecord[] {
+  if (specs.length === 0) {
+    throw new TransformError("typeCast requires at least one spec.");
+  }
+  for (const spec of specs) {
+    if (!["string", "number", "boolean", "date"].includes(spec.targetType)) {
+      throw new TransformError(
+        `typeCast: unknown targetType "${spec.targetType}". Allowed: string, number, boolean, date.`,
+      );
+    }
+  }
+
+  return records.map((record) => {
+    const out: DataRecord = { ...record };
+    for (const { field, targetType, outputField } of specs) {
+      const raw = record[field];
+      const dest = outputField ?? field;
+      out[dest] = castValue(raw, targetType);
+    }
+    return out;
+  });
+}
+
+function castValue(value: unknown, targetType: CastTargetType): unknown {
+  if (value === null || value === undefined) return null;
+  switch (targetType) {
+    case "string":
+      return String(value);
+    case "number": {
+      const n = parseFloat(String(value));
+      return Number.isNaN(n) ? null : n;
+    }
+    case "boolean": {
+      const s = String(value).toLowerCase().trim();
+      return s === "true" || s === "1" || s === "yes";
+    }
+    case "date": {
+      const d = new Date(String(value));
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Date parse
+// ---------------------------------------------------------------------------
+
+export interface DateParseSpec {
+  field: string;
+  /** Output field name. Defaults to the same as field (in-place). */
+  outputField?: string;
+  /**
+   * Output format — what the parsed result should be:
+   *   "iso"       → ISO-8601 string (default)
+   *   "timestamp" → Unix epoch in milliseconds (number)
+   *   "date"      → Date-only string "YYYY-MM-DD"
+   *
+   * The JavaScript Date constructor handles many common input formats (ISO-8601,
+   * RFC-2822, and locale-specific strings). For exotic formats users should
+   * pre-process with a code step before using dateParse.
+   */
+  outputFormat?: "iso" | "timestamp" | "date";
+}
+
+/**
+ * Parses date strings into a canonical output format.
+ *
+ * Fields that do not parse as a valid date are set to null so downstream
+ * steps can filter rather than silently propagating garbage values.
+ */
+export function dateParse(records: DataRecord[], specs: DateParseSpec[]): DataRecord[] {
+  if (specs.length === 0) {
+    throw new TransformError("dateParse requires at least one spec.");
+  }
+
+  return records.map((record) => {
+    const out: DataRecord = { ...record };
+    for (const { field, outputField, outputFormat = "iso" } of specs) {
+      const raw = record[field];
+      const dest = outputField ?? field;
+      if (raw === null || raw === undefined) {
+        out[dest] = null;
+        continue;
+      }
+      const d = new Date(String(raw));
+      if (isNaN(d.getTime())) {
+        out[dest] = null;
+        continue;
+      }
+      switch (outputFormat) {
+        case "iso":
+          out[dest] = d.toISOString();
+          break;
+        case "timestamp":
+          out[dest] = d.getTime();
+          break;
+        case "date":
+          out[dest] = d.toISOString().slice(0, 10);
+          break;
+      }
+    }
+    return out;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// String operations
+// ---------------------------------------------------------------------------
+
+export type StringOp =
+  | { op: "trim" }
+  | { op: "uppercase" }
+  | { op: "lowercase" }
+  | { op: "replace"; search: string; replacement: string; replaceAll?: boolean }
+  | { op: "split"; separator: string; outputField: string; index?: number };
+
+export interface StringOpSpec {
+  field: string;
+  operations: StringOp[];
+  /** Output field name. Defaults to the same as field (in-place). */
+  outputField?: string;
+}
+
+/**
+ * Applies a chain of string manipulation operations to a field.
+ *
+ * Operations execute left-to-right; the output of each operation becomes the
+ * input for the next. Non-string field values are coerced to string first.
+ *
+ * "split" with no index specified outputs the full array. With an index it
+ * outputs the element at that index (null if out of bounds).
+ */
+export function stringOp(records: DataRecord[], specs: StringOpSpec[]): DataRecord[] {
+  if (specs.length === 0) {
+    throw new TransformError("stringOp requires at least one spec.");
+  }
+  for (const spec of specs) {
+    if (spec.operations.length === 0) {
+      throw new TransformError(`stringOp: spec for field "${spec.field}" has no operations.`);
+    }
+  }
+
+  return records.map((record) => {
+    const out: DataRecord = { ...record };
+    for (const { field, operations, outputField } of specs) {
+      const raw = record[field];
+      const dest = outputField ?? field;
+      if (raw === null || raw === undefined) {
+        out[dest] = null;
+        continue;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let current: any = String(raw);
+      for (const operation of operations) {
+        if (typeof current !== "string") {
+          // Once a split (without index) yields an array, string ops no longer apply
+          break;
+        }
+        switch (operation.op) {
+          case "trim":
+            current = current.trim();
+            break;
+          case "uppercase":
+            current = current.toUpperCase();
+            break;
+          case "lowercase":
+            current = current.toLowerCase();
+            break;
+          case "replace":
+            if (operation.replaceAll === true) {
+              current = current.replaceAll(operation.search, operation.replacement);
+            } else {
+              current = current.replace(operation.search, operation.replacement);
+            }
+            break;
+          case "split": {
+            const parts = current.split(operation.separator);
+            if (operation.index !== undefined) {
+              current = parts[operation.index] ?? null;
+            } else {
+              current = parts;
+            }
+            break;
+          }
+        }
+      }
+      out[dest] = current;
+    }
+    return out;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 

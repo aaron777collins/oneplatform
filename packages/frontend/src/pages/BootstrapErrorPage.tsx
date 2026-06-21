@@ -76,7 +76,7 @@ export function BootstrapErrorPage() {
             <span>
               <strong className="text-[var(--color-foreground)]">Check the gateway.</strong>{" "}
               The API is served through Caddy on HTTPS (port 443).
-              Try <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">curl -k https://localhost/api/v1/healthz</code>.
+              Try <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">curl -k https://localhost/healthz</code>.
             </span>
           </li>
           <li className="flex gap-2">

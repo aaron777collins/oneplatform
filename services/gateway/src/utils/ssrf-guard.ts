@@ -78,6 +78,10 @@ export function isBlockedIpRange(ip: string): boolean {
   // IPv6 loopback — normalised form returned by Node's dns.resolve6()
   if (lower === "::1") return true;
 
+  // IPv6 unspecified address — equivalent to 0.0.0.0 in IPv4; should never
+  // be a valid delivery target and is already blocked in the IPv4 CIDR list.
+  if (lower === "::") return true;
+
   // Link-local IPv6: fe80::/10 — covers fe80:: through febf::
   // The first 10 bits of the address must be 1111111010 (0xfe80 with mask 0xffc0).
   // We match on the prefix characters; any address starting with fe8/fe9/fea/feb

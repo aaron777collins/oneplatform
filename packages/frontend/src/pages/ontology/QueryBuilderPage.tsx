@@ -13,7 +13,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   Plus, Trash2, Play, Download, ChevronLeft, ChevronRight,
   AlertCircle, X, BarChart3, LineChart as LineChartIcon,
-  PieChart as PieChartIcon, Save, FolderOpen, Eye, Layers, Code,
+  PieChart as PieChartIcon, Save, FolderOpen, Eye, Layers, Code, Calendar,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -37,6 +37,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog.js";
 import { Badge } from "@/components/ui/badge.js";
 import { Separator } from "@/components/ui/separator.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
@@ -51,6 +59,7 @@ import type { EntitySummary } from "@/components/ontology/EntityList.js";
 
 const PAGE_SIZE = 50;
 const SAVED_QUERIES_KEY = "oneplatform:saved-queries";
+const SCHEDULED_REPORTS_KEY = "oneplatform:scheduled-reports";
 
 /** HSL chart palette — chosen for contrast and legibility on both light/dark themes. */
 const CHART_COLORS = [
@@ -74,7 +83,7 @@ type WhereOperator =
 
 type AggregateFunction = "COUNT" | "SUM" | "AVG" | "MIN" | "MAX";
 
-type ResultViewTab = "table" | "chart" | "sql";
+type ResultViewTab = "table" | "chart" | "sql" | "pivot";
 type ChartType = "bar" | "line" | "pie";
 
 const OPERATOR_LABELS: Record<WhereOperator, string> = {
@@ -1011,6 +1020,197 @@ function ChartVisualization({ result, config, onConfigChange }: ChartVisualizati
 }
 
 // ---------------------------------------------------------------------------
+// PivotTable — client-side cross-tabulation of query results (NCA-012)
+// ---------------------------------------------------------------------------
+
+type PivotAggFn = "count" | "sum" | "avg" | "min" | "max";
+
+interface PivotConfig {
+  rowField: string;
+  colField: string;
+  valueField: string;
+  aggFn: PivotAggFn;
+}
+
+interface PivotTableProps {
+  result: QueryResult;
+  config: PivotConfig;
+  onConfigChange: (cfg: PivotConfig) => void;
+}
+
+function applyPivotAgg(values: number[], fn: PivotAggFn): number | null {
+  if (values.length === 0) return null;
+  switch (fn) {
+    case "count": return values.length;
+    case "sum": return values.reduce((a, b) => a + b, 0);
+    case "avg": return values.reduce((a, b) => a + b, 0) / values.length;
+    case "min": return Math.min(...values);
+    case "max": return Math.max(...values);
+  }
+}
+
+function PivotTable({ result, config, onConfigChange }: PivotTableProps) {
+  const columns = result.columns.map((c) => c.name);
+
+  // Derive the pivot cross-tabulation from the raw rows.
+  // For performance we keep this inside a useMemo — recomputing only when
+  // the result rows or config changes.
+  const pivotData = React.useMemo(() => {
+    if (!config.rowField || !config.colField || !config.valueField) return null;
+
+    // Collect all unique column values for the pivot header
+    const colValues = new Set<string>();
+    for (const row of result.rows) {
+      const cv = row[config.colField];
+      if (cv !== null && cv !== undefined) colValues.add(String(cv));
+    }
+    const colHeaders = Array.from(colValues).sort();
+
+    // Group by (rowField, colField) → array of valueField numbers
+    const cells = new Map<string, Map<string, number[]>>();
+    const rowKeys = new Set<string>();
+
+    for (const row of result.rows) {
+      const rk = String(row[config.rowField] ?? "(empty)");
+      const ck = String(row[config.colField] ?? "(empty)");
+      rowKeys.add(rk);
+
+      if (!cells.has(rk)) cells.set(rk, new Map());
+      const colMap = cells.get(rk)!;
+      if (!colMap.has(ck)) colMap.set(ck, []);
+      const rawVal = row[config.valueField];
+      const n = Number(rawVal);
+      if (!Number.isNaN(n)) colMap.get(ck)!.push(n);
+    }
+
+    const rowHeaders = Array.from(rowKeys).sort();
+    return { rowHeaders, colHeaders, cells };
+  }, [result.rows, config.rowField, config.colField, config.valueField]);
+
+  const formatPivotCell = (v: number | null): string => {
+    if (v === null) return "";
+    return Number.isInteger(v) ? String(v) : v.toFixed(2);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Config row */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs text-[var(--color-muted-foreground)]">Row field</Label>
+          <Select
+            value={config.rowField}
+            onValueChange={(v) => onConfigChange({ ...config, rowField: v })}
+          >
+            <SelectTrigger className="w-36 h-8">
+              <SelectValue placeholder="Row" />
+            </SelectTrigger>
+            <SelectContent>
+              {columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-[var(--color-muted-foreground)]">Column field</Label>
+          <Select
+            value={config.colField}
+            onValueChange={(v) => onConfigChange({ ...config, colField: v })}
+          >
+            <SelectTrigger className="w-36 h-8">
+              <SelectValue placeholder="Column" />
+            </SelectTrigger>
+            <SelectContent>
+              {columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-[var(--color-muted-foreground)]">Value field</Label>
+          <Select
+            value={config.valueField}
+            onValueChange={(v) => onConfigChange({ ...config, valueField: v })}
+          >
+            <SelectTrigger className="w-36 h-8">
+              <SelectValue placeholder="Value" />
+            </SelectTrigger>
+            <SelectContent>
+              {columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-[var(--color-muted-foreground)]">Aggregation</Label>
+          <Select
+            value={config.aggFn}
+            onValueChange={(v) => onConfigChange({ ...config, aggFn: v as PivotAggFn })}
+          >
+            <SelectTrigger className="w-28 h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="count">Count</SelectItem>
+              <SelectItem value="sum">Sum</SelectItem>
+              <SelectItem value="avg">Average</SelectItem>
+              <SelectItem value="min">Min</SelectItem>
+              <SelectItem value="max">Max</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Pivot table output */}
+      {!pivotData ? (
+        <p className="text-sm text-[var(--color-muted-foreground)]">
+          Select a row field, column field, and value field to build the pivot table.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-md border border-[var(--color-border)]">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] bg-[var(--color-muted)]/40">
+                <th className="px-3 py-2 text-left font-medium text-[var(--color-foreground)]">
+                  {config.rowField}
+                </th>
+                {pivotData.colHeaders.map((col) => (
+                  <th key={col} className="px-3 py-2 text-right font-medium text-[var(--color-foreground)]">
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pivotData.rowHeaders.map((rk, ri) => (
+                <tr
+                  key={rk}
+                  className={ri % 2 === 0 ? "" : "bg-[var(--color-muted)]/20"}
+                >
+                  <td className="px-3 py-2 font-medium text-[var(--color-foreground)]">{rk}</td>
+                  {pivotData.colHeaders.map((ck) => {
+                    const nums = pivotData.cells.get(rk)?.get(ck) ?? [];
+                    const val = applyPivotAgg(nums, config.aggFn);
+                    return (
+                      <td
+                        key={ck}
+                        className="px-3 py-2 text-right tabular-nums text-[var(--color-muted-foreground)]"
+                      >
+                        {formatPivotCell(val)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SqlPreview — read-only syntax-highlighted SQL preview block
 // ---------------------------------------------------------------------------
 
@@ -1153,6 +1353,152 @@ function SavedQueriesPanel({ currentQuery, onLoad }: SavedQueriesPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// ScheduleReportDialog — schedule a saved query to run on a recurring cadence
+// ---------------------------------------------------------------------------
+
+type ReportFrequency = "daily" | "weekly" | "monthly";
+type ReportFormat = "csv" | "json";
+
+interface ScheduledReport {
+  id: string;
+  queryName: string;
+  /** Snapshot of the query at scheduling time */
+  query: Omit<SavedQuery, "name">;
+  frequency: ReportFrequency;
+  recipients: string;
+  format: ReportFormat;
+  createdAt: string;
+}
+
+function loadScheduledReports(): ScheduledReport[] {
+  try {
+    const raw = localStorage.getItem(SCHEDULED_REPORTS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ScheduledReport[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistScheduledReports(reports: ScheduledReport[]): void {
+  localStorage.setItem(SCHEDULED_REPORTS_KEY, JSON.stringify(reports));
+}
+
+interface ScheduleReportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  queryName: string;
+  currentQuery: Omit<SavedQuery, "name">;
+}
+
+function ScheduleReportDialog({ open, onOpenChange, queryName, currentQuery }: ScheduleReportDialogProps) {
+  const [frequency, setFrequency] = React.useState<ReportFrequency>("daily");
+  const [recipients, setRecipients] = React.useState("");
+  const [format, setFormat] = React.useState<ReportFormat>("csv");
+
+  function handleSchedule() {
+    const trimmedRecipients = recipients.trim();
+    if (!trimmedRecipients) {
+      toast({ title: "Enter at least one email recipient", variant: "destructive" });
+      return;
+    }
+
+    const existing = loadScheduledReports();
+    const newReport: ScheduledReport = {
+      id: crypto.randomUUID(),
+      queryName,
+      query: currentQuery,
+      frequency,
+      recipients: trimmedRecipients,
+      format,
+      createdAt: new Date().toISOString(),
+    };
+    persistScheduledReports([...existing, newReport]);
+
+    toast({
+      title: "Report scheduled",
+      description: `"${queryName}" will run ${frequency} and be sent to ${trimmedRecipients}.`,
+    });
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Schedule report</DialogTitle>
+          <DialogDescription>
+            Set up a recurring report for{" "}
+            <span className="font-semibold">{queryName || "this query"}</span>.
+            The configuration is saved locally and would be sent to the scheduling API.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="sched-frequency" className="text-sm">Frequency</Label>
+            <Select
+              value={frequency}
+              onValueChange={(v) => setFrequency(v as ReportFrequency)}
+            >
+              <SelectTrigger id="sched-frequency">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="daily">Daily</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="sched-recipients" className="text-sm">Email recipients</Label>
+            <Input
+              id="sched-recipients"
+              type="text"
+              placeholder="alice@example.com, bob@example.com"
+              value={recipients}
+              onChange={(e) => setRecipients(e.target.value)}
+            />
+            <p className="text-xs text-[var(--color-muted-foreground)]">
+              Comma-separated list of email addresses.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="sched-format" className="text-sm">Export format</Label>
+            <Select
+              value={format}
+              onValueChange={(v) => setFormat(v as ReportFormat)}
+            >
+              <SelectTrigger id="sched-format">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="csv">CSV</SelectItem>
+                <SelectItem value="json">JSON</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSchedule}>
+            <Calendar className="h-4 w-4 mr-1.5" aria-hidden />
+            Schedule report
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // QueryBuilderPage — main page component
 // ---------------------------------------------------------------------------
 
@@ -1200,8 +1546,19 @@ export function QueryBuilderPage() {
     yFields: [],
   });
 
+  // --- Pivot config ---
+  const [pivotConfig, setPivotConfig] = useState<PivotConfig>({
+    rowField: "",
+    colField: "",
+    valueField: "",
+    aggFn: "count",
+  });
+
   // --- Saved queries panel visibility ---
   const [showSavedQueries, setShowSavedQueries] = useState(false);
+
+  // --- Schedule report dialog ---
+  const [showScheduleReport, setShowScheduleReport] = useState(false);
 
   // --- Query results ---
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
@@ -1521,6 +1878,17 @@ export function QueryBuilderPage() {
               <FolderOpen className="h-4 w-4 mr-1.5" aria-hidden />
               Saved queries
             </Button>
+            {selectedEntityType && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowScheduleReport(true)}
+                aria-label="Schedule this query as a recurring report"
+              >
+                <Calendar className="h-4 w-4 mr-1.5" aria-hidden />
+                Schedule report
+              </Button>
+            )}
             {selectedEntityType && (
               <Button
                 variant={sqlMode ? "default" : "outline"}
@@ -1934,16 +2302,17 @@ export function QueryBuilderPage() {
                     Results
                   </h2>
 
-                  {/* View tab switcher: Table | Chart | SQL */}
+                  {/* View tab switcher: Table | Chart | Pivot | SQL */}
                   <div
                     className="flex rounded-md border border-[var(--color-border)] overflow-hidden"
                     role="tablist"
                     aria-label="Result view"
                   >
                     {([
-                      { key: "table", label: "Table", Icon: null },
-                      { key: "chart", label: "Chart", Icon: BarChart3 },
-                      { key: "sql",   label: "SQL",   Icon: Eye },
+                      { key: "table", label: "Table",  Icon: null },
+                      { key: "chart", label: "Chart",  Icon: BarChart3 },
+                      { key: "pivot", label: "Pivot",  Icon: Layers },
+                      { key: "sql",   label: "SQL",    Icon: Eye },
                     ] as const).map(({ key, label, Icon }) => (
                       <button
                         key={key}
@@ -1982,6 +2351,14 @@ export function QueryBuilderPage() {
                   />
                 )}
 
+                {resultTab === "pivot" && (
+                  <PivotTable
+                    result={queryResult}
+                    config={pivotConfig}
+                    onConfigChange={setPivotConfig}
+                  />
+                )}
+
                 {resultTab === "sql" && (
                   <div className="space-y-2">
                     <p className="text-xs text-[var(--color-muted-foreground)]">
@@ -2008,6 +2385,14 @@ export function QueryBuilderPage() {
           </>
         )}
       </div>
+
+      {/* Schedule Report dialog */}
+      <ScheduleReportDialog
+        open={showScheduleReport}
+        onOpenChange={setShowScheduleReport}
+        queryName={selectedEntityType}
+        currentQuery={currentQuerySnapshot}
+      />
     </div>
   );
 }

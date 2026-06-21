@@ -125,26 +125,55 @@ function isPasswordField(key: string, prop: JsonSchemaProperty): boolean {
 
 // ---------------------------------------------------------------------------
 // Field hint — tooltip icon + inline examples
+//
+// MU-013: CSS-only hover tooltips are inaccessible on mobile where there is no
+// hover state. This implementation shows the tooltip on both hover (desktop) and
+// on click/tap (mobile/keyboard). The tooltip is dismissed by clicking the icon
+// again, pressing Escape, or clicking anywhere outside the icon.
 // ---------------------------------------------------------------------------
 
 function FieldHint({ prop }: { prop: JsonSchemaProperty }) {
   const hasExamples = prop.examples !== undefined && prop.examples.length > 0;
+  const [open, setOpen] = React.useState(false);
+
+  // Dismiss on Escape key — standard tooltip interaction pattern
+  React.useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
   if (!prop.description && !hasExamples) return null;
 
   return (
     <>
       {prop.description !== undefined && (
-        <span
-          className="group relative ml-1 inline-flex cursor-help"
-          aria-label={prop.description}
-        >
-          <HelpCircle className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />
-          <span
-            role="tooltip"
-            className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-popover)] px-2 py-1 text-xs text-[var(--color-popover-foreground)] opacity-0 shadow-md transition-opacity group-hover:opacity-100"
+        <span className="relative ml-1 inline-flex">
+          <button
+            type="button"
+            // onClick toggles the tooltip so it works on touch devices (MU-013).
+            // onMouseEnter/Leave provides the familiar hover behaviour on desktop
+            // without requiring a click — both interaction modes work simultaneously.
+            onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
+            onMouseEnter={() => setOpen(true)}
+            onMouseLeave={() => setOpen(false)}
+            className="cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded"
+            aria-label={`Help: ${prop.description}`}
+            aria-expanded={open}
           >
-            {prop.description}
-          </span>
+            <HelpCircle className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />
+          </button>
+          {open && (
+            <span
+              role="tooltip"
+              className="absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-popover)] px-2 py-1 text-xs text-[var(--color-popover-foreground)] shadow-md"
+            >
+              {prop.description}
+            </span>
+          )}
         </span>
       )}
       {hasExamples && (

@@ -164,7 +164,11 @@ function NavLinkItem({ item, collapsed }: NavLinkItemProps) {
       <Link
         to={item.to}
         className={cn(
-          "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+          // min-h-[44px] satisfies WCAG 2.5.5 minimum touch target size (MU-006).
+          // py-2 gives 8px top/bottom padding; the icon is 16px; combined with
+          // line-height this reaches 44px on typical font sizes. The explicit
+          // min-h ensures the target is never smaller on condensed screens.
+          "group flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
           "hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-foreground)]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
           isActive
@@ -285,7 +289,8 @@ export function Sidebar({ className }: SidebarProps) {
           type="button"
           onClick={toggleCollapsed}
           className={cn(
-            "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-[var(--color-muted-foreground)] transition-colors",
+            // min-h-[44px] satisfies WCAG 2.5.5 minimum touch target size (MU-006).
+            "flex min-h-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-[var(--color-muted-foreground)] transition-colors",
             "hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-foreground)]",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
             collapsed && "justify-center px-2",

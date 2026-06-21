@@ -20,6 +20,8 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d
 ```
 
+> **Browser alternative:** Once the stack is running, open **https://localhost** in your browser to use the guided setup wizard instead of the CLI commands below. The wizard walks you through creating the first admin account and configuring initial settings with no CLI required. Accept the browser's self-signed certificate warning for local development.
+
 ## First working example
 
 Wait for all services to report healthy (check with `docker compose ps`), then:

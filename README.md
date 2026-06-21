@@ -33,6 +33,14 @@ OnePlatform is a free, open-source alternative to Fivetran + n8n + Retool — co
 | Logging | Centralized logs, audit, metrics |
 | Plugin | Plugin lifecycle, hooks, registry |
 
+## Preview
+
+| Dashboard | Pipeline Editor | App Builder |
+|-----------|----------------|-------------|
+| ![Dashboard — service health, recent runs, and key metrics](docs/images/dashboard.png) | ![Pipeline Editor — visual drag-and-drop node canvas](docs/images/pipeline-editor.png) | ![App Builder — drag-and-drop UI components with live preview](docs/images/app-builder.png) |
+
+> Screenshots will be added once the hosted demo environment is available. The images above show placeholder paths pointing to `docs/images/`.
+
 ## Quick Start
 
 ```bash

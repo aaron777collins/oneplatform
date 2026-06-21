@@ -20,6 +20,7 @@ import {
   Workflow,
   Webhook,
   Search,
+  Repeat,
   type LucideProps,
 } from "lucide-react";
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
@@ -69,6 +70,13 @@ const PALETTE_ITEMS: PaletteItem[] = [
     description: "Add conditions (if/else)",
     icon: GitBranch,
     iconClass: "text-yellow-500",
+  },
+  {
+    type: "loop",
+    label: "Loop",
+    description: "Iterate over an array field",
+    icon: Repeat,
+    iconClass: "text-indigo-500",
   },
   {
     type: "webhook",

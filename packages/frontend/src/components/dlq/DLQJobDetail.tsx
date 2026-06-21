@@ -1,19 +1,61 @@
 /**
  * DLQJobDetail — expanded detail panel for a DLQ job.
  *
- * Shows: full error stack trace, original payload (JSON viewer), metadata.
+ * Shows: full error stack trace, original payload (JSON viewer), metadata,
+ * error category badge, and an inline Retry button.
  * Rendered inline below the selected table row or in a side panel.
  */
 import * as React from "react";
 import { AlertCircle, Clock, RefreshCw, ChevronDown } from "lucide-react";
 import { RelativeTime } from "@/components/shared/RelativeTime.js";
 import { CopyButton } from "@/components/shared/CopyButton.js";
+import { Button } from "@/components/ui/button.js";
+import { Badge } from "@/components/ui/badge.js";
 import type { DLQJob } from "./DLQTable.js";
 
 export interface DLQJobDetailProps {
   job: DLQJob;
+  /** Called when the user clicks the Retry button inside the detail panel. */
+  onRetry?: (jobId: string) => void;
+  isRetrying?: boolean;
   className?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Error category inference
+// ---------------------------------------------------------------------------
+
+type ErrorCategory = "validation" | "timeout" | "system" | "network" | "unknown";
+
+/**
+ * Infers an error category from the error message string.
+ * This is intentionally heuristic — it gives operators a fast visual signal
+ * without requiring the job producer to attach structured metadata.
+ */
+function inferErrorCategory(message: string): ErrorCategory {
+  const lower = message.toLowerCase();
+  if (/timeout|timed?\s*out|deadline/i.test(lower)) return "timeout";
+  if (/validat|invalid|schema|required|missing field|parse error|bad request/i.test(lower)) return "validation";
+  if (/network|econnrefused|enotfound|econnreset|socket|dns/i.test(lower)) return "network";
+  if (/error|exception|internal|crash|fatal|oops/i.test(lower)) return "system";
+  return "unknown";
+}
+
+const CATEGORY_BADGE_VARIANT: Record<ErrorCategory, "destructive" | "outline" | "secondary"> = {
+  validation: "destructive",
+  timeout: "outline",
+  system: "destructive",
+  network: "outline",
+  unknown: "secondary",
+};
+
+const CATEGORY_LABEL: Record<ErrorCategory, string> = {
+  validation: "Validation",
+  timeout: "Timeout",
+  system: "System Error",
+  network: "Network",
+  unknown: "Unknown",
+};
 
 /** Extract a user-friendly summary from an error message (first sentence / line). */
 function summarizeError(message: string): string {
@@ -24,7 +66,7 @@ function summarizeError(message: string): string {
   return summary.length > 200 ? summary.slice(0, 197) + "..." : summary;
 }
 
-export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
+export function DLQJobDetail({ job, onRetry, isRetrying = false, className }: DLQJobDetailProps) {
   const [showStack, setShowStack] = React.useState(false);
   const payloadString = React.useMemo(() => {
     try {
@@ -36,6 +78,7 @@ export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
 
   const errorSummary = summarizeError(job.errorMessage);
   const hasFullMessage = errorSummary !== job.errorMessage;
+  const errorCategory = inferErrorCategory(job.errorMessage);
 
   return (
     <div className={className}>
@@ -45,6 +88,9 @@ export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
           <div className="mb-2 flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-[var(--color-destructive)]" aria-hidden="true" />
             <h3 className="text-sm font-semibold">Error</h3>
+            <Badge variant={CATEGORY_BADGE_VARIANT[errorCategory]} className="text-[10px] py-0 px-1.5">
+              {CATEGORY_LABEL[errorCategory]}
+            </Badge>
           </div>
 
           {/* User-friendly summary */}
@@ -83,7 +129,26 @@ export function DLQJobDetail({ job, className }: DLQJobDetailProps) {
 
         {/* Metadata */}
         <section>
-          <h3 className="mb-2 text-sm font-semibold">Metadata</h3>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Metadata</h3>
+            {onRetry !== undefined && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onRetry(job.id)}
+                disabled={isRetrying}
+                aria-busy={isRetrying}
+                aria-label="Retry this job"
+                className="h-7 text-xs"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 mr-1 ${isRetrying ? "animate-spin" : ""}`}
+                  aria-hidden="true"
+                />
+                {isRetrying ? "Retrying…" : "Retry"}
+              </Button>
+            )}
+          </div>
           <dl className="space-y-2 text-sm">
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-[var(--color-muted-foreground)]">Job ID</dt>

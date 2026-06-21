@@ -47,6 +47,14 @@ import { Input } from "@/components/ui/input.js";
 import { Button } from "@/components/ui/button.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { Badge } from "@/components/ui/badge.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.js";
+import { FormDescription } from "@/components/ui/form.js";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog.js";
 import { RelativeTime } from "@/components/shared/RelativeTime.js";
 import { usePermission } from "@/hooks/use-auth.js";
@@ -58,17 +66,38 @@ import { toast } from "@/hooks/use-toast.js";
 // Types & schema
 // ---------------------------------------------------------------------------
 
+interface TenantPreferences {
+  timezone?: string;
+  dateFormat?: string;
+  defaultPageSize?: number;
+}
+
 interface TenantResponse {
   id: string;
   name: string;
   slug: string;
-  settings: Record<string, unknown>;
+  settings: TenantPreferences & Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
 
+// Date format options — ordered from ISO standard (unambiguous) to locale formats.
+const DATE_FORMAT_OPTIONS = ["YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"] as const;
+type DateFormat = (typeof DATE_FORMAT_OPTIONS)[number];
+
+// Pagination options — powers of 10 cover the typical needs without going huge.
+const PAGINATION_OPTIONS = [10, 25, 50, 100] as const;
+type PaginationSize = (typeof PAGINATION_OPTIONS)[number];
+
 const tenantSchema = z.object({
   tenantName: z.string().min(2, "Name must be at least 2 characters").max(64),
+  // Tenant preferences (PA-009)
+  timezone: z.string().min(1, "Timezone is required"),
+  dateFormat: z.enum(DATE_FORMAT_OPTIONS),
+  defaultPageSize: z.coerce.number().refine(
+    (v): v is PaginationSize => (PAGINATION_OPTIONS as readonly number[]).includes(v),
+    { message: "Must be 10, 25, 50, or 100" },
+  ),
 });
 type TenantValues = z.infer<typeof tenantSchema>;
 
@@ -204,13 +233,23 @@ export function AdminPage() {
 
   const form = useForm<TenantValues>({
     resolver: zodResolver(tenantSchema),
-    values: { tenantName: tenantData?.name ?? "" },
+    values: {
+      tenantName: tenantData?.name ?? "",
+      timezone: (tenantData?.settings.timezone as string | undefined) ?? "UTC",
+      dateFormat: ((tenantData?.settings.dateFormat as string | undefined) ?? "YYYY-MM-DD") as TenantValues["dateFormat"],
+      defaultPageSize: ((tenantData?.settings.defaultPageSize as number | undefined) ?? 25) as TenantValues["defaultPageSize"],
+    },
   });
 
   const updateConfigMutation = useMutation({
     mutationFn: (values: TenantValues) =>
       client.patch<TenantResponse>(`/v1/tenants/${tenantId}`, {
         name: values.tenantName,
+        settings: {
+          timezone: values.timezone,
+          dateFormat: values.dateFormat,
+          defaultPageSize: values.defaultPageSize,
+        },
       }),
     onSuccess: () => {
       toast({ title: "Settings saved", description: "Tenant settings have been updated." });
@@ -345,13 +384,96 @@ export function AdminPage() {
                   onSubmit={(e) => void form.handleSubmit((v) => updateConfigMutation.mutate(v))(e)}
                   className="space-y-4"
                 >
+                  {/* Display name */}
                   <FormField
                     control={form.control}
                     name="tenantName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Organization name</FormLabel>
+                        <FormLabel>Organization display name</FormLabel>
                         <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Timezone (PA-009) — free-text since full IANA picker is out of scope */}
+                  <FormField
+                    control={form.control}
+                    name="timezone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Default timezone</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="e.g. America/New_York, UTC, Europe/London"
+                          />
+                        </FormControl>
+                        <FormDescription className="text-xs text-[var(--color-muted-foreground)]">
+                          IANA timezone name used for date display and scheduled tasks.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Date format (PA-009) */}
+                  <FormField
+                    control={form.control}
+                    name="dateFormat"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Date format</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select date format" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {DATE_FORMAT_OPTIONS.map((fmt) => (
+                              <SelectItem key={fmt} value={fmt}>
+                                {fmt}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Default pagination size (PA-009) */}
+                  <FormField
+                    control={form.control}
+                    name="defaultPageSize"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Default page size</FormLabel>
+                        <Select
+                          onValueChange={(v) => field.onChange(Number(v))}
+                          value={String(field.value)}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select page size" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {PAGINATION_OPTIONS.map((size) => (
+                              <SelectItem key={size} value={String(size)}>
+                                {size} per page
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription className="text-xs text-[var(--color-muted-foreground)]">
+                          Default number of items shown per page across the platform.
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}

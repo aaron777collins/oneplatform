@@ -25,6 +25,7 @@ import {
   CheckSquare,
   Workflow,
   Webhook,
+  Repeat2,
   AlertTriangle,
   type LucideProps,
 } from "lucide-react";
@@ -116,6 +117,12 @@ const STEP_TYPE_STYLES: Record<GraphStepType, StepTypeStyle> = {
     label: "Webhook",
     headerClass: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
     accentClass: "border-l-pink-500",
+  },
+  loop: {
+    icon: Repeat2,
+    label: "Loop",
+    headerClass: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+    accentClass: "border-l-indigo-500",
   },
 };
 

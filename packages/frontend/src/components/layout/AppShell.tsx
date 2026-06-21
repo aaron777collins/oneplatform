@@ -46,18 +46,21 @@ export function AppShell() {
           <Sidebar />
         </div>
 
-        {/* Mobile navigation drawer overlay — visible only when hamburger is open */}
+        {/* Mobile navigation drawer overlay — visible only when hamburger is open.
+            Slide-in animation (MU-005): the drawer translates from -100% to 0 over
+            200 ms with ease-out so the motion feels snappy on touch devices.
+            The backdrop fades in simultaneously via animate-in/fade-in utilities. */}
         {mobileNavOpen && (
           <>
-            {/* Backdrop: clicking outside closes the drawer */}
+            {/* Backdrop: fade-in, clicking outside closes the drawer */}
             <div
-              className="fixed inset-0 z-40 bg-black/50 md:hidden"
+              className="fixed inset-0 z-40 bg-black/50 md:hidden animate-in fade-in duration-200"
               aria-hidden="true"
               onClick={() => setMobileNavOpen(false)}
             />
-            {/* Drawer panel */}
+            {/* Drawer panel: slides in from the left edge */}
             <div
-              className="fixed inset-y-0 left-0 z-50 flex md:hidden"
+              className="fixed inset-y-0 left-0 z-50 flex md:hidden translate-x-0 transition-transform duration-200 ease-out motion-reduce:transition-none animate-in slide-in-from-left duration-200"
               role="dialog"
               aria-modal="true"
               aria-label="Navigation"

@@ -8,7 +8,7 @@
  */
 import * as React from "react";
 import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
-import { User, Users, Key, Webhook, HardDrive, Shield } from "lucide-react";
+import { User, Users, Key, Webhook, HardDrive, Shield, ShieldCheck } from "lucide-react";
 import { usePermission } from "@/hooks/use-auth.js";
 import { cn } from "@/lib/utils.js";
 
@@ -32,6 +32,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: "API Keys", to: "/settings/api-keys", icon: Key as IconComponent },
   { label: "Webhooks", to: "/settings/webhooks", icon: Webhook as IconComponent },
   { label: "Storage", to: "/settings/storage", icon: HardDrive as IconComponent },
+  // Roles & Permissions is visible to all authenticated users — it is a
+  // reference page, not an admin action. Understanding roles does not require
+  // elevated access.
+  { label: "Roles & Permissions", to: "/settings/roles", icon: ShieldCheck as IconComponent },
   { label: "Admin", to: "/settings/admin", icon: Shield as IconComponent, adminOnly: true },
 ];
 

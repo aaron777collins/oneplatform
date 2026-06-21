@@ -61,8 +61,13 @@ export function createAuditRoutes(
       ? parsed.data.tenantId
       : user.tenantId;
 
+    // startDate / endDate take precedence over legacy from / to when both are supplied.
+    const effectiveFrom = parsed.data.startDate ?? parsed.data.from;
+    const effectiveTo = parsed.data.endDate ?? parsed.data.to;
+
     const params: AuditQueryParams = {
       limit: parsed.data.limit,
+      ...(parsed.data.search !== undefined ? { search: parsed.data.search } : {}),
       ...(parsed.data.actorId !== undefined ? { actorId: parsed.data.actorId } : {}),
       ...(parsed.data.actorType !== undefined ? { actorType: parsed.data.actorType } : {}),
       ...(effectiveTenantId !== undefined ? { tenantId: effectiveTenantId } : {}),
@@ -70,8 +75,8 @@ export function createAuditRoutes(
       ...(parsed.data.resourceType !== undefined ? { resourceType: parsed.data.resourceType } : {}),
       ...(parsed.data.resourceId !== undefined ? { resourceId: parsed.data.resourceId } : {}),
       ...(parsed.data.result !== undefined ? { result: parsed.data.result } : {}),
-      ...(parsed.data.from !== undefined ? { from: parsed.data.from } : {}),
-      ...(parsed.data.to !== undefined ? { to: parsed.data.to } : {}),
+      ...(effectiveFrom !== undefined ? { from: effectiveFrom } : {}),
+      ...(effectiveTo !== undefined ? { to: effectiveTo } : {}),
       ...(parsed.data.cursor !== undefined ? { cursor: parsed.data.cursor } : {}),
     };
 

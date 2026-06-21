@@ -21,6 +21,21 @@ export interface EntityRouteDeps {
 const REQUIRED_READ_SCOPE = "ontology:read";
 const REQUIRED_WRITE_SCOPE = "ontology:write";
 
+// Entity type slugs are lowercase alphanumeric with hyphens and underscores.
+// Enforcing this allowlist at the route boundary prevents reflected-input in
+// error messages (SA-009) — the service layer re-uses the slug value verbatim
+// in NotFoundError text, which would otherwise echo arbitrary URL content.
+const ENTITY_TYPE_SLUG_RE = /^[a-z0-9_-]+$/i;
+
+function validateEntityTypeParam(entityType: string): void {
+  if (!ENTITY_TYPE_SLUG_RE.test(entityType)) {
+    throw new ValidationError(
+      "entityType must contain only alphanumeric characters, hyphens, and underscores.",
+      [],
+    );
+  }
+}
+
 function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
@@ -112,6 +127,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     }
 
     const entityType = c.req.param("entityType");
+    validateEntityTypeParam(entityType);
     const entity = await entityService.getEntity(user.tenantId, entityType);
     const relationships = await relationshipService.getRelationships(user.tenantId, entityType);
 
@@ -125,6 +141,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     }
 
     const entityType = c.req.param("entityType");
+    validateEntityTypeParam(entityType);
     const body = await c.req.json();
     const parsed = patchEntityRequest.safeParse(body);
     if (!parsed.success) {
@@ -189,6 +206,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     }
 
     const entityType = c.req.param("entityType");
+    validateEntityTypeParam(entityType);
     const query = deleteEntityQuery.parse(Object.fromEntries(new URL(c.req.url).searchParams));
     await entityService.deleteEntity(user.tenantId, entityType, query.confirm);
 
@@ -202,6 +220,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     }
 
     const entityType = c.req.param("entityType");
+    validateEntityTypeParam(entityType);
     const body = await c.req.json();
     const parsed = validateRecordRequest.safeParse(body);
     if (!parsed.success) {
@@ -220,6 +239,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     }
 
     const entityType = c.req.param("entityType");
+    validateEntityTypeParam(entityType);
     const body = await c.req.json();
     const parsed = patchEntityRequest.safeParse(body);
     if (!parsed.success) {
@@ -250,6 +270,7 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
       throw new ForbiddenError("ontology:write scope is required.");
     }
 
+    validateEntityTypeParam(c.req.param("entityType"));
     const body = await c.req.json();
     const parsed = createRelationshipRequest.safeParse(body);
     if (!parsed.success) {

@@ -1,9 +1,11 @@
 // Tenant management route handlers.
 //
-// All routes require the "admin" scope (platform-admin only). Tenant management
-// is a cross-tenant operation — there is no tenant-admin equivalent because a
-// tenant admin operates *within* a single tenant and cannot affect other tenants
-// or the platform itself.
+// Access model:
+//   - platform-admin ("admin" scope): full access to all tenants (list, create,
+//     read, update, delete).
+//   - tenant-admin ("tenant-admin" role): may read and update their OWN tenant
+//     only (name, settings). They cannot list all tenants, create new ones, or
+//     delete any tenant — those are platform-level operations.
 //
 // Safety invariants enforced here:
 //   - A tenant cannot be deleted while it has active users. The caller must
@@ -153,14 +155,30 @@ export function createTenantRoutes(
     return c.json(formatTenant(tenant));
   });
 
-  // PATCH /api/v1/tenants/:id — update name and/or settings (platform-admin only)
+  // PATCH /api/v1/tenants/:id — update name and/or settings.
+  //
+  // Access:
+  //   - platform-admin: may update any tenant.
+  //   - tenant-admin: may update their OWN tenant only.
   //
   // Slug is intentionally excluded — it is immutable after creation because
   // external systems (DNS, OAuth redirect URIs) may depend on it.
   routes.patch("/api/v1/tenants/:id", async (c) => {
-    requirePlatformAdmin(c.var.user.scopes);
-
     const id = c.req.param("id");
+    const { scopes, roles, tenantId: userTenantId } = c.var.user;
+
+    const isPlatformAdmin = scopes.includes(PLATFORM_ADMIN_SCOPE);
+    const isTenantAdmin = roles.includes("tenant-admin");
+    const isOwnTenant = id === userTenantId;
+
+    // Enforce access: platform-admin can update any tenant; tenant-admin can
+    // only update their own tenant.
+    if (!isPlatformAdmin && !(isTenantAdmin && isOwnTenant)) {
+      throw new ForbiddenError(
+        "admin scope is required to update other tenants. Tenant admins may only update their own tenant."
+      );
+    }
+
     const body = await c.req.json();
     const parsed = updateTenantRequest.safeParse(body);
     if (!parsed.success) {

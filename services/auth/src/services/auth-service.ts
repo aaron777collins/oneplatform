@@ -43,6 +43,27 @@ import {
 const PASSWORD_HISTORY_DEPTH = 5;
 
 // ---------------------------------------------------------------------------
+// Lockout policy — read once at module load.
+// Operators override via OP_LOCKOUT_MAX_ATTEMPTS / OP_LOCKOUT_DURATION_MINUTES.
+// Defaults (5 attempts, 30 min) match the authConfigSchema defaults so the
+// values are always consistent even when loadConfig() has not been called yet
+// (e.g. in unit tests that import this module in isolation).
+// ---------------------------------------------------------------------------
+
+function readLockoutMaxAttempts(): number {
+  const raw = process.env["OP_LOCKOUT_MAX_ATTEMPTS"];
+  const parsed = raw !== undefined ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 5;
+}
+
+function readLockoutDurationMs(): number {
+  const raw = process.env["OP_LOCKOUT_DURATION_MINUTES"];
+  const parsed = raw !== undefined ? parseInt(raw, 10) : NaN;
+  const minutes = Number.isFinite(parsed) && parsed >= 1 ? parsed : 30;
+  return minutes * 60 * 1_000;
+}
+
+// ---------------------------------------------------------------------------
 // DB row types (internal — not exported)
 // ---------------------------------------------------------------------------
 
@@ -326,7 +347,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
     if (!valid) {
       const newFailCount = user.failed_login_count + 1;
-      const shouldLock = newFailCount >= 10;
+      const shouldLock = newFailCount >= readLockoutMaxAttempts();
 
       await db.query(
         `UPDATE auth.users
@@ -335,7 +356,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
          WHERE id = $3`,
         [
           newFailCount,
-          shouldLock ? new Date(Date.now() + 15 * 60 * 1_000) : null,
+          shouldLock ? new Date(Date.now() + readLockoutDurationMs()) : null,
           user.id,
         ]
       );

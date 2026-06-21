@@ -67,6 +67,11 @@ export const authConfigSchema = baseConfigSchema.extend({
   OP_SMTP_SECURE: z.string().transform((v) => v === "true").default("true"),
   OP_MINIO_USER: z.string().default("minioadmin"),
   OP_MINIO_PASSWORD: minioPasswordSchema,
+  // Configurable account lockout policy (PA-018).
+  // Defaults match the previous hardcoded values so existing deployments see
+  // no behaviour change unless they explicitly set these vars.
+  OP_LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(5),
+  OP_LOCKOUT_DURATION_MINUTES: z.coerce.number().int().min(1).default(30),
 });
 
 export const ingestionConfigSchema = baseConfigSchema.extend({

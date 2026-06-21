@@ -5,6 +5,10 @@
  * The gateway /healthz endpoint returns an overall status plus a services
  * map with individual service statuses.
  *
+ * Health history is kept in-component state (ring buffer of HISTORY_SIZE
+ * check results per service). This gives operators a quick visual signal of
+ * recent stability without requiring a separate time-series endpoint.
+ *
  * Color is supplemented by text labels per §14.4 (color is never the sole indicator).
  */
 import * as React from "react";
@@ -83,6 +87,89 @@ const STATUS_LABELS: Record<ServiceStatus, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Health history
+// ---------------------------------------------------------------------------
+
+/** Number of poll results kept per service (one every 30s = ~12 min window). */
+const HISTORY_SIZE = 24;
+
+/** Per-check snapshot stored in the history ring buffer. */
+interface HealthCheckSnapshot {
+  status: ServiceStatus;
+  /** Unix epoch ms — used only for tooltip display. */
+  checkedAt: number;
+}
+
+type ServiceHealthHistory = Map<string, HealthCheckSnapshot[]>;
+
+/**
+ * Appends a new snapshot to the history ring for `serviceName`,
+ * discarding the oldest entry when the buffer is full.
+ * Returns a new Map (immutable update) so React sees the state change.
+ */
+function appendHistory(
+  prev: ServiceHealthHistory,
+  serviceName: string,
+  snapshot: HealthCheckSnapshot,
+): ServiceHealthHistory {
+  const next = new Map(prev);
+  const existing = next.get(serviceName) ?? [];
+  const updated = existing.length >= HISTORY_SIZE
+    ? [...existing.slice(1), snapshot]
+    : [...existing, snapshot];
+  next.set(serviceName, updated);
+  return next;
+}
+
+/**
+ * Computes a percentage uptime string from the history snapshots.
+ * "Healthy" counts as healthy; anything else is considered degraded/down.
+ */
+function uptimeLabel(history: HealthCheckSnapshot[]): string {
+  if (history.length === 0) return "";
+  const healthy = history.filter((s) => s.status === "healthy").length;
+  const pct = Math.round((healthy / history.length) * 100);
+  return `${pct}% (last ${history.length} checks)`;
+}
+
+// ---------------------------------------------------------------------------
+// HealthSparkline — mini timeline of dot indicators for one service
+// ---------------------------------------------------------------------------
+
+interface HealthSparklineProps {
+  history: HealthCheckSnapshot[];
+}
+
+function HealthSparkline({ history }: HealthSparklineProps) {
+  if (history.length === 0) return null;
+
+  return (
+    <div
+      className="flex items-center gap-px mt-1"
+      aria-label={`Health history: ${uptimeLabel(history)}`}
+      role="img"
+    >
+      {history.map((snap, i) => (
+        <span
+          key={i}
+          className={[
+            "inline-block h-1.5 w-1.5 rounded-full",
+            snap.status === "healthy"
+              ? "bg-[var(--color-status-success)]"
+              : snap.status === "degraded"
+              ? "bg-[var(--color-status-warning)]"
+              : snap.status === "down"
+              ? "bg-[var(--color-destructive)]"
+              : "bg-[var(--color-muted-foreground)]",
+          ].join(" ")}
+          title={`${snap.status} at ${new Date(snap.checkedAt).toLocaleTimeString()}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ServiceHealthGrid component
 // ---------------------------------------------------------------------------
 
@@ -92,6 +179,10 @@ export interface ServiceHealthGridProps {
 
 export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
   const client = useApiClient();
+
+  // Ring buffer of health snapshots per service — gives operators a quick
+  // stability signal without requiring a separate time-series endpoint (PA-016).
+  const [healthHistory, setHealthHistory] = React.useState<ServiceHealthHistory>(new Map());
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["service-health"],
@@ -153,6 +244,24 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
     staleTime: 15_000,
   });
 
+  // When a fresh poll result arrives, append each service's status to its
+  // history buffer so the sparklines update without re-fetching history.
+  const checkedAt = React.useRef(0);
+  React.useEffect(() => {
+    if (data === undefined) return;
+    const now = Date.now();
+    // Guard against running twice for the same poll result
+    if (now - checkedAt.current < 5_000) return;
+    checkedAt.current = now;
+    setHealthHistory((prev) => {
+      let next = prev;
+      for (const service of data.data) {
+        next = appendHistory(next, service.name, { status: service.status, checkedAt: now });
+      }
+      return next;
+    });
+  }, [data]);
+
   const services = data?.data ?? [];
 
   if (isLoading) {
@@ -173,23 +282,37 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
   return (
     <div className={className}>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-        {services.map((service) => (
-          <div key={service.name} className="flex items-center gap-2">
-            <span
-              className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT_CLASS[service.status]}`}
-              aria-hidden="true"
-            />
-            <div className="min-w-0">
-              <p className="truncate text-sm">{service.name}</p>
-              <p className="text-xs text-[var(--color-muted-foreground)]">
-                {STATUS_LABELS[service.status]}
-                {service.latencyMs !== undefined && service.status === "healthy" && (
-                  <span className="ml-1">{service.latencyMs}ms</span>
+        {services.map((service) => {
+          const history = healthHistory.get(service.name) ?? [];
+          const uptime = uptimeLabel(history);
+          return (
+            <div key={service.name} className="flex items-start gap-2">
+              <span
+                className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT_CLASS[service.status]}`}
+                aria-hidden="true"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm">{service.name}</p>
+                <p className="text-xs text-[var(--color-muted-foreground)]">
+                  {STATUS_LABELS[service.status]}
+                  {service.latencyMs !== undefined && service.status === "healthy" && (
+                    <span className="ml-1">{service.latencyMs}ms</span>
+                  )}
+                </p>
+                {history.length > 0 && (
+                  <>
+                    <HealthSparkline history={history} />
+                    {uptime && (
+                      <p className="text-[10px] text-[var(--color-muted-foreground)] mt-0.5">
+                        Uptime: {uptime}
+                      </p>
+                    )}
+                  </>
                 )}
-              </p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {services.length === 0 && (
           <p className="col-span-full text-sm text-[var(--color-muted-foreground)]">
             No service health data available.

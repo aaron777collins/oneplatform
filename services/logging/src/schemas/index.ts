@@ -49,6 +49,9 @@ export const auditExportQuerySchema = z.object({
 export type AuditExportQueryInput = z.infer<typeof auditExportQuerySchema>;
 
 export const auditQuerySchema = z.object({
+  // Free-text search against the action field and JSON metadata blob.
+  // Truncated at 256 chars to prevent excessively large LIKE patterns (PA-014).
+  search: z.string().max(256).optional(),
   actorId: z.string().max(255).optional(),
   actorType: z.enum(["user", "service", "system"]).optional(),
   tenantId: z.string().max(255).optional(),
@@ -56,6 +59,10 @@ export const auditQuerySchema = z.object({
   resourceType: z.string().max(255).optional(),
   resourceId: z.string().max(255).optional(),
   result: z.enum(["success", "failure"]).optional(),
+  // startDate / endDate are the documented public names (PA-014).
+  // from / to are kept as aliases for backward compatibility with internal callers.
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   cursor: z.string().max(512).optional(),

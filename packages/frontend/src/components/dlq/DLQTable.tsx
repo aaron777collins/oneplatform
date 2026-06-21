@@ -189,7 +189,11 @@ export function DLQTable({ queueName, search = "", className }: DLQTableProps) {
                 isExpanded && (
                   <TableRow key={`${job.id}-detail`} className="bg-[var(--color-muted)]/30">
                     <TableCell colSpan={7} className="p-4">
-                      <DLQJobDetail job={job} />
+                      <DLQJobDetail
+                        job={job}
+                        onRetry={(id) => replayMutation.mutate(id)}
+                        isRetrying={replayMutation.isPending && replayMutation.variables === job.id}
+                      />
                     </TableCell>
                   </TableRow>
                 ),

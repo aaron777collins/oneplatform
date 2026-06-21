@@ -456,6 +456,15 @@ const storageRoute = createRoute({
   ),
 });
 
+const rolesRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/roles",
+  component: lazyRouteComponent(
+    () => import("./pages/settings/RolesPage.js"),
+    "RolesPage",
+  ),
+});
+
 const adminRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/admin",
@@ -529,6 +538,7 @@ const routeTree = rootRoute.addChildren([
       apiKeysRoute,
       webhooksRoute,
       storageRoute,
+      rolesRoute,
       adminRoute,
     ]),
   ]),

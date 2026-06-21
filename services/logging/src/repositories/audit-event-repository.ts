@@ -89,6 +89,16 @@ export class AuditEventRepository {
     const args: unknown[] = [];
     let n = 1;
 
+    // Full-text search: ILIKE against the action column and the metadata JSONB cast
+    // to text. Using ILIKE rather than pg full-text search avoids a dependency on
+    // tsvector indexes and is fast enough for the expected audit volume.
+    if (params.search !== undefined && params.search.trim() !== "") {
+      const pattern = `%${params.search.trim()}%`;
+      conditions.push(`(action ILIKE $${n} OR metadata::text ILIKE $${n})`);
+      args.push(pattern);
+      n++;
+    }
+
     if (params.actorId !== undefined) {
       conditions.push(`actor_id = $${n++}`);
       args.push(params.actorId);
