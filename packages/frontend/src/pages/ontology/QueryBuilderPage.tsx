@@ -741,13 +741,13 @@ interface AggregateRowProps {
 
 function AggregateRow({ aggregate, fieldOptions, onChange, onRemove }: AggregateRowProps) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
       {/* Aggregate function */}
       <Select
         value={aggregate.fn}
         onValueChange={(v) => onChange({ ...aggregate, fn: v as AggregateFunction })}
       >
-        <SelectTrigger className="w-28" aria-label="Aggregate function">
+        <SelectTrigger className="w-full sm:w-28" aria-label="Aggregate function">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -764,7 +764,7 @@ function AggregateRow({ aggregate, fieldOptions, onChange, onRemove }: Aggregate
         value={aggregate.field}
         onValueChange={(v) => onChange({ ...aggregate, field: v })}
       >
-        <SelectTrigger className="w-40" aria-label="Field to aggregate">
+        <SelectTrigger className="w-full sm:w-40" aria-label="Field to aggregate">
           <SelectValue placeholder="Field" />
         </SelectTrigger>
         <SelectContent>
@@ -780,7 +780,7 @@ function AggregateRow({ aggregate, fieldOptions, onChange, onRemove }: Aggregate
 
       {/* Optional alias */}
       <Input
-        className="w-36"
+        className="w-full sm:w-36"
         placeholder="alias (optional)"
         value={aggregate.alias}
         onChange={(e) => onChange({ ...aggregate, alias: e.target.value })}

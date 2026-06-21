@@ -103,7 +103,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Logs", to: "/logs", icon: FileText },
       { label: "Audit", to: "/logs/audit", icon: ClipboardList },
       // DLQ and Metrics are hidden for viewer-role users (§10.2)
-      { label: "DLQ", to: "/dlq", icon: Inbox, requiredRole: "data-engineer" },
+      { label: "DLQ", to: "/dlq", icon: Inbox, requiredRole: "data-engineer", description: "Dead Letter Queue — failed jobs awaiting retry" },
       { label: "Metrics", to: "/metrics", icon: BarChart2, requiredRole: "data-engineer" },
     ],
   },
