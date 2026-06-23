@@ -437,6 +437,20 @@ const CONNECTOR_METADATA: ConnectorMetadata = {
         default: 100,
         title: "Batch Size",
       },
+      maxPayloadBytes: {
+        type: "number",
+        minimum: 1,
+        title: "Max Payload Bytes",
+        description: "Maximum accepted webhook body size in bytes.",
+      },
+      replayWindowSeconds: {
+        type: "number",
+        minimum: 0,
+        default: 300,
+        title: "Replay Window (seconds)",
+        description:
+          "Reject signed payloads older than this many seconds (replay protection). 0 disables the check.",
+      },
     },
   },
   outputSchema: {
