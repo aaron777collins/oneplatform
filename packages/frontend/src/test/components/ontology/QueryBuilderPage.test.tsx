@@ -492,9 +492,13 @@ describe("QueryBuilderPage — Run query", () => {
     const apiClient = makeApiClient();
     await selectEntityAndRun(apiClient);
 
+    // Headers are rendered human-readable (NCP-017): underscores/camelCase are
+    // split and each word is title-cased, so "_id" → "Id" and "status" → "Status".
+    // The column header also carries the type as a badge, so match the column
+    // header cells by role with a regex over their accessible name.
     await waitFor(() => {
-      expect(screen.getByText("_id")).toBeInTheDocument();
-      expect(screen.getByText("status")).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: /\bId\b/ })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: /\bStatus\b/ })).toBeInTheDocument();
     });
   });
 
@@ -530,8 +534,10 @@ describe("QueryBuilderPage — Run query", () => {
     const apiClient = makeApiClient();
     await selectEntityAndRun(apiClient);
 
+    // NCA-006: export is a CSV/JSON button group; the CSV button's accessible
+    // name is "Export as CSV".
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /export csv/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /export as csv/i })).toBeInTheDocument();
     });
   });
 });

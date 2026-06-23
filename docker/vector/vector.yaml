@@ -13,10 +13,12 @@
 
 # Vector persists source checkpoints and buffers under data_dir. The default
 # /var/lib/vector is not writable by the non-root user (65534) this container
-# runs as, causing "Permission denied" at startup. Point it at the writable
-# log-data volume mount (which already exists, so Vector does not need to create
-# it) and let Vector create its per-source checkpoint subdirectories there.
-data_dir: /var/log/oneplatform
+# runs as. Point it at a dedicated tmpfs mounted at /vector-data (writable by
+# any user) so Vector can create its per-source checkpoint subdirectories.
+# Checkpoints only prevent duplicate replay across restarts; losing them on
+# container restart is acceptable for dev-test (read_from: end already skips
+# historical logs).
+data_dir: /vector-data
 
 sources:
   docker_file_logs:

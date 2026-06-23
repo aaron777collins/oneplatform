@@ -75,11 +75,14 @@ export class RetentionService {
         continue;
       }
 
+      // Partition bound expressions in CREATE TABLE ... FOR VALUES cannot be
+      // bind parameters — PostgreSQL requires literals there. The bounds come
+      // from Date.toISOString() (a fixed, non-user format), so inlining them as
+      // quoted literals is safe.
       await this.db.query(
         `CREATE TABLE IF NOT EXISTS logging.${name}
          PARTITION OF logging.events
-         FOR VALUES FROM ($1) TO ($2)`,
-        [start.toISOString(), end.toISOString()]
+         FOR VALUES FROM ('${start.toISOString()}') TO ('${end.toISOString()}')`
       );
 
       // Track in registry so the retention job can query it without hitting

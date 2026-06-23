@@ -179,7 +179,7 @@ export { corsMiddleware } from "./middleware/cors.js";
 export type { CorsConfig } from "./middleware/cors.js";
 export { authMiddleware } from "./middleware/auth.js";
 export type { AuthMiddlewareConfig } from "./middleware/auth.js";
-export { serviceAuthMiddleware } from "./middleware/service-auth.js";
+export { serviceAuthMiddleware, signUserContext } from "./middleware/service-auth.js";
 export type { ServiceAuthConfig } from "./middleware/service-auth.js";
 export { responseEnvelopeMiddleware } from "./middleware/response-envelope.js";
 export { errorHandlerMiddleware } from "./middleware/error-handler.js";

@@ -314,9 +314,6 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     },
   });
 
-  // TODO(#PLAT-???): No Worker consumes "ontology.map" yet — jobs accumulate in Redis
-  // until the ontology service implements a consumer. Retry config is set to match
-  // the platform standard so jobs are not silently discarded on enqueue failures.
   const ontologyQueue = new Queue("ontology.map", {
     connection: { lazyConnect: true, url: redisUrl },
     defaultJobOptions: {

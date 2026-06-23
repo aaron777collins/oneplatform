@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { SignJWT, exportJWK, generateKeyPair, type KeyLike } from "jose";
 import {
   createMockContext,
   createAuthProviderMockContext,
@@ -99,6 +100,34 @@ function makeJwt(payload: Record<string, unknown>): string {
   return `${encodeB64url(header)}.${encodeB64url(payload)}.fakesignature`;
 }
 
+// ── Real RS256 signing for id_token verification paths ──────────────────────
+// handleCallback() now verifies the id_token signature against the provider's
+// JWKS (P19-080), so id_tokens used in the success paths must be genuinely
+// signed. We generate one RSA keypair for the whole suite, serve its public JWK
+// from the mock JWKS endpoint, and sign id_tokens with the private key.
+const SIGNING_KID = "key-1";
+let signingKeyPair: { privateKey: KeyLike; publicJwk: Record<string, unknown> } | null = null;
+
+async function getSigningKeyPair() {
+  if (signingKeyPair === null) {
+    const { privateKey, publicKey } = await generateKeyPair("RS256", { extractable: true });
+    const jwk = await exportJWK(publicKey);
+    signingKeyPair = {
+      privateKey,
+      publicJwk: { ...jwk, kid: SIGNING_KID, use: "sig", alg: "RS256" },
+    };
+  }
+  return signingKeyPair;
+}
+
+/** Sign a real RS256 id_token with the suite signing key. */
+async function signIdToken(payload: Record<string, unknown>): Promise<string> {
+  const { privateKey } = await getSigningKeyPair();
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: "RS256", typ: "JWT", kid: SIGNING_KID })
+    .sign(privateKey);
+}
+
 // ── Fetch handler factories ──────────────────────────────────────────────────
 
 /**
@@ -111,8 +140,16 @@ function makeJwt(payload: Record<string, unknown>): string {
  */
 function makeFetchHandler(options: {
   tokenResponse?: Record<string, unknown>;
+  /**
+   * Returns the token-endpoint body at request time. Used by the handleCallback
+   * success paths, where the id_token must embed the per-flow nonce (only known
+   * after getAuthorizationUrl() runs). Takes precedence over tokenResponse.
+   */
+  tokenResponseProvider?: () => Record<string, unknown>;
   tokenStatus?: number;
   discoveryDocument?: Record<string, unknown>;
+  /** When true, serve the suite's real public JWK so id_token signatures verify. */
+  realJwks?: boolean;
 } = {}) {
   const tokenResp = options.tokenResponse ?? makeTokenResponse();
   const tokenStatus = options.tokenStatus ?? 200;
@@ -126,18 +163,18 @@ function makeFetchHandler(options: {
       });
     }
     if (url.endsWith("/token")) {
-      return new Response(JSON.stringify(tokenResp), {
+      const body = options.tokenResponseProvider ? options.tokenResponseProvider() : tokenResp;
+      return new Response(JSON.stringify(body), {
         status: tokenStatus,
         headers: { "Content-Type": "application/json" },
       });
     }
     if (url.includes("/.well-known/jwks.json")) {
+      const keys = options.realJwks && signingKeyPair
+        ? [signingKeyPair.publicJwk]
+        : [{ kty: "RSA", use: "sig", alg: "RS256", kid: "key-1", n: "fake-n", e: "AQAB" }];
       return new Response(
-        JSON.stringify({
-          keys: [
-            { kty: "RSA", use: "sig", alg: "RS256", kid: "key-1", n: "fake-n", e: "AQAB" },
-          ],
-        }),
+        JSON.stringify({ keys }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -169,6 +206,71 @@ async function initializeProvider(
 
   await authProvider.initialize(BASE_CONFIG, ctx);
   return ctx;
+}
+
+/**
+ * Drive a full, valid OIDC callback flow for handleCallback() success tests.
+ *
+ * handleCallback() now requires a state previously registered by
+ * getAuthorizationUrl() (CSRF protection) and verifies the id_token signature
+ * and nonce against the provider JWKS (P19-080). This helper:
+ *   1. registers a state via getAuthorizationUrl(),
+ *   2. extracts the per-flow nonce from the returned authorization URL,
+ *   3. serves a real-signed id_token carrying that nonce from the token endpoint.
+ *
+ * Returns the initialized ctx and the registered state to pass to handleCallback().
+ */
+async function driveCallback(
+  idTokenClaims: Record<string, unknown> = {},
+  tokenOverrides: Record<string, unknown> = {},
+): Promise<{ ctx: ReturnType<typeof createAuthProviderMockContext>; state: string }> {
+  await getSigningKeyPair();
+  const state = "state-" + Math.random().toString(36).slice(2);
+  const redirectUri = "https://app.example.test/auth/callback";
+
+  let idToken: string | undefined;
+  const ctx = createAuthProviderMockContext({
+    authCredentials: { clientSecret: CLIENT_SECRET },
+    fetchHandler: makeFetchHandler({
+      realJwks: true,
+      tokenResponseProvider: () => ({
+        access_token: makeJwt({
+          sub: "user-123",
+          iss: ISSUER_URL,
+          aud: CLIENT_ID,
+          exp: futureExp(),
+          iat: nowSeconds(),
+        }),
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: "refresh-token-abc",
+        id_token: idToken,
+        ...tokenOverrides,
+      }),
+    }),
+    config: { redirectUri },
+  });
+
+  await authProvider.initialize(BASE_CONFIG, ctx);
+
+  // Register the state and capture the nonce the provider generated for it.
+  const authUrl = new URL(authProvider.getAuthorizationUrl(state, { redirectUri }));
+  const nonce = authUrl.searchParams.get("nonce") ?? "";
+
+  // Sign the id_token with the captured nonce so verifyJwt() accepts it.
+  idToken = await signIdToken({
+    sub: "user-123",
+    iss: ISSUER_URL,
+    aud: CLIENT_ID,
+    exp: futureExp(),
+    iat: nowSeconds(),
+    nonce,
+    email: "alice@example.test",
+    groups: ["admins", "editors"],
+    ...idTokenClaims,
+  });
+
+  return { ctx, state };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -375,10 +477,10 @@ describe("getAuthorizationUrl()", () => {
 
 describe("handleCallback()", () => {
   it("returns an AuthResult with accessToken and providerUserId on success", async () => {
-    const ctx = await initializeProvider();
+    const { ctx, state } = await driveCallback();
 
     const result = await authProvider.handleCallback(
-      { code: "auth-code-123" },
+      { code: "auth-code-123", state },
       ctx,
     );
 
@@ -388,35 +490,35 @@ describe("handleCallback()", () => {
   });
 
   it("extracts claims from the id_token when present", async () => {
-    const ctx = await initializeProvider();
+    const { ctx, state } = await driveCallback();
 
-    const result = await authProvider.handleCallback({ code: "code" }, ctx);
+    const result = await authProvider.handleCallback({ code: "code", state }, ctx);
 
     expect(result.claims["sub"]).toBe("user-123");
     expect(result.claims["email"]).toBe("alice@example.test");
   });
 
   it("populates expiresAt as an ISO 8601 string when expires_in is present", async () => {
-    const ctx = await initializeProvider();
+    const { ctx, state } = await driveCallback();
 
-    const result = await authProvider.handleCallback({ code: "code" }, ctx);
+    const result = await authProvider.handleCallback({ code: "code", state }, ctx);
 
     expect(typeof result.expiresAt).toBe("string");
     expect(() => new Date(result.expiresAt!)).not.toThrow();
   });
 
   it("returns the refresh token from the token response", async () => {
-    const ctx = await initializeProvider();
+    const { ctx, state } = await driveCallback();
 
-    const result = await authProvider.handleCallback({ code: "code" }, ctx);
+    const result = await authProvider.handleCallback({ code: "code", state }, ctx);
 
     expect(result.refreshToken).toBe("refresh-token-abc");
   });
 
   it("posts to the token endpoint with grant_type=authorization_code", async () => {
-    const ctx = await initializeProvider();
+    const { ctx, state } = await driveCallback();
 
-    await authProvider.handleCallback({ code: "my-code" }, ctx);
+    await authProvider.handleCallback({ code: "my-code", state }, ctx);
 
     const tokenCall = ctx.fetchCalls.find((c) => c.url.endsWith("/token"));
     expect(tokenCall).toBeDefined();
@@ -446,32 +548,34 @@ describe("handleCallback()", () => {
   });
 
   it("throws PluginAuthError when the token endpoint returns an OAuth error", async () => {
-    const ctx = await initializeProvider(
-      makeFetchHandler({
+    // Register a valid state so the flow reaches the token exchange, then have
+    // the token endpoint reject the code so the OAuth-error path is exercised.
+    const state = "state-oauth-error";
+    const redirectUri = "https://app.example.test/auth/callback";
+    const ctx = createAuthProviderMockContext({
+      authCredentials: { clientSecret: CLIENT_SECRET },
+      fetchHandler: makeFetchHandler({
         tokenResponse: { error: "invalid_grant", error_description: "Code expired" },
         tokenStatus: 400,
       }),
-    );
+      config: { redirectUri },
+    });
+    await authProvider.initialize(BASE_CONFIG, ctx);
+    authProvider.getAuthorizationUrl(state, { redirectUri });
 
     await expect(
-      authProvider.handleCallback({ code: "expired-code" }, ctx),
+      authProvider.handleCallback({ code: "expired-code", state }, ctx),
     ).rejects.toBeInstanceOf(PluginAuthError);
   });
 
   it("throws PluginAuthError when the token response lacks a sub claim", async () => {
-    const tokenWithoutSub = makeTokenResponse({
-      id_token: makeJwt({
-        iss: ISSUER_URL,
-        aud: CLIENT_ID,
-        exp: futureExp(),
-        iat: nowSeconds(),
-        // No sub claim
-      }),
-    });
-    const ctx = await initializeProvider(makeFetchHandler({ tokenResponse: tokenWithoutSub }));
+    // A signed id_token whose claims omit sub must be rejected after signature
+    // verification succeeds. driveCallback signs with the per-flow nonce; we
+    // override sub to undefined so it is absent from the payload.
+    const { ctx, state } = await driveCallback({ sub: undefined });
 
     await expect(
-      authProvider.handleCallback({ code: "code" }, ctx),
+      authProvider.handleCallback({ code: "code", state }, ctx),
     ).rejects.toBeInstanceOf(PluginAuthError);
   });
 });

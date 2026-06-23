@@ -24,7 +24,12 @@ export async function runMigrations(pool: pg.Pool): Promise<MigrationResult> {
   // automatically when the client connection is returned to the pool.
   const client = await pool.connect();
   try {
-    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
+    // Inline the (compile-time constant) lock key rather than binding it as a
+    // parameter: a parameterized query uses the extended-query protocol, which
+    // PgBouncer in transaction pooling mode breaks with "prepared statement
+    // requires 0 parameters". The key is a trusted literal, so there is no
+    // injection risk.
+    await client.query(`SELECT pg_advisory_lock(${MIGRATION_ADVISORY_LOCK_KEY})`);
 
     // Bootstrap the migration tracking table under the logging schema.
     // The logging schema itself is created by the first migration SQL file,
@@ -84,7 +89,7 @@ export async function runMigrations(pool: pg.Pool): Promise<MigrationResult> {
     // pg_advisory_unlock is implicit on connection release, but calling it
     // explicitly is clearer and ensures the lock is freed even if the connection
     // is reused rather than closed.
-    await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {});
+    await client.query(`SELECT pg_advisory_unlock(${MIGRATION_ADVISORY_LOCK_KEY})`).catch(() => {});
     client.release();
   }
 }

@@ -513,7 +513,7 @@ export async function verifyJwt(token: string, options: VerifyOptions): Promise<
     logger.debug("JWT signature invalid with cached JWKS — evicting cache and retrying", {
       kid: parsed.header.kid,
     });
-    await cache.delete(JWKS_CACHE_KEY);
+    await cache.delete(jwksCacheKey(jwksUri));
     const freshJwks = await getJwks(jwksUri, cacheTtlSeconds, fetch, cache, logger);
     signatureValid = await verifySignatureWithKeySet(parsed, freshJwks.keys);
   }

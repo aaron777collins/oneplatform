@@ -9,6 +9,8 @@ const secretBytes = new TextEncoder().encode(JWT_SECRET);
 async function issueToken(sub: string, tid: string, roles: string[], scopes: string[]) {
   return new SignJWT({ sub, tid, roles, scopes })
     .setProtectedHeader({ alg: "HS256" })
+    .setIssuer("oneplatform")
+    .setAudience("oneplatform")
     .setIssuedAt()
     .setExpirationTime("15m")
     .setJti("test-jti-" + Math.random())

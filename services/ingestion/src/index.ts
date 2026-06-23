@@ -11,6 +11,8 @@ import {
   loadMasterKey,
   readPackageVersion,
   setupProcessErrorHandlers,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -39,8 +41,9 @@ import {
   createConnectorRegistryService,
   registerBuiltinConnectors,
   createStreamingIngestionService,
+  createOntologyMapWorkerService,
 } from "./services/index.js";
-import type { SyncJobPayload, BatchJobPayload, ReconcileJobPayload } from "./services/index.js";
+import type { SyncJobPayload, BatchJobPayload, ReconcileJobPayload, OntologyMapJobPayload } from "./services/index.js";
 import type { FileParseJobPayload } from "./services/upload-service.js";
 import { createWebhookManagementService } from "./services/webhook-management-service.js";
 import {
@@ -73,6 +76,7 @@ export interface IngestionConfig {
   masterKey: Buffer;
   allowedOrigins: string[];
   executionServiceUrl: string;
+  ontologyServiceUrl: string;
   baseUrl: string;
   /** When false, BullMQ workers and retention scheduler are not started. Defaults to true. */
   startWorkers?: boolean;
@@ -275,10 +279,11 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   let reconcileWorker: Worker<ReconcileJobPayload> | undefined;
   let batchWorker: Worker<BatchJobPayload> | undefined;
   let fileParseWorker: Worker<FileParseJobPayload> | undefined;
+  let ontologyMapWorker: Worker<OntologyMapJobPayload> | undefined;
 
   if (startWorkers) {
     syncWorker = new Worker<SyncJobPayload>(
-      "ingestion:sync",
+      "ingestion.sync",
       async (job) => syncService.processSyncJob(job),
       {
         connection: { url: config.redisUrl },
@@ -289,7 +294,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     );
 
     batchWorker = new Worker<BatchJobPayload>(
-      "ingestion:batch",
+      "ingestion.batch",
       async (job) => syncService.processBatchJob(job),
       {
         connection: { url: config.redisUrl },
@@ -300,7 +305,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     );
 
     fileParseWorker = new Worker<FileParseJobPayload>(
-      "ingestion:file-parse",
+      "ingestion.file-parse",
       async (job) => uploadService.processUploadJob(job),
       {
         connection: { url: config.redisUrl },
@@ -311,7 +316,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     );
 
     reconcileWorker = new Worker<ReconcileJobPayload>(
-      "ingestion:reconcile",
+      "ingestion.reconcile",
       async (job) => reconciliationService.processReconcileJob(job),
       {
         connection: { url: config.redisUrl },
@@ -321,7 +326,37 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       },
     );
 
-    logger.info("BullMQ sync, batch, and file-parse workers started");
+    // Wire the ontology map worker.  The service token signer requires the
+    // ingestion service's Ed25519 private key so the ontology service can verify
+    // the caller's identity via serviceAuthMiddleware.  The key is loaded
+    // lazily here (inside the startWorkers block) so test environments that
+    // skip workers do not fail on a missing key file.
+    const serviceKeysDir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
+    const ingestionPrivateKeyPem = await loadServicePrivateKey("ingestion-service", serviceKeysDir);
+    const ontologyMapTokenSigner = await createServiceTokenSigner(
+      "ingestion-service",
+      ingestionPrivateKeyPem,
+    );
+
+    const ontologyMapWorkerService = createOntologyMapWorkerService({
+      rawTableRepo,
+      ontologyServiceUrl: config.ontologyServiceUrl,
+      serviceTokenSigner: ontologyMapTokenSigner,
+      logger,
+    });
+
+    ontologyMapWorker = new Worker<OntologyMapJobPayload>(
+      "ontology.map",
+      async (job) => ontologyMapWorkerService.processOntologyMapJob(job.data),
+      {
+        connection: { url: config.redisUrl },
+        concurrency: parseInt(process.env["OP_ONTOLOGY_MAP_WORKER_CONCURRENCY"] ?? "3", 10),
+        removeOnComplete: { age: 86_400 },
+        removeOnFail: { age: 604_800 },
+      },
+    );
+
+    logger.info("BullMQ sync, batch, file-parse, and ontology-map workers started");
 
     retentionService.startScheduler();
 
@@ -451,6 +486,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
         reconcileWorker?.close(),
         batchWorker?.close(),
         fileParseWorker?.close(),
+        ontologyMapWorker?.close(),
       ]);
     }
     await db.end();
@@ -470,7 +506,8 @@ async function main(): Promise<void> {
     jwtSecret: config.OP_JWT_SECRET,
     masterKey,
     allowedOrigins: config.OP_ALLOWED_ORIGINS,
-    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
+    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3000",
+    ontologyServiceUrl: process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3000",
     baseUrl: process.env["OP_BASE_URL"] ?? "https://api.oneplatform.dev",
   });
 

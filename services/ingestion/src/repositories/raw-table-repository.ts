@@ -330,6 +330,49 @@ export class RawTableRepository {
     await this.insertBatch(connectorId, envelopes);
   }
 
+  // Fetches all non-deleted records for a given connector + batch.  Used by the
+  // ontology map worker to supply the records payload to POST /internal/ontology/map.
+  //
+  // Returns an empty array when the batch has aged out of the table or was
+  // already hard-deleted by the retention service — the caller is responsible
+  // for deciding how to handle that case (typically: log a warning and skip).
+  async fetchBatch(connectorId: string, batchId: string): Promise<Array<{
+    _id: string;
+    _batch_id: string;
+    _connector_id: string;
+    _ingested_at: string;
+    data: Record<string, unknown>;
+  }>> {
+    const qtName = qualifiedTableName(connectorId);
+
+    const result = await this.pool.query<{
+      _id: string;
+      _batch_id: string;
+      _connector_id: string;
+      _ingested_at: Date;
+      data: unknown;
+    }>(
+      `SELECT _id, _batch_id, _connector_id, _ingested_at, data
+         FROM ${qtName}
+        WHERE _connector_id = $1
+          AND _batch_id     = $2
+          AND deleted_at   IS NULL
+        ORDER BY _ingested_at`,
+      [connectorId, batchId],
+    );
+
+    return result.rows.map((r) => ({
+      _id: r["_id"],
+      _batch_id: r["_batch_id"],
+      _connector_id: r["_connector_id"],
+      // DB returns a Date object; ontology service expects an ISO string.
+      _ingested_at: r["_ingested_at"] instanceof Date
+        ? r["_ingested_at"].toISOString()
+        : String(r["_ingested_at"]),
+      data: r["data"] as Record<string, unknown>,
+    }));
+  }
+
   // tableExists — checks the pg_tables catalog for the given table name within
   // the ingestion schema. Used by the retention service before attempting DDL.
   async tableExists(tableName: string): Promise<boolean> {

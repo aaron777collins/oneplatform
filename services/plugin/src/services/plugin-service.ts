@@ -198,7 +198,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
   async function getBullMQQueue(): Promise<BullMQQueue> {
     if (bullmqQueue === null) {
       const { Queue } = await import("bullmq");
-      const redisUrl = process.env["REDIS_URL"] ?? "redis://localhost:6379";
+      // The entrypoint exports OP_REDIS_URL; REDIS_URL is the legacy/local name.
+      // Reading only REDIS_URL connected to localhost in production, so the
+      // pre-uninstall active-jobs check silently failed (getJobs threw, was
+      // caught, and the safety check was skipped). Match index.ts's fallback order.
+      const redisUrl =
+        process.env["OP_REDIS_URL"] ?? process.env["REDIS_URL"] ?? "redis://localhost:6379";
       bullmqQueue = new Queue("execution", {
         connection: { url: redisUrl } as { url: string },
       });

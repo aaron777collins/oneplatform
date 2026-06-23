@@ -340,6 +340,16 @@ services:
       args:
         SERVICE: gateway
     entrypoint: ["/bin/sh", "/usr/local/bin/service-entrypoint.sh"]
+    # Gateway migrations declare FKs to auth.tenants, so auth-service must run its
+    # migrations first. YAML merge replaces the whole depends_on map, so the
+    # pgbouncer/redis conditions from *service-common are restated here.
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
     environment:
       <<: *otel-env
       SERVICE_NAME: gateway-service
@@ -821,6 +831,10 @@ services:
       - ${OP_DOCKER_DATA_ROOT:-/var/lib/docker/containers}:/var/lib/docker/containers:ro
       - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
       - log-data:/var/log/oneplatform
+    # Writable scratch for Vector's checkpoint/buffer data_dir. The log-data
+    # volume root is root-owned and not writable by UID 65534, so use a tmpfs.
+    tmpfs:
+      - /vector-data:size=64M
     networks:
       - op-dev-test-internal
     restart: unless-stopped

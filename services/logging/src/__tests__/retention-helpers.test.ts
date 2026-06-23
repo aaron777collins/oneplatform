@@ -134,13 +134,16 @@ describe("formatPartitionName — tested via ensurePartitions()", () => {
         typeof args[0] === "string" && (args[0] as string).includes("CREATE TABLE IF NOT EXISTS")
     );
 
-    const values0 = createCalls[0]?.[1] as string[];
-    expect(values0[0]).toBe("2026-06-01T00:00:00.000Z"); // from
-    expect(values0[1]).toBe("2026-07-01T00:00:00.000Z"); // to (exclusive)
+    // Partition bound expressions in CREATE TABLE ... FOR VALUES cannot be bind
+    // parameters (PostgreSQL requires literals there), so the boundaries are
+    // inlined as quoted ISO-8601 literals in the DDL text itself.
+    const sql0 = createCalls[0]?.[0] as string;
+    expect(sql0).toContain("FROM ('2026-06-01T00:00:00.000Z')"); // from
+    expect(sql0).toContain("TO ('2026-07-01T00:00:00.000Z')"); // to (exclusive)
 
-    const values1 = createCalls[1]?.[1] as string[];
-    expect(values1[0]).toBe("2026-07-01T00:00:00.000Z"); // from
-    expect(values1[1]).toBe("2026-08-01T00:00:00.000Z"); // to (exclusive)
+    const sql1 = createCalls[1]?.[0] as string;
+    expect(sql1).toContain("FROM ('2026-07-01T00:00:00.000Z')"); // from
+    expect(sql1).toContain("TO ('2026-08-01T00:00:00.000Z')"); // to (exclusive)
 
     vi.useRealTimers();
   });

@@ -393,17 +393,19 @@ describe("fetchBatch() — incremental sync", () => {
     expect(dataQuery).not.toContain("WHERE");
   });
 
-  it("tracks the high-water mark in the cursor after the first batch", async () => {
-    const rows = [
-      { id: 1, updated_at: "2024-01-01T00:00:00Z" },
-      { id: 2, updated_at: "2024-06-01T00:00:00Z" },
-    ];
+  it("captures the high-water mark in the cursor on the final page of a run", async () => {
+    // A run paginates by OFFSET while the WHERE filter stays fixed; the
+    // high-water mark is only captured on the final page so the *next* run
+    // resumes from where this one ended. A single partial page (1 row <
+    // batchSize 2) is therefore the final page.
+    const rows = [{ id: 2, updated_at: "2024-06-01T00:00:00Z" }];
     const ctx = makeContext([rows]);
     const handle = await connector.connect(INCREMENTAL_CONFIG, ctx);
 
     const result = await connector.fetchBatch(handle, null, ctx);
 
     // Cursor encodes the high-water mark. Decode it to verify.
+    expect(result.hasMore).toBe(false);
     expect(result.nextCursor).not.toBeNull();
     const decoded = JSON.parse(
       Buffer.from(result.nextCursor!, "base64url").toString("utf8"),
@@ -411,7 +413,11 @@ describe("fetchBatch() — incremental sync", () => {
     expect(decoded.since).toBe("2024-06-01T00:00:00Z");
   });
 
-  it("adds a WHERE clause with the high-water mark on subsequent calls", async () => {
+  it("adds a WHERE clause with the high-water mark on the next run after a run completes", async () => {
+    // Within a run the connector paginates purely by OFFSET (no WHERE) and only
+    // captures the high-water mark on the final page. The WHERE `col` > ? filter
+    // is applied on the *next* run, using the cursor emitted when the prior run
+    // ended on a partial page.
     const queriesSent: string[] = [];
     const paramsSent: unknown[][] = [];
 
@@ -424,25 +430,22 @@ describe("fetchBatch() — incremental sync", () => {
         if (body.query?.includes("INFORMATION_SCHEMA")) {
           return makePkDiscoveryResponse("id");
         }
-        // First data call: full page to generate a next cursor
-        if (queriesSent.filter((q) => !q.includes("INFORMATION_SCHEMA")).length === 1) {
-          return makeDataResponse([
-            { id: 1, updated_at: "2024-03-15T10:00:00Z" },
-            { id: 2, updated_at: "2024-03-15T12:00:00Z" },
-          ]);
-        }
-        // Second data call: partial page (end of data)
-        return makeDataResponse([{ id: 3, updated_at: "2024-03-16T08:00:00Z" }]);
+        // Partial page (1 row < batchSize 2) ends the run immediately and
+        // emits a cursor carrying the high-water mark.
+        return makeDataResponse([{ id: 2, updated_at: "2024-03-15T12:00:00Z" }]);
       },
     });
 
     const handle = await connector.connect(INCREMENTAL_CONFIG, ctx);
+    // Run 1 ends on a partial page → cursor carries the high-water mark.
     const first = await connector.fetchBatch(handle, null, ctx);
+    expect(first.hasMore).toBe(false);
+    // Run 2 starts from that cursor → applies the incremental WHERE filter.
     await connector.fetchBatch(handle, first.nextCursor!, ctx);
 
-    // Find the second data query (third total query after PK discovery and first data call)
     const dataQueries = queriesSent.filter((q) => !q.includes("INFORMATION_SCHEMA"));
     expect(dataQueries).toHaveLength(2);
+    expect(dataQueries[0]).not.toContain("WHERE");
     expect(dataQueries[1]).toContain("WHERE");
     expect(dataQueries[1]).toContain("`updated_at`");
 

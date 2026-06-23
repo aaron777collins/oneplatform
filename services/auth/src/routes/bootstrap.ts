@@ -9,6 +9,7 @@ import { ValidationError } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 import type { BootstrapService } from "../services/index.js";
 import { bootstrapRequest } from "../schemas/index.js";
+import { isSecureRequest } from "./auth.js";
 
 /** Redis key used to track whether the master key has already been served.
  *  SET NX EX 3600 — once set, the key survives process restarts and
@@ -104,7 +105,7 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
     });
 
     if (c.req.header("Origin") !== undefined && result.accessToken !== undefined) {
-      const isSecure = c.req.url.startsWith("https://");
+      const isSecure = isSecureRequest(c);
       c.res = new Response(JSON.stringify(result), {
         status: 201,
         headers: { "Content-Type": "application/json" },

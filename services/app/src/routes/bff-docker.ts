@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppVariables, Logger } from "@oneplatform/core";
-import { UnauthorizedError, ForbiddenError } from "@oneplatform/core";
+import { UnauthorizedError, ForbiddenError, signUserContext } from "@oneplatform/core";
 import type { Redis } from "ioredis";
 
 // ---------------------------------------------------------------------------
@@ -123,11 +123,23 @@ export function createBffDockerRoutes(
     const hasBody = method !== "GET" && method !== "HEAD";
     const body = hasBody ? await c.req.arrayBuffer().catch(() => undefined) : undefined;
 
-    const userContext = JSON.stringify({
-      userId: user.userId,
-      tenantId: user.tenantId,
-      roles: user.roles,
-    });
+    // Base64-encode the context (matching serviceAuthMiddleware's decode) and
+    // attach an HMAC signature so the downstream service can trust it. Include
+    // scopes so RBAC decisions downstream see the full identity. Without the
+    // signature, docker-bff could not adopt serviceAuthMiddleware (which requires
+    // X-User-Context-Signature), and the unsigned context was a latent trust gap.
+    const userContext = Buffer.from(
+      JSON.stringify({
+        userId: user.userId,
+        tenantId: user.tenantId,
+        roles: user.roles,
+        scopes: user.scopes,
+        isService: user.isService,
+        isGuest: user.isGuest,
+        emailVerified: user.emailVerified,
+      }),
+    ).toString("base64");
+    const userContextSignature = signUserContext(userContext);
 
     let upstream: Response;
     try {
@@ -136,6 +148,7 @@ export function createBffDockerRoutes(
         headers: {
           "X-Service-Token": serviceTokenSecret,
           "X-User-Context": userContext,
+          "X-User-Context-Signature": userContextSignature,
           ...(hasBody ? { "Content-Type": "application/json" } : {}),
           // Forward the Accept header so SSE endpoints negotiate correctly.
           Accept: c.req.header("accept") ?? "application/json",

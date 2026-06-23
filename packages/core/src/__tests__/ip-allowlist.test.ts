@@ -207,13 +207,16 @@ describe("parseIpFromRequest", () => {
     expect(body.ip).toBe("1.2.3.4");
   });
 
-  it("falls back to the leftmost X-Forwarded-For value", async () => {
+  it("ignores X-Forwarded-For and fails closed (returns empty) when X-Real-IP is absent", async () => {
+    // X-Forwarded-For is client-controlled and spoofable; the allowlist must
+    // fail closed rather than trust it. Only the proxy-injected X-Real-IP is
+    // authoritative, so an empty string is returned here.
     const app = buildApp({});
     const res = await app.request("/test", {
       headers: { "x-forwarded-for": "5.6.7.8, 9.10.11.12" },
     });
     const body = await res.json() as { ip: string };
-    expect(body.ip).toBe("5.6.7.8");
+    expect(body.ip).toBe("");
   });
 
   it("returns empty string when no IP header is present", async () => {

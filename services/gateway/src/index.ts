@@ -669,7 +669,13 @@ async function main(): Promise<void> {
     ontologyServiceUrl: process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3000",
     ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
     ...(serviceToken !== undefined ? { serviceToken } : {}),
-    rateLimitPerMinute: parseInt(process.env["OP_RATE_LIMIT_PER_MIN"] ?? "1000", 10),
+    // Accept both names: docker-compose sets OP_GLOBAL_RATE_LIMIT, while older
+    // configs/tests use OP_RATE_LIMIT_PER_MIN. Reading only the latter ignored
+    // the compose-configured value and always used the 1000/min default.
+    rateLimitPerMinute: parseInt(
+      process.env["OP_RATE_LIMIT_PER_MIN"] ?? process.env["OP_GLOBAL_RATE_LIMIT"] ?? "1000",
+      10,
+    ),
     replicaCount: parseInt(process.env["OP_GATEWAY_REPLICAS"] ?? "1", 10),
     circuitBreakerThreshold: parseInt(process.env["OP_CIRCUIT_BREAKER_THRESHOLD"] ?? "5", 10),
     circuitBreakerResetMs: parseInt(process.env["OP_CIRCUIT_BREAKER_RESET_MS"] ?? "10000", 10),

@@ -129,9 +129,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON auth.sessions (user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_tenant_id ON auth.sessions (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_family_id ON auth.sessions (family_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_refresh_token_jti ON auth.sessions (refresh_token_jti);
--- Partial index for active (non-expired, non-revoked) sessions:
+-- Partial index for active (non-revoked) sessions. The predicate cannot include
+-- `expires_at > now()` because now() is STABLE, not IMMUTABLE, and Postgres
+-- forbids non-immutable functions in index predicates. Expiry is filtered at
+-- query time; revoked_at IS NULL still prunes the bulk of inactive rows.
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON auth.sessions (user_id)
-    WHERE revoked_at IS NULL AND expires_at > now();
+    WHERE revoked_at IS NULL;
 
 -- ============================================================
 -- auth.api_keys
@@ -163,9 +166,11 @@ CREATE TABLE IF NOT EXISTS auth.api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON auth.api_keys (user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON auth.api_keys (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_key_prefix ON auth.api_keys (key_prefix);
--- Partial index for active (non-revoked, non-expired) keys:
+-- Partial index for active (non-revoked) keys. now() is not IMMUTABLE and so
+-- cannot appear in an index predicate; expiry is filtered at query time, while
+-- revoked_at IS NULL keeps the index limited to live keys.
 CREATE INDEX IF NOT EXISTS idx_api_keys_active ON auth.api_keys (key_prefix)
-    WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now());
+    WHERE revoked_at IS NULL;
 
 -- ============================================================
 -- auth.oauth_providers

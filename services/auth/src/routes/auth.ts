@@ -22,6 +22,22 @@ import {
   changePasswordRequest,
 } from "../schemas/index.js";
 
+/**
+ * Determine whether the request reached the platform over HTTPS so the cookie
+ * `Secure` attribute is set correctly. The auth service runs on plain HTTP
+ * behind a TLS-terminating proxy (Caddy/gateway), so `c.req.url` is always
+ * http:// — we must consult `x-forwarded-proto` (injected by the proxy from the
+ * real client connection) as well, otherwise `Secure` is never set in
+ * production and tokens can leak over a downgraded connection.
+ */
+export function isSecureRequest(c: { req: { url: string; header: (name: string) => string | undefined } }): boolean {
+  if (c.req.url.startsWith("https://")) return true;
+  const forwardedProto = c.req.header("x-forwarded-proto");
+  if (forwardedProto === undefined) return false;
+  // May be a comma-separated list (proto chain); the leftmost is the client-facing proto.
+  return forwardedProto.split(",")[0]?.trim().toLowerCase() === "https";
+}
+
 export interface AuthRouteDeps {
   authService: AuthService;
   tokenService: TokenService;
@@ -134,7 +150,7 @@ return count`,
     // Detection heuristic: presence of an Origin header indicates a browser-initiated
     // cross-origin request (set automatically by browsers, not by API clients).
     if (c.req.header("Origin") !== undefined && result.accessToken !== undefined) {
-      const isSecure = c.req.url.startsWith("https://");
+      const isSecure = isSecureRequest(c);
       c.res = new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
       });
@@ -239,7 +255,7 @@ return count`,
     // Expire both cookies so browser sessions are fully cleared on logout.
     // Max-Age=0 is the standard way to instruct the browser to delete a cookie
     // immediately, regardless of the original expiry or Secure flag.
-    const isSecure = c.req.url.startsWith("https://");
+    const isSecure = isSecureRequest(c);
     const secureSuffix = isSecure ? "; Secure" : "";
     const logoutResponse = new Response(null, { status: 204 });
     logoutResponse.headers.append(
@@ -296,7 +312,7 @@ return count`,
     // refresh token as an HttpOnly cookie so the cycle continues without the
     // frontend needing to read the token from the response body.
     if (c.req.header("Origin") !== undefined && result.refreshToken) {
-      const isSecure = c.req.url.startsWith("https://");
+      const isSecure = isSecureRequest(c);
       c.header(
         "Set-Cookie",
         `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,

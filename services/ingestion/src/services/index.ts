@@ -166,6 +166,13 @@ export {
   type ConnectorCapabilities,
 } from "./connector-registry-service.js";
 
+export {
+  createOntologyMapWorkerService,
+  type OntologyMapWorkerService,
+  type OntologyMapWorkerServiceDeps,
+  type OntologyMapJobPayload,
+} from "./ontology-map-worker-service.js";
+
 // Re-export error classes so routes only need to import from services/index.js
 export {
   ConnectorNotFoundError,

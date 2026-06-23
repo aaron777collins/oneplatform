@@ -52,6 +52,7 @@ const ALL_SCOPES: readonly string[] = [
   "webhooks:manage",
   "execution:read",
   "execution:run",
+  "lineage:read",
   "admin",
 ] as const;
 
@@ -65,19 +66,21 @@ const PREDEFINED_ROLE_SCOPES: Readonly<Record<string, readonly string[]>> = {
     "pipelines:manage", "apps:manage", "apps:deploy", "apps:read",
     "execution:read", "execution:run", "plugins:read", "plugins:manage",
     "users:read", "users:manage", "logs:read", "logs:export",
-    "audit:read", "webhooks:manage",
+    "audit:read", "webhooks:manage", "lineage:read",
   ],
   developer: [
     "data:read", "data:write", "ontology:read", "pipelines:manage",
     "apps:manage", "apps:deploy", "apps:read", "execution:read", "execution:run",
-    "plugins:read", "logs:read", "audit:read",
+    "plugins:read", "logs:read", "audit:read", "lineage:read",
   ],
   editor: [
     "data:read", "data:write", "ontology:read", "pipelines:manage",
     "apps:manage", "apps:read", "execution:read", "logs:read", "audit:read",
+    "lineage:read",
   ],
   viewer: [
     "data:read", "ontology:read", "pipelines:read", "apps:read", "logs:read",
+    "lineage:read",
   ],
 };
 
