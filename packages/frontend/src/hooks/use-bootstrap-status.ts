@@ -8,12 +8,6 @@ import type { ApiResponse } from "@/lib/api-client.js";
 
 export interface BootstrapStatus {
   completed: boolean;
-  /**
-   * @deprecated V6-020: The bootstrap token is no longer returned by the API
-   * for security reasons. It is logged to the server console at startup.
-   * The user must provide it manually (e.g. via the MasterKeyStep or CLI).
-   * This field remains for backwards compatibility but will always be undefined.
-   */
   bootstrapToken?: string;
 }
 
