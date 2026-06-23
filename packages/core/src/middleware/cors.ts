@@ -50,7 +50,21 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
       return;
     }
 
-    if (rejectAll || (!allowAll && !originSet.has(origin))) {
+    // Same-origin auto-detection: browsers include Origin on cross-origin requests,
+    // but Caddy (and most reverse proxies) forward the original Host unchanged.
+    // When Origin's host matches the Host header the request comes from the same
+    // deployment and must be allowed regardless of the explicit allowlist — this
+    // lets the platform work on any domain without per-deployment CORS config.
+    let isSameOrigin = false;
+    try {
+      const originHost = new URL(origin).host;
+      const requestHost = c.req.header("Host") ?? c.req.header("X-Forwarded-Host") ?? "";
+      isSameOrigin = originHost === requestHost;
+    } catch {
+      // Malformed origin URL — fall through to allowlist check
+    }
+
+    if (!isSameOrigin && (rejectAll || (!allowAll && !originSet.has(origin)))) {
       const safeOrigin = origin.length > 256 ? origin.slice(0, 256) + "..." : origin;
       const sanitized = safeOrigin.replace(/[&<>"']/g, (ch) => {
         const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };

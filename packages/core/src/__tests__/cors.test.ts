@@ -88,4 +88,66 @@ describe("corsMiddleware", () => {
     expect(allowHeaders).toContain("Authorization");
     expect(allowHeaders).toContain("X-API-Key");
   });
+
+  it("allows a same-origin request even when the origin is not in the allowlist", async () => {
+    // Simulates a Caddy-proxied deployment: browser sends Origin matching Host
+    const app = buildApp(["https://localhost:8443"]);
+    const res = await app.request("/data", {
+      headers: {
+        Origin: "https://myapp.example.com",
+        Host: "myapp.example.com",
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("allows a same-origin request when origin and host both include a port", async () => {
+    const app = buildApp([]);
+    const res = await app.request("/data", {
+      headers: {
+        Origin: "https://localhost:8443",
+        Host: "localhost:8443",
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a cross-origin request even when host is known", async () => {
+    const app = buildApp(["https://app.example.com"]);
+    const res = await app.request("/data", {
+      headers: {
+        Origin: "https://evil.com",
+        Host: "myapp.example.com",
+      },
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("ORIGIN_NOT_ALLOWED");
+  });
+
+  it("falls through to allowlist check when origin URL is malformed", async () => {
+    // A garbage Origin header is not same-origin; allowlist is then consulted
+    const app = buildApp(["https://app.example.com"]);
+    const res = await app.request("/data", {
+      headers: {
+        Origin: "not-a-url",
+        Host: "myapp.example.com",
+      },
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("ORIGIN_NOT_ALLOWED");
+  });
+
+  it("allows a same-origin request matching the deployment domain forwarded by a reverse proxy", async () => {
+    // Reproduces the test.aaroncollins.info deployment scenario
+    const app = buildApp(["https://localhost:8443"]);
+    const res = await app.request("/data", {
+      headers: {
+        Origin: "https://test.aaroncollins.info",
+        Host: "test.aaroncollins.info",
+      },
+    });
+    expect(res.status).toBe(200);
+  });
 });
