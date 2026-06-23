@@ -21,8 +21,8 @@
 #   MinIO API     9100  → 9000
 #   MinIO Console 9101  → 9001
 #   Gateway       4080  → 3000   (direct, 127.0.0.1 only)
-#   Caddy HTTP    8080  → 80
-#   Caddy HTTPS   8443  → 443
+#   Caddy HTTP    8088  → 80    (redirects to HTTPS; 8088 avoids 8080 squatters)
+#   Caddy HTTPS   8443  → 443   (primary entry point)
 #   Jaeger UI    16687  → 16686  (127.0.0.1 only)
 #   Grafana       3101  → 3000   (127.0.0.1 only)
 #
@@ -749,6 +749,13 @@ services:
       INGESTION_SERVICE_URL: http://op-dev-test-ingestion:3000
       OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
+      # Plugin bundle storage reads OP_S3_* (not OP_MINIO_*). Point it at the
+      # dev-test MinIO container with the same root credentials; without these it
+      # falls back to empty keys and the bundle-bucket create fails with HTTP 403.
+      OP_S3_ENDPOINT: http://op-dev-test-minio:9000
+      OP_S3_ACCESS_KEY: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_S3_SECRET_KEY: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
+      OP_S3_REGION: us-east-1
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -873,7 +880,10 @@ services:
       - op-dev-test-public
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      # Use 127.0.0.1, not localhost: nginx in this image listens on IPv4 only,
+      # but localhost can resolve to ::1 first, giving a false "connection
+      # refused". Pinning to the IPv4 loopback makes the check deterministic.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -899,7 +909,10 @@ services:
       - caddy-data:/data/caddy
       - caddy-config:/config/caddy
     ports:
-      - "8080:80"
+      # HTTP on 8088 (not 8080) to avoid colliding with other tools that
+      # commonly squat 8080 (Jenkins, dozzle, etc.). HTTPS stays on 8443 and
+      # is the primary entry point; HTTP only redirects to it.
+      - "8088:80"
       - "8443:443"
     networks:
       - op-dev-test-public
@@ -916,11 +929,18 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     read_only: true
+    # Only /tmp is writable; the rendered Caddyfile lands there. Do NOT add an
+    # /etc/caddy tmpfs — it would mask the Caddyfile sources baked into the image.
     tmpfs:
       - /tmp:size=50M
-      - /etc/caddy:size=1M
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://localhost/ || exit 1"]
+      # Use localhost (not 127.0.0.1): Caddy's internal CA issues the cert for
+      # the SNI name "localhost", so probing by IP triggers a TLS alert. Caddy
+      # binds both IPv4 and IPv6, so localhost resolution is not a problem here.
+      # busybox wget cannot validate Caddy's internally-issued (local CA) cert and
+      # errors on the HTTP→HTTPS redirect, so probe the listening TLS port with nc
+      # instead. A successful TCP connect to :443 confirms Caddy is up and serving.
+      test: ["CMD-SHELL", "nc -z localhost 443 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

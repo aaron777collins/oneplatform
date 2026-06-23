@@ -358,6 +358,16 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
       defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 5_000 } },
     });
 
+    // BullMQ Queue/Worker are EventEmitters whose internal ioredis connection
+    // surfaces transient failures (e.g. an EPIPE if Redis resets the socket
+    // during the startup race before ACLs are fully live) as an `error` event.
+    // An unhandled `error` event throws and crashes the process; logging it
+    // lets ioredis's retry strategy reconnect instead. Reason: first-boot
+    // crash-loop where the app raced Redis readiness on `docker compose up`.
+    retentionQueue.on("error", (err: Error) => {
+      logger.error("Retention queue error", { error: err.message });
+    });
+
     // Upsert the repeating job so restarts are idempotent (repeat key is stable)
     await retentionQueue.upsertJobScheduler(
       "daily-retention-cleanup",
@@ -381,6 +391,10 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
         removeOnFail:     { count: 100 },
       }
     );
+
+    retentionWorker.on("error", (err: Error) => {
+      logger.error("Retention worker error", { error: err.message });
+    });
 
     logger.info("App retention worker started", { buildRetentionCount });
   }

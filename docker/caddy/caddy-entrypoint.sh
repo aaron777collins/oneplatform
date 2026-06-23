@@ -5,9 +5,15 @@ OP_TLS_MODE="${OP_TLS_MODE:-internal}"
 OP_DOMAIN="${OP_DOMAIN:-localhost}"
 OP_TLS_EMAIL="${OP_TLS_EMAIL:-}"
 
+# The container runs with a read-only root filesystem, so the rendered Caddyfile
+# is written to /tmp (a writable tmpfs) rather than /etc/caddy. We must NOT mount
+# a tmpfs over /etc/caddy itself — that would mask the Caddyfile.dev /
+# Caddyfile.prod.template / Caddyfile.nossl sources baked into the image.
+RENDERED="/tmp/Caddyfile"
+
 case "$OP_TLS_MODE" in
   internal)
-    cp /etc/caddy/Caddyfile.dev /etc/caddy/Caddyfile
+    cp /etc/caddy/Caddyfile.dev "$RENDERED"
     ;;
   auto)
     if [ -z "$OP_DOMAIN" ] || [ "$OP_DOMAIN" = "localhost" ]; then
@@ -24,10 +30,10 @@ case "$OP_TLS_MODE" in
     fi
     envsubst '${OP_DOMAIN} ${OP_TLS_EMAIL}' \
       < /etc/caddy/Caddyfile.prod.template \
-      > /etc/caddy/Caddyfile
+      > "$RENDERED"
     ;;
   off)
-    cp /etc/caddy/Caddyfile.nossl /etc/caddy/Caddyfile
+    cp /etc/caddy/Caddyfile.nossl "$RENDERED"
     ;;
   *)
     echo "[caddy-entrypoint] ERROR: Unknown OP_TLS_MODE=$OP_TLS_MODE (valid: internal|auto|off)" >&2
@@ -36,4 +42,4 @@ case "$OP_TLS_MODE" in
 esac
 
 echo "[caddy-entrypoint] TLS mode: $OP_TLS_MODE"
-exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+exec caddy run --config "$RENDERED" --adapter caddyfile
