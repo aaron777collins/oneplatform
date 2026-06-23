@@ -934,13 +934,10 @@ services:
     tmpfs:
       - /tmp:size=50M
     healthcheck:
-      # Use localhost (not 127.0.0.1): Caddy's internal CA issues the cert for
-      # the SNI name "localhost", so probing by IP triggers a TLS alert. Caddy
-      # binds both IPv4 and IPv6, so localhost resolution is not a problem here.
-      # busybox wget cannot validate Caddy's internally-issued (local CA) cert and
-      # errors on the HTTP→HTTPS redirect, so probe the listening TLS port with nc
-      # instead. A successful TCP connect to :443 confirms Caddy is up and serving.
-      test: ["CMD-SHELL", "nc -z localhost 443 || exit 1"]
+      # With OP_TLS_MODE=off Caddy serves HTTP on :80 only and does not bind :443,
+      # so probe the HTTP port. A successful TCP connect to :80 confirms Caddy is
+      # up and listening. Use localhost so both IPv4 and IPv6 binds are covered.
+      test: ["CMD-SHELL", "nc -z localhost 80 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

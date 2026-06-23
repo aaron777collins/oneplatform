@@ -255,8 +255,12 @@ export function createProxyService(): ProxyService {
         method: c.req.method,
         headers: outboundHeaders,
         // Spread body conditionally — exactOptionalPropertyTypes forbids
-        // assigning undefined to RequestInit.body.
-        ...(hasBody ? { body: c.req.raw.body } : {}),
+        // assigning undefined to RequestInit.body. `duplex: "half"` is
+        // required by undici when streaming a request body, but is absent
+        // from the DOM RequestInit type, hence the cast.
+        ...(hasBody
+          ? ({ body: c.req.raw.body, duplex: "half" } as RequestInit)
+          : {}),
         signal: controller.signal,
         // Pass redirect responses through verbatim; upstreams should not
         // redirect, but if they do the client should receive the 3xx.
