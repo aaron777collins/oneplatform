@@ -1,0 +1,10 @@
+{
+  "name": "Docker Fleet Manager",
+  "slug": "docker-fleet-manager",
+  "description": "View and manage Docker containers, images, volumes, and networks.",
+  "version": "0.1.0",
+  "accessMode": "platform-user",
+  "requiredRoles": ["admin", "devops"],
+  "allowedModules": ["react", "react-dom", "@oneplatform/app-sdk"],
+  "entrypoint": "/src/index.tsx"
+}

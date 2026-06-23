@@ -56,7 +56,7 @@ transforms:
       # /var/log/oneplatform/gateway-service.log instead of /var/log/oneplatform/<sha>.log.
       # Falls back to container_id when the log line is not structured JSON or
       # the serviceName field is absent (e.g. third-party container logs).
-      .service_name = string(.serviceName) ?? string(.service) ?? .container_id ?? "unknown"
+      .service_name = string(.serviceName) ?? string(.service) ?? string(.container_id) ?? "unknown"
 
 sinks:
   # Write parsed logs to per-container log files on the log-data named volume.

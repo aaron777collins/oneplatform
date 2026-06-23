@@ -1,28 +1,33 @@
-# docker/Dockerfile.frontend
+# services/docker-bff/Dockerfile
 #
-# Multi-stage build for the OnePlatform React SPA.
+# Multi-stage build for the Docker BFF Sidecar.
 #
-# Stage 1 (builder): installs deps and runs Vite build.
-# Stage 2 (runner):  nginx:alpine serving the built SPA.
-#                    API routing and TLS are handled by Caddy at the edge.
+# This service is single-purpose and lightweight (it does not depend on
+# @oneplatform/core), so it builds standalone from the repo root rather than
+# via the shared docker/Dockerfile.service turbo-prune pipeline.
+#
+# Build from the repo root:
+#   docker build -f services/docker-bff/Dockerfile -t oneplatform/docker-bff .
+#
+# Runtime requires the Docker socket mounted:
+#   -v /var/run/docker.sock:/var/run/docker.sock
 
 ARG NODE_VERSION=22
 
-# ─── Stage 1: Build the React SPA ────────────────────────────────────────────
+# ─── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine AS builder
 
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
 WORKDIR /build
 
-# Copy workspace manifests first for Docker layer caching.
-COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+# Workspace manifests for dependency-layer caching.
+COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json .npmrc ./
 COPY pnpm-lock.yaml ./
-COPY .npmrc ./
 
 # pnpm install --frozen-lockfile validates every workspace manifest against the
-# lockfile, so all workspace package.json files must be present — not only the
-# frontend-related ones.
+# lockfile, so all workspace package.json files must be present even though only
+# docker-bff is built here.
 COPY packages/app-sdk/package.json          ./packages/app-sdk/package.json
 COPY packages/cli/package.json              ./packages/cli/package.json
 COPY packages/core/package.json             ./packages/core/package.json
@@ -50,22 +55,30 @@ COPY plugins/connector-webhook/package.json     ./plugins/connector-webhook/pack
 COPY tools/openapi-gen/package.json         ./tools/openapi-gen/package.json
 COPY tools/proto-gen/package.json           ./tools/proto-gen/package.json
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @oneplatform/docker-bff-service...
 
-COPY . .
+COPY services/docker-bff ./services/docker-bff
 
-RUN pnpm --filter @oneplatform/frontend build
+RUN pnpm --filter @oneplatform/docker-bff-service build
 
-# ─── Stage 2: nginx runtime ──────────────────────────────────────────────────
-FROM nginx:1.27-alpine AS runner
+# ─── Stage 2: Runner ─────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-alpine AS runner
 
-# Copy the built SPA assets from the builder stage.
-COPY --from=builder /build/packages/frontend/dist /usr/share/nginx/html
+RUN addgroup --system --gid 1001 oneplatform && \
+    adduser --system --uid 1001 --ingroup oneplatform oneplatform
 
-# Copy the static nginx config (no template substitution needed — Caddy handles
-# API routing and TLS at the edge).
-COPY --from=builder /build/packages/frontend/nginx.conf /etc/nginx/nginx.conf
+WORKDIR /app
 
-EXPOSE 80
+COPY --from=builder --chown=oneplatform:oneplatform /build/node_modules ./node_modules
+COPY --from=builder --chown=oneplatform:oneplatform /build/services/docker-bff/dist ./dist
+COPY --from=builder --chown=oneplatform:oneplatform /build/services/docker-bff/node_modules ./node_modules
+COPY --from=builder --chown=oneplatform:oneplatform /build/services/docker-bff/package.json ./package.json
 
-CMD ["nginx", "-g", "daemon off;"]
+USER oneplatform
+
+EXPOSE 3010
+
+ENV NODE_ENV=production
+ENV PORT=3010
+
+CMD ["node", "dist/index.js"]

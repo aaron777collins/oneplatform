@@ -25,6 +25,7 @@
   "dependencies": {
     "@oneplatform/core": "workspace:*",
     "@oneplatform/openapi-gen": "workspace:*",
+    "@oneplatform/sdk": "workspace:*",
     "bullmq": "^5.0.0",
     "hono": "^4.0.0",
     "ioredis": "^5.0.0",

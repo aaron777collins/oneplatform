@@ -453,6 +453,29 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   });
   honoApp.route("/bff", bffRoutes);
 
+  // BFF Docker proxy — Docker Fleet Manager app (design docs/designs/docker-fleet-manager-app.md).
+  // Opt-in: only registered when OP_ENABLE_DOCKER_BFF=true so deployments
+  // without the docker-bff sidecar never expose a Docker control plane.
+  if (process.env["OP_ENABLE_DOCKER_BFF"] === "true") {
+    const serviceTokenSecret = process.env["OP_SERVICE_TOKEN_SECRET"];
+    if (serviceTokenSecret === undefined || serviceTokenSecret === "") {
+      logger.warn(
+        "OP_ENABLE_DOCKER_BFF is true but OP_SERVICE_TOKEN_SECRET is unset — Docker BFF routes not registered."
+      );
+    } else {
+      const { createBffDockerRoutes } = await import("./routes/bff-docker.js");
+      const bffDockerRoutes = createBffDockerRoutes({
+        serviceTokenSecret,
+        redis,
+        logger,
+      });
+      honoApp.route("/bff/docker", bffDockerRoutes);
+      logger.info("Docker BFF proxy routes registered", {
+        dockerBffUrl: process.env["DOCKER_BFF_URL"] ?? "http://docker-bff:3010",
+      });
+    }
+  }
+
   // Embed routes — G-071
   // Management routes require user auth (handled by global auth middleware).
   // The serve route is intentionally public — the token is the credential.

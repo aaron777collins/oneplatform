@@ -15,6 +15,11 @@ ARG NODE_VERSION=22
 # ─── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine AS builder
 
+# Re-declare SERVICE inside this stage. ARGs declared before the first FROM are
+# only in scope for FROM lines; each build stage that references the value must
+# re-declare it, otherwise ${SERVICE} expands to an empty string.
+ARG SERVICE
+
 # Install pnpm via corepack (avoids a separate npm install step).
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
@@ -23,24 +28,39 @@ WORKDIR /build
 # Copy root workspace manifests first so Docker can cache the dependency
 # installation layer independently from source changes.
 COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY pnpm-lock.yaml ./
 COPY .npmrc ./
 
 # Copy all workspace package.json files. Docker layer caching: only re-runs
 # pnpm install when package.json files change, not on source code changes.
-COPY packages/core/package.json         ./packages/core/package.json
-COPY packages/sdk/package.json          ./packages/sdk/package.json
-COPY packages/app-sdk/package.json      ./packages/app-sdk/package.json
-COPY packages/plugin-sdk/package.json   ./packages/plugin-sdk/package.json
-COPY packages/cli/package.json          ./packages/cli/package.json
-COPY services/gateway/package.json      ./services/gateway/package.json
-COPY services/auth/package.json         ./services/auth/package.json
-COPY services/ingestion/package.json    ./services/ingestion/package.json
-COPY services/ontology/package.json     ./services/ontology/package.json
-COPY services/pipeline/package.json     ./services/pipeline/package.json
-COPY services/execution/package.json    ./services/execution/package.json
-COPY services/app/package.json          ./services/app/package.json
-COPY services/logging/package.json      ./services/logging/package.json
-COPY services/plugin/package.json       ./services/plugin/package.json
+# Every workspace manifest must be present — pnpm install --frozen-lockfile
+# validates all of them against the lockfile, not just the target service's.
+COPY packages/app-sdk/package.json          ./packages/app-sdk/package.json
+COPY packages/cli/package.json              ./packages/cli/package.json
+COPY packages/core/package.json             ./packages/core/package.json
+COPY packages/docs/package.json             ./packages/docs/package.json
+COPY packages/frontend/package.json         ./packages/frontend/package.json
+COPY packages/plugin-sdk/package.json       ./packages/plugin-sdk/package.json
+COPY packages/sdk/package.json              ./packages/sdk/package.json
+COPY services/app/package.json              ./services/app/package.json
+COPY services/auth/package.json             ./services/auth/package.json
+COPY services/docker-bff/package.json       ./services/docker-bff/package.json
+COPY services/execution/package.json        ./services/execution/package.json
+COPY services/gateway/package.json          ./services/gateway/package.json
+COPY services/ingestion/package.json        ./services/ingestion/package.json
+COPY services/logging/package.json          ./services/logging/package.json
+COPY services/ontology/package.json         ./services/ontology/package.json
+COPY services/pipeline/package.json         ./services/pipeline/package.json
+COPY services/plugin/package.json           ./services/plugin/package.json
+COPY plugins/auth-provider-ldap/package.json    ./plugins/auth-provider-ldap/package.json
+COPY plugins/auth-provider-oidc/package.json    ./plugins/auth-provider-oidc/package.json
+COPY plugins/connector-csv/package.json         ./plugins/connector-csv/package.json
+COPY plugins/connector-mysql/package.json       ./plugins/connector-mysql/package.json
+COPY plugins/connector-postgres/package.json    ./plugins/connector-postgres/package.json
+COPY plugins/connector-rest-api/package.json    ./plugins/connector-rest-api/package.json
+COPY plugins/connector-webhook/package.json     ./plugins/connector-webhook/package.json
+COPY tools/openapi-gen/package.json         ./tools/openapi-gen/package.json
+COPY tools/proto-gen/package.json           ./tools/proto-gen/package.json
 
 # Install all workspace dependencies.
 RUN pnpm install --frozen-lockfile
@@ -72,6 +92,13 @@ RUN pnpm install --frozen-lockfile
 
 # Copy pruned source files.
 COPY --from=builder /build/out/full/ .
+
+# turbo prune does not include root config files that are not part of a
+# workspace package. Each package's tsconfig.json does `extends:
+# "../../tsconfig.base.json"`, so without this the TypeScript build silently
+# falls back to compiler defaults (ES3, no esModuleInterop) and fails. Copy it
+# in explicitly.
+COPY --from=builder /build/tsconfig.base.json ./tsconfig.base.json
 
 # Build the target service and all its local dependencies.
 RUN pnpm dlx turbo run build --filter="@oneplatform/${SERVICE}-service"

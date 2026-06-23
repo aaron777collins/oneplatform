@@ -87,8 +87,13 @@ services:
       - init-data:/data/init
       - shared-pubkeys:/data/service-keys
       - ./init/init.sh:/init.sh:ro
-    command: ["/bin/sh", "/init.sh"]
-    networks: []
+    # alpine:3.19 ships without openssl, which init.sh needs for random secrets
+    # and Ed25519 key generation. Install it before running the script. The
+    # public bridge network is attached only to give apk outbound access to the
+    # Alpine package mirror; op-init stays off the internal and sandbox networks.
+    command: ["/bin/sh", "-c", "apk add --no-cache openssl && exec /bin/sh /init.sh"]
+    networks:
+      - op-dev-test-public
     restart: "no"
     healthcheck:
       test: ["CMD", "test", "-f", "/data/init/ready"]
@@ -227,9 +232,57 @@ services:
       op-init:
         condition: service_completed_successfully
 
+  # ─── Docker Fleet Manager sidecar ─────────────────────────────────────────
+  # Bridges the App Service BFF Docker proxy to the Docker daemon. Talks to the
+  # daemon through the read-only socket proxy (not a direct socket mount), and
+  # is reachable by the App Service on the internal network. Authenticated via a
+  # shared X-Service-Token (OP_SERVICE_TOKEN_SECRET) — must match app-service.
+  docker-bff:
+    container_name: op-dev-test-docker-bff
+    build:
+      context: ..
+      dockerfile: services/docker-bff/Dockerfile
+    labels:
+      <<: *dev-test-labels
+    restart: unless-stopped
+    stop_grace_period: 15s
+    environment:
+      <<: *otel-env
+      NODE_ENV: production
+      PORT: "3000"
+      DOCKER_HOST: tcp://op-dev-test-docker-socket-proxy:2375
+      OP_SERVICE_TOKEN_SECRET: ${OP_SERVICE_TOKEN_SECRET:-dev_test_docker_bff_secret}
+    networks:
+      - op-dev-test-internal
+      - op-dev-test-sandbox
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=50M
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
   # ─── Layer 2: Connection Pooler ───────────────────────────────────────────
   pgbouncer:
-    image: pgbouncer/pgbouncer:1.22.1
+    # edoburu/pgbouncer is the maintained community image (the pgbouncer/pgbouncer
+    # Docker Hub repo stops at 1.15.0). The custom entrypoint overrides the image
+    # default, so only the pgbouncer + psql binaries it provides are required.
+    image: edoburu/pgbouncer:1.22.1-p0
     container_name: op-dev-test-pgbouncer
     labels:
       <<: *dev-test-labels
@@ -577,6 +630,12 @@ services:
       OP_WILDCARD_DOMAIN: ${OP_WILDCARD_DOMAIN:-}
       OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      # Docker Fleet Manager BFF proxy — opt-in. Routes /bff/docker/* to the
+      # docker-bff sidecar after admin/devops RBAC. The shared secret must match
+      # the sidecar's OP_SERVICE_TOKEN_SECRET.
+      OP_ENABLE_DOCKER_BFF: ${OP_ENABLE_DOCKER_BFF:-true}
+      OP_SERVICE_TOKEN_SECRET: ${OP_SERVICE_TOKEN_SECRET:-dev_test_docker_bff_secret}
+      DOCKER_BFF_URL: http://docker-bff:3000
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -666,7 +725,7 @@ services:
 
   # ─── Observability: Jaeger ───────────────────────────────────────────────
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:1.62.0
     container_name: op-dev-test-jaeger
     labels:
       <<: *dev-test-labels

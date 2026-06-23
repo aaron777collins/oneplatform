@@ -44,6 +44,12 @@ RUN addgroup --system --gid 1002 sandbox && \
 
 WORKDIR /sandbox
 
+# Create the socket mount directory owned by the sandbox user. When the empty
+# sandbox-socket named volume is mounted at /run/sandbox, Docker initialises its
+# ownership from this directory, so the sandbox process (UID 1002) can bind its
+# Unix socket there despite the read-only root filesystem.
+RUN mkdir -p /run/sandbox && chown sandbox:sandbox /run/sandbox
+
 # Copy only the runtime — no build tools, no source maps.
 COPY --from=sandbox-builder --chown=sandbox:sandbox /sandbox/node_modules ./node_modules
 COPY --from=sandbox-builder --chown=sandbox:sandbox /sandbox/src/          ./src/

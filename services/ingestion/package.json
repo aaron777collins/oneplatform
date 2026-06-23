@@ -25,6 +25,7 @@
   "dependencies": {
     "@oneplatform/core": "workspace:*",
     "@oneplatform/openapi-gen": "workspace:*",
+    "@oneplatform/plugin-sdk": "workspace:*",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.0.0",
     "hono": "^4.0.0",
