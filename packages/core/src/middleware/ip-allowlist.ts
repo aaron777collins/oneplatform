@@ -59,17 +59,14 @@ function stripPortSuffix(ip: string): string {
 export function parseIpFromRequest(c: Context): string {
   const realIp = c.req.header("x-real-ip");
   if (realIp) {
-    return realIp.trim();
+    return stripPortSuffix(realIp.trim());
   }
 
-  const forwarded = c.req.header("x-forwarded-for");
-  if (forwarded) {
-    // X-Forwarded-For: <client>, <proxy1>, <proxy2>
-    // Take only the leftmost value; strip any port suffix.
-    const first = forwarded.split(",")[0]?.trim() ?? "";
-    return stripPortSuffix(first);
-  }
-
+  // X-Forwarded-For is intentionally NOT used as a fallback for the allowlist:
+  // it is client-controlled and trivially spoofable when X-Real-IP (injected by
+  // the trusted proxy from the TCP socket) is absent. Returning "" here makes
+  // the allowlist middleware fail closed (deny) rather than trusting a value an
+  // attacker can set to an allowlisted address.
   return "";
 }
 

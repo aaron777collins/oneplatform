@@ -77,14 +77,14 @@ export interface ApiKeyService {
   validate(key: string): Promise<UserContext | null>;
   list(
     userId: string,
-    options?: { status?: "active" | "revoked" | "all"; limit?: number; offset?: number },
-  ): Promise<{ keys: ApiKeyRecord[]; total: number }>;
+    options?: { status?: "active" | "revoked" | "all"; limit?: number; cursor?: string },
+  ): Promise<{ keys: ApiKeyRecord[]; nextCursor: string | null; total: number }>;
   // Admin-only: list all keys across all users (no ownership filter).
   listAllKeys(options?: {
     status?: "active" | "revoked" | "all";
     limit?: number;
-    offset?: number;
-  }): Promise<{ keys: AdminApiKeyRecord[]; total: number }>;
+    cursor?: string;
+  }): Promise<{ keys: AdminApiKeyRecord[]; nextCursor: string | null; total: number }>;
   revoke(keyId: string, revokedBy: string, tenantId: string): Promise<void>;
   // Admin-only: revoke any key regardless of ownership; tenantId is not required
   // because the admin has already been authenticated at the service entry point.
@@ -311,11 +311,11 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
 
   async function list(
     userId: string,
-    options?: { status?: "active" | "revoked" | "all"; limit?: number; offset?: number },
-  ): Promise<{ keys: ApiKeyRecord[]; total: number }> {
+    options?: { status?: "active" | "revoked" | "all"; limit?: number; cursor?: string },
+  ): Promise<{ keys: ApiKeyRecord[]; nextCursor: string | null; total: number }> {
     const status = options?.status ?? "active";
     const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
-    const offset = Math.max(options?.offset ?? 0, 0);
+    const cursor = options?.cursor;
 
     let statusClause = "";
     if (status === "active") {
@@ -325,22 +325,52 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
     }
     // status === "all" → no extra clause
 
-    const countResult = await db.query<{ count: string }>(
-      `SELECT count(*) AS count FROM auth.api_keys
-       WHERE user_id = $1${statusClause}`,
-      [userId],
-    );
+    // Decode the keyset cursor — opaque base64url JSON { created_at, id }.
+    let cursorClause = "";
+    const params: unknown[] = [userId];
+    if (cursor !== undefined) {
+      let parsed: { created_at: string; id: string };
+      try {
+        parsed = JSON.parse(
+          Buffer.from(cursor, "base64url").toString("utf8"),
+        ) as { created_at: string; id: string };
+      } catch {
+        throw new Error("Invalid pagination cursor");
+      }
+      params.push(parsed.created_at, parsed.id);
+      // Keyset: rows before cursor (DESC ordering means "older than" = created_at < cursor)
+      cursorClause = ` AND (created_at, id) < ($${params.length - 1}, $${params.length})`;
+    }
+
+    const [countResult, result] = await Promise.all([
+      db.query<{ count: string }>(
+        `SELECT count(*) AS count FROM auth.api_keys
+         WHERE user_id = $1${statusClause}`,
+        [userId],
+      ),
+      db.query<ApiKeyRow>(
+        `SELECT * FROM auth.api_keys
+         WHERE user_id = $1${statusClause}${cursorClause}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length + 1}`,
+        [...params, limit],
+      ),
+    ]);
+
     const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const keys = result.rows.map(rowToRecord);
+    const lastKey = keys[keys.length - 1];
+    const nextCursor =
+      keys.length === limit && lastKey !== undefined
+        ? Buffer.from(
+            JSON.stringify({
+              created_at: lastKey.createdAt.toISOString(),
+              id: lastKey.id,
+            }),
+          ).toString("base64url")
+        : null;
 
-    const result = await db.query<ApiKeyRow>(
-      `SELECT * FROM auth.api_keys
-       WHERE user_id = $1${statusClause}
-       ORDER BY created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset],
-    );
-
-    return { keys: result.rows.map(rowToRecord), total };
+    return { keys, nextCursor, total };
   }
 
   // -------------------------------------------------------------------------
@@ -350,11 +380,11 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
   async function listAllKeys(options?: {
     status?: "active" | "revoked" | "all";
     limit?: number;
-    offset?: number;
-  }): Promise<{ keys: AdminApiKeyRecord[]; total: number }> {
+    cursor?: string;
+  }): Promise<{ keys: AdminApiKeyRecord[]; nextCursor: string | null; total: number }> {
     const status = options?.status ?? "active";
     const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
-    const offset = Math.max(options?.offset ?? 0, 0);
+    const cursor = options?.cursor;
 
     let statusClause = "";
     if (status === "active") {
@@ -363,34 +393,59 @@ export function createApiKeyService(deps: ApiKeyServiceDeps): ApiKeyService {
       statusClause = " AND k.revoked_at IS NOT NULL";
     }
 
-    const countResult = await db.query<{ count: string }>(
-      `SELECT count(*) AS count FROM auth.api_keys k WHERE 1=1${statusClause}`
-    );
+    // Decode keyset cursor — opaque base64url JSON { created_at, id }.
+    let cursorClause = "";
+    const params: unknown[] = [];
+    if (cursor !== undefined) {
+      let parsed: { created_at: string; id: string };
+      try {
+        parsed = JSON.parse(
+          Buffer.from(cursor, "base64url").toString("utf8"),
+        ) as { created_at: string; id: string };
+      } catch {
+        throw new Error("Invalid pagination cursor");
+      }
+      params.push(parsed.created_at, parsed.id);
+      cursorClause = ` AND (k.created_at, k.id) < ($${params.length - 1}, $${params.length})`;
+    }
+
+    const [countResult, result] = await Promise.all([
+      db.query<{ count: string }>(
+        `SELECT count(*) AS count FROM auth.api_keys k WHERE 1=1${statusClause}`,
+      ),
+      db.query<AdminApiKeyRow>(
+        // key_hash is intentionally excluded — the column is never returned by this
+        // service method. key_prefix provides enough context for identification.
+        `SELECT k.id, k.user_id, k.tenant_id, k.name, k.key_hash, k.key_prefix,
+                k.scopes, k.expires_at, k.last_used_at, k.created_at, k.revoked_at,
+                u.display_name, u.email
+         FROM auth.api_keys k
+         JOIN auth.users u ON u.id = k.user_id
+         WHERE 1=1${statusClause}${cursorClause}
+         ORDER BY k.created_at DESC, k.id DESC
+         LIMIT $${params.length + 1}`,
+        [...params, limit],
+      ),
+    ]);
+
     const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const keys = result.rows.map((row) => ({
+      ...rowToRecord(row),
+      displayName: row.display_name,
+      email: row.email,
+    }));
+    const lastKey = keys[keys.length - 1];
+    const nextCursor =
+      keys.length === limit && lastKey !== undefined
+        ? Buffer.from(
+            JSON.stringify({
+              created_at: lastKey.createdAt.toISOString(),
+              id: lastKey.id,
+            }),
+          ).toString("base64url")
+        : null;
 
-    // Join with auth.users to surface owning user info.
-    // key_hash is intentionally excluded — the column is never returned by this
-    // service method. key_prefix provides enough context for identification.
-    const result = await db.query<AdminApiKeyRow>(
-      `SELECT k.id, k.user_id, k.tenant_id, k.name, k.key_hash, k.key_prefix,
-              k.scopes, k.expires_at, k.last_used_at, k.created_at, k.revoked_at,
-              u.display_name, u.email
-       FROM auth.api_keys k
-       JOIN auth.users u ON u.id = k.user_id
-       WHERE 1=1${statusClause}
-       ORDER BY k.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
-
-    return {
-      keys: result.rows.map((row) => ({
-        ...rowToRecord(row),
-        displayName: row.display_name,
-        email: row.email,
-      })),
-      total,
-    };
+    return { keys, nextCursor, total };
   }
 
   // -------------------------------------------------------------------------

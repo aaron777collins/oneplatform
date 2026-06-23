@@ -177,6 +177,20 @@ export class QueryCache {
     }
   }
 
+  /**
+   * Drops every cached entry. Called on AppProvider unmount so a remounted or
+   * replaced provider (e.g. a different tenant/app in an embed iframe) never
+   * observes the previous provider's rows. Listeners are notified so any
+   * still-mounted subscribers re-fetch under the new scope.
+   */
+  clear(): void {
+    const keys = Array.from(this.entries.keys());
+    this.entries.clear();
+    for (const key of keys) {
+      this.notifyListeners(key);
+    }
+  }
+
   // ─── useSyncExternalStore integration ─────────────────────────────────────
 
   /**

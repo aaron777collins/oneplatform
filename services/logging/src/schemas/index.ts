@@ -22,6 +22,7 @@ export type LogQueryInput = z.infer<typeof logQuerySchema>;
 // ---------------------------------------------------------------------------
 
 const MAX_AUDIT_QUERY_RANGE_DAYS = 90;
+const MAX_AUDIT_EXPORT_RANGE_DAYS = 365;
 
 // Export query for audit events.
 // startDate and endDate are required to prevent full-table scans — SIEM
@@ -41,6 +42,17 @@ export const auditExportQuerySchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "endDate must be after startDate",
+      path: ["endDate"],
+    });
+    return;
+  }
+  // Cap the export window to prevent full-table scans on multi-year ranges.
+  // The row limit caps results but not the DB work; this caps the DB work.
+  const maxRangeMs = MAX_AUDIT_EXPORT_RANGE_DAYS * 24 * 60 * 60 * 1000;
+  if (end - start > maxRangeMs) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Audit export time range must not exceed ${MAX_AUDIT_EXPORT_RANGE_DAYS} days.`,
       path: ["endDate"],
     });
   }

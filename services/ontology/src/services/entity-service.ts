@@ -367,6 +367,12 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
       const existingFields = await fieldRepo.findByEntityId(entity.id);
       const schemaName = tenantSchemaName(tenantId);
 
+      // hasData is computed before any structural check so classifyChange can
+      // determine whether adding a required-NOT-NULL field without a default is
+      // breaking.  The actual TOCTOU-safe count happens inside the DDL transaction
+      // below (see LOCK TABLE comment), but we need it here for the diff
+      // classification.  We do an early optimistic read — if the table is empty
+      // this is free; if it has rows we'll re-verify under a lock before the DDL.
       const hasData = await entityRepo.countDataRows(schemaName, entity.slug) > 0;
 
       const diff: EntityDiff = {
@@ -411,6 +417,27 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
+
+        // Detect fields that are required, non-nullable, and have no default —
+        // these are backward_compatible only because hasData was false at
+        // classification time.  A concurrent ingest could sneak a row in between
+        // that check and the ALTER TABLE, causing a raw PG NOT NULL violation.
+        // LOCK TABLE IN SHARE MODE blocks concurrent inserts until COMMIT, then we
+        // re-verify the row count so the ConflictError is raised cleanly instead.
+        const requiresNotNullDDL = (input.addFields ?? []).some(
+          (f) => (f.required ?? false) && !(f.nullable ?? true) && f.defaultValue === undefined,
+        );
+        if (requiresNotNullDDL) {
+          const tableRef = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(entity.slug)}`;
+          await client.query(`LOCK TABLE ${tableRef} IN SHARE MODE`);
+          const liveCount = await entityRepo.countDataRows(schemaName, entity.slug);
+          if (liveCount > 0) {
+            throw new ConflictError(
+              `Cannot add a required NOT NULL column without a default: the table now has ${liveCount} row(s). ` +
+              `Add a defaultValue or mark the field nullable.`,
+            );
+          }
+        }
 
         // Update entity metadata
         const entitySets: string[] = ["updated_at = now()", "version = version + 1"];

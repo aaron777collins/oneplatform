@@ -171,6 +171,14 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
   let reconnectTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let isDraining = false;
 
+  // Maps each in-flight executionId to the SandboxInstance it was dispatched on.
+  // This is necessary because `primary` may be swapped to a new instance during a
+  // blue-green recycle after recordRun() but before recordCompletion() — without
+  // this map, recordCompletion would delete from the new primary instead of the
+  // old one, leaving the id stuck in oldPrimary.inflightIds and causing the drain
+  // to wait the full grace period and then fire a false onCrash.
+  const executionInstanceMap = new Map<string, SandboxInstance>();
+
   // ---------------------------------------------------------------------------
   // Health check — design spec §7.5
   // ---------------------------------------------------------------------------
@@ -426,17 +434,30 @@ export function createSandboxManager(deps: SandboxManagerDeps): SandboxManager {
       );
     }
 
-    primary.inflightIds.add(executionId);
-    primary.runCount++;
+    // Capture the instance reference at dispatch time so recordCompletion
+    // always removes from the same instance, even if a blue-green swap happens
+    // between recordRun() and recordCompletion().
+    const dispatchedInstance = primary;
+    dispatchedInstance.inflightIds.add(executionId);
+    dispatchedInstance.runCount++;
+    executionInstanceMap.set(executionId, dispatchedInstance);
 
-    if (primary.runCount >= recycleAfterCount && !isDraining) {
+    if (dispatchedInstance.runCount >= recycleAfterCount && !isDraining) {
       // Trigger recycle asynchronously — do not block the calling execution
       void triggerRecycle("threshold");
     }
   }
 
   function recordCompletion(executionId: string): void {
-    primary.inflightIds.delete(executionId);
+    // Use the map to find the exact instance this execution was dispatched on.
+    // Without this, a blue-green swap between recordRun and recordCompletion
+    // would cause the delete to target the new primary instead of the old one,
+    // leaving the id in oldPrimary.inflightIds and triggering a false onCrash.
+    const instance = executionInstanceMap.get(executionId);
+    if (instance !== undefined) {
+      instance.inflightIds.delete(executionId);
+      executionInstanceMap.delete(executionId);
+    }
   }
 
   function handleCrash(): string[] {

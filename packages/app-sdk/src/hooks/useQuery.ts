@@ -67,9 +67,20 @@ function sortKeys(value: unknown): unknown {
  * Filter keys are recursively sorted so that `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`
  * produce the same cache key — making key computation order-independent.
  */
-function buildCacheKey(entity: string, options: QueryOptions): string {
+function buildCacheKey(
+  entity: string,
+  options: QueryOptions,
+  scope?: { appId: string; tenantId: string },
+): string {
+  // entity MUST remain the first serialized field: keyBelongsToEntity() in
+  // QueryCache prefix-matches on `{"entity":<entity>` for invalidation.
+  // appId/tenantId scope the key so co-existing AppProvider instances
+  // (micro-frontends, SSR, cross-tenant embed iframes) never read each other's
+  // cached rows.
   return JSON.stringify({
     entity,
+    appId: scope?.appId ?? "",
+    tenantId: scope?.tenantId ?? "",
     filter: sortKeys(options.filter) ?? null,
     sort: options.sort ?? null,
     fields: options.fields ?? null,
@@ -156,7 +167,7 @@ export function useQuery<T = unknown>(
   entity: string,
   options: QueryOptions = {},
 ): QueryResult<T> {
-  const { bffClient, isReady } = useAppContext();
+  const { bffClient, isReady, appId, tenantId } = useAppContext();
   const staleTime = options.staleTime ?? 30_000;
   const enabled = options.enabled !== false;
 
@@ -164,7 +175,7 @@ export function useQuery<T = unknown>(
   // Comparing to the previous key via ref ensures that a new options object
   // reference with identical values reuses the existing key string — preventing
   // the infinite-refetch loop that occurs when callers pass inline object literals.
-  const serializedKey = buildCacheKey(entity, options);
+  const serializedKey = buildCacheKey(entity, options, { appId, tenantId });
   const stableKeyRef = React.useRef<string>(serializedKey);
   if (stableKeyRef.current !== serializedKey) {
     // Only update when the serialized representation actually differs, not merely

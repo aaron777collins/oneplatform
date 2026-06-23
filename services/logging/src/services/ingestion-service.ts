@@ -3,6 +3,7 @@ import type { Redis } from "ioredis";
 import { z } from "zod";
 import type { LogEventRepository } from "../repositories/index.js";
 import type { CreateLogEventData } from "../repositories/types.js";
+import { isSensitiveField } from "../repositories/field-audit-repository.js";
 
 // ---------------------------------------------------------------------------
 // Zod schema for incoming pub/sub messages (matches LogEvent from core)
@@ -19,6 +20,22 @@ const LogEventSchema = z.object({
 });
 
 type ParsedLogEvent = z.infer<typeof LogEventSchema>;
+
+// ---------------------------------------------------------------------------
+// Redact any metadata field whose key name contains a sensitive substring
+// (password, secret, token, key, credential). This mirrors the redaction
+// applied in field-audit-repository so no sensitive data is stored verbatim.
+// ---------------------------------------------------------------------------
+
+const REDACTED_SENTINEL = "[REDACTED]";
+
+function redactSensitiveMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(metadata)) {
+    result[k] = isSensitiveField(k) ? REDACTED_SENTINEL : v;
+  }
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Batch accumulator constants — configurable via env vars
@@ -79,8 +96,16 @@ export class BatchAccumulator extends EventEmitter {
     if (this.buffer.length === 0) return;
 
     const batch = this.buffer.splice(0, this.buffer.length);
-    // SSE subscribers receive events here — they filter by service/level/traceId
-    this.emit("batch", batch);
+    // SSE subscribers receive events here — they filter by service/level/traceId.
+    // Wrap in try/catch: a synchronous throw from a listener must not propagate
+    // into flush→push→handleMessage and crash the Redis subscriber process.
+    try {
+      this.emit("batch", batch);
+    } catch (emitErr: unknown) {
+      console.error("Synchronous error from batch event listener", {
+        error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+      });
+    }
     this.writeBatch(batch).catch((err: unknown) => {
       this.handleInsertFailure(batch, err instanceof Error ? err : new Error(String(err)));
     });
@@ -93,7 +118,9 @@ export class BatchAccumulator extends EventEmitter {
       service: e.service,
       level: e.level,
       message: e.message,
-      metadata: e.metadata,
+      // Redact sensitive keys before persisting so passwords/tokens from
+      // publishers that accidentally include them are never stored verbatim.
+      metadata: redactSensitiveMetadata(e.metadata),
       createdAt: new Date(e.timestamp),
     }));
     await this.repo.insertBatch(rows);

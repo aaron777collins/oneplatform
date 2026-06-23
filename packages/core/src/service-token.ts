@@ -41,7 +41,16 @@ export async function loadServicePrivateKey(
   serviceName: string,
   keysDir: string = "/data/service-keys",
 ): Promise<string> {
-  const keyPath = path.join(keysDir, `${serviceName}.key.pem`);
+  // The container entrypoint provisions each service's Ed25519 private key on
+  // the init volume and exports its absolute path as OP_SERVICE_PRIVATE_KEY_PATH
+  // (e.g. /data/init/keys/app-service/private.pem). Prefer it so the private key
+  // is read from where it is actually written, rather than the public-key
+  // directory passed as keysDir.
+  const envKeyPath = process.env["OP_SERVICE_PRIVATE_KEY_PATH"];
+  const keyPath =
+    envKeyPath && envKeyPath.length > 0
+      ? envKeyPath
+      : path.join(keysDir, `${serviceName}.key.pem`);
   if (!existsSync(keyPath)) {
     throw new Error(
       `Service private key not found at ${keyPath}. ` +

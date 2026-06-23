@@ -186,10 +186,17 @@ export function createBootstrapService(
     //
     // If bootstrap token was never loaded (service startup failure), use a
     // dummy so comparison still takes the same time as a real compare.
-    const providedBytes = Buffer.from(
+    // Non-hex characters are silently dropped by Buffer.from(..., "hex"),
+    // producing a shorter buffer that causes timingSafeEqual to throw
+    // ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH instead of returning false.
+    // Normalise to exactly 32 bytes so the comparison always runs safely;
+    // a malformed token will simply not match.
+    const rawProvided = Buffer.from(
       data.bootstrapToken.padEnd(64, "0"),
       "hex"
     );
+    const providedBytes =
+      rawProvided.length === 32 ? rawProvided : Buffer.alloc(32);
     const expectedBytes = Buffer.from(
       (inMemoryToken ?? DUMMY_64_CHAR_HEX).padEnd(64, "0"),
       "hex"

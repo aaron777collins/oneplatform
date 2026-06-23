@@ -82,7 +82,11 @@ function generateState(): string {
   return base64UrlEncode(array);
 }
 
-export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): PkceAuthHandler {
+export function createPkceHandler(
+  config: BrowserPkceConfig,
+  baseUrl: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): PkceAuthHandler {
   const prefix = config.storagePrefix ?? DEFAULT_STORAGE_PREFIX;
   const scopes = config.scopes ?? [...DEFAULT_SCOPES];
   const redirectUri =
@@ -153,7 +157,8 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
       });
     }
 
-    const response = await fetch(`${baseUrl}/api/v1/auth/token`, {
+    // Use the injected fetchImpl so callers can supply TLS-pinned / proxy / test fetch
+    const response = await fetchImpl(`${baseUrl}/api/v1/auth/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -196,7 +201,8 @@ export function createPkceHandler(config: BrowserPkceConfig, baseUrl: string): P
   }
 
   async function refreshAccessToken(refreshToken: string): Promise<StoredTokens> {
-    const response = await fetch(`${baseUrl}/api/v1/auth/token`, {
+    // Use the injected fetchImpl so callers can supply TLS-pinned / proxy / test fetch
+    const response = await fetchImpl(`${baseUrl}/api/v1/auth/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

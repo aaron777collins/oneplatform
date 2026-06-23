@@ -52,6 +52,7 @@ import {
 import { evaluateCondition } from "./condition-evaluator.js";
 import type { ExecutionTracker } from "./execution-tracker.js";
 import type { ApprovalService } from "./approval-service.js";
+import { isUrlSsrfBlocked } from "./ssrf-blocklist.js";
 
 // ---------------------------------------------------------------------------
 // Repository interfaces required by the execution engine
@@ -184,10 +185,25 @@ async function releaseAdvisoryLock(
 // ---------------------------------------------------------------------------
 
 // Conditional step expressions are already wrapped with a 100ms timeout.
-// Webhook body templates and response mappings use the same evaluator but
-// can produce larger data and are afforded a generous 5-second budget before
-// being treated as a DoS attempt via a maliciously crafted expression.
-const JSONATA_WEBHOOK_TIMEOUT_MS = 5_000;
+// Webhook body templates and response mappings use a 1-second budget.
+// The previous 5-second budget combined with JSONata's $eval (which re-enters
+// the evaluator) created a compounding DoS window; 1 second is sufficient for
+// real-world transformations and bounds worst-case expression evaluation.
+const JSONATA_WEBHOOK_TIMEOUT_MS = 1_000;
+
+// Maximum number of JSONata evaluation steps allowed in a webhook body template.
+// This prevents exponential/recursive expressions from exhausting CPU even within
+// the timeout window. 10 000 steps handle realistic transformations with headroom.
+const JSONATA_WEBHOOK_MAX_NODES = 10_000;
+
+// Disable $eval in a JSONata expression to prevent recursive evaluation attacks.
+// JSONata exposes $eval as a built-in; overriding the underlying 'eval' function
+// name (without the '$' prefix, which is how registerFunction works) replaces it.
+function disableEval(expr: ReturnType<typeof jsonata>): void {
+  expr.registerFunction("eval", () => {
+    throw new Error("$eval is disabled in pipeline webhook expressions");
+  });
+}
 
 function evaluateWithTimeout(expr: ReturnType<typeof jsonata>, data: unknown): Promise<unknown> {
   // The timeout handle must be cleared when the evaluation resolves before the
@@ -222,33 +238,32 @@ function evaluateWithTimeout(expr: ReturnType<typeof jsonata>, data: unknown): P
 }
 
 // ---------------------------------------------------------------------------
-// SSRF check for webhook steps (re-checked at execution time per design spec)
-// ---------------------------------------------------------------------------
-
-const SSRF_BLOCKED_PATTERNS = [
-  /^https?:\/\/localhost(:\d+)?(\/|$)/i,
-  /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
-  /^https?:\/\/\[fe80:/i,               // IPv6 link-local addresses
-  /^https?:\/\/0\.0\.0\.0(:\d+)?(\/|$)/,
-  /^https?:\/\/metadata\.google\.internal(:\d+)?(\/|$)/,
-  /^https?:\/\/100\.100\.100\.200(:\d+)?(\/|$)/,
-];
-
-function isUrlSsrfBlocked(url: string): boolean {
-  return SSRF_BLOCKED_PATTERNS.some((p) => p.test(url));
-}
-
-// ---------------------------------------------------------------------------
 // Cancellation Redis key
 // ---------------------------------------------------------------------------
 
 function cancellationKey(runId: string): string {
   return `queue:pipeline:run:${runId}:cancel`;
+}
+
+// ---------------------------------------------------------------------------
+// collectAllStepsFlat — recursively flatten top-level steps and all steps
+// nested inside ParallelBranch containers so every step has a run_steps row
+// and is trackable/auditable. Preserves depth-first ordering: parent step
+// appears before its branch steps, which matches execution order.
+// ---------------------------------------------------------------------------
+
+function collectAllStepsFlat(steps: Step[]): Step[] {
+  const result: Step[] = [];
+  for (const step of steps) {
+    result.push(step);
+    if (step.type === "parallel") {
+      for (const branch of step.branches) {
+        // Branch steps can themselves contain nested parallel steps, so recurse.
+        result.push(...collectAllStepsFlat(branch.steps));
+      }
+    }
+  }
+  return result;
 }
 
 const MIN_STEP_TIMEOUT_MS = 5_000;
@@ -292,10 +307,13 @@ export interface SubWorkflowCompletionResult {
 // avoids a direct dependency on the full RunService and makes testing easier.
 export interface SubWorkflowTrigger {
   // Enqueue a new run for the given pipeline and return its runId.
+  // callStack contains the ordered ancestor pipelineIds and is forwarded in
+  // the BullMQ job payload so the worker can detect cross-job cycles.
   triggerRun(
     pipelineId: string,
     tenantId: string,
     input: Record<string, unknown>,
+    callStack: readonly string[],
   ): Promise<SubWorkflowTriggerResult>;
 
   // Poll until the run reaches a terminal state or timeoutMs elapses.
@@ -757,10 +775,14 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
 
     const timeoutMs = Math.min(step.timeout ?? 30_000, 120_000);
 
-    // Build request body — if it is a string starting with '=', treat as JSONata template
+    // Build request body — if it is a string starting with '=', treat as JSONata template.
+    // $eval is disabled to prevent recursive evaluation attacks; node count is bounded
+    // to limit CPU consumption from exponential/recursive expressions.
     let body: unknown = step.body;
     if (typeof step.body === "string" && step.body.startsWith("=")) {
       const expr = jsonata(step.body.slice(1));
+      disableEval(expr);
+      expr.assign("$__maxNodes", JSONATA_WEBHOOK_MAX_NODES);
       body = await evaluateWithTimeout(expr, { input: resolvedInput });
     }
 
@@ -1145,10 +1167,14 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
     // Trigger the child run.
     let triggerResult: SubWorkflowTriggerResult;
     try {
+      // fullCallChain includes the current pipelineId, so the child worker
+      // seeds its subWorkflowCallStack from it and can detect cycles
+      // that span multiple BullMQ job boundaries.
       triggerResult = await subWorkflowTrigger.triggerRun(
         step.pipelineId,
         ctx.tenantId,
         childInput,
+        fullCallChain,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1410,8 +1436,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       const definition = run.definition_snapshot as unknown as PipelineDefinition;
 
       // Build the run context shared across all step executions.
-      // subWorkflowCallStack is empty for top-level runs; child runs receive
-      // a context with the parent pipelineId appended (see executeSubWorkflowStep).
+      // subWorkflowCallStack is seeded from the job payload so that cross-job
+      // sub-workflow cycles (A enqueues B which enqueues A) are detectable.
+      // Top-level runs carry no payload callStack, so we fall back to [].
       const queueWaitMs = job.processedOn !== undefined && job.timestamp !== undefined
         ? Math.max(job.processedOn - job.timestamp, 0)
         : 0;
@@ -1427,7 +1454,7 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           const flag = await redis.get(cancellationKey(runId));
           return flag !== null;
         },
-        subWorkflowCallStack: [],
+        subWorkflowCallStack: job.data.subWorkflowCallStack ?? [],
         queueWaitMs,
       };
 
@@ -1436,8 +1463,10 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
       await appendLog(runId, tenantId, `Pipeline run started, triggered by ${run.triggered_by}`);
 
       // Step 4: Create run_steps rows for all steps (status=pending) so the UI
-      // can display the full step graph immediately
-      const allSteps = definition.steps;
+      // can display the full step graph immediately.
+      // collectAllStepsFlat descends into ParallelBranch.steps so branch steps
+      // are also inserted and their updateStatus calls are auditable.
+      const allSteps = collectAllStepsFlat(definition.steps);
       await runStepRepo.createBatch(
         allSteps.map((step) => ({
           run_id: runId,
@@ -1507,6 +1536,8 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           await appendLog(runId, tenantId, `Critical after:trigger hook failed: ${err instanceof Error ? err.message : String(err)}`, {
             level: "error",
           });
+          // Notify SSE subscribers so their streams terminate rather than hanging.
+          executionTracker?.completeExecution(runId, "failed");
           return;
         }
       }
@@ -1865,6 +1896,9 @@ export function createExecutionEngine(deps: ExecutionEngineDeps): ExecutionEngin
           await appendLog(runId, tenantId, `Critical before:complete hook failed: ${err instanceof Error ? err.message : String(err)}`, {
             level: "error",
           });
+          // Notify SSE subscribers so their streams terminate rather than hanging.
+          executionTracker?.completeExecution(runId, "failed");
+          await runAfterCompleteHooks(ctx, "failed");
           return;
         }
       }

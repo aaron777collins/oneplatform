@@ -179,9 +179,21 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
   });
 
+  // Storage service is constructed early because it is shared between the
+  // GDPR export flow (presigned URL generation after upload) and the storage
+  // browser routes registered later. Env var resolution is identical in both
+  // places; the credential guard runs at the bottom of startServer().
+  const storageService = createStorageService({
+    endpoint: process.env["OP_MINIO_ENDPOINT"] ?? "http://minio:9000",
+    region: process.env["OP_MINIO_REGION"] ?? "us-east-1",
+    accessKeyId: process.env["OP_MINIO_ACCESS_KEY"] ?? (process.env["OP_MINIO_USER"] ?? "minioadmin"),
+    secretAccessKey: process.env["OP_MINIO_SECRET_KEY"] ?? (process.env["OP_MINIO_PASSWORD"] ?? "oneplatform_minio_dev_2024"),
+  });
+
   const gdprService = createGdprService({
     gdprRequestRepo,
     logger,
+    storageService,
     config: {
       authServiceUrl: config.authServiceUrl ?? process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
       loggingServiceUrl: config.loggingServiceUrl ?? process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
@@ -243,7 +255,10 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   // circuitBreakers.get(resolved.serviceName) finds the correct breaker.
   const serviceNames = [
     "auth",
+    "oauth",
     "connectors",
+    "connector-registry",
+    "analytics",
     "webhooks/inbound",
     "uploads",
     "ontology",
@@ -328,9 +343,16 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
         return null;
       }
 
+      // Guard against a malformed auth response that omits identity fields —
+      // comparing undefined to real tenant IDs would silently bypass tenant
+      // isolation checks downstream.
+      if (!body.userId || !body.tenantId) {
+        return null;
+      }
+
       return {
-        userId: body.userId!,
-        tenantId: body.tenantId!,
+        userId: body.userId,
+        tenantId: body.tenantId,
         roles: body.roles ?? [],
         scopes: body.scopes ?? [],
         isGuest: body.isGuest ?? false,
@@ -363,6 +385,13 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
       "/api/v1/auth/forgot-password",
       "/api/v1/auth/reset-password/*",
       "/api/v1/auth/verify-email/*",
+      // OAuth browser-login redirect endpoints — the IdP redirects the user's
+      // browser here with no platform JWT, so they must be public at the gateway.
+      "/api/v1/oauth/*/authorize",
+      "/api/v1/oauth/*/callback",
+      // JWKS public key set — fetched unauthenticated by SDK clients verifying
+      // platform-issued JWT signatures.
+      "/api/v1/auth/.well-known/*",
     ],
     targetService: "gateway-service",
     servicePublicKeys,
@@ -489,12 +518,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   // Storage browser routes — serve MinIO/S3 bucket and object APIs.
   // Must be registered before the catch-all proxy so that /api/v1/storage/*
   // is handled directly by the Gateway rather than proxied to another service.
-  const storageService = createStorageService({
-    endpoint: process.env["OP_MINIO_ENDPOINT"] ?? "http://minio:9000",
-    region: process.env["OP_MINIO_REGION"] ?? "us-east-1",
-    accessKeyId: process.env["OP_MINIO_ACCESS_KEY"] ?? (process.env["OP_MINIO_USER"] ?? "minioadmin"),
-    secretAccessKey: process.env["OP_MINIO_SECRET_KEY"] ?? (process.env["OP_MINIO_PASSWORD"] ?? "oneplatform_minio_dev_2024"),
-  });
+  // storageService is created above, shared with the GDPR export flow.
   const storageRoutes = createStorageRoutes({ storageService });
   app.route("/api/v1/storage", storageRoutes);
 
@@ -551,6 +575,14 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   });
   app.route("/", openApiRoutes);
 
+  // Usage and billing routes must be mounted before the catch-all proxy so
+  // that /api/v1/usage/* and /api/v1/billing/* are never swallowed by the proxy.
+  const usageRoutes = createUsageRoutes({ meteringService });
+  app.route("/api/v1/usage", usageRoutes);
+
+  const billingRoutes = createBillingRoutes({ billingWebhookConfigRepo });
+  app.route("/api/v1/billing", billingRoutes);
+
   const proxyRoutes = createProxyRoutes({
     proxyService,
     circuitBreakers,
@@ -603,14 +635,25 @@ async function main(): Promise<void> {
   // reach production — they are publicly known and would allow any attacker
   // to read/write the object store.
   const nodeEnv = process.env["NODE_ENV"] ?? "";
-  const minioUser = process.env["OP_MINIO_USER"] ?? "";
-  const minioPassword = process.env["OP_MINIO_PASSWORD"] ?? "";
+  // Resolve the credentials that will actually be used by the storage client,
+  // mirroring the fallback chain in createStorageService. The guard must cover
+  // both variable pairs (ACCESS_KEY/SECRET_KEY and USER/PASSWORD) because a
+  // deployment using only the ACCESS_KEY pair bypassed the old guard which only
+  // checked USER/PASSWORD.
+  const minioAccessKey =
+    process.env["OP_MINIO_ACCESS_KEY"] ??
+    process.env["OP_MINIO_USER"] ??
+    "minioadmin";
+  const minioSecretKey =
+    process.env["OP_MINIO_SECRET_KEY"] ??
+    process.env["OP_MINIO_PASSWORD"] ??
+    "oneplatform_minio_dev_2024";
   if (nodeEnv === "production") {
-    if (minioUser === "minioadmin" || minioPassword === "oneplatform_minio_dev_2024") {
+    if (minioAccessKey === "minioadmin" || minioSecretKey === "oneplatform_minio_dev_2024") {
       throw new Error(
-        "Refusing to start: OP_MINIO_USER / OP_MINIO_PASSWORD are set to default " +
-        "development values in a production environment. Set strong, unique " +
-        "credentials via environment variables or the init-data volume.",
+        "Refusing to start: MinIO credentials resolve to default development values " +
+        "in a production environment. Set OP_MINIO_ACCESS_KEY and OP_MINIO_SECRET_KEY " +
+        "(or OP_MINIO_USER / OP_MINIO_PASSWORD) to strong, unique credentials.",
       );
     }
   }

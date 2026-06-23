@@ -92,6 +92,22 @@ const QUERY_TIMEOUT_MS = 30_000;
 // The system columns that every entity table has. These are always valid select targets.
 const SYSTEM_COLUMNS = new Set(["_id", "_created_at", "_updated_at", "_version", "_source_id"]);
 
+/**
+ * Quote a column name for safe use in SQL.
+ *
+ * quotePgIdentifier's slug regex rejects leading underscores, so system
+ * columns like _id would throw. We bypass that regex ONLY for columns that
+ * appear in the hardcoded SYSTEM_COLUMNS allowlist — never for arbitrary
+ * underscore-prefixed input — and double-quote them directly.
+ */
+function quoteColumnIdentifier(col: string): string {
+  if (SYSTEM_COLUMNS.has(col)) {
+    // Safe: col is one of a fixed, hardcoded set of known identifiers.
+    return `"${col}"`;
+  }
+  return quotePgIdentifier(col);
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -233,7 +249,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     if (clauses.length === 0) return "";
 
     const parts = clauses.map((clause) => {
-      const qField = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(tableSlug)}.${quotePgIdentifier(clause.field)}`;
+      const qField = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(tableSlug)}.${quoteColumnIdentifier(clause.field)}`;
 
       switch (clause.operator) {
         case "eq": {
@@ -261,8 +277,13 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
           return `${qField} <= $${params.length}`;
         }
         case "like": {
+          // Clients supply the full LIKE pattern including % and _ wildcards.
+          // Only the backslash is escaped here so that our ESCAPE '\' clause
+          // does not accidentally interpret a literal backslash in the input as
+          // an escape character.  % and _ are intentionally left as-is so that
+          // prefix/suffix/contains patterns work as expected.
           const raw = typeof clause.value === "string" ? clause.value : String(clause.value);
-          const escaped = raw.replace(/[\\%_]/g, (ch) => "\\" + ch);
+          const escaped = raw.replace(/\\/g, "\\\\");
           params.push(escaped);
           return `${qField} LIKE $${params.length} ESCAPE '\\'`;
         }
@@ -306,7 +327,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     const selectClause =
       query.select.includes("*")
         ? `${qTable}.*`
-        : query.select.map((f) => `${qTable}.${quotePgIdentifier(f)}`).join(", ");
+        : query.select.map((f) => `${qTable}.${quoteColumnIdentifier(f)}`).join(", ");
 
     let sql = `SELECT ${selectClause} FROM ${qTable}`;
 
@@ -319,7 +340,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     // GROUP BY
     if (query.groupBy && query.groupBy.length > 0) {
       const groupCols = query.groupBy
-        .map((f) => `${qTable}.${quotePgIdentifier(f)}`)
+        .map((f) => `${qTable}.${quoteColumnIdentifier(f)}`)
         .join(", ");
       sql += ` GROUP BY ${groupCols}`;
 
@@ -334,7 +355,7 @@ export function createQueryService(deps: QueryServiceDeps): QueryService {
     if (query.orderBy && query.orderBy.length > 0) {
       const orderParts = query.orderBy.map((ob) => {
         const dir = ob.direction === "desc" ? "DESC" : "ASC";
-        return `${qTable}.${quotePgIdentifier(ob.field)} ${dir}`;
+        return `${qTable}.${quoteColumnIdentifier(ob.field)} ${dir}`;
       });
       sql += ` ORDER BY ${orderParts.join(", ")}`;
     }

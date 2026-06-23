@@ -305,9 +305,26 @@ export function createInternalRoutes(
       );
     }
 
+    // Use the URL path param as the authoritative manifestId. Trusting only the
+    // body would let a caller POST to /internal/plugins/A/drain-complete with
+    // body {manifestId:'B'} and prematurely signal drain for a different plugin.
+    const pathManifestId = c.req.param("manifestId");
+    if (parsed.data.manifestId !== pathManifestId) {
+      return c.json(
+        {
+          error: {
+            code: "VALIDATION_ERROR",
+            message: `Body manifestId '${parsed.data.manifestId}' does not match URL path param '${pathManifestId}'.`,
+            requestId: c.var.requestId,
+          },
+        },
+        400,
+      );
+    }
+
     // W10 fix: signal the pending upgrade that drain is complete so the atomic
     // swap can proceed immediately rather than waiting for the 62s fallback.
-    upgradeService.signalDrainComplete(parsed.data.manifestId);
+    upgradeService.signalDrainComplete(pathManifestId);
     return c.json({ received: true });
   });
 

@@ -6,9 +6,15 @@ export interface MigrationRepository {
   findById(id: string): Promise<MigrationRow | null>;
   findByTenantId(tenantId: string, status?: string, cursor?: string, limit?: number): Promise<MigrationRow[]>;
   findActiveByEntityId(entityId: string): Promise<MigrationRow | null>;
+  /** Batch-load active migrations for multiple entities in a single query, eliminating N+1 on snapshot builds. */
+  findActiveByEntityIds(entityIds: string[]): Promise<Map<string, MigrationRow>>;
   updateStatus(id: string, status: string, extra?: Record<string, unknown>): Promise<MigrationRow | null>;
   setConfirmed(id: string, confirmedBy: string): Promise<MigrationRow | null>;
-  setRunning(id: string, unionViewName: string): Promise<MigrationRow | null>;
+  /** Same as setConfirmed but runs on the provided transaction client so the
+   *  UPDATE is atomic with the advisory lock acquired in that transaction. */
+  setConfirmedWithClient(client: pg.PoolClient, id: string, confirmedBy: string): Promise<MigrationRow | null>;
+  /** Pass the transaction client so the status update is in the same transaction as any DDL. */
+  setRunning(id: string, unionViewName: string, client?: pg.PoolClient): Promise<MigrationRow | null>;
   setComplete(id: string): Promise<MigrationRow | null>;
   setFailed(id: string, errorDetails: Record<string, unknown>): Promise<MigrationRow | null>;
   setRolledBack(id: string): Promise<MigrationRow | null>;
@@ -72,6 +78,26 @@ export function createMigrationRepository(db: pg.Pool): MigrationRepository {
       return result.rows[0] ?? null;
     },
 
+    async findActiveByEntityIds(entityIds) {
+      if (entityIds.length === 0) return new Map();
+
+      // DISTINCT ON keeps only the latest active migration per entity
+      // (ordered by created_at DESC per entity_id).
+      const result = await db.query<MigrationRow>(
+        `SELECT DISTINCT ON (entity_id) *
+         FROM ontology.migrations
+         WHERE entity_id = ANY($1::uuid[]) AND status IN ('pending_confirmation', 'confirmed', 'running')
+         ORDER BY entity_id, created_at DESC`,
+        [entityIds],
+      );
+
+      const grouped = new Map<string, MigrationRow>();
+      for (const row of result.rows) {
+        grouped.set(row.entity_id, row);
+      }
+      return grouped;
+    },
+
     async updateStatus(id, status, extra) {
       const ALLOWED_COLUMNS = new Set([
         "confirmed_by", "confirmed_at", "started_at", "completed_at",
@@ -117,8 +143,24 @@ export function createMigrationRepository(db: pg.Pool): MigrationRepository {
       return result.rows[0] ?? null;
     },
 
-    async setRunning(id, unionViewName) {
-      const result = await db.query<MigrationRow>(
+    async setConfirmedWithClient(client, id, confirmedBy) {
+      // Runs the same UPDATE as setConfirmed but on the caller's transaction
+      // client so it is committed atomically with the advisory lock.
+      const result = await client.query<MigrationRow>(
+        `UPDATE ontology.migrations
+         SET status = 'confirmed', confirmed_by = $1, confirmed_at = now()
+         WHERE id = $2 AND status = 'pending_confirmation'
+         RETURNING *`,
+        [confirmedBy, id],
+      );
+      return result.rows[0] ?? null;
+    },
+
+    async setRunning(id, unionViewName, client) {
+      // Use the provided transaction client when available so this UPDATE is
+      // atomic with the CREATE VIEW DDL that runs in the same transaction.
+      const queryFn = client ?? db;
+      const result = await queryFn.query<MigrationRow>(
         `UPDATE ontology.migrations
          SET status = 'running', started_at = now(), union_view_name = $1
          WHERE id = $2 AND status = 'confirmed'

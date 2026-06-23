@@ -40,7 +40,16 @@ export interface OidcDiscoveryDocument {
 // Cache key
 // ────────────────────────────────────────────────────────────────────────────
 
-const DISCOVERY_CACHE_KEY = "oidc:discovery";
+/**
+ * Build an issuer-scoped discovery cache key. A static key would let multiple
+ * plugin instances configured for *different* issuers collide on one cache
+ * entry, so one issuer's discovery document (and thus its endpoints) could be
+ * used for another issuer — a cross-issuer verification leak.
+ */
+function discoveryCacheKey(issuerUrl: string): string {
+  const normalized = issuerUrl.endsWith("/") ? issuerUrl.slice(0, -1) : issuerUrl;
+  return `oidc:discovery:${normalized}`;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Fetch and validate
@@ -151,8 +160,9 @@ export async function fetchDiscoveryDocument(
   options: DiscoveryOptions,
 ): Promise<OidcDiscoveryDocument> {
   const { issuerUrl, cacheTtlSeconds, fetch, cache, logger } = options;
+  const cacheKey = discoveryCacheKey(issuerUrl);
 
-  const cached = await cache.get<OidcDiscoveryDocument>(DISCOVERY_CACHE_KEY);
+  const cached = await cache.get<OidcDiscoveryDocument>(cacheKey);
   if (cached !== null) {
     logger.debug("OIDC discovery document served from cache", { issuerUrl });
     return cached;
@@ -213,6 +223,6 @@ export async function fetchDiscoveryDocument(
 
   logger.info("OIDC discovery document fetched", { issuer: document.issuer });
 
-  await cache.set(DISCOVERY_CACHE_KEY, document, cacheTtlSeconds);
+  await cache.set(cacheKey, document, cacheTtlSeconds);
   return document;
 }

@@ -72,13 +72,22 @@ export interface VerifyOptions {
   fetch: FetchProxy;
   cache: CacheAccessor;
   logger: PluginLogger;
+  /** When set, the id_token's nonce claim must equal this value (replay prevention). */
+  expectedNonce?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Cache key
 // ────────────────────────────────────────────────────────────────────────────
 
-const JWKS_CACHE_KEY = "oidc:jwks";
+/**
+ * Build a jwksUri-scoped cache key. A static key would let plugin instances for
+ * different issuers collide on one JWKS entry, so one issuer's keys could be
+ * used to verify another issuer's tokens — a signature-verification cross-leak.
+ */
+function jwksCacheKey(jwksUri: string): string {
+  return `oidc:jwks:${jwksUri}`;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Base64url helpers
@@ -288,7 +297,8 @@ async function getJwks(
   cache: CacheAccessor,
   logger: PluginLogger,
 ): Promise<JwksResponse> {
-  const cached = await cache.get<JwksResponse>(JWKS_CACHE_KEY);
+  const cacheKey = jwksCacheKey(jwksUri);
+  const cached = await cache.get<JwksResponse>(cacheKey);
   if (cached !== null) {
     logger.debug("JWKS served from cache", { jwksUri });
     return cached;
@@ -296,7 +306,7 @@ async function getJwks(
 
   logger.debug("Fetching JWKS", { jwksUri });
   const jwks = await fetchJwks(jwksUri, fetch);
-  await cache.set(JWKS_CACHE_KEY, jwks, cacheTtlSeconds);
+  await cache.set(cacheKey, jwks, cacheTtlSeconds);
   logger.info("JWKS fetched and cached", { keyCount: jwks.keys.length });
   return jwks;
 }
@@ -335,18 +345,10 @@ async function verifySignatureWithKeySet(
       // Per RFC 7518 §3.5, salt length must equal the hash output length.
       const hashSizeBytes: Record<string, number> = { "SHA-256": 32, "SHA-384": 48, "SHA-512": 64 };
 
-      // For ECDSA, crypto.subtle.verify() requires EcdsaParams which mandates a
-      // 'hash' property. cryptoKey.algorithm for ECDSA keys is { name: 'ECDSA',
-      // namedCurve: 'P-256' } — it does NOT include 'hash', so using it directly
-      // causes a "hash is required" error that is silently caught, causing all
-      // ECDSA-signed tokens to be rejected. We map the JWT algorithm (from the
-      // header) to the correct hash name per RFC 7518 §3.4.
-      const ecdsaHashByAlg: Record<string, string> = {
-        ES256: "SHA-256",
-        ES384: "SHA-384",
-        ES512: "SHA-512",
-      };
-
+      // For ECDSA, crypto.subtle.verify() requires EcdsaParams with a 'hash'
+      // property. cryptoKey.algorithm for ECDSA keys is { name: 'ECDSA',
+      // namedCurve: 'P-256' } — it does NOT include 'hash', so we derive the hash
+      // from the key's curve below (RFC 7518 §3.4).
       let verifyAlg: AlgorithmIdentifier | RsaPssParams | EcdsaParams;
       if (cryptoKey.algorithm.name === "RSA-PSS") {
         verifyAlg = {
@@ -355,10 +357,19 @@ async function verifySignatureWithKeySet(
             hashSizeBytes[(cryptoKey.algorithm as RsaHashedKeyAlgorithm).hash.name] ?? 32,
         };
       } else if (cryptoKey.algorithm.name === "ECDSA") {
-        // alg is the JWT algorithm string (e.g. "ES256") from the parsed header.
-        const ecHash = ecdsaHashByAlg[alg];
+        // Derive the hash from the IMPORTED KEY's curve, not the JWT header alg.
+        // The key was imported using the JWK's own alg (jwk.alg ?? alg); selecting
+        // the hash from the attacker-influenced header alg could pair, e.g., a
+        // P-384 key (ES384) with SHA-256, which silently fails verification for
+        // every legitimate token. Per RFC 7518 §3.4 the curve fixes the hash.
+        const ecdsaHashByCurve: Record<string, string> = {
+          "P-256": "SHA-256",
+          "P-384": "SHA-384",
+          "P-521": "SHA-512",
+        };
+        const namedCurve = (cryptoKey.algorithm as EcKeyAlgorithm).namedCurve;
+        const ecHash = ecdsaHashByCurve[namedCurve];
         if (ecHash === undefined) {
-          // Should not happen: importJwk already validated the alg, but be defensive.
           continue;
         }
         verifyAlg = { name: "ECDSA", hash: ecHash };
@@ -399,6 +410,7 @@ function validateClaims(
   claims: JwtClaims,
   issuerUrl: string,
   clientId: string,
+  expectedNonce?: string,
 ): { valid: boolean; reason?: string } {
   const nowSeconds = Math.floor(Date.now() / 1000);
 
@@ -438,6 +450,17 @@ function validateClaims(
     };
   }
 
+  // Nonce check: only enforced when an expectedNonce was provided (id_token flows).
+  // When undefined, nonce validation is skipped for backward-compatible access_token paths.
+  if (expectedNonce !== undefined) {
+    if (claims.nonce !== expectedNonce) {
+      return {
+        valid: false,
+        reason: `nonce mismatch: token nonce "${claims.nonce ?? "(absent)"}" does not match expected value — possible replay attack`,
+      };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -472,7 +495,7 @@ export async function verifyJwt(token: string, options: VerifyOptions): Promise<
   }
 
   // Claims validation first — cheap and catches obvious failures before hitting the network.
-  const claimsResult = validateClaims(parsed.claims, issuerUrl, clientId);
+  const claimsResult = validateClaims(parsed.claims, issuerUrl, clientId, options.expectedNonce);
   if (!claimsResult.valid) {
     // exactOptionalPropertyTypes: only include error when reason is defined
     return {

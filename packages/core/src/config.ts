@@ -148,7 +148,18 @@ export type PluginServiceConfig = z.infer<typeof pluginConfigSchema>;
  *   const config = loadConfig(gatewayConfigSchema);
  */
 export function loadConfig<S extends z.ZodTypeAny>(serviceSchema: S): z.infer<S> {
-  const result = serviceSchema.safeParse(process.env);
+  // Treat empty-string env vars as absent. Docker Compose renders an unset
+  // variable like `${OP_SMTP_FROM:-}` to an empty string, which is *present* in
+  // process.env and so bypasses `.optional()` / `.default()` and instead fails
+  // validators such as `.min(1)`. Dropping empty values restores the intended
+  // "not provided" semantics.
+  const cleanedEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && value !== "") {
+      cleanedEnv[key] = value;
+    }
+  }
+  const result = serviceSchema.safeParse(cleanedEnv);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join(".")}: ${i.message}`)

@@ -175,10 +175,12 @@ export function createCdcIngestionService(deps: CdcIngestionServiceDeps): CdcIng
     // Ensure the raw table exists. Idempotent DDL, negligible cost on hot path.
     await rawTableRepo.createRawTable(connectorId);
 
-    const envelopes = events.map((event) => {
+    const envelopes = events.map((event, index) => {
       // sourceId for CDC records encodes the table + LSN so that replaying
       // the same WAL position produces the same _id (idempotent upsert).
-      const positionKey = event.lsn ?? event.position ?? new Date().toISOString();
+      // Fall back to batchId+index (not a timestamp) so re-delivery of the
+      // same event without LSN/position still produces the same sourceId.
+      const positionKey = event.lsn ?? event.position ?? `${batchId}:${index}`;
       const sourceId = `${event.table}:${event.type}:${positionKey}`;
 
       // Embed the CDC metadata inside the data payload so downstream

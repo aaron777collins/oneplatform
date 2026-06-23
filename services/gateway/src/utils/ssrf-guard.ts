@@ -138,7 +138,11 @@ export function isBlockedHostname(hostname: string): boolean {
   if (lower === "localhost") return true;
   if (lower === "0.0.0.0") return true;
   if (lower.endsWith(".local")) return true;
-  if (lower.endsWith("-service")) return true;
+  // Block bare (dot-less) hostnames ending in "-service" — these are Docker
+  // Compose internal service names (e.g. "auth-service"). Do NOT block FQDNs
+  // like "delivery-service.example.com" or "self-service.stripe.com" which are
+  // legitimate external hosts; IP-range checks below cover DNS rebinding.
+  if (!lower.includes(".") && lower.endsWith("-service")) return true;
 
   // Block all cloud metadata and K8s API-server hostnames by exact or prefix match.
   for (const pattern of BLOCKED_HOSTNAME_PATTERNS) {

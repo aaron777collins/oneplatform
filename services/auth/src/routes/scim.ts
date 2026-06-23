@@ -217,6 +217,25 @@ export function createScimRoutes(
       200, // Hard cap matching UserRepository.MAX_LIMIT
     );
 
+    // MAX_LIMIT is the repository hard cap. The offset-emulation approach of
+    // fetching (startIndex-1)+count rows only works while that total fits within
+    // MAX_LIMIT. Beyond that the repository clamps the fetch and pageUsers comes
+    // back empty even when totalResults > 0 — a silent wrong answer. Return a
+    // proper SCIM error instead so the caller knows to use startIndex=1 and
+    // traverse via the next page rather than jumping to an arbitrary offset.
+    const MAX_PAGING_DEPTH = 200;
+    if (startIndex > MAX_PAGING_DEPTH) {
+      return c.json(
+        {
+          schemas: [SCIM_ERROR_SCHEMA],
+          status: "400",
+          scimType: "tooMany",
+          detail: `startIndex must not exceed ${MAX_PAGING_DEPTH}. Use sequential pagination from startIndex=1.`,
+        },
+        400,
+      );
+    }
+
     // Basic filter support: filter=userName eq "value"
     let emailFilter: string | undefined;
     const filterParam = c.req.query("filter");

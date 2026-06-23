@@ -68,28 +68,27 @@ export function createTenantRoutes(
   //
   // Query params:
   //   limit  — number of results per page (1–100, default 20)
-  //   offset — zero-based starting position (default 0)
+  //   cursor — opaque keyset cursor returned by the previous page response
   routes.get("/api/v1/tenants", async (c) => {
     requirePlatformAdmin(c.var.user.scopes);
 
     const rawLimit = c.req.query("limit");
-    const rawOffset = c.req.query("offset");
+    const cursor = c.req.query("cursor");
 
     const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 20;
-    const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : 0;
 
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new ValidationError("limit must be an integer between 1 and 100", []);
     }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new ValidationError("offset must be a non-negative integer", []);
-    }
 
-    const { tenants, total } = await tenantRepository.list({ limit, offset });
+    const { tenants, nextCursor, total } = await tenantRepository.list({
+      limit,
+      ...(cursor !== undefined ? { cursor } : {}),
+    });
 
     return c.json({
       data: tenants.map(formatTenant),
-      pagination: { total, limit, offset },
+      pagination: { nextCursor, total, limit },
     });
   });
 

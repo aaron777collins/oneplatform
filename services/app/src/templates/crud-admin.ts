@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const crudAdminTemplate: AppTemplate = {
   meta: {
@@ -20,6 +21,7 @@ export const crudAdminTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -76,7 +78,7 @@ export const crudAdminTemplate: AppTemplate = {
         `  return (`,
         `    <div style={{ padding: "24px", fontFamily: "system-ui, sans-serif" }}>`,
         `      <h1 style={{ marginBottom: "24px", fontSize: "1.5rem", fontWeight: 700 }}>`,
-        `        ${appName}`,
+        `        ${safeName}`,
         `      </h1>`,
         `      <RecordTable />`,
         `    </div>`,

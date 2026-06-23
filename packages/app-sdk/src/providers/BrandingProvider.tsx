@@ -71,15 +71,43 @@ function applyCssVariables(
  * The element is identified by a stable ID so repeated calls replace the tag
  * rather than accumulating duplicates.
  */
+/**
+ * Decode CSS escape sequences so the scheme/keyword checks below cannot be
+ * bypassed by escaped forms. In CSS, `\75 rl(...)` (or `\000075rl`) parses as
+ * `url(...)`, and `java\73 cript:` parses as `javascript:`. A regex matching
+ * only the literal ASCII spelling would miss these. We normalise per the CSS
+ * Syntax spec: `\` followed by 1–6 hex digits (optional trailing whitespace) is
+ * a code point; `\` followed by any other (non-newline) char is that literal
+ * char.
+ */
+function decodeCssEscapes(css: string): string {
+  return css.replace(
+    /\\(?:([0-9a-fA-F]{1,6})[ \t\n\r\f]?|([^\n\r\f0-9a-fA-F]))/g,
+    (_m, hex: string | undefined, ch: string | undefined) => {
+      if (hex !== undefined) {
+        const cp = parseInt(hex, 16);
+        if (cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+          return "�";
+        }
+        return String.fromCodePoint(cp);
+      }
+      return ch ?? "";
+    },
+  );
+}
+
 function sanitizeCss(css: string): string {
-  let sanitized = css;
+  // Normalise CSS escape sequences first so escaped url()/scheme forms cannot
+  // slip past the literal-string matchers below.
+  let sanitized = decodeCssEscapes(css);
   sanitized = sanitized.replace(/@import\b[^;]*;?/gi, "");
   sanitized = sanitized.replace(/expression\s*\([^)]*(?:\([^)]*\)[^)]*)*\)/gi, "");
-  // Replace dangerous url() schemes (anything except data: and https:).
-  // The regex handles nested parentheses in the URL argument to avoid
-  // leaving trailing ')' that would produce malformed CSS.
+  // Replace dangerous url() schemes. Only http: and https: targets are allowed;
+  // data:, javascript:, blob:, and every other scheme (and scheme-relative or
+  // about: forms) are neutralised. data: is rejected in custom CSS because it
+  // can carry text/html payloads.
   sanitized = sanitized.replace(
-    /url\s*\(\s*(?:['"]?\s*(?!(?:data:|https:))[a-z][a-z0-9+.-]*:)[^)]*(?:\([^)]*\)[^)]*)*\)/gi,
+    /url\s*\(\s*(?:['"]?\s*(?!https?:\/\/)[a-z][a-z0-9+.-]*:)[^)]*(?:\([^)]*\)[^)]*)*\)/gi,
     "url(about:invalid)",
   );
   sanitized = sanitized.replace(/<\/?script[^>]*>/gi, "");

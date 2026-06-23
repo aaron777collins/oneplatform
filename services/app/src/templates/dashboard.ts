@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const dashboardTemplate: AppTemplate = {
   meta: {
@@ -19,6 +20,7 @@ export const dashboardTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -98,7 +100,7 @@ export const dashboardTemplate: AppTemplate = {
         ``,
         `  return (`,
         `    <div style={containerStyle}>`,
-        `      <h1 style={{ marginBottom: "24px", fontSize: "1.5rem", fontWeight: 700 }}>${appName}</h1>`,
+        `      <h1 style={{ marginBottom: "24px", fontSize: "1.5rem", fontWeight: 700 }}>${safeName}</h1>`,
         `      <KpiSection total={total} count={data.length} avg={avg} />`,
         `      <div style={{ marginTop: "32px" }}>`,
         `        <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "16px" }}>Recent values (last 7)</h2>`,

@@ -12,7 +12,7 @@ const FILE_COLUMNS = `
 // Exposes only the metadata columns — avoids fetching content on list calls.
 const FILE_META_COLUMNS = `
   id, app_id, path, content_hash, file_version, created_at, updated_at, updated_by,
-  length(content) AS size_bytes
+  octet_length(content) AS size_bytes
 `;
 
 export interface AppFileMetaRow extends Omit<AppFileRow, "content"> {

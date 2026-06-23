@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="luxury">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OnePlatform V5 Friction Point Analysis</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+  <style>
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 8px rgba(255, 193, 7, 0.3); }
+      50% { box-shadow: 0 0 24px rgba(255, 193, 7, 0.6); }
+    }
+    .phase-active {
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+    @keyframes fade-in-up {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-in {
+      animation: fade-in-up 0.5s ease-out forwards;
+    }
+    .pipeline-connector {
+      position: relative;
+    }
+    .pipeline-connector::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      right: -1rem;
+      width: 1rem;
+      height: 2px;
+      background: oklch(var(--bc) / 0.2);
+    }
+    .pipeline-connector:last-child::after {
+      display: none;
+    }
+    @media (max-width: 1024px) {
+      .pipeline-connector::after {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body class="bg-base-100 text-base-content min-h-screen">
+
+  <!-- Hero Section -->
+  <section class="relative overflow-hidden">
+    <div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-base-100 to-secondary/10"></div>
+    <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12 text-center">
+      <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
+        <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+        Analysis In Progress
+      </div>
+      <h1 class="text-5xl sm:text-6xl font-bold tracking-tight mb-4">
+        <span class="text-primary">One</span>Platform
+      </h1>
+      <h2 class="text-2xl sm:text-3xl font-light text-base-content/70 mb-4">
+        V5 Friction Point Analysis
+      </h2>
+      <p class="max-w-2xl mx-auto text-base-content/50 text-lg leading-relaxed">
+        Multi-persona deep analysis of the complete platform codebase.
+        10 specialist agents examining every surface for developer friction,
+        adversarially verified, then synthesized into a prioritized action plan.
+      </p>
+    </div>
+  </section>
+
+  <!-- Stats Row -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-2 mb-16">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="stat bg-base-200 rounded-xl px-4 py-5 text-center">
+        <div class="stat-title text-xs uppercase tracking-wider text-base-content/40">Phases</div>
+        <div class="stat-value text-2xl text-primary">14</div>
+        <div class="stat-desc text-base-content/40">completed</div>
+      </div>
+      <div class="stat bg-base-200 rounded-xl px-4 py-5 text-center">
+        <div class="stat-title text-xs uppercase tracking-wider text-base-content/40">Tests</div>
+        <div class="stat-value text-2xl text-secondary">9,600+</div>
+        <div class="stat-desc text-base-content/40">passing</div>
+      </div>
+      <div class="stat bg-base-200 rounded-xl px-4 py-5 text-center">
+        <div class="stat-title text-xs uppercase tracking-wider text-base-content/40">Services</div>
+        <div class="stat-value text-2xl text-accent">9</div>
+        <div class="stat-desc text-base-content/40">microservices</div>
+      </div>
+      <div class="stat bg-base-200 rounded-xl px-4 py-5 text-center">
+        <div class="stat-title text-xs uppercase tracking-wider text-base-content/40">Packages</div>
+        <div class="stat-value text-2xl text-info">7</div>
+        <div class="stat-desc text-base-content/40">shared libs</div>
+      </div>
+      <div class="stat bg-base-200 rounded-xl px-4 py-5 text-center">
+        <div class="stat-title text-xs uppercase tracking-wider text-base-content/40">ADRs</div>
+        <div class="stat-value text-2xl text-warning">36</div>
+        <div class="stat-desc text-base-content/40">decisions</div>
+      </div>
+      <div class="stat bg-base-200 rounded-xl px-4 py-5 text-center">
+        <div class="stat-title text-xs uppercase tracking-wider text-base-content/40">Gaps Closed</div>
+        <div class="stat-value text-2xl text-success">127</div>
+        <div class="stat-desc text-base-content/40">of 127</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Development Pipeline -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
+    <div class="text-center mb-10">
+      <h3 class="text-sm uppercase tracking-widest text-base-content/40 mb-2">Development Process</h3>
+      <h2 class="text-3xl font-bold">6-Phase Pipeline</h2>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <!-- Phase 1 - Active -->
+      <div class="phase-active rounded-2xl border-2 border-warning bg-warning/10 p-5 text-center transition-all">
+        <div class="w-12 h-12 rounded-full bg-warning text-warning-content flex items-center justify-center text-lg font-bold mx-auto mb-3">1</div>
+        <h4 class="font-bold text-warning text-sm mb-1">Analysis</h4>
+        <p class="text-xs text-base-content/50">Multi-persona friction point discovery</p>
+        <div class="badge badge-warning badge-sm mt-3">ACTIVE</div>
+      </div>
+      <!-- Phase 2 -->
+      <div class="rounded-2xl border border-base-300 bg-base-200/50 p-5 text-center opacity-50">
+        <div class="w-12 h-12 rounded-full bg-base-300 text-base-content/40 flex items-center justify-center text-lg font-bold mx-auto mb-3">2</div>
+        <h4 class="font-bold text-base-content/60 text-sm mb-1">Architecture</h4>
+        <p class="text-xs text-base-content/40">Architect agent creates design</p>
+        <div class="badge badge-ghost badge-sm mt-3">PENDING</div>
+      </div>
+      <!-- Phase 3 -->
+      <div class="rounded-2xl border border-base-300 bg-base-200/50 p-5 text-center opacity-50">
+        <div class="w-12 h-12 rounded-full bg-base-300 text-base-content/40 flex items-center justify-center text-lg font-bold mx-auto mb-3">3</div>
+        <h4 class="font-bold text-base-content/60 text-sm mb-1">Design</h4>
+        <p class="text-xs text-base-content/40">L2 design: DB, API, flows</p>
+        <div class="badge badge-ghost badge-sm mt-3">PENDING</div>
+      </div>
+      <!-- Phase 4 -->
+      <div class="rounded-2xl border border-base-300 bg-base-200/50 p-5 text-center opacity-50">
+        <div class="w-12 h-12 rounded-full bg-base-300 text-base-content/40 flex items-center justify-center text-lg font-bold mx-auto mb-3">4</div>
+        <h4 class="font-bold text-base-content/60 text-sm mb-1">Implementation</h4>
+        <p class="text-xs text-base-content/40">Developer + tester agents</p>
+        <div class="badge badge-ghost badge-sm mt-3">PENDING</div>
+      </div>
+      <!-- Phase 5 -->
+      <div class="rounded-2xl border border-base-300 bg-base-200/50 p-5 text-center opacity-50">
+        <div class="w-12 h-12 rounded-full bg-base-300 text-base-content/40 flex items-center justify-center text-lg font-bold mx-auto mb-3">5</div>
+        <h4 class="font-bold text-base-content/60 text-sm mb-1">Code Review</h4>
+        <p class="text-xs text-base-content/40">Code reviewer agent</p>
+        <div class="badge badge-ghost badge-sm mt-3">PENDING</div>
+      </div>
+      <!-- Phase 6 -->
+      <div class="rounded-2xl border border-base-300 bg-base-200/50 p-5 text-center opacity-50">
+        <div class="w-12 h-12 rounded-full bg-base-300 text-base-content/40 flex items-center justify-center text-lg font-bold mx-auto mb-3">6</div>
+        <h4 class="font-bold text-base-content/60 text-sm mb-1">Commit</h4>
+        <p class="text-xs text-base-content/40">Commit &amp; document</p>
+        <div class="badge badge-ghost badge-sm mt-3">PENDING</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Analysis Methodology -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
+    <div class="text-center mb-10">
+      <h3 class="text-sm uppercase tracking-widest text-base-content/40 mb-2">How It Works</h3>
+      <h2 class="text-3xl font-bold">Analysis Methodology</h2>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- Step 1: Find -->
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body items-center text-center">
+          <div class="w-16 h-16 rounded-2xl bg-primary/15 flex items-center justify-center mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          </div>
+          <h3 class="card-title text-lg">1. Discover</h3>
+          <p class="text-sm text-base-content/50">10 persona agents analyze the codebase in parallel, each finding 8-15 friction points from their unique perspective by reading actual source code.</p>
+          <div class="badge badge-primary badge-outline mt-2">80-150 raw findings</div>
+        </div>
+      </div>
+      <!-- Step 2: Verify -->
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body items-center text-center">
+          <div class="w-16 h-16 rounded-2xl bg-secondary/15 flex items-center justify-center mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <h3 class="card-title text-lg">2. Verify</h3>
+          <p class="text-sm text-base-content/50">All CRITICAL and HIGH severity findings are adversarially verified by independent skeptic agents who challenge assumptions and check for false positives.</p>
+          <div class="badge badge-secondary badge-outline mt-2">adversarial skeptics</div>
+        </div>
+      </div>
+      <!-- Step 3: Synthesize -->
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body items-center text-center">
+          <div class="w-16 h-16 rounded-2xl bg-accent/15 flex items-center justify-center mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+          </div>
+          <h3 class="card-title text-lg">3. Synthesize</h3>
+          <p class="text-sm text-base-content/50">Results are deduplicated, cross-referenced across personas, severity-ranked, and organized into a prioritized remediation plan with effort estimates.</p>
+          <div class="badge badge-accent badge-outline mt-2">prioritized plan</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Persona Agent Grid -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
+    <div class="text-center mb-10">
+      <h3 class="text-sm uppercase tracking-widest text-base-content/40 mb-2">Parallel Analysis</h3>
+      <h2 class="text-3xl font-bold">10 Persona Agents</h2>
+      <p class="text-base-content/50 mt-2 max-w-xl mx-auto">Each agent adopts a specific user persona and deeply analyzes the codebase from that perspective, reading actual source files to identify real friction.</p>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <!-- Persona 1 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-primary/15 text-primary">
+                <span class="text-lg">1</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">First-Time Self-Hoster</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">Docker setup</span>
+            <span class="badge badge-xs badge-ghost">Quickstart</span>
+            <span class="badge badge-xs badge-ghost">Error messages</span>
+            <span class="badge badge-xs badge-ghost">Config defaults</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 2 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-secondary/15 text-secondary">
+                <span class="text-lg">2</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">Data Engineer</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">Connectors</span>
+            <span class="badge badge-xs badge-ghost">Pipelines</span>
+            <span class="badge badge-xs badge-ghost">Transformations</span>
+            <span class="badge badge-xs badge-ghost">CDC/WAL</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 3 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-accent/15 text-accent">
+                <span class="text-lg">3</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">App Developer</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">App SDK</span>
+            <span class="badge badge-xs badge-ghost">Components</span>
+            <span class="badge badge-xs badge-ghost">Data binding</span>
+            <span class="badge badge-xs badge-ghost">Deployment</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 4 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-info/15 text-info">
+                <span class="text-lg">4</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">Plugin Developer</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">Plugin SDK</span>
+            <span class="badge badge-xs badge-ghost">Marketplace</span>
+            <span class="badge badge-xs badge-ghost">Sandbox</span>
+            <span class="badge badge-xs badge-ghost">Hooks/Events</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 5 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-warning/15 text-warning">
+                <span class="text-lg">5</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">Platform Admin</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">RBAC</span>
+            <span class="badge badge-xs badge-ghost">Tenant mgmt</span>
+            <span class="badge badge-xs badge-ghost">Audit logs</span>
+            <span class="badge badge-xs badge-ghost">Billing</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 6 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-success/15 text-success">
+                <span class="text-lg">6</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">DevOps / SRE</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">K8s deploy</span>
+            <span class="badge badge-xs badge-ghost">Monitoring</span>
+            <span class="badge badge-xs badge-ghost">Scaling</span>
+            <span class="badge badge-xs badge-ghost">Health checks</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 7 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-error/15 text-error">
+                <span class="text-lg">7</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">Security Auditor</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">Auth flows</span>
+            <span class="badge badge-xs badge-ghost">Secrets mgmt</span>
+            <span class="badge badge-xs badge-ghost">OWASP</span>
+            <span class="badge badge-xs badge-ghost">Data isolation</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 8 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-primary/15 text-primary">
+                <span class="text-lg">8</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">CLI Power User</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">CLI commands</span>
+            <span class="badge badge-xs badge-ghost">Scripting</span>
+            <span class="badge badge-xs badge-ghost">Output formats</span>
+            <span class="badge badge-xs badge-ghost">Autocomplete</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 9 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-secondary/15 text-secondary">
+                <span class="text-lg">9</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">SDK Consumer</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">TypeScript SDK</span>
+            <span class="badge badge-xs badge-ghost">API surface</span>
+            <span class="badge badge-xs badge-ghost">Type safety</span>
+            <span class="badge badge-xs badge-ghost">Examples</span>
+          </div>
+        </div>
+      </div>
+      <!-- Persona 10 -->
+      <div class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+        <div class="card-body p-5">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="avatar placeholder">
+              <div class="w-10 rounded-full bg-accent/15 text-accent">
+                <span class="text-lg">10</span>
+              </div>
+            </div>
+            <h4 class="font-bold text-sm leading-tight">Frontend / UX Reviewer</h4>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <span class="badge badge-xs badge-ghost">React UI</span>
+            <span class="badge badge-xs badge-ghost">Accessibility</span>
+            <span class="badge badge-xs badge-ghost">Responsiveness</span>
+            <span class="badge badge-xs badge-ghost">State mgmt</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Analysis Timeline -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
+    <div class="text-center mb-10">
+      <h3 class="text-sm uppercase tracking-widest text-base-content/40 mb-2">History</h3>
+      <h2 class="text-3xl font-bold">Analysis Timeline</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <ul class="timeline timeline-horizontal w-full justify-center">
+        <!-- V2 -->
+        <li>
+          <div class="timeline-start text-center pb-2">
+            <div class="text-xs text-base-content/40 uppercase tracking-wider">V2</div>
+          </div>
+          <div class="timeline-middle">
+            <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-success" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+            </div>
+          </div>
+          <div class="timeline-end text-center pt-2">
+            <div class="font-bold text-xl text-base-content/70">85</div>
+            <div class="text-xs text-base-content/40">findings</div>
+          </div>
+          <hr class="bg-success/30"/>
+        </li>
+        <!-- V3 -->
+        <li>
+          <hr class="bg-success/30"/>
+          <div class="timeline-start text-center pb-2">
+            <div class="text-xs text-base-content/40 uppercase tracking-wider">V3</div>
+          </div>
+          <div class="timeline-middle">
+            <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-success" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+            </div>
+          </div>
+          <div class="timeline-end text-center pt-2">
+            <div class="font-bold text-xl text-base-content/70">53</div>
+            <div class="text-xs text-base-content/40">findings</div>
+          </div>
+          <hr class="bg-success/30"/>
+        </li>
+        <!-- V4 -->
+        <li>
+          <hr class="bg-success/30"/>
+          <div class="timeline-start text-center pb-2">
+            <div class="text-xs text-base-content/40 uppercase tracking-wider">V4</div>
+          </div>
+          <div class="timeline-middle">
+            <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-success" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+            </div>
+          </div>
+          <div class="timeline-end text-center pt-2">
+            <div class="font-bold text-xl text-base-content/70">148</div>
+            <div class="text-xs text-base-content/40">findings</div>
+          </div>
+          <hr class="bg-warning/30"/>
+        </li>
+        <!-- V5 -->
+        <li>
+          <hr class="bg-warning/30"/>
+          <div class="timeline-start text-center pb-2">
+            <div class="text-xs text-base-content/40 uppercase tracking-wider">V5</div>
+          </div>
+          <div class="timeline-middle">
+            <div class="w-10 h-10 rounded-full bg-warning flex items-center justify-center phase-active">
+              <span class="loading loading-spinner loading-sm text-warning-content"></span>
+            </div>
+          </div>
+          <div class="timeline-end text-center pt-2">
+            <div class="font-bold text-xl text-warning">...</div>
+            <div class="text-xs text-warning">in progress</div>
+          </div>
+        </li>
+      </ul>
+    </div>
+    <!-- Trend insight -->
+    <div class="mt-8 max-w-2xl mx-auto">
+      <div class="alert bg-base-200 border border-base-300">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-info shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        <div>
+          <p class="text-sm text-base-content/60"><strong class="text-base-content/80">Trend:</strong> V2 found 85 initial issues. V3 found 53 remaining after fixes. V4 expanded to 10 personas and found 148 across a larger surface area. V5 continues with 10 personas across the now-complete 14-phase codebase.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Platform Architecture Overview -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
+    <div class="text-center mb-10">
+      <h3 class="text-sm uppercase tracking-widest text-base-content/40 mb-2">Under Analysis</h3>
+      <h2 class="text-3xl font-bold">Platform Surface Area</h2>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Services -->
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body">
+          <h3 class="card-title text-lg mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+            9 Microservices
+          </h3>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">gateway</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">auth</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">ingestion</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">ontology</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">pipeline</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">execution</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">app</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">logging</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-primary">plugin</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Packages -->
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body">
+          <h3 class="card-title text-lg mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+            7 Packages + 5 Connectors
+          </h3>
+          <div class="grid grid-cols-3 gap-2 mb-3">
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">core</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">sdk</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">app-sdk</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">plugin-sdk</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">cli</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">frontend</div>
+            </div>
+            <div class="rounded-lg bg-base-300/50 px-3 py-2 text-center">
+              <div class="text-xs font-mono text-secondary">docs</div>
+            </div>
+          </div>
+          <div class="divider text-xs text-base-content/30 my-1">connectors</div>
+          <div class="flex flex-wrap gap-2 justify-center">
+            <span class="badge badge-outline badge-sm">REST</span>
+            <span class="badge badge-outline badge-sm">PostgreSQL</span>
+            <span class="badge badge-outline badge-sm">MySQL</span>
+            <span class="badge badge-outline badge-sm">CSV</span>
+            <span class="badge badge-outline badge-sm">Webhook</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What's Next -->
+  <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
+    <div class="text-center mb-10">
+      <h3 class="text-sm uppercase tracking-widest text-base-content/40 mb-2">After Analysis</h3>
+      <h2 class="text-3xl font-bold">What's Next</h2>
+    </div>
+    <div class="max-w-3xl mx-auto">
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body">
+          <ul class="space-y-4">
+            <li class="flex gap-4">
+              <div class="w-8 h-8 rounded-lg bg-warning/15 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-warning font-bold text-sm">1</span>
+              </div>
+              <div>
+                <h4 class="font-semibold text-sm">Synthesize & Deduplicate Findings</h4>
+                <p class="text-xs text-base-content/50 mt-1">Merge overlapping friction points from multiple personas. Assign severity (CRITICAL/HIGH/MEDIUM/LOW) and effort estimates (S/M/L/XL).</p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <div class="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-primary font-bold text-sm">2</span>
+              </div>
+              <div>
+                <h4 class="font-semibold text-sm">Architecture Design</h4>
+                <p class="text-xs text-base-content/50 mt-1">Architect agent designs solutions for the highest-priority friction points, creating ADRs and interface specifications.</p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <div class="w-8 h-8 rounded-lg bg-secondary/15 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-secondary font-bold text-sm">3</span>
+              </div>
+              <div>
+                <h4 class="font-semibold text-sm">L2 Design & Review</h4>
+                <p class="text-xs text-base-content/50 mt-1">Detailed designs with database schemas, API contracts, and data flows. Architecture reviewer validates against SOLID principles.</p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <div class="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-accent font-bold text-sm">4</span>
+              </div>
+              <div>
+                <h4 class="font-semibold text-sm">Implementation & Testing</h4>
+                <p class="text-xs text-base-content/50 mt-1">Developer agents implement fixes. Tester agents write comprehensive tests. Code reviewer agents verify quality before commit.</p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <div class="w-8 h-8 rounded-lg bg-success/15 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-success font-bold text-sm">5</span>
+              </div>
+              <div>
+                <h4 class="font-semibold text-sm">Commit & Document</h4>
+                <p class="text-xs text-base-content/50 mt-1">Changes committed with full traceability. WORKING-STATE.md, handoff.md, and all design documents updated.</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-base-300 py-8 mt-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <p class="text-sm text-base-content/30">
+        OnePlatform V5 Friction Point Analysis &mdash; Generated <span id="timestamp"></span>
+      </p>
+      <p class="text-xs text-base-content/20 mt-1">
+        Open-source data platform &bull; Fivetran + n8n + Retool combined
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('timestamp').textContent = new Date().toLocaleString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+    });
+  </script>
+</body>
+</html>

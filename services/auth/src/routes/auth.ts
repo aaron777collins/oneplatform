@@ -193,8 +193,17 @@ return count`,
     // Access token JTI and expiry come from the JWT claims embedded in c.var.user.
     // We re-verify the raw token here to extract jti/exp for revocation — the auth
     // middleware validates the token already, so this is a fast in-process decode.
+    //
+    // Cookie-auth sessions (browser) do NOT send a Bearer header; fall back to
+    // the op_access_token HttpOnly cookie so those tokens also reach the blocklist.
     const authHeader = c.req.header("Authorization");
-    const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+
+    const cookieHeader = c.req.header("cookie") ?? "";
+    const accessCookieMatch = cookieHeader.match(/(?:^|;\s*)op_access_token=([^;]+)/);
+    const cookieAccessToken = accessCookieMatch?.[1] ?? undefined;
+
+    const rawToken = bearerToken ?? cookieAccessToken;
 
     let accessTokenJti = "";
     let accessTokenExp = 0;
@@ -212,7 +221,7 @@ return count`,
         {
           error: {
             code: "BAD_REQUEST",
-            message: "No Authorization header or refresh token provided. Nothing to revoke.",
+            message: "No Authorization header, access-token cookie, or refresh token provided. Nothing to revoke.",
           },
         },
         400,
@@ -227,7 +236,21 @@ return count`,
       parsed.data.all,
     );
 
-    return new Response(null, { status: 204 });
+    // Expire both cookies so browser sessions are fully cleared on logout.
+    // Max-Age=0 is the standard way to instruct the browser to delete a cookie
+    // immediately, regardless of the original expiry or Secure flag.
+    const isSecure = c.req.url.startsWith("https://");
+    const secureSuffix = isSecure ? "; Secure" : "";
+    const logoutResponse = new Response(null, { status: 204 });
+    logoutResponse.headers.append(
+      "Set-Cookie",
+      `op_access_token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureSuffix}`,
+    );
+    logoutResponse.headers.append(
+      "Set-Cookie",
+      `op_refresh_token=; HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh; Max-Age=0${secureSuffix}`,
+    );
+    return logoutResponse;
   });
 
   // POST /api/v1/auth/refresh — public (the refresh token is in the body or cookie)
@@ -239,9 +262,11 @@ return count`,
   // in the JSON body. The cookie takes precedence when both are present, but
   // in practice only one will be set.
   routes.post("/api/v1/auth/refresh", async (c) => {
+    // Trust only gateway-injected headers. x-forwarded-for is client-controllable
+    // on the auth service's internal interface, so including it as a fallback
+    // lets an attacker rotate apparent IP for unlimited refresh attempts.
     const ip = c.req.header("cf-connecting-ip")
       ?? c.req.header("x-real-ip")
-      ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim()
       ?? "unknown";
     await checkRefreshRateLimit(ip);
 

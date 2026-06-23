@@ -244,13 +244,21 @@ export function createOAuthService(deps: OAuthServiceDeps): OAuthService {
       );
     }
 
-    // Step 1: Atomic GET + DEL of the state from Redis
-    const pipeline = redis.pipeline();
-    pipeline.get(`auth:oauth:state:${state}`);
-    pipeline.del(`auth:oauth:state:${state}`);
-    const results = await pipeline.exec();
-
-    const rawPayload = results?.[0]?.[1] as string | null;
+    // Step 1: Atomically read and delete the state so it can only be used once.
+    // The Lua script is guaranteed atomic by Redis's single-threaded execution
+    // model — no two concurrent callbacks for the same state can both read the
+    // value before the DEL lands (TOCTOU replay). A pipeline GET+DEL is NOT
+    // atomic and was the previous vulnerability (P19-034).
+    const getDelScript = `
+      local v = redis.call('GET', KEYS[1])
+      if v then redis.call('DEL', KEYS[1]) end
+      return v
+    `;
+    const rawPayload = await redis.eval(
+      getDelScript,
+      1,
+      `auth:oauth:state:${state}`,
+    ) as string | null;
 
     if (rawPayload === null) {
       throw new OAuthStateInvalidError(

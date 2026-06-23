@@ -361,6 +361,12 @@ export function createTokenService(deps: TokenServiceDeps): TokenService {
     issuePipeline.sadd(`auth:refresh-family:${familyId}`, token);
     issuePipeline.expire(`auth:refresh-family:${familyId}`, 30 * 24 * 60 * 60);
     issuePipeline.sadd(`auth:user-sessions:${userId}`, token);
+    // Keep the user-sessions set alive for the same duration as the longest
+    // possible refresh token. Without this TTL the set grows unboundedly for
+    // users who never explicitly log out, making logout-all an O(N) scan over
+    // stale members. EXPIRE uses the maximum refresh TTL (30 days) so the set
+    // naturally evicts after all tokens in it could have expired.
+    issuePipeline.expire(`auth:user-sessions:${userId}`, 30 * 24 * 60 * 60);
     const issueResults = await issuePipeline.exec();
     if (!issueResults) {
       throw new Error("Redis pipeline failed during refresh token issuance.");

@@ -121,16 +121,65 @@ function sanitizeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
+// HTML elements that can execute script, load remote/active content, or
+// otherwise carry an XSS payload. They (and their contents) are removed wholesale
+// before the HTML is embedded in generated TSX via dangerouslySetInnerHTML.
+const DANGEROUS_HTML_ELEMENTS = [
+  "script",
+  "iframe",
+  "object",
+  "embed",
+  "applet",
+  "link",
+  "meta",
+  "base",
+  "form",
+  "style",
+  "template",
+  "noscript",
+  "frame",
+  "frameset",
+] as const;
+
 /**
- * Remove script tags, iframes, and inline event handlers from HTML before
- * embedding it in generated TSX. The generated file is code the developer
- * will review, but a malicious payload could trick them into deploying XSS.
+ * Remove dangerous tags, inline event handlers, and javascript:/active-content
+ * attribute payloads from HTML before embedding it in generated TSX.
+ *
+ * The previous allowlist only stripped <script>/<iframe>/on* and silently let
+ * <object data=…>, <embed>, <link rel=import>, SVG `href="javascript:"`, and
+ * CSS `expression()` through — emitting them into a .tsx file via
+ * dangerouslySetInnerHTML with false confidence. This tightens the filter to
+ * cover those vectors. The generated file is still developer-reviewed code, not
+ * a runtime sanitizer, so we fail safe by removing anything questionable.
  */
 function sanitizeHtmlForCodeGen(html: string): string {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
-    .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, "");
+  let out = html;
+
+  // Strip dangerous elements with their content (paired tags), then any
+  // stray/self-closing/unclosed openers of the same elements.
+  for (const tag of DANGEROUS_HTML_ELEMENTS) {
+    const paired = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, "gi");
+    out = out.replace(paired, "");
+    const opener = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+    out = out.replace(opener, "");
+  }
+
+  // Inline event handlers: onclick=, onerror=, etc.
+  out = out.replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, "");
+
+  // Attribute values pointing at javascript:/vbscript:/data: schemes (covers
+  // href, src, xlink:href/href on SVG <use>, formaction, etc.). The negative
+  // lookahead tolerates leading whitespace and HTML entities are decoded by the
+  // browser, so we also strip control chars that could split the scheme token.
+  out = out.replace(
+    /\b(?:href|xlink:href|src|formaction|action|data|poster)\s*=\s*(["']?)\s*(?:javascript|vbscript|data)\s*:[^"'>\s]*\1/gi,
+    "",
+  );
+
+  // CSS expression() inside style attributes / inline CSS (legacy IE XSS).
+  out = out.replace(/expression\s*\([^)]*\)/gi, "");
+
+  return out;
 }
 
 function renderRow(row: LayoutRow, indent: number): string[] {

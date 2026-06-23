@@ -77,7 +77,10 @@ interface DockerCreateBody {
     NetworkMode: string;
     ReadonlyRootfs: boolean;
     CapDrop: string[];
-    AutoRemove: boolean;
+    AutoRemove?: boolean;
+    PidsLimit: number;
+    SecurityOpt: string[];
+    User: string;
   };
   Env: string[];
   AttachStdin: boolean;
@@ -199,7 +202,21 @@ async function createDockerContainer(
       NetworkMode: "oneplatform-sandbox",
       ReadonlyRootfs: true,
       CapDrop: ["ALL"],
-      AutoRemove: true,
+      // AutoRemove is intentionally omitted (defaults to false). With AutoRemove:true
+      // the container is removed the moment it exits, so getDockerContainerStats
+      // always returns 0 because the container is gone before the stats call runs.
+      // The explicit deleteDockerContainer call after stats collection handles cleanup.
+      // Fork-bomb protection: cap total process count inside the container.
+      PidsLimit: 256,
+      // Prevent privilege escalation via setuid/setgid binaries. The default
+      // Docker seccomp profile applies automatically when seccomp is not
+      // overridden — we only add no-new-privileges here to avoid carrying a
+      // custom seccomp profile path that may not exist in all environments.
+      SecurityOpt: ["no-new-privileges:true"],
+      // Run as an unprivileged user. The sandbox images must have a uid 1000
+      // user (typically created during image build). ReadonlyRootfs is already
+      // set, so writes are restricted to tmpfs mounts defined in the image.
+      User: "1000:1000",
     },
     Env: [
       `OP_EXECUTION_ID=${executionId}`,

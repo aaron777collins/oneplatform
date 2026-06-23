@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const projectTrackerTemplate: AppTemplate = {
   meta: {
@@ -18,6 +19,7 @@ export const projectTrackerTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -102,7 +104,7 @@ export const projectTrackerTemplate: AppTemplate = {
         ``,
         `  return (`,
         `    <div style={wrap}>`,
-        `      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "20px" }}>${appName}</h1>`,
+        `      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "20px" }}>${safeName}</h1>`,
         ``,
         `      {/* Filter bar */}`,
         `      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>`,

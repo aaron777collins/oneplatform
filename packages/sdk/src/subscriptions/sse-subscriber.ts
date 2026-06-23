@@ -118,6 +118,10 @@ export function createSseSubscription(
   let lastEventId: string | null = options.fromEventId ?? null;
   let destroyed = false;
   let currentAbortController: AbortController | null = null;
+  // Total lifetime reconnect attempts — never resets so the MAX_RECONNECT_ATTEMPTS
+  // cap cannot be circumvented by servers that repeatedly drop connections just
+  // after the stability threshold.
+  let totalReconnectAttempts = 0;
 
   const statusHandlers: StatusHandler[] = [];
   const errorHandlers: ErrorHandler[] = [];
@@ -257,12 +261,15 @@ export function createSseSubscription(
       }
 
       // Stream ended without error — server closed the connection; reconnect.
-      // Only reset the attempt counter if the connection was stable (alive > threshold).
+      // Reset the backoff delay when the connection was stable, but always
+      // increment the total lifetime counter so the cap cannot be bypassed.
       if (!destroyed) {
         const wasStable =
           connectedAt !== null &&
           Date.now() - connectedAt >= STABLE_CONNECTION_THRESHOLD_MS;
-        await scheduleReconnect(wasStable ? 0 : reconnectAttempt + 1);
+        totalReconnectAttempts += 1;
+        const backoffAttempt = wasStable ? 0 : reconnectAttempt + 1;
+        await scheduleReconnect(backoffAttempt);
       }
     } catch (err) {
       if (destroyed) return;
@@ -280,19 +287,24 @@ export function createSseSubscription(
             });
 
       emitError(networkErr);
-      // Only reset the attempt counter if the connection was alive long enough
-      // to be considered stable; otherwise increment to trigger backoff.
+      // Reset the backoff delay when the connection was stable, but always
+      // increment the total lifetime counter so the cap cannot be bypassed.
       const wasStable =
         connectedAt !== null &&
         Date.now() - connectedAt >= STABLE_CONNECTION_THRESHOLD_MS;
-      await scheduleReconnect(wasStable ? 0 : reconnectAttempt + 1);
+      totalReconnectAttempts += 1;
+      const backoffAttempt = wasStable ? 0 : reconnectAttempt + 1;
+      await scheduleReconnect(backoffAttempt);
     }
   }
 
-  async function scheduleReconnect(attempt: number): Promise<void> {
+  async function scheduleReconnect(backoffAttempt: number): Promise<void> {
     if (destroyed) return;
 
-    if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+    // Check the total lifetime counter — never the per-stable-session attempt —
+    // so a server that drops every connection just after the stability threshold
+    // cannot keep totalReconnectAttempts at 0 and reconnect indefinitely.
+    if (totalReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       setStatus('closed');
       emitError(
         new NetworkError({
@@ -304,9 +316,9 @@ export function createSseSubscription(
     }
 
     setStatus('reconnecting');
-    const delayMs = calculateReconnectDelay(attempt);
+    const delayMs = calculateReconnectDelay(backoffAttempt);
     await sleep(delayMs);
-    await connect(attempt);
+    await connect(backoffAttempt);
   }
 
   // Start the connection asynchronously

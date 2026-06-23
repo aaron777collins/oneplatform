@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const teamDirectoryTemplate: AppTemplate = {
   meta: {
@@ -19,6 +20,7 @@ export const teamDirectoryTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -101,7 +103,7 @@ export const teamDirectoryTemplate: AppTemplate = {
         ``,
         `  return (`,
         `    <div style={wrap}>`,
-        `      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "16px" }}>${appName}</h1>`,
+        `      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "16px" }}>${safeName}</h1>`,
         `      <input`,
         `        type="search"`,
         `        placeholder="Search by name, team, or title…"`,

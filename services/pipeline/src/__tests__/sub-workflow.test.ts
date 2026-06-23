@@ -276,9 +276,10 @@ describe("sub_workflow step — successful execution with waitForCompletion=true
 
     await engine.processRun(makeJob({ runId: RUN_ID, tenantId: TENANT_UUID }));
 
-    // triggerRun called with correct pipelineId and tenantId
+    // triggerRun called with correct pipelineId, tenantId, input, and callStack.
+    // callStack contains the parent pipelineId so the child worker can detect cycles.
     const triggerFn = trigger.triggerRun as ReturnType<typeof vi.fn>;
-    expect(triggerFn).toHaveBeenCalledWith(PIPELINE_B, TENANT_UUID, {});
+    expect(triggerFn).toHaveBeenCalledWith(PIPELINE_B, TENANT_UUID, {}, [PIPELINE_A]);
 
     // waitForCompletion called with child runId
     const waitFn = trigger.waitForCompletion as ReturnType<typeof vi.fn>;
@@ -324,6 +325,7 @@ describe("sub_workflow step — successful execution with waitForCompletion=true
       PIPELINE_B,
       TENANT_UUID,
       { childUserId: "user-abc", childRegion: "us-east" },
+      [PIPELINE_A],
     );
   });
 });
@@ -607,7 +609,7 @@ describe("sub_workflow step — input mapping resolution", () => {
     await engine.processRun(makeJob({ runId: RUN_ID, tenantId: TENANT_UUID }));
 
     const triggerFn = trigger.triggerRun as ReturnType<typeof vi.fn>;
-    expect(triggerFn).toHaveBeenCalledWith(PIPELINE_B, TENANT_UUID, {});
+    expect(triggerFn).toHaveBeenCalledWith(PIPELINE_B, TENANT_UUID, {}, [PIPELINE_A]);
   });
 
   it("resolves nested path from parent input to child field", async () => {
@@ -630,6 +632,7 @@ describe("sub_workflow step — input mapping resolution", () => {
       PIPELINE_B,
       TENANT_UUID,
       { targetId: "obj-123" },
+      [PIPELINE_A],
     );
   });
 });

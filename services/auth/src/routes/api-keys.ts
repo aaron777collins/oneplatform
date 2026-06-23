@@ -63,7 +63,7 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
   // Query params:
   //   status — "active" (default), "revoked", or "all"
   //   limit  — results per page (1–200, default 50)
-  //   offset — zero-based starting position (default 0)
+  //   cursor — opaque keyset cursor returned by the previous page response
   routes.get("/api/v1/api-keys", async (c) => {
     const user = c.var.user;
 
@@ -73,18 +73,18 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
       : "active";
 
     const rawLimit = c.req.query("limit");
-    const rawOffset = c.req.query("offset");
+    const cursor = c.req.query("cursor");
     const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 50;
-    const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : 0;
 
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
       throw new ValidationError("limit must be an integer between 1 and 200", []);
     }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new ValidationError("offset must be a non-negative integer", []);
-    }
 
-    const { keys, total } = await apiKeyService.list(user.userId, { status, limit, offset });
+    const { keys, nextCursor, total } = await apiKeyService.list(user.userId, {
+      status,
+      limit,
+      ...(cursor !== undefined ? { cursor } : {}),
+    });
 
     const data = keys.map((k) => ({
       id: k.id,
@@ -99,7 +99,7 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
 
     return c.json({
       data,
-      pagination: { nextCursor: null, total, limit, offset },
+      pagination: { nextCursor, total, limit },
     });
   });
 
@@ -138,7 +138,7 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
   // Response never includes the key hash or full key value — only the 8-char
   // prefix is returned so admins can correlate keys without being able to use them.
   //
-  // Query params: status (active|revoked|all), limit (1-200), offset
+  // Query params: status (active|revoked|all), limit (1-200), cursor
   routes.get("/api/v1/admin/api-keys", async (c) => {
     const user = c.var.user;
     if (!user.scopes.includes("admin")) {
@@ -153,18 +153,18 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
       : "active";
 
     const rawLimit = c.req.query("limit");
-    const rawOffset = c.req.query("offset");
+    const cursor = c.req.query("cursor");
     const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 50;
-    const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : 0;
 
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
       throw new ValidationError("limit must be an integer between 1 and 200", []);
     }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new ValidationError("offset must be a non-negative integer", []);
-    }
 
-    const { keys, total } = await apiKeyService.listAllKeys({ status, limit, offset });
+    const { keys, nextCursor, total } = await apiKeyService.listAllKeys({
+      status,
+      limit,
+      ...(cursor !== undefined ? { cursor } : {}),
+    });
 
     const data = keys.map((k) => ({
       keyId: k.id,
@@ -179,7 +179,7 @@ export function createApiKeyRoutes(deps: ApiKeyRouteDeps): Hono<{ Variables: App
       revokedAt: k.revokedAt?.toISOString() ?? null,
     }));
 
-    return c.json({ data, pagination: { total, limit, offset } });
+    return c.json({ data, pagination: { nextCursor, total, limit } });
   });
 
   // DELETE /api/v1/admin/api-keys/:keyId — revoke any API key as a platform admin

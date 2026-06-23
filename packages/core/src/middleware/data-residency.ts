@@ -196,11 +196,15 @@ export function dataResidencyMiddleware(config: DataResidencyMiddlewareConfig) {
     });
 
     if (!evaluation.allowed && enforce) {
+      // Log the region details internally — never expose topology in the response body
+      console.warn(
+        `[data-residency] request blocked: tenantRegion=${tenantRegion} serviceRegion=${serviceRegion} requestId=${c.var.requestId ?? ""}`,
+      );
       return c.json(
         {
           error: {
             code: "FORBIDDEN",
-            message: `Data residency violation: tenant is assigned to region ${tenantRegion} but this service is in region ${serviceRegion}. Cross-region transfer is denied.`,
+            message: "Access denied: data residency policy does not permit this request.",
             requestId: c.var.requestId ?? "",
           },
         },

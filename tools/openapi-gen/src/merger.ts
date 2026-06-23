@@ -157,14 +157,29 @@ function mergeTags(specs: ServiceSpec[]): Array<{ name: string; description: str
  * Collects the security schemes from all specs, deduplicating by name.
  * In practice all services use the same two schemes (BearerAuth, ApiKeyAuth)
  * but we collect them all to be safe.
+ *
+ * Throws on conflicting definitions (matching mergeSchemas behaviour) so a
+ * silently-wrong merged spec is never produced.
  */
 function mergeSecuritySchemes(specs: ServiceSpec[]): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
-  for (const { doc } of specs) {
+  for (const { service, doc } of specs) {
     const components = (doc["components"] as JsonObject | undefined) ?? {};
     const schemes =
       (components["securitySchemes"] as Record<string, unknown> | undefined) ?? {};
     for (const [name, scheme] of Object.entries(schemes)) {
+      if (name in merged) {
+        const existing = JSON.stringify(merged[name]);
+        const incoming = JSON.stringify(scheme);
+        if (existing !== incoming) {
+          throw new Error(
+            `[openapi-gen] Security scheme conflict: "${name}" is defined differently in service "${service}" ` +
+              `than in a previously merged spec. Ensure all services declare identical schemes or rename to avoid collision.`,
+          );
+        }
+        // Identical definitions — safe to skip
+        continue;
+      }
       merged[name] = scheme;
     }
   }

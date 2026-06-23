@@ -136,6 +136,16 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
           <div className="flex h-full items-center justify-center text-sm text-[var(--color-muted-foreground)]">
             Loading preview…
           </div>
+        ) : configQuery.isError ? (
+          // Render an explicit error rather than silently downgrading to Mode B
+          // (same-origin sandbox) when the runtime config fetch fails. A silent
+          // fallback would reduce isolation for operators who configured Mode A.
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-[var(--color-destructive)]">
+            <span className="font-semibold">Preview unavailable</span>
+            <span className="text-[var(--color-muted-foreground)]">
+              Unable to load preview configuration. Reload the page or contact your administrator.
+            </span>
+          </div>
         ) : (
           <iframe
             ref={iframeRef}

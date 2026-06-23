@@ -347,7 +347,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
   // Step 6: Start BullMQ retention worker AND enqueue repeating job (W1).
   // The worker exists to consume jobs; we must also enqueue a repeating job
   // otherwise the worker sits idle and retention never runs.
-  const retentionQueueName = "queue:app:retention";
+  const retentionQueueName = "queue.app.retention";
   let retentionWorker: Worker | undefined;
   let retentionQueue: Queue | undefined;
 
@@ -790,8 +790,10 @@ async function main(): Promise<void> {
     executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
     baseUrl:            process.env["OP_BASE_URL"]           ?? "http://localhost:3000",
     minioEndpoint:      process.env["OP_MINIO_ENDPOINT"]    ?? process.env["MINIO_ENDPOINT"]   ?? "http://minio:9000",
-    minioAccessKey:     process.env["OP_MINIO_ACCESS_KEY"]  ?? process.env["MINIO_ACCESS_KEY"] ?? "minioadmin",
-    minioSecretKey:     process.env["OP_MINIO_SECRET_KEY"]  ?? process.env["MINIO_SECRET_KEY"] ?? "minioadmin",
+    // OP_MINIO_USER/OP_MINIO_PASSWORD are what docker-compose sets; the ACCESS_KEY
+    // and SECRET_KEY names are kept as fallbacks for legacy/custom deployments.
+    minioAccessKey:     process.env["OP_MINIO_USER"]        ?? process.env["OP_MINIO_ACCESS_KEY"]  ?? process.env["MINIO_ACCESS_KEY"] ?? "minioadmin",
+    minioSecretKey:     process.env["OP_MINIO_PASSWORD"]    ?? process.env["OP_MINIO_SECRET_KEY"]  ?? process.env["MINIO_SECRET_KEY"] ?? "minioadmin",
     minioRegion:        process.env["OP_MINIO_REGION"]      ?? process.env["MINIO_REGION"]     ?? "us-east-1",
     buildRetentionCount: parseInt(process.env["APP_BUILD_RETENTION_COUNT"] ?? "20", 10),
     serviceKeysDir:     process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys",

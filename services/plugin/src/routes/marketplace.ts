@@ -390,6 +390,23 @@ export function createMarketplaceRoutes(
       );
     }
 
+    // Marketplace install creates a real plugin record, so it must be gated
+    // to platform-admin exactly like the regular POST /api/v1/plugins install
+    // route (plugins.ts:105). Without this check any tenant user could bypass
+    // the admin-only guard by going through the marketplace path.
+    if (!user.roles?.includes("platform-admin")) {
+      return c.json(
+        {
+          error: {
+            code: "FORBIDDEN",
+            message: "Platform admin role required to install plugins.",
+            requestId: c.var.requestId,
+          },
+        },
+        403
+      );
+    }
+
     const id = c.req.param("id");
 
     // Step 1: Record telemetry (download counter + event).

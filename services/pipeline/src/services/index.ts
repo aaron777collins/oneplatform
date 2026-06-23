@@ -66,6 +66,8 @@ export {
   type RunEngineRepository,
   type RunStepEngineRepository,
   type RunLogEngineRepository,
+  type SubWorkflowTrigger,
+  type SubWorkflowTriggerResult,
 } from "./execution-engine.js";
 
 export {

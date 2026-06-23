@@ -56,6 +56,8 @@ export interface StorageService {
   getObjectMetadata(bucket: string, key: string): Promise<ObjectMetadata>;
   deleteObject(bucket: string, key: string): Promise<void>;
   generatePresignedDownloadUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<PresignedUrlResult>;
+  /** Upload bytes to the given bucket/key. */
+  putObject(bucket: string, key: string, body: Buffer, contentType: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -531,12 +533,52 @@ export function createStorageService(config: StorageServiceConfig): StorageServi
     return { url: presignedUrl, expiresAt };
   }
 
+  // -------------------------------------------------------------------------
+  // putObject — PUT /{bucket}/{key} (S3 PutObject)
+  // -------------------------------------------------------------------------
+
+  async function putObject(
+    bucket: string,
+    key: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    const url = new URL(
+      `${config.endpoint}/${encodeURIComponent(bucket)}/${encodeObjectKey(key)}`,
+    );
+    const payloadHash = sha256Hex(body);
+    // Only sign content-type (not content-length) — including content-length in
+    // the signed set causes MinIO to reject the request when the header value
+    // differs from the actual body size after the network layer.
+    const sigHeaders = signRequest("PUT", url, config, payloadHash, {
+      "content-type": contentType,
+    });
+
+    const response = await fetch(url.toString(), {
+      method: "PUT",
+      headers: {
+        ...sigHeaders,
+        "Content-Type": contentType,
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const responseBody = await response.text();
+      throw new StorageServiceError(
+        `PutObject failed for "${bucket}/${key}": HTTP ${response.status} — ${responseBody}`,
+        response.status,
+      );
+    }
+  }
+
   return {
     listBuckets,
     listObjects,
     getObjectMetadata,
     deleteObject,
     generatePresignedDownloadUrl,
+    putObject,
   };
 }
 

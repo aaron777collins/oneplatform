@@ -36,7 +36,48 @@ export const PluginManifestSchema = z.object({
   entrypoint: z.string().min(1),
   configSchema: z.record(z.unknown()),
   hooks: z.array(HookDeclarationSchema),
-  requiredExternalUrls: z.array(z.string()),
+  requiredExternalUrls: z.array(
+    z.string().superRefine((raw, ctx) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(raw);
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not a valid URL: ${raw}` });
+        return;
+      }
+
+      // Only allow public http(s) — block every other scheme (file, redis, ftp, …).
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `URL scheme must be http or https, got '${parsed.protocol.replace(":", "")}'`,
+        });
+        return;
+      }
+
+      // Reject private-range / metadata hostnames to prevent SSRF.
+      // Covers: loopback (127/8, ::1), link-local (169.254/16, fe80::/10),
+      // private RFC-1918 (10/8, 172.16–31/12, 192.168/16), and unspecified (0.0.0.0).
+      const host = parsed.hostname.toLowerCase();
+      const privatePatterns = [
+        /^localhost$/,
+        /^127\.\d+\.\d+\.\d+$/,
+        /^0\.0\.0\.0$/,
+        /^::1$/,
+        /^fe80:/,
+        /^10\.\d+\.\d+\.\d+$/,
+        /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/,
+        /^192\.168\.\d+\.\d+$/,
+        /^169\.254\.\d+\.\d+$/,
+      ];
+      if (privatePatterns.some((re) => re.test(host))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `URL host '${host}' resolves to a private or reserved range and is not allowed`,
+        });
+      }
+    })
+  ),
   requiredApis: z.array(
     z.enum(["credentials", "fetch", "cache", "ontology", "tracing"])
   ),

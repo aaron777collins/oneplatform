@@ -60,6 +60,11 @@ export function createBillingRoutes(deps: BillingRouteDeps): Hono<{ Variables: A
     // This blocks private IP ranges, loopback, and internal service hostnames.
     await validateWebhookUrl(parsed.data.url);
 
+    // Check existence before upsert so we can return 201 on create vs 200 on
+    // update — callers such as Stripe webhooks use the status code to distinguish
+    // first-time registration from subsequent updates.
+    const existing = await billingWebhookConfigRepo.findByTenantId(user.tenantId);
+
     const config = await billingWebhookConfigRepo.upsert({
       tenant_id: user.tenantId,
       url: parsed.data.url,
@@ -70,7 +75,7 @@ export function createBillingRoutes(deps: BillingRouteDeps): Hono<{ Variables: A
       enabled: parsed.data.enabled,
     });
 
-    return c.json({ data: sanitizeBillingConfig(config) }, 200);
+    return c.json({ data: sanitizeBillingConfig(config) }, existing === null ? 201 : 200);
   });
 
   // -------------------------------------------------------------------------

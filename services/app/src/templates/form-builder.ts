@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const formBuilderTemplate: AppTemplate = {
   meta: {
@@ -19,6 +20,7 @@ export const formBuilderTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -74,7 +76,7 @@ export const formBuilderTemplate: AppTemplate = {
         `export function App() {`,
         `  return (`,
         `    <div style={{ padding: "24px", fontFamily: "system-ui, sans-serif" }}>`,
-        `      <h1 style={{ marginBottom: "8px", fontSize: "1.5rem", fontWeight: 700 }}>${appName}</h1>`,
+        `      <h1 style={{ marginBottom: "8px", fontSize: "1.5rem", fontWeight: 700 }}>${safeName}</h1>`,
         `      <p style={{ marginBottom: "32px", color: "#64748b", fontSize: "0.875rem" }}>`,
         `        Fill in the form below. All fields marked * are required.`,
         `      </p>`,

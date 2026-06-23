@@ -11,7 +11,13 @@ import type { AppVariables } from "@oneplatform/core";
 
 const SERVICE_MAP: Record<string, string> = {
   auth: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
+  // OAuth browser-login endpoints live on the auth service under /api/v1/oauth/*.
+  oauth: process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
   connectors:
+    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
+  "connector-registry":
+    process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
+  analytics:
     process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
   "webhooks/inbound":
     process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",

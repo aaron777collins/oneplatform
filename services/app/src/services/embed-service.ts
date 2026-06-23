@@ -328,20 +328,27 @@ function rowToConfig(row: EmbedTokenRow): EmbedConfig {
  *   Empty list     → rejects all origins (most restrictive)
  */
 export function isOriginAllowed(requestOrigin: string, allowedOrigins: string[]): boolean {
-  // Browsers send Origin with a scheme (e.g., "https://example.com") but stored
-  // patterns are bare hostnames (e.g., "example.com") per the originPattern schema.
-  // Extract just the hostname for comparison; fall back to the raw value if the
-  // origin is not a valid URL (e.g., "null" or empty string).
+  // Browsers send Origin with a scheme (e.g., "https://example.com:8080") but stored
+  // patterns may be bare hostnames ("example.com") or host+port ("example.com:8080").
+  // We compare against both `.host` (includes port) and `.hostname` (no port) so that
+  // a stored pattern of "example.com:8080" matches a port-qualified origin, while a
+  // stored bare pattern like "example.com" continues to match origins without a port.
+  let requestHost: string;
   let requestHostname: string;
   try {
-    requestHostname = new URL(requestOrigin).hostname;
+    const parsed = new URL(requestOrigin);
+    requestHost     = parsed.host;      // "example.com:8080" or "example.com"
+    requestHostname = parsed.hostname;  // always "example.com"
   } catch {
+    requestHost     = requestOrigin;
     requestHostname = requestOrigin;
   }
 
   for (const pattern of allowedOrigins) {
     if (pattern === "*") return true;
-    if (pattern === requestHostname) return true;
+    // Match against both host (port-qualified) and hostname (bare) so stored
+    // patterns work regardless of whether the port was included when saved.
+    if (pattern === requestHost || pattern === requestHostname) return true;
 
     if (pattern.startsWith("*.")) {
       const domain = pattern.slice(2);

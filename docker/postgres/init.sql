@@ -94,6 +94,23 @@ GRANT USAGE, CREATE ON SCHEMA logging    TO logging_service_role;
 GRANT USAGE, CREATE ON SCHEMA plugin     TO plugin_service_role;
 GRANT USAGE, CREATE ON SCHEMA gateway    TO gateway_service_role;
 
+-- ─── Database CREATE Grants ───────────────────────────────────────────────────
+-- Each service's migration runner issues `CREATE SCHEMA IF NOT EXISTS <svc>` on
+-- startup. PostgreSQL checks CREATE privilege on the database before the
+-- IF NOT EXISTS short-circuit, so without this the migration fails with
+-- "permission denied for database oneplatform" even though the schema already
+-- exists. Granting CREATE ON DATABASE lets the idempotent CREATE SCHEMA succeed;
+-- roles still cannot touch schemas they do not own (no cross-schema USAGE).
+GRANT CREATE ON DATABASE oneplatform TO auth_service_role;
+GRANT CREATE ON DATABASE oneplatform TO ingestion_service_role;
+GRANT CREATE ON DATABASE oneplatform TO ontology_service_role;
+GRANT CREATE ON DATABASE oneplatform TO pipeline_service_role;
+GRANT CREATE ON DATABASE oneplatform TO execution_service_role;
+GRANT CREATE ON DATABASE oneplatform TO app_service_role;
+GRANT CREATE ON DATABASE oneplatform TO logging_service_role;
+GRANT CREATE ON DATABASE oneplatform TO plugin_service_role;
+GRANT CREATE ON DATABASE oneplatform TO gateway_service_role;
+
 -- Default privileges: tables created in each schema are automatically
 -- granted to the owning role. Prevents accidental lockout after migrations.
 
@@ -148,6 +165,18 @@ GRANT SELECT ON ALL TABLES IN SCHEMA ingestion TO ontology_service_role;
 -- Ensure future ingestion tables are also readable by ontology (for dynamic raw_ tables).
 ALTER DEFAULT PRIVILEGES FOR ROLE ingestion_service_role IN SCHEMA ingestion
   GRANT SELECT ON TABLES TO ontology_service_role;
+
+-- Gateway → auth.tenants (referential integrity only, NOT read access).
+-- Several gateway tables (tenant_settings, usage metering, gdpr_requests,
+-- data_residency) declare `tenant_id ... REFERENCES auth.tenants(id)`. Declaring
+-- a foreign key requires USAGE on the target schema and REFERENCES on the target
+-- table — but not SELECT, so the gateway role still cannot read tenant rows.
+-- auth.tenants is created later by the auth service migration, so the table-level
+-- grant is expressed as a DEFAULT PRIVILEGE on tables auth_service_role creates in
+-- the auth schema, which applies when that table is created.
+GRANT USAGE ON SCHEMA auth TO gateway_service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE auth_service_role IN SCHEMA auth
+  GRANT REFERENCES ON TABLES TO gateway_service_role;
 
 -- ─── Search Path Defaults ────────────────────────────────────────────────────
 -- Set each role's default search_path so queries don't need schema prefixes.

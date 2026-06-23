@@ -162,7 +162,10 @@ function decrypt(stored: string, key: Buffer): string {
 // ─── Credential file I/O ────────────────────────────────────────────────────
 
 function ensureConfigDir(): void {
-  mkdirSync(CONFIG_DIR, { recursive: true });
+  // 0o700 so only the owning user can read the config directory;
+  // credentials.json is 0o600 but profile/config files would otherwise
+  // be world-readable at the parent-directory level.
+  mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
 }
 
 function readCredentialsFile(): CredentialsStore {

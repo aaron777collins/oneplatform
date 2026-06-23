@@ -29,6 +29,14 @@ const server = net.createServer((socket) => {
 });
 
 server.listen(socketPath, () => {
+  // The execution service runs as a different UID (1001) than this sandbox
+  // process (1002). Connecting to a Unix socket requires write permission on the
+  // socket file, which the default 0755 creation mode denies to other users.
+  // The execution container's UID (1001) is in neither the owner nor the
+  // sandbox group (1002), so relax to 0666. The socket still lives on an
+  // isolated volume reachable only by these two containers on the sandbox
+  // network, so widening file-mode bits does not broaden real exposure.
+  try { fs.chmodSync(socketPath, 0o666); } catch {}
   console.log(`[sandbox-vm] listening on ${socketPath}`);
 });
 

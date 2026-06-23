@@ -109,6 +109,14 @@ services:
     command: ["postgres", "-c", "max_connections=200"]
     labels:
       <<: *dev-test-labels
+    # op-init writes secret files as 0440 root:SECRET_GID (GID 1001). The postgres
+    # entrypoint runs the initdb scripts (set-passwords.sh) as UID 70, which is
+    # neither the owner nor in GID 1001, so it cannot read the per-service DB
+    # password files. Adding GID 1001 as a supplementary group lets postgres read
+    # them via the group bit — exactly the access the permission model intends —
+    # without weakening the 0440 mode.
+    group_add:
+      - "1001"
     environment:
       POSTGRES_USER: postgres
       # Superuser password — only used during first-time PostgreSQL init on a
@@ -187,8 +195,8 @@ services:
       <<: *dev-test-labels
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${OP_MINIO_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      MINIO_ROOT_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      MINIO_ROOT_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
     ports:
       # 9100 = S3 API, 9101 = web console. 127.0.0.1 only.
       - "127.0.0.1:9100:9000"
@@ -286,6 +294,11 @@ services:
     container_name: op-dev-test-pgbouncer
     labels:
       <<: *dev-test-labels
+    # pgbouncer runs as UID 70 / GID 70 and reads op-init's 0440 root:1001 secret
+    # files (and must traverse the 0750 root:1001 /data/init directory). Add GID
+    # 1001 as a supplementary group so it can read them via the group bit.
+    group_add:
+      - "1001"
     entrypoint: ["/bin/sh", "/usr/local/bin/pgbouncer-entrypoint.sh"]
     volumes:
       - init-data:/data/init:ro
@@ -344,9 +357,11 @@ services:
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
       OP_GLOBAL_RATE_LIMIT: ${OP_GLOBAL_RATE_LIMIT:-10000}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
       OP_WEBHOOK_ALLOW_HTTP: ${OP_WEBHOOK_ALLOW_HTTP:-false}
+      # Shared internal service-to-service token — must match plugin/execution.
+      OP_SERVICE_TOKEN: ${OP_SERVICE_TOKEN:-dev_test_internal_service_token_2026}
     ports:
       # Direct gateway access for API testing / debugging. 127.0.0.1 only.
       - "127.0.0.1:4080:3000"
@@ -386,8 +401,8 @@ services:
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
       OP_REQUIRE_EMAIL_VERIFICATION: ${OP_REQUIRE_EMAIL_VERIFICATION:-false}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
       OP_SMTP_HOST: ${OP_SMTP_HOST:-}
       OP_SMTP_PORT: ${OP_SMTP_PORT:-}
       OP_SMTP_USER: ${OP_SMTP_USER:-}
@@ -428,8 +443,8 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
       OP_INGESTION_BATCH_SIZE: ${OP_INGESTION_BATCH_SIZE:-1000}
       OP_LARGE_SYNC_CONCURRENCY: ${OP_LARGE_SYNC_CONCURRENCY:-3}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -464,8 +479,8 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
       OP_MIGRATION_TIMEOUT: ${OP_MIGRATION_TIMEOUT:-3600}
       OP_ONTOLOGY_POLL_INTERVAL: ${OP_ONTOLOGY_POLL_INTERVAL:-15}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -498,8 +513,8 @@ services:
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -577,8 +592,10 @@ services:
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
       OP_SANDBOX_POOL_SIZE: ${OP_SANDBOX_POOL_SIZE:-5}
       OP_CONNECTOR_TIMEOUT_SECONDS: ${OP_CONNECTOR_TIMEOUT_SECONDS:-300}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
+      # Shared internal service-to-service token — must match plugin/gateway.
+      OP_SERVICE_TOKEN: ${OP_SERVICE_TOKEN:-dev_test_internal_service_token_2026}
       DOCKER_HOST: tcp://op-dev-test-docker-socket-proxy:2375
     # YAML merge does not deep-merge maps — overriding depends_on replaces the
     # whole map, so all four dependencies must be listed explicitly.
@@ -628,8 +645,8 @@ services:
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
       OP_WILDCARD_DOMAIN: ${OP_WILDCARD_DOMAIN:-}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
       # Docker Fleet Manager BFF proxy — opt-in. Routes /bff/docker/* to the
       # docker-bff sidecar after admin/devops RBAC. The shared secret must match
       # the sidecar's OP_SERVICE_TOKEN_SECRET.
@@ -669,8 +686,8 @@ services:
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
@@ -703,9 +720,12 @@ services:
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
-      OP_MINIO_USER: ${OP_MINIO_USER:-minioadmin}
-      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-oneplatform_minio_dev_2024}
-      OP_SERVICE_TOKEN: ${OP_SERVICE_TOKEN:-}
+      OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
+      OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
+      # Shared internal service-to-service token. Gateway and execution present
+      # this token on internal calls; plugin/execution validate it. All three must
+      # carry the SAME value, so they share this dev-test default.
+      OP_SERVICE_TOKEN: ${OP_SERVICE_TOKEN:-dev_test_internal_service_token_2026}
     volumes:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro

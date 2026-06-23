@@ -1,6 +1,6 @@
-import { mkdir, rm, readdir } from "node:fs/promises";
+import { mkdir, rm, readdir, readFile as readFileFn } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createVerify } from "node:crypto";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as semver from "semver";
@@ -39,6 +39,72 @@ const execFile = promisify(execFileCb);
 
 const MAX_BUNDLE_BYTES = 50 * 1024 * 1024; // 50MB
 const CURRENT_PLATFORM_VERSION = process.env["OP_PLATFORM_VERSION"] ?? "1.0.0";
+
+// ---------------------------------------------------------------------------
+// Bundle signature verification (supply-chain gate — P19-059)
+//
+// If OP_PLUGIN_PUBLIC_KEY_PEM is set, every install that provides a
+// signaturePath must carry a valid Ed25519/RSA detached signature over the
+// bundle bytes.  A missing signature file is a hard failure so unsigned
+// bundles cannot slip through when a keyring is configured.
+//
+// If OP_PLUGIN_PUBLIC_KEY_PEM is NOT set the gate is open but a warning is
+// emitted to make the gap observable.  Operators should always configure the
+// key in production.
+// ---------------------------------------------------------------------------
+
+const PLATFORM_PUBLIC_KEY_PEM = process.env["OP_PLUGIN_PUBLIC_KEY_PEM"] ?? "";
+
+async function verifyBundleSignature(
+  bundleBytes: Buffer,
+  signaturePath: string | undefined,
+  logger: { warn(msg: string, ctx?: Record<string, unknown>): void },
+): Promise<void> {
+  if (PLATFORM_PUBLIC_KEY_PEM === "") {
+    // No keyring configured — log a warning so operators notice the gap.
+    logger.warn(
+      "OP_PLUGIN_PUBLIC_KEY_PEM is not set; bundle signature verification is skipped. " +
+      "Set this env var in production to enforce the supply-chain gate.",
+    );
+    return;
+  }
+
+  if (signaturePath === undefined || signaturePath === "") {
+    throw new Error(
+      "Bundle signature verification is required but no signaturePath was provided. " +
+      "Re-submit the install request with a detached .sig file.",
+    );
+  }
+
+  let sigBytes: Buffer;
+  try {
+    sigBytes = await readFileFn(signaturePath) as Buffer;
+  } catch (err) {
+    throw new Error(`Could not read signature file at '${signaturePath}': ${String(err)}`);
+  }
+
+  // Support both raw binary and base64-encoded detached signatures.
+  // Try base64 first; if the decoded result is empty or looks binary-clean, use it.
+  let sigBuffer: Buffer;
+  try {
+    const decoded = Buffer.from(sigBytes.toString("ascii").trim(), "base64");
+    sigBuffer = decoded.length > 0 ? decoded : sigBytes;
+  } catch {
+    sigBuffer = sigBytes;
+  }
+
+  // Node's createVerify auto-detects RSA/EC algorithm from the PEM key header.
+  const verify = createVerify("SHA256");
+  verify.update(bundleBytes);
+  const valid = verify.verify(PLATFORM_PUBLIC_KEY_PEM, sigBuffer);
+
+  if (!valid) {
+    throw new Error(
+      "Bundle signature verification failed: the detached signature does not match the bundle bytes. " +
+      "Ensure the bundle was signed with the platform's trusted private key.",
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // PluginService — plugin lifecycle: install, activate, stage, disable, uninstall
@@ -275,13 +341,13 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           );
         }
 
-        // Step 5: Verify bundle checksum.
-        // Note: GPG signature verification is not yet implemented. The gpgFingerprint
-        // field has been removed from the manifest schema to avoid security theater —
-        // the previous code accepted a signature file but never verified it cryptographically.
-        // TODO(#security-sig): implement full openpgp signature verification once the
-        // openpgp dependency is approved and a trusted keyring policy is defined.
-        // The signaturePath parameter is accepted but intentionally unused until then.
+        // Step 5a: Verify cryptographic signature before trusting any bundle content.
+        // This is the supply-chain gate: if OP_PLUGIN_PUBLIC_KEY_PEM is configured,
+        // a valid detached signature is mandatory. See verifyBundleSignature above.
+        const bundleBytes = await readFileFn(extractedBundlePath);
+        await verifyBundleSignature(bundleBytes as Buffer, signaturePath, logger);
+
+        // Step 5b: Verify bundle checksum (integrity, separate from authenticity).
         await bundleService.verifyChecksum(
           extractedBundlePath,
           manifest.bundleChecksum

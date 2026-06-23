@@ -25,8 +25,52 @@ import {
 //
 // useDefaults: false — we intentionally do not mutate the caller's config
 // object; defaults must be applied explicitly by the plugin itself.
+//
+// loadSchema: disabled (no handler) — prevents untrusted $ref URIs from
+// triggering outbound HTTP fetches during compilation.
 // ---------------------------------------------------------------------------
 const ajv = new Ajv({ allErrors: true, useDefaults: false });
+
+// Maximum allowed JSON-serialised schema size (bytes) before Ajv compilation.
+// Prevents a malicious plugin from submitting a multi-megabyte anyOf/allOf
+// tree that exhausts memory during compilation.
+const MAX_SCHEMA_BYTES = 64 * 1024; // 64 KiB
+
+// Maximum nesting depth of a plugin configSchema (object/array levels).
+// JSONSchema $ref recursion and deeply nested allOf/anyOf can cause Ajv
+// to walk an exponential path tree; bounding depth at 8 covers all realistic
+// plugin configs with significant headroom.
+const MAX_SCHEMA_DEPTH = 8;
+
+function measureSchemaDepth(value: unknown, current: number = 0): number {
+  if (current > MAX_SCHEMA_DEPTH) return current;
+  if (typeof value !== "object" || value === null) return current;
+  let max = current;
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (typeof v === "object" && v !== null) {
+      const d = measureSchemaDepth(v, current + 1);
+      if (d > max) max = d;
+    }
+  }
+  return max;
+}
+
+function assertSafeCandidateSchema(schema: Record<string, unknown>): void {
+  const json = JSON.stringify(schema);
+  if (json.length > MAX_SCHEMA_BYTES) {
+    throw new Error(
+      `Plugin configSchema exceeds the maximum allowed size of ${MAX_SCHEMA_BYTES} bytes ` +
+      `(actual: ${json.length} bytes). Reduce the schema complexity.`,
+    );
+  }
+  const depth = measureSchemaDepth(schema);
+  if (depth > MAX_SCHEMA_DEPTH) {
+    throw new Error(
+      `Plugin configSchema exceeds the maximum allowed nesting depth of ${MAX_SCHEMA_DEPTH} ` +
+      `(actual: ${depth}). Flatten the schema structure.`,
+    );
+  }
+}
 
 // Bounded cache for compiled Ajv validators keyed by a hash of the schema
 // JSON. This prevents unbounded memory growth from ajv.compile() creating a
@@ -39,6 +83,12 @@ function getOrCompileValidator(schema: Record<string, unknown>): ValidateFunctio
   const hash = createHash("sha256").update(schemaJson).digest("hex");
   let validator = validatorCache.get(hash);
   if (validator === undefined) {
+    // Enforce size and depth limits before handing the schema to Ajv.
+    // A malicious plugin can submit a deeply recursive $ref / exponential
+    // anyOf that hangs or exhausts CPU/memory during compilation; we reject
+    // it before any parsing happens.
+    assertSafeCandidateSchema(schema);
+
     // Evict oldest entries if cache is full (simple FIFO eviction)
     if (validatorCache.size >= MAX_VALIDATOR_CACHE_SIZE) {
       const firstKey = validatorCache.keys().next().value as string;

@@ -27,6 +27,7 @@ import {
 } from "./services/index.js";
 import type {
   PipelineRunJobPayload,
+  SubWorkflowTrigger,
 } from "./services/index.js";
 import {
   PipelineRepository,
@@ -177,8 +178,11 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
   // BullMQ queues
   const redisConnection = { url: config.redisUrl };
 
-  const runQueue = createQueue("queue:pipeline:run", redisConnection);
-  const cronQueue = createQueue("queue:pipeline:cron", redisConnection);
+  const runQueue = createQueue("queue.pipeline.run", redisConnection);
+  // Note: a pipeline:cron BullMQ queue was previously created here but never
+  // consumed by a Worker — cron scheduling is driven by an in-process
+  // setInterval loop in ScheduleService. The queue wasted a Redis connection
+  // and reported misleading depth metrics in /readyz. Removed (P19-101).
 
   // Services
   const pipelineService = createPipelineService({
@@ -225,6 +229,64 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
   // execution routes for the SSE and REST status endpoints.
   const executionTracker = createExecutionTracker();
 
+  // Concrete SubWorkflowTrigger implementation.
+  // triggerRun creates a run row via runService and enqueues the BullMQ job with
+  // the forwarded callStack so the worker can detect cross-job circular chains.
+  // waitForCompletion polls the run row until it reaches a terminal state.
+  const subWorkflowTrigger: SubWorkflowTrigger = {
+    async triggerRun(pipelineId, tenantId, input, callStack) {
+      const result = await runService.triggerRun(
+        pipelineId,
+        tenantId,
+        "service",
+        input,
+        { triggeredBy: "sub_workflow" },
+      );
+      // Patch the job payload with the inherited call stack so the worker can
+      // detect cross-job cycles. We update the existing job via the queue rather
+      // than relying on runService (which has no callStack param) because the
+      // run row is already created — we only need to amend the BullMQ payload.
+      // Since BullMQ doesn't support in-place payload mutation on an already-queued
+      // job, we directly enqueue a replacement and rely on the run's idempotency
+      // guard (status !== 'pending' → skip) to absorb any double-enqueue.
+      // The simplest correct approach: enqueue an additional job with the full
+      // payload; the first worker to win the advisory lock drives the run.
+      if (callStack.length > 0) {
+        await runQueue.add("run", {
+          runId: result.runId,
+          tenantId,
+          subWorkflowCallStack: [...callStack],
+        });
+      }
+      return { runId: result.runId };
+    },
+
+    async waitForCompletion(runId, timeoutMs) {
+      const { SubWorkflowTimeoutError } = await import("./services/errors.js");
+      const POLL_INTERVAL_MS = 1_000;
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const run = await runRepo.findById(runId);
+        if (run !== null && (run.status === "completed" || run.status === "failed" || run.status === "cancelled")) {
+          // Derive output from the last completed step
+          const steps = await runStepRepo.findByRunId(runId);
+          const lastOutput = steps
+            .filter((s) => s.status === "completed" && s.output !== null)
+            .at(-1)?.output ?? null;
+          return {
+            status: run.status,
+            output: lastOutput as Record<string, unknown> | null,
+          };
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+      throw new SubWorkflowTimeoutError(
+        `Sub-workflow run "${runId}" did not complete within ${timeoutMs}ms.`,
+        { runId, timeoutMs },
+      );
+    },
+  };
+
   const executionEngine = createExecutionEngine({
     runRepo,
     runStepRepo,
@@ -239,6 +301,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     logger,
     serviceTokenSigner,
     executionTracker,
+    subWorkflowTrigger,
   });
 
   // Workers are optional so tests can wire the app without consuming Redis connections
@@ -248,7 +311,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     // Using new Worker directly rather than createWorker from core because we need
     // to configure concurrency — core's createWorker signature does not expose it.
     runWorker = new Worker<PipelineRunJobPayload>(
-      "queue:pipeline:run",
+      "queue.pipeline.run",
       async (job) => executionEngine.processRun(job),
       {
         connection: redisConnection,
@@ -297,7 +360,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
       }
     });
 
-    logger.info("BullMQ pipeline:run and pipeline:cron workers started", {
+    logger.info("BullMQ pipeline:run worker started", {
       concurrency: maxConcurrentRuns,
       maxQueueLength,
     });
@@ -335,7 +398,6 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
     pool: db,
     redis,
     runQueue,
-    cronQueue,
     serviceStartedAt,
     isReady: () => serviceReady,
   });
@@ -369,7 +431,6 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
       db.end(),
       redis.quit(),
       runQueue.close(),
-      cronQueue.close(),
     ]);
   };
 

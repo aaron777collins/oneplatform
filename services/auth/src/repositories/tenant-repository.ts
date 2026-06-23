@@ -52,27 +52,65 @@ export class TenantRepository {
   }
 
   /**
-   * List non-deleted tenants with offset-based pagination.
+   * List non-deleted tenants using keyset cursor pagination.
    *
-   * Also returns the total count of non-deleted tenants so callers can
-   * compute page metadata without a separate COUNT query.
+   * The cursor is an opaque base64url-encoded JSON object containing
+   * { created_at, id } from the last row of the previous page. Passing
+   * undefined starts from the first page.
    */
-  async list(opts: ListTenantsOptions): Promise<{ tenants: Tenant[]; total: number }> {
-    const countResult = await this.pool.query<{ count: string }>(
-      `SELECT count(*) AS count FROM auth.tenants WHERE deleted_at IS NULL`
-    );
+  async list(opts: ListTenantsOptions): Promise<{
+    tenants: Tenant[];
+    nextCursor: string | null;
+    total: number;
+  }> {
+    const [countResult, rowsResult] = await Promise.all([
+      this.pool.query<{ count: string }>(
+        `SELECT count(*) AS count FROM auth.tenants WHERE deleted_at IS NULL`,
+      ),
+      opts.cursor !== undefined
+        ? (() => {
+            let parsed: { created_at: string; id: string };
+            try {
+              parsed = JSON.parse(
+                Buffer.from(opts.cursor, "base64url").toString("utf8"),
+              ) as { created_at: string; id: string };
+            } catch {
+              throw new Error("Invalid pagination cursor");
+            }
+            return this.pool.query<Tenant>(
+              `SELECT ${TENANT_COLUMNS}
+                 FROM auth.tenants
+                WHERE deleted_at IS NULL
+                  AND (created_at, id) > ($1, $2)
+                ORDER BY created_at ASC, id ASC
+                LIMIT $3`,
+              [parsed.created_at, parsed.id, opts.limit],
+            );
+          })()
+        : this.pool.query<Tenant>(
+            `SELECT ${TENANT_COLUMNS}
+               FROM auth.tenants
+              WHERE deleted_at IS NULL
+              ORDER BY created_at ASC, id ASC
+              LIMIT $1`,
+            [opts.limit],
+          ),
+    ]);
+
     const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const tenants = rowsResult.rows;
+    const last = tenants[tenants.length - 1];
+    const nextCursor =
+      tenants.length === opts.limit && last !== undefined
+        ? Buffer.from(
+            JSON.stringify({
+              created_at: (last.created_at as Date).toISOString(),
+              id: last.id,
+            }),
+          ).toString("base64url")
+        : null;
 
-    const rowsResult = await this.pool.query<Tenant>(
-      `SELECT ${TENANT_COLUMNS}
-         FROM auth.tenants
-        WHERE deleted_at IS NULL
-        ORDER BY created_at ASC
-        LIMIT $1 OFFSET $2`,
-      [opts.limit, opts.offset]
-    );
-
-    return { tenants: rowsResult.rows, total };
+    return { tenants, nextCursor, total };
   }
 
   /**

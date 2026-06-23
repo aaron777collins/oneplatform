@@ -83,11 +83,22 @@ export function createCacheService(deps: CacheServiceDeps): CacheService {
     const entitySnapshots: EntitySnapshot[] = [];
     let maxVersion = 0;
 
-    for (const entity of entities) {
-      const fields = await fieldRepo.findByEntityId(entity.id);
-      const relationships = await relationshipRepo.findByEntityId(entity.id);
+    const entityIds = entities.map((e) => e.id);
 
-      const activeMigration = await migrationRepo.findActiveByEntityId(entity.id);
+    // Batch-load all fields, relationships, and active migrations in 3 queries
+    // instead of 3 queries per entity (N+1 eliminated).  The batch methods
+    // short-circuit on empty input so the Promise.all is safe for zero entities.
+    const [fieldsByEntityId, relsByEntityId, activeMigrationByEntityId] = await Promise.all([
+      fieldRepo.findByEntityIds(entityIds),
+      relationshipRepo.findByEntityIds(entityIds),
+      migrationRepo.findActiveByEntityIds(entityIds),
+    ]);
+
+    for (const entity of entities) {
+      const fields = fieldsByEntityId.get(entity.id) ?? [];
+      const relationships = relsByEntityId.get(entity.id) ?? [];
+      const activeMigration = activeMigrationByEntityId.get(entity.id) ?? null;
+
       const migrationStatus: "idle" | "migrating" = activeMigration?.status === "running" ? "migrating" : "idle";
       const migrationViewName = activeMigration?.union_view_name ?? null;
 

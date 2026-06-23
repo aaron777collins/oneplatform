@@ -99,9 +99,17 @@ export function createReconciliationRoutes(
     }
 
     // Verify tenant ownership before exposing any report data.
-    await connectorService.getConnector(user.tenantId, c.req.param("id"));
+    const connectorId = c.req.param("id");
+    await connectorService.getConnector(user.tenantId, connectorId);
 
     const report = await reconciliationService.getReport(c.req.param("jobId"));
+
+    // Guard against IDOR: a valid jobId for a different connector must not be
+    // readable via this connector's URL even though the tenant check passed.
+    if (report !== null && report.connectorId !== connectorId) {
+      return c.json({ data: null }, 404);
+    }
+
     return c.json({ data: report ?? null });
   });
 

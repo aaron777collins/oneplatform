@@ -357,6 +357,8 @@ export const CreateScheduleSchema = z.object({
   timezone: z.string().min(1).max(64).default("UTC"),
   enabled: z.boolean().default(true),
   inputTemplate: z.record(z.unknown()).default({}),
+  /** Pipeline IDs whose latest run must be 'completed' before this schedule fires. */
+  dependsOn: z.array(UUIDSchema).default([]),
 });
 
 export const PatchScheduleSchema = z.object({
@@ -364,6 +366,8 @@ export const PatchScheduleSchema = z.object({
   timezone: z.string().min(1).max(64).optional(),
   enabled: z.boolean().optional(),
   inputTemplate: z.record(z.unknown()).optional(),
+  /** Replace the dependency list. Pass [] to clear all dependencies. */
+  dependsOn: z.array(UUIDSchema).optional(),
 });
 
 // ---------------------------------------------------------------------------

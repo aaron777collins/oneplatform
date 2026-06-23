@@ -29,8 +29,9 @@ Plugins are tenant-scoped — each tenant has its own independent set of install
 | `GET` | `/api/v1/plugins` | Bearer | List installed plugins |
 | `GET` | `/api/v1/plugins/{id}` | Bearer | Get a plugin |
 | `DELETE` | `/api/v1/plugins/{id}` | Bearer + `plugins:manage` | Remove a plugin |
-| `POST` | `/api/v1/plugins/{id}/activate` | Bearer + `plugins:manage` | Activate a plugin |
-| `POST` | `/api/v1/plugins/{id}/deactivate` | Bearer + `plugins:manage` | Deactivate a plugin |
+| `GET` | `/api/v1/plugins/{id}/instances` | Bearer | List a plugin's instances |
+| `POST` | `/api/v1/plugins/{id}/instances` | Bearer + `plugins:manage` | Create (activate) a plugin instance |
+| `PATCH` | `/api/v1/plugins/{id}/instances/{instanceId}` | Bearer + `plugins:manage` | Update or disable an instance |
 | `POST` | `/api/v1/plugins/{id}/upgrade` | Bearer + `plugins:manage` | Upgrade to a new bundle |
 | `POST` | `/api/v1/plugins/{id}/rollback` | Bearer + `plugins:manage` | Roll back to the previous version |
 

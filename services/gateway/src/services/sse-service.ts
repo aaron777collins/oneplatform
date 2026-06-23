@@ -129,7 +129,11 @@ export function createSseService(deps: { logger: Logger }): SseService {
 
     replay(tenantId, lastEventId, patterns) {
       const buf = buffers.get(tenantId);
-      if (!buf || buf.size === 0) return "overflow";
+      // An empty or absent buffer means the tenant has no history at all —
+      // no events were missed, so return an empty list. Reserve "overflow" for
+      // the case where the buffer is populated but the lastEventId is no longer
+      // present (i.e. the ring buffer wrapped past it).
+      if (!buf || buf.size === 0) return [];
 
       let foundIdx = -1;
       for (let i = 0; i < buf.size; i++) {

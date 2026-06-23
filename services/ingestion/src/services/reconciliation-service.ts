@@ -368,13 +368,13 @@ export function createReconciliationService(
   const executionServiceUrl =
     deps.executionServiceUrl ??
     process.env["EXECUTION_SERVICE_URL"] ??
-    "http://execution-service:3005";
+    "http://execution-service:3000";
 
   // Derive BullMQ Redis URL from the injected dependency, falling back to the
   // module-level default.
   const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
-  const reconcileQueue = new Queue<ReconcileJobPayload>("ingestion:reconcile", {
+  const reconcileQueue = new Queue<ReconcileJobPayload>("ingestion.reconcile", {
     connection: { lazyConnect: true, url: redisUrl },
     defaultJobOptions: {
       attempts: 2,

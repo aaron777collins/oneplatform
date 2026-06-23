@@ -672,9 +672,13 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
     }
 
     const limit = options?.limit ?? 20;
+    // When a status filter is active, count only matching builds so that the
+    // total/pagination metadata reflects the filtered result set, not all builds.
     const [builds, total] = await Promise.all([
       buildRepo.listByApp(appId, options),
-      buildRepo.countByApp(appId),
+      options?.filterStatus !== undefined
+        ? buildRepo.countByAppAndStatus(appId, options.filterStatus)
+        : buildRepo.countByApp(appId),
     ]);
 
     const nextCursor = builds.length === limit ? (builds[builds.length - 1]?.id ?? null) : null;
@@ -752,13 +756,15 @@ export function createBuildService(deps: BuildServiceDeps): BuildService {
   async function recoverInterruptedBuilds(): Promise<void> {
     const cutoff = new Date(Date.now() - BUILD_INTERRUPTED_GRACE_MS);
 
+    // app.builds has no updated_at column; use created_at as a proxy with a
+    // wider grace window so a build that was still running at restart time is
+    // not incorrectly recovered the moment it was created.
     const result = await pool.query<{ id: string; app_id: string; status: string }>(
       `UPDATE app.builds
           SET status        = 'failed',
-              error_message = 'Interrupted by service restart',
-              updated_at    = now()
+              error_message = 'Interrupted by service restart'
         WHERE status IN ('pending', 'building')
-          AND updated_at   < $1
+          AND created_at < $1
       RETURNING id, app_id, status`,
       [cutoff]
     );

@@ -99,6 +99,11 @@ export interface RunLogRepository {
 export interface PipelineRunJobPayload {
   runId: string;
   tenantId: string;
+  // Ordered list of ancestor pipelineIds from the root call down to (but not
+  // including) the current pipeline. Forwarded from the parent job so the worker
+  // can detect cross-job circular sub-workflow chains (A → B → A across BullMQ
+  // job boundaries). Omitted for top-level runs (equivalent to an empty array).
+  subWorkflowCallStack?: string[];
 }
 
 // ---------------------------------------------------------------------------

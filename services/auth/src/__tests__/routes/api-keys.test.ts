@@ -179,10 +179,10 @@ describe("GET /api/v1/api-keys", () => {
   });
 
   it("queries with the authenticated user's userId", async () => {
-    const listSpy = vi.fn().mockResolvedValue({ keys: [], total: 0 });
+    const listSpy = vi.fn().mockResolvedValue({ keys: [], total: 0, nextCursor: null });
     const app = buildApp(makeApiKeyService({ list: listSpy }), MOCK_USER);
     await app.request("/api/v1/api-keys");
-    expect(listSpy).toHaveBeenCalledWith("user-1", { status: "active", limit: 50, offset: 0 });
+    expect(listSpy).toHaveBeenCalledWith("user-1", { status: "active", limit: 50 });
   });
 });
 

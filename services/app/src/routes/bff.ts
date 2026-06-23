@@ -233,7 +233,16 @@ export function createBffRoutes(deps: BffRouteDeps): Hono<{ Variables: AppVariab
 
     // executionServiceUrl is derived from deps at factory time (see above)
 
-    const queryParams = new URLSearchParams(c.req.query()).toString();
+    // Only forward a safe set of query params — forwarding all client params
+    // verbatim would let callers inject limit overrides, debug flags, or
+    // tenant-overriding params into the execution service.
+    const ALLOWED_PARAMS = ["filter", "limit", "cursor", "sort"] as const;
+    const safe = new URLSearchParams();
+    for (const key of ALLOWED_PARAMS) {
+      const val = c.req.query(key);
+      if (val !== undefined) safe.set(key, val);
+    }
+    const queryParams = safe.toString();
     const upstreamUrl = `${executionServiceUrl}/internal/data/${user.tenantId}/${appId}/${encodeURIComponent(entity)}${queryParams ? `?${queryParams}` : ""}`;
 
     // W3: include service token on inter-service calls

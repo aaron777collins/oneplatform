@@ -1,5 +1,5 @@
 import type { Logger } from "@oneplatform/core";
-import { parseExpression } from "cron-parser";
+import cronParser from "cron-parser";
 import type { PipelineRow } from "./pipeline-service.js";
 import type { TriggeredBy, TriggerRunResult, RunService, RunStatus } from "./run-service.js";
 import { ScheduleNotFoundError, ScheduleInvalidCronError } from "./errors.js";
@@ -206,7 +206,7 @@ function validateCronExpression(cronExpr: string): void {
 
   // Validate via cron-parser — throws if expression is syntactically invalid
   try {
-    parseExpression(expanded, { tz: "UTC" });
+    cronParser.parseExpression(expanded, { tz: "UTC" });
   } catch (err) {
     throw new ScheduleInvalidCronError(
       `Invalid cron expression "${cronExpr}": ${err instanceof Error ? err.message : String(err)}`,
@@ -231,7 +231,7 @@ function validateTimezone(timezone: string): void {
 function computeNextRunAt(cronExpr: string, timezone: string): Date {
   // Expand @-shorthands so the parser receives a valid 5-field expression.
   const expanded = CRON_ALIAS_MAP[cronExpr.trim()] ?? cronExpr;
-  const interval = parseExpression(expanded, {
+  const interval = cronParser.parseExpression(expanded, {
     tz: timezone,
     currentDate: new Date(),
   });
@@ -462,6 +462,26 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
       try {
         const nextRunAt = computeNextRunAt(schedule.cron_expr, schedule.timezone);
 
+        // Check pipeline dependencies BEFORE claiming the tick so that a transient
+        // dependency failure does not permanently lose the tick. If we advanced
+        // next_run_at first (previous order) and then skipped, the tick would be
+        // silently dropped — e.g. an entire day for @daily on a transient failure.
+        const dependsOn = schedule.depends_on ?? [];
+        if (dependsOn.length > 0) {
+          const depCheck = await checkDependencies(schedule.tenant_id, dependsOn);
+          if (!depCheck.satisfied) {
+            logger.info("Cron schedule skipped: dependencies not completed", {
+              scheduleId: schedule.id,
+              pipelineId: schedule.pipeline_id,
+              tenantId: schedule.tenant_id,
+              blockingPipelines: depCheck.blocking,
+            });
+            // Do NOT advance next_run_at — the tick will be retried on the next
+            // 30-second cron poll so a transient failure does not lose the schedule.
+            continue;
+          }
+        }
+
         // Optimistic lock: only the first replica to claim this tick wins.
         // The UPDATE WHERE next_run_at = currentNextRunAt guard (design spec §19.3)
         // prevents duplicate triggers when multiple instances race on the same schedule.
@@ -475,25 +495,6 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
         if (!claimed) {
           // Another instance claimed this tick first
           continue;
-        }
-
-        // Check pipeline dependencies before triggering. If any dependency's
-        // latest run is not 'completed', skip this tick and log why. The
-        // schedule's next_run_at has already been advanced above so the next
-        // cron tick will re-evaluate the dependencies at the next scheduled
-        // time rather than re-checking on every 30s poll.
-        const dependsOn = schedule.depends_on ?? [];
-        if (dependsOn.length > 0) {
-          const depCheck = await checkDependencies(schedule.tenant_id, dependsOn);
-          if (!depCheck.satisfied) {
-            logger.info("Cron schedule skipped: dependencies not completed", {
-              scheduleId: schedule.id,
-              pipelineId: schedule.pipeline_id,
-              tenantId: schedule.tenant_id,
-              blockingPipelines: depCheck.blocking,
-            });
-            continue;
-          }
         }
 
         await runService.triggerRun(

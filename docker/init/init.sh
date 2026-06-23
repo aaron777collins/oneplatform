@@ -45,15 +45,33 @@ SECRET_GID=1001
 mkdir -p "$INIT_DIR"
 mkdir -p "$PUBKEYS_DIR"
 
-# Ensure the init directory itself is group-readable by service containers.
+# Ensure the init directory itself is traversable by service containers. The
+# postgres/pgbouncer images run as UID 70 (not in SECRET_GID after su-exec drops
+# supplementary groups), so the directory must be world-searchable (0755) for
+# them to reach the world-readable DB password files. World-search on the
+# directory does not expose 0440 secret contents — those still require ownership
+# or SECRET_GID group membership to read.
 chgrp "$SECRET_GID" "$INIT_DIR" 2>/dev/null || true
-chmod 0750 "$INIT_DIR"
+chmod 0755 "$INIT_DIR"
 
 # lock_secret <path> — sets owner=root, group=SECRET_GID, mode=0440.
 # 0440 means: owner read-only, group read-only, world no-access.
 lock_secret() {
   chown "0:${SECRET_GID}" "$1" 2>/dev/null || true
   chmod 0440 "$1"
+}
+
+# lock_db_secret <path> — like lock_secret but world-readable (0444).
+# The postgres and pgbouncer images run their config/initdb steps as UID 70
+# (the postgres entrypoint uses su-exec, which drops supplementary groups, so a
+# group_add of SECRET_GID does not survive into the initdb scripts). These DB
+# role passwords must therefore be readable by UID 70. They are only the per-role
+# DB passwords — the higher-value secrets (master key, JWT, cursor, bootstrap,
+# Ed25519 private keys, Redis passwords) stay at 0440. Combined with the 0755 dir
+# below this lets postgres/pgbouncer read exactly what they need and nothing more.
+lock_db_secret() {
+  chown "0:${SECRET_GID}" "$1" 2>/dev/null || true
+  chmod 0444 "$1"
 }
 
 # ── Master Key ──────────────────────────────────────────────────────────────
@@ -158,7 +176,7 @@ for SERVICE in auth gateway ingestion ontology pipeline execution app logging pl
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating DB password for ${SERVICE}_service_role"
     gen_password > "$PW_FILE"
-    lock_secret "$PW_FILE"
+    lock_db_secret "$PW_FILE"
   else
     echo "[op-init] DB password for ${SERVICE}_service_role already exists, skipping"
   fi
@@ -172,7 +190,7 @@ for PGBUSER in pgbouncer_admin pgbouncer_stats; do
   if [ ! -f "$PW_FILE" ]; then
     echo "[op-init] Generating password for ${PGBUSER}"
     gen_password > "$PW_FILE"
-    lock_secret "$PW_FILE"
+    lock_db_secret "$PW_FILE"
   else
     echo "[op-init] Password for ${PGBUSER} already exists, skipping"
   fi
@@ -184,7 +202,7 @@ done
 if [ ! -f "$INIT_DIR/db_password_postgres_superuser.txt" ]; then
   echo "[op-init] Generating Postgres superuser password"
   gen_password > "$INIT_DIR/db_password_postgres_superuser.txt"
-  lock_secret "$INIT_DIR/db_password_postgres_superuser.txt"
+  lock_db_secret "$INIT_DIR/db_password_postgres_superuser.txt"
 else
   echo "[op-init] Postgres superuser password already exists, skipping"
 fi

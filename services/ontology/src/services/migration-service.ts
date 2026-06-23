@@ -177,11 +177,6 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
         throw new MigrationPlanExpiredError("Migration confirmation window (1 hour) has expired.");
       }
 
-      const confirmed = await migrationRepo.setConfirmed(migrationId, userId);
-      if (!confirmed) {
-        throw new MigrationWrongStateError("Migration state changed concurrently.");
-      }
-
       const entity = await entityRepo.findById(migration.tenant_id, migration.entity_id);
       if (!entity) throw new MigrationNotFoundError("Entity no longer exists.");
 
@@ -189,6 +184,10 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
       // released on the same connection. The lock is transaction-scoped
       // (pg_try_advisory_xact_lock) so it is automatically released when the
       // transaction ends, preventing leaks if the process crashes mid-migration.
+      //
+      // setConfirmed runs INSIDE this transaction so that if the lock fails or
+      // any subsequent step fails, the status='confirmed' UPDATE is rolled back
+      // and the migration is never permanently stuck.
       const client = await db.connect();
       try {
         await client.query("BEGIN");
@@ -202,6 +201,14 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
           throw new MigrationInProgressError("Another migration is already running for this entity.");
         }
 
+        // Confirm inside the transaction so the status update is rolled back
+        // atomically if anything below fails before COMMIT.
+        const confirmed = await migrationRepo.setConfirmedWithClient(client, migrationId, userId);
+        if (!confirmed) {
+          await client.query("ROLLBACK");
+          throw new MigrationWrongStateError("Migration state changed concurrently.");
+        }
+
         const schemaName = tenantSchemaName(migration.tenant_id);
         const viewName = buildUnionViewName(entity.slug, migrationId);
 
@@ -211,7 +218,9 @@ export function createMigrationService(deps: MigrationServiceDeps): MigrationSer
           await client.query(viewDDL);
         }
 
-        await migrationRepo.setRunning(migrationId, viewName);
+        // Pass the tx client so the status update and CREATE VIEW are in the
+        // same transaction — prevents status='running' from leaking if COMMIT fails.
+        await migrationRepo.setRunning(migrationId, viewName, client);
 
         await client.query("COMMIT");
 

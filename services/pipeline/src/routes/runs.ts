@@ -133,15 +133,14 @@ export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariab
         // Polling loop — 500ms interval per design spec §11.3
         let isStreamActive = true;
 
-        // Detect client disconnect to stop the polling loop
-        // (ReadableStream cancel is called when the client disconnects)
-        const cleanup = (): void => {
+        // Stop the polling loop when the client disconnects. executions.ts uses
+        // c.req.raw.signal the same way. Without this, a disconnected client leaks
+        // a DB polling connection until the run reaches a terminal state.
+        const abortSignal = c.req.raw.signal;
+        const onAbort = (): void => {
           isStreamActive = false;
         };
-
-        // We cannot easily hook into client disconnect from within a ReadableStream
-        // start handler, so we rely on the controller.close() path via run terminal status.
-        // In production, an AbortSignal on the Hono request context would be used here.
+        abortSignal.addEventListener("abort", onAbort, { once: true });
 
         while (isStreamActive) {
           await new Promise<void>((resolve) => setTimeout(resolve, 500));
@@ -197,7 +196,7 @@ export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariab
           }
         }
 
-        cleanup();
+        abortSignal.removeEventListener("abort", onAbort);
         controller.close();
       },
     });

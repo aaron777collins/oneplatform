@@ -100,7 +100,7 @@ describe("useBuildLogs", () => {
     expect(es.readyState).toBe(MockEventSource.CLOSED);
   });
 
-  it("falls back to buildResult='success' when 'complete' carries malformed JSON", () => {
+  it("falls back to buildResult='failed' when 'complete' carries malformed JSON", () => {
     const { result } = renderHook(() => useBuildLogs("app-1", "build-1"));
     const es = instances[0]!;
 
@@ -109,7 +109,7 @@ describe("useBuildLogs", () => {
       dispatchComplete(es, null);
     });
 
-    expect(result.current.buildResult).toBe("success");
+    expect(result.current.buildResult).toBe("failed");
     expect(result.current.isComplete).toBe(true);
   });
 

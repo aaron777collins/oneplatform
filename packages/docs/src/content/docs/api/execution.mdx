@@ -25,11 +25,10 @@ the result. Run results (including per-step logs) are queryable after completion
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/v1/runs` | Bearer + `pipelines:run` | Start a pipeline run |
-| `GET` | `/api/v1/runs` | Bearer | List runs |
-| `GET` | `/api/v1/runs/{id}` | Bearer | Get run status and result |
-| `DELETE` | `/api/v1/runs/{id}` | Bearer + `pipelines:run` | Cancel a running job |
-| `GET` | `/api/v1/runs/{id}/logs` | Bearer | Stream logs for a run |
+| `POST` | `/api/v1/exec/run` | Bearer + `pipelines:run` | Start an execution run |
+| `GET` | `/api/v1/exec` | Bearer | List runs |
+| `GET` | `/api/v1/exec/{id}` | Bearer | Get run status and result |
+| `GET` | `/api/v1/exec/{id}/logs` | Bearer | Stream logs for a run |
 
 ## Run request
 

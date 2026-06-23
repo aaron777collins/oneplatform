@@ -340,6 +340,48 @@ function splitOnUnescapedComma(dn: string): string[] {
   return parts;
 }
 
+/**
+ * Unescape an RFC 4514 RDN value. Handles both escape forms:
+ *   - `\HH` hex escape  → the byte HH (e.g. `\2c` → ",")
+ *   - `\X`  char escape → the literal character X (e.g. `\,` → ",")
+ *
+ * Consecutive `\HH` escapes are decoded as a UTF-8 byte sequence so multi-byte
+ * characters (e.g. accented group names) round-trip correctly.
+ */
+function unescapeRfc4514(value: string): string {
+  let out = "";
+  let pendingBytes: number[] = [];
+
+  const flushBytes = (): void => {
+    if (pendingBytes.length === 0) return;
+    out += Buffer.from(pendingBytes).toString("utf8");
+    pendingBytes = [];
+  };
+
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === "\\" && i + 1 < value.length) {
+      const next = value[i + 1]!;
+      const after = i + 2 < value.length ? value[i + 2]! : "";
+      const hexPair = next + after;
+      if (/^[0-9a-fA-F]{2}$/.test(hexPair)) {
+        pendingBytes.push(parseInt(hexPair, 16));
+        i += 2;
+        continue;
+      }
+      // Single-character escape: \, \\ \+ \" \< \> \; \space etc.
+      flushBytes();
+      out += next;
+      i += 1;
+      continue;
+    }
+    flushBytes();
+    out += ch;
+  }
+  flushBytes();
+  return out;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // LDAP proxy client
 //
@@ -622,7 +664,7 @@ class LdapAuthProvider implements AuthProvider {
       }
       this.proxyUrl = rawProxyUrl.trim();
 
-      const bindPassword = await context.credentials.get(this.config.bindCredentialKey);
+      const bindPassword = await this.requireBindPassword(context);
       await context.cache.set(PROXY_URL_CACHE_KEY, this.proxyUrl, 3600);
 
       // Probe the LDAP connection with the service-account bind to surface
@@ -834,7 +876,16 @@ class LdapAuthProvider implements AuthProvider {
     // that the service account has access to, allowing information disclosure of
     // directory entries outside the intended search scope.
     const searchBase = token.trim();
-    if (!searchBase.toLowerCase().endsWith(cfg.baseDN.toLowerCase())) {
+    // Require an RDN comma boundary so a sibling DN whose text is a suffix of
+    // baseDN cannot pass the check (P19-084 — privilege escalation via suffix match).
+    // e.g. "evil.example.com" must not match baseDN "e.example.com".
+    // Both sides are lowercased because LDAP DNs are case-insensitive.
+    const normalizedBase = searchBase.toLowerCase();
+    const normalizedDN = cfg.baseDN.toLowerCase();
+    const dnInScope =
+      normalizedBase === normalizedDN ||
+      normalizedBase.endsWith("," + normalizedDN);
+    if (!dnInScope) {
       return { valid: false, error: "Token DN is outside the configured base DN" };
     }
 
@@ -1179,8 +1230,10 @@ class LdapAuthProvider implements AuthProvider {
       const firstRDN = splitOnUnescapedComma(dn)[0] ?? "";
       const eqIndex = firstRDN.indexOf("=");
       if (eqIndex !== -1) {
-        // Unescape RFC 4514 backslash-escaped characters in the RDN value.
-        const name = firstRDN.slice(eqIndex + 1).replace(/\\(.)/g, "$1").trim();
+        // Unescape RFC 4514 escapes in the RDN value, including \HH hex escapes
+        // (e.g. cn=Finance\2cLegal → "Finance,Legal"). Decoding only single-char
+        // backslash escapes silently mangled OpenLDAP/FreeIPA group names.
+        const name = unescapeRfc4514(firstRDN.slice(eqIndex + 1)).trim();
         if (name !== "") {
           groupNames.push(name);
         }
@@ -1266,7 +1319,17 @@ class LdapAuthProvider implements AuthProvider {
 
   private async requireBindPassword(context: AuthContext): Promise<string> {
     const cfg = this.requireConfig();
-    return context.credentials.get(cfg.bindCredentialKey);
+    const bindPassword = await context.credentials.get(cfg.bindCredentialKey);
+    // An empty bind password is treated by many LDAP servers as an UNauthenticated
+    // (anonymous) bind that still returns success — silently dropping the
+    // service-account identity. Reject it rather than send it.
+    if (typeof bindPassword !== "string" || bindPassword === "") {
+      throw new PluginConfigError(
+        "LDAP service-account bind password is empty — set the credential referenced by bindCredentialKey",
+        "bindCredentialKey",
+      );
+    }
+    return bindPassword;
   }
 
   private async requireProxyUrl(context: AuthContext): Promise<string> {

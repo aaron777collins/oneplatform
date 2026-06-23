@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --project tsconfig.json && node -e \"const fs=require('fs');const s='src/db/migrations';const t='dist/db/migrations';if(fs.existsSync(s)){fs.mkdirSync(t,{recursive:true});for(const f of fs.readdirSync(s))if(f.endsWith('.sql'))fs.copyFileSync(s+'/'+f,t+'/'+f);}\"",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run --passWithNoTests",

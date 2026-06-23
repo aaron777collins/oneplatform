@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { hash as bcryptHash, compare as bcryptCompare } from "bcryptjs";
+import bcryptjs from "bcryptjs";
+
+const { hash: bcryptHash, compare: bcryptCompare } = bcryptjs;
 import { encrypt, ForbiddenError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import { WebhookReceiverNotFoundError, ConnectorNotFoundError } from "./errors.js";

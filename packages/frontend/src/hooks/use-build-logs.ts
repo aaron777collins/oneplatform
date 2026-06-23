@@ -85,8 +85,9 @@ export function useBuildLogs(
         const payload = JSON.parse((e as MessageEvent<string>).data) as { status: "success" | "failed" };
         setBuildResult(payload.status);
       } catch {
-        // Treat missing payload as success — the build is at least done
-        setBuildResult("success");
+        // Payload is malformed — treat as failed so a failed build with a bad
+        // payload is never silently reported as successful.
+        setBuildResult("failed");
       }
       setIsComplete(true);
       es.close();

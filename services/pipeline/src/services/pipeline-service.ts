@@ -13,6 +13,7 @@ import {
   PipelineInvalidWebhookUrlError,
   PipelineVersionNotFoundError,
 } from "./errors.js";
+import { isUrlSsrfBlocked } from "./ssrf-blocklist.js";
 
 // ---------------------------------------------------------------------------
 // Domain types — re-use the concrete repo row type.
@@ -411,37 +412,6 @@ export interface PipelineServiceDeps {
   scheduleRepo: ScheduleRepoForPipeline;
   runRepo: RunRepository;
   logger: Logger;
-}
-
-// ---------------------------------------------------------------------------
-// RFC-1918 / loopback / link-local / metadata SSRF blocklist (design spec §4.2)
-// We check at definition-save time; execution engine re-checks at runtime.
-// ---------------------------------------------------------------------------
-
-const SSRF_BLOCKED_PATTERNS = [
-  // Loopback
-  /^https?:\/\/localhost(:\d+)?(\/|$)/i,
-  /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
-  // RFC-1918 private ranges
-  /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?(\/|$)/,
-  // Link-local
-  /^https?:\/\/169\.254\.\d+\.\d+(:\d+)?(\/|$)/,
-  /^https?:\/\/\[fe80:/i,
-  // AWS metadata endpoint
-  /^https?:\/\/169\.254\.169\.254(:\d+)?(\/|$)/,
-  // GCP metadata
-  /^https?:\/\/metadata\.google\.internal(:\d+)?(\/|$)/i,
-  // Azure metadata
-  /^https?:\/\/169\.254\.169\.254(:\d+)?(\/|$)/,
-  // Alibaba cloud metadata
-  /^https?:\/\/100\.100\.100\.200(:\d+)?(\/|$)/,
-];
-
-function isUrlSsrfBlocked(url: string): boolean {
-  return SSRF_BLOCKED_PATTERNS.some((pattern) => pattern.test(url));
 }
 
 // ---------------------------------------------------------------------------

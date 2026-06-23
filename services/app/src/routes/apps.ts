@@ -264,6 +264,10 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     const app = await appService.getApp(user.tenantId, c.req.param("id"));
     const filePath = `/${decodeURIComponent(c.req.param("path") ?? "")}`;
 
+    // Reject traversal attempts and disallowed extensions before any DB access,
+    // matching the same guard applied in PUT and rename handlers.
+    validateFilePath(filePath);
+
     if (filePath === "/src/index.tsx") {
       throw new AppCannotDeleteEntrypointError(
         "Cannot delete /src/index.tsx — it is the required app entrypoint.",
@@ -471,16 +475,14 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     // Verify app ownership
     await appService.getApp(user.tenantId, c.req.param("id"));
 
-    // Additional redirect URIs are forwarded to the Auth Service.
-    // Implementation: call Auth Service PATCH /internal/oauth/clients/{clientId}/redirect-uris
-    // Stubbed for now — returns acknowledgment
-    return c.json({
-      data: {
-        appId:                  c.req.param("id"),
-        additionalRedirectUris: parsed.data.additionalRedirectUris,
-        updatedAt:              new Date().toISOString(),
-      },
-    });
+    // The Auth Service client (authServiceUrl + serviceTokenSigner) is not wired
+    // into this route's dependency set, so we cannot call
+    // PATCH /internal/oauth/clients/:clientId/redirect-uris.
+    // Returning 501 prevents callers from falsely believing the change was applied.
+    return c.json(
+      { error: "OAuth redirect-URI management requires Auth Service integration not yet wired to this route." },
+      501
+    );
   });
 
   routes.delete("/:id/oauth/dev-redirect-uris", async (c) => {
@@ -488,8 +490,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
     await appService.getApp(user.tenantId, c.req.param("id"));
-    // Forward to Auth Service to remove dev redirect URIs
-    return new Response(null, { status: 204 });
+    // Auth Service integration is not wired to this route; cannot call
+    // DELETE /internal/oauth/clients/:clientId/redirect-uris.
+    return c.json(
+      { error: "OAuth redirect-URI management requires Auth Service integration not yet wired to this route." },
+      501
+    );
   });
 
   // ---------------------------------------------------------------------------

@@ -1,0 +1,212 @@
+[
+  {
+    "name": "ingestion/batch-insert-100",
+    "throughputOpsPerSec": 1277.6256849574868,
+    "latency": {
+      "meanMs": 0.781321240000002,
+      "p95Ms": 1.2885029999999915,
+      "p99Ms": 2.469853999999998
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/batch-insert-1000",
+    "throughputOpsPerSec": 165.01840889263346,
+    "latency": {
+      "meanMs": 6.05834514,
+      "p95Ms": 7.953380000000038,
+      "p99Ms": 9.112762000000032
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/batch-insert-10000",
+    "throughputOpsPerSec": 16.514583672952305,
+    "latency": {
+      "meanMs": 60.55006469999998,
+      "p95Ms": 72.9564620000001,
+      "p99Ms": 88.87075099999993
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/sync-cycle-latency",
+    "throughputOpsPerSec": 739687.0975638956,
+    "latency": {
+      "meanMs": 0.001142191000006278,
+      "p95Ms": 0.001510000000052969,
+      "p99Ms": 0.004560000000310538
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/concurrent-sync-throughput",
+    "throughputOpsPerSec": 671340.990200905,
+    "latency": {
+      "meanMs": 0.010228363999964131,
+      "p95Ms": 0.0179599999992206,
+      "p99Ms": 0.023210000000290165
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/schema-inference-simple-500",
+    "throughputOpsPerSec": 6507.919422065506,
+    "latency": {
+      "meanMs": 0.15347764000002825,
+      "p95Ms": 0.16046099999948638,
+      "p99Ms": 0.17423200000030192
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/schema-inference-medium-500",
+    "throughputOpsPerSec": 2097.0441575426994,
+    "latency": {
+      "meanMs": 0.4766117299999814,
+      "p95Ms": 0.5754659999993237,
+      "p99Ms": 0.5947360000000117
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "ingestion/schema-inference-complex-500",
+    "throughputOpsPerSec": 322.4422815378052,
+    "latency": {
+      "meanMs": 3.100895444999983,
+      "p95Ms": 3.376814000000195,
+      "p99Ms": 3.7106170000006387
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "pipeline/step-execution-latency",
+    "throughputOpsPerSec": 1611249.8755309733,
+    "latency": {
+      "meanMs": 0.00048623649999954066,
+      "p95Ms": 0.0008399999996981933,
+      "p99Ms": 0.0009199999994962127
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "pipeline/throughput-5-steps",
+    "throughputOpsPerSec": 470105.74088433315,
+    "latency": {
+      "meanMs": 0.002053979000000254,
+      "p95Ms": 0.003269999999247375,
+      "p99Ms": 0.00401999999940017
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "pipeline/throughput-25-steps",
+    "throughputOpsPerSec": 99858.8993751781,
+    "latency": {
+      "meanMs": 0.009940980000020317,
+      "p95Ms": 0.011100000000624277,
+      "p99Ms": 0.015049999999973807
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "pipeline/conditional-branching-overhead",
+    "throughputOpsPerSec": 306330.55057558184,
+    "latency": {
+      "meanMs": 0.003192791000001762,
+      "p95Ms": 0.0059000000001105946,
+      "p99Ms": 0.009710000000268337
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "pipeline/parallel-branch-overhead-4-branches",
+    "throughputOpsPerSec": 402122.4020378822,
+    "latency": {
+      "meanMs": 0.0024143749999993814,
+      "p95Ms": 0.003110000000560831,
+      "p99Ms": 0.009100000000216824
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "pipeline/parallel-branch-overhead-16-branches",
+    "throughputOpsPerSec": 137080.88718201336,
+    "latency": {
+      "meanMs": 0.007218660999990789,
+      "p95Ms": 0.008009999999558204,
+      "p99Ms": 0.01246999999966647
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/gateway-routing-latency",
+    "throughputOpsPerSec": 823623.2408622331,
+    "latency": {
+      "meanMs": 0.0011345837400005803,
+      "p95Ms": 0.0013699999999516876,
+      "p99Ms": 0.0017600000001039007
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/jwt-validation-overhead",
+    "throughputOpsPerSec": 42732.27700711367,
+    "latency": {
+      "meanMs": 0.02328847249999808,
+      "p95Ms": 0.035979999999653955,
+      "p99Ms": 0.046000000000276486
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/api-key-lookup-overhead",
+    "throughputOpsPerSec": 466031.10897461174,
+    "latency": {
+      "meanMs": 0.0020732607999983882,
+      "p95Ms": 0.0025709999999889988,
+      "p99Ms": 0.002860000000509899
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/pagination-page-10-dataset-1000",
+    "throughputOpsPerSec": 158938.2113716743,
+    "latency": {
+      "meanMs": 0.006222422800006279,
+      "p95Ms": 0.007749999999759893,
+      "p99Ms": 0.009860000000116997
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/pagination-page-50-dataset-1000",
+    "throughputOpsPerSec": 157762.35927676514,
+    "latency": {
+      "meanMs": 0.006267373200000111,
+      "p95Ms": 0.008330000000569271,
+      "p99Ms": 0.009740000000419968
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/pagination-page-100-dataset-10000",
+    "throughputOpsPerSec": 16160.16079385842,
+    "latency": {
+      "meanMs": 0.06178028379999141,
+      "p95Ms": 0.07454099999995378,
+      "p99Ms": 0.09545100000013917
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  },
+  {
+    "name": "api/hmac-signing-overhead",
+    "throughputOpsPerSec": 245922.7090747266,
+    "latency": {
+      "meanMs": 0.003980945800000882,
+      "p95Ms": 0.005490000000463624,
+      "p99Ms": 0.006370000000060827
+    },
+    "recordedAt": "2026-06-18T06:22:35.415Z"
+  }
+]

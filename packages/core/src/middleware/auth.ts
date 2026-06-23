@@ -36,6 +36,18 @@ export interface AuthMiddlewareConfig {
   validateApiKey: (key: string) => Promise<UserContext | null>;
   // Routes that bypass auth entirely (e.g. /healthz, /readyz, /api/v1/auth/*)
   publicRoutes?: string[];
+  /**
+   * Expected JWT issuer (`iss` claim). When provided, jose rejects tokens
+   * whose `iss` does not match — preventing cross-issuer token replay.
+   * Omit to skip issuer validation (backward-compatible default).
+   */
+  issuer?: string;
+  /**
+   * Expected JWT audience (`aud` claim). When provided, jose rejects tokens
+   * whose `aud` does not include this value — preventing cross-audience token replay.
+   * Omit to skip audience validation (backward-compatible default).
+   */
+  audience?: string;
 }
 
 /**
@@ -55,8 +67,9 @@ export interface AuthMiddlewareConfig {
 export function authMiddleware(config: AuthMiddlewareConfig) {
   const secretBytes = new TextEncoder().encode(config.jwtSecret);
   const exactPublicRoutes = new Set<string>();
-  const prefixPublicRoutes: string[] = [];
   const wildcardPublicRoutes: RegExp[] = [];
+  // prefixPublicRoutes was removed — routes use exact or wildcard (glob/param) buckets.
+  // Add a "prefix/*" wildcard entry to publicRoutes instead.
 
   // Pre-parse the Ed25519 public key once at middleware-creation time so we
   // pay the PEM-parse cost on startup, not on every request.
@@ -102,9 +115,6 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       ? rawPath.slice(0, -1)
       : rawPath;
     if (exactPublicRoutes.has(path)) return true;
-    for (const prefix of prefixPublicRoutes) {
-      if (path === prefix || path.startsWith(prefix + "/")) return true;
-    }
     for (const pattern of wildcardPublicRoutes) {
       if (pattern.test(path)) return true;
     }
@@ -176,10 +186,22 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
               401
             );
           }
-          const { payload } = await jwtVerify(token, edDsaPublicKey, { algorithms: ["EdDSA"] });
+          const { payload } = await jwtVerify(token, edDsaPublicKey, {
+            algorithms: ["EdDSA"],
+            // Enforce iss/aud when configured to prevent cross-issuer and
+            // cross-audience token replay attacks (P19-039).
+            ...(config.issuer !== undefined ? { issuer: config.issuer } : {}),
+            ...(config.audience !== undefined ? { audience: config.audience } : {}),
+          });
           claims = payload as JwtClaims;
         } else {
-          const { payload } = await jwtVerify(token, secretBytes, { algorithms: ["HS256"] });
+          const { payload } = await jwtVerify(token, secretBytes, {
+            algorithms: ["HS256"],
+            // Enforce iss/aud when configured to prevent cross-issuer and
+            // cross-audience token replay attacks (P19-039).
+            ...(config.issuer !== undefined ? { issuer: config.issuer } : {}),
+            ...(config.audience !== undefined ? { audience: config.audience } : {}),
+          });
           claims = payload as JwtClaims;
         }
       } catch {

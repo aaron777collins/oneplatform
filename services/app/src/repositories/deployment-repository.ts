@@ -122,9 +122,7 @@ export class DeploymentRepository {
       throw new Error(`update() called with no fields to update for build ${id}`);
     }
 
-    // Always update the updated_at timestamp on writes
-    sets.push(`updated_at = now()`);
-
+    // app.builds has no updated_at column (see 001_initial_schema.sql) — do not append one
     values.push(id);
 
     const result = await this.pool.query<BuildRow>(
@@ -173,6 +171,16 @@ export class DeploymentRepository {
     const result = await this.pool.query<{ count: string }>(
       "SELECT COUNT(*) AS count FROM app.builds WHERE app_id = $1",
       [appId]
+    );
+    return parseInt(result.rows[0]?.count ?? "0", 10);
+  }
+
+  // Counts only builds matching a given status — used when the caller filters
+  // listByApp with filterStatus so that pagination totals stay consistent.
+  async countByAppAndStatus(appId: string, status: string): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(
+      "SELECT COUNT(*) AS count FROM app.builds WHERE app_id = $1 AND status = $2",
+      [appId, status]
     );
     return parseInt(result.rows[0]?.count ?? "0", 10);
   }

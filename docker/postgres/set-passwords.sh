@@ -38,9 +38,11 @@ for SERVICE in auth gateway ingestion ontology pipeline execution app logging pl
   PW=$(read_password "$INIT_DIR/db_password_${SERVICE}.txt")
   # Use psql variable binding to prevent SQL injection from password contents.
   # The :'-quoted_var' syntax causes psql to properly quote/escape the value.
-  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-    -v "safe_pw=$PW" \
-    -c "ALTER ROLE ${SERVICE}_service_role WITH PASSWORD :'safe_pw';"
+  # NOTE: psql only interpolates :'var' for SQL read from stdin/-f, NOT from -c
+  # command strings, so the statement must be piped in rather than passed via -c.
+  echo "ALTER ROLE ${SERVICE}_service_role WITH PASSWORD :'safe_pw';" | \
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+      -v "safe_pw=$PW"
   echo "[postgres-init] Password set for ${SERVICE}_service_role"
 done
 
@@ -55,9 +57,10 @@ for PGBUSER in pgbouncer_admin pgbouncer_stats; do
   if [ "$ROLE_EXISTS" = "1" ]; then
     PW=$(read_password "$INIT_DIR/db_password_${PGBUSER}.txt")
     # Use psql variable binding to prevent SQL injection from password contents.
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-      -v "safe_pw=$PW" \
-      -c "ALTER ROLE ${PGBUSER} WITH PASSWORD :'safe_pw';"
+    # Piped via stdin so :'safe_pw' interpolation runs (it does not for -c).
+    echo "ALTER ROLE ${PGBUSER} WITH PASSWORD :'safe_pw';" | \
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+        -v "safe_pw=$PW"
     echo "[postgres-init] Password set for ${PGBUSER}"
   else
     echo "[postgres-init] Role ${PGBUSER} does not exist, skipping password set"
@@ -70,9 +73,10 @@ done
 # op-init generated password so the superuser is always protected by a strong
 # credential after first boot, regardless of what POSTGRES_PASSWORD was set to.
 SUPER_PW=$(read_password "$INIT_DIR/db_password_postgres_superuser.txt")
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-  -v "safe_pw=$SUPER_PW" \
-  -c "ALTER ROLE ${POSTGRES_USER} WITH PASSWORD :'safe_pw';"
+# Piped via stdin so :'safe_pw' interpolation runs (it does not for -c).
+echo "ALTER ROLE ${POSTGRES_USER} WITH PASSWORD :'safe_pw';" | \
+  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    -v "safe_pw=$SUPER_PW"
 echo "[postgres-init] Postgres superuser password reset to op-init generated value."
 
 echo "[postgres-init] All service role passwords applied successfully."

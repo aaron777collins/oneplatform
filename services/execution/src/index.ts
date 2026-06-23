@@ -53,7 +53,18 @@ function loadServicePublicKeys(): Promise<Record<string, string>> {
       );
 
       return keys;
-    } catch {
+    } catch (err) {
+      // An empty key map means every inbound /internal/* call will receive a
+      // 401 with no actionable error. Log loudly so the problem is visible at
+      // startup. In non-test environments this also marks the readiness check
+      // as failed until keys are present.
+      const isTest = process.env["NODE_ENV"] === "test";
+      const msg = `loadServicePublicKeys: no keys loaded from '${process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys"}' — ${err instanceof Error ? err.message : String(err)}`;
+      if (isTest) {
+        console.warn(`[WARN] ${msg}`);
+      } else {
+        console.error(`[ERROR] ${msg}`);
+      }
       return {};
     }
   })();
@@ -75,6 +86,7 @@ function createNoopRedisStub() {
   return {
     exists: async (..._keys: string[]): Promise<number> => 0,
     ping: async (): Promise<string> => "PONG",
+    publish: async (_channel: string, _message: string): Promise<number> => 0,
     on: (_event: string, _handler: unknown): unknown => null,
     quit: async (): Promise<void> => undefined,
   } as unknown as import("ioredis").Redis;
@@ -257,9 +269,15 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
   sandboxManager.startHealthChecks();
   logger.info("Sandbox health checks started");
 
-  // Step 14: Load service public keys for inter-service JWT verification
+  // Step 14: Load service public keys for inter-service JWT verification.
+  // Zero keys is a fatal misconfiguration in production: every /internal/*
+  // call will 401 with no indication of why. Fail readiness so Kubernetes
+  // traffic is not routed here until the init-data volume is populated.
   const servicePublicKeys = await loadServicePublicKeys();
-  logger.info("Service public keys loaded", { count: Object.keys(servicePublicKeys).length });
+  const keysLoaded = Object.keys(servicePublicKeys).length;
+  logger.info("Service public keys loaded", { count: keysLoaded });
+  const isTestEnv = process.env["NODE_ENV"] === "test";
+  const keysReady = keysLoaded > 0 || isTestEnv;
 
   // Step 15: Gate — service is ready only after sandbox health check passes.
   // Allow a brief window for the first ping to complete before marking ready.
@@ -286,7 +304,9 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
     pool: db,
     sandboxClient,
     serviceStartedAt,
-    isReady: () => serviceReady,
+    // keysReady gates on having at least one service public key (skipped in test
+    // env where no key files exist). Without keys every /internal/* call 401s.
+    isReady: () => serviceReady && keysReady,
   });
   app.route("/", healthRoutes);
 

@@ -385,9 +385,17 @@ export function createMeteringService(deps: MeteringServiceDeps): MeteringServic
       const eventsToInsert = entries.map(([type, rawValue]) => {
         const value = parseFloat(rawValue);
         const rawMeta = metas[type];
-        const metadata: Record<string, string> | undefined = rawMeta !== undefined
-          ? JSON.parse(rawMeta) as Record<string, string>
-          : undefined;
+        // Guard against corrupt Redis entries: a SyntaxError here would abort
+        // the entire entries.map and skip all remaining tenants in the flush.
+        // Treat unparseable metadata as absent rather than fatal.
+        let metadata: Record<string, string> | undefined;
+        if (rawMeta !== undefined) {
+          try {
+            metadata = JSON.parse(rawMeta) as Record<string, string>;
+          } catch {
+            metadata = undefined;
+          }
+        }
 
         return {
           tenant_id: tenantId,

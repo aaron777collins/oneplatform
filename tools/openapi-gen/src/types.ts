@@ -57,6 +57,12 @@ export interface RouteMeta {
   response: RouteResponseMeta;
   deprecated?: boolean;
   deprecationMessage?: string;
+  /**
+   * Content-type for successful (2xx) responses.
+   * Defaults to "application/json". Use "text/event-stream" for SSE endpoints
+   * so the generated spec correctly documents the streaming response.
+   */
+  responseContentType?: string;
 }
 
 export interface ServiceOpenApiMeta {

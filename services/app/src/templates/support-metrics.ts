@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const supportMetricsTemplate: AppTemplate = {
   meta: {
@@ -18,6 +19,7 @@ export const supportMetricsTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -113,7 +115,7 @@ export const supportMetricsTemplate: AppTemplate = {
         `  return (`,
         `    <div style={wrap}>`,
         `      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>`,
-        `        <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>${appName}</h1>`,
+        `        <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>${safeName}</h1>`,
         `        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>`,
         `          <label htmlFor="priority-filter" style={{ fontSize: "0.875rem", color: "#64748b" }}>Priority:</label>`,
         `          <select`,

@@ -38,6 +38,7 @@ import {
 // ────────────────────────────────────────────────────────────────────────────
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024; // 1 MB
+const DEFAULT_REPLAY_WINDOW_SECONDS = 300; // 5 minutes
 
 /** Validated config extracted from the raw plugin config object. */
 interface WebhookConfig {
@@ -47,6 +48,11 @@ interface WebhookConfig {
   idField: string | undefined;
   batchSize: number;
   maxPayloadBytes: number;
+  /**
+   * Reject signed payloads whose receivedAt is older than this many seconds
+   * (replay-attack window). 0 disables the check. Default 300s.
+   */
+  replayWindowSeconds: number;
 }
 
 /**
@@ -155,6 +161,18 @@ function parseConfig(raw: Record<string, unknown>): WebhookConfig {
       ? Math.floor(rawMaxPayloadBytes)
       : MAX_PAYLOAD_BYTES;
 
+  const rawReplayWindow = raw["replayWindowSeconds"];
+  const resolvedReplayWindow = (() => {
+    if (rawReplayWindow === undefined) return DEFAULT_REPLAY_WINDOW_SECONDS;
+    if (typeof rawReplayWindow !== "number" || !Number.isFinite(rawReplayWindow) || rawReplayWindow < 0) {
+      throw new PluginConfigError(
+        `replayWindowSeconds must be a non-negative number, got ${String(rawReplayWindow)}`,
+        "replayWindowSeconds",
+      );
+    }
+    return Math.floor(rawReplayWindow);
+  })();
+
   return {
     webhookPath,
     signatureHeader: typeof signatureHeader === "string" ? signatureHeader : undefined,
@@ -162,6 +180,7 @@ function parseConfig(raw: Record<string, unknown>): WebhookConfig {
     idField: typeof idField === "string" ? idField : undefined,
     batchSize: resolvedBatchSize,
     maxPayloadBytes: resolvedMaxPayloadBytes,
+    replayWindowSeconds: resolvedReplayWindow,
   };
 }
 
@@ -367,6 +386,7 @@ interface WebhookHandleMetadata {
   idField: string | undefined;
   batchSize: number;
   maxPayloadBytes: number;
+  replayWindowSeconds: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -479,6 +499,7 @@ const webhookConnector: Connector = {
       idField: parsed.idField,
       batchSize: parsed.batchSize,
       maxPayloadBytes: parsed.maxPayloadBytes,
+      replayWindowSeconds: parsed.replayWindowSeconds,
     };
 
     context.logger.info("Webhook connector connected", {
@@ -528,151 +549,206 @@ const webhookConnector: Connector = {
     span.setAttribute("batchSize", batchSize);
 
     try {
-      // Read the ordered index of pending payload IDs.
-      const index = await context.cache.get<PendingIndex>(pendingIndexKey(instanceId));
-      const allIds = index?.ids ?? [];
-
-      if (allIds.length === 0) {
-        context.logger.debug("Webhook staging queue is empty", { instanceId });
+      // Acquire a distributed lock before read-modify-write on the pending index.
+      // Without this, concurrent fetchBatch calls for the same instance read the
+      // same index snapshot and double-process the same batch of payloads. TTL of
+      // 30 s is generous — a single batch completes in well under that; the auto-
+      // release prevents deadlocks if the process dies mid-batch.
+      const lockKey = `webhook:lock:${instanceId}`;
+      const lock = await context.cache.lock(lockKey, 30);
+      if (lock === null) {
+        // Another fetchBatch for this instance is already running. Return empty
+        // so the caller retries on the next scheduler tick rather than racing.
+        context.logger.debug("Webhook fetchBatch skipped — lock held by concurrent run", { instanceId });
         return {
           records: [],
-          nextCursor: null,
-          hasMore: false,
+          nextCursor: "continue", // signal that there may still be data
+          hasMore: true,
           fetchedAt: new Date().toISOString(),
         };
       }
 
-      // Always start from index 0 of the current (already-pruned) index.
-      // Processed IDs are removed from the index at the end of each batch, so
-      // the next call sees only unprocessed entries starting at position 0.
-      const startIndex = 0;
+      try {
+        // Read the ordered index of pending payload IDs inside the lock.
+        const index = await context.cache.get<PendingIndex>(pendingIndexKey(instanceId));
+        const allIds = index?.ids ?? [];
 
-      const pageIds = allIds.slice(startIndex, startIndex + batchSize);
-
-      if (pageIds.length === 0) {
-        return {
-          records: [],
-          nextCursor: null,
-          hasMore: false,
-          fetchedAt: new Date().toISOString(),
-        };
-      }
-
-      // Retrieve secret once per batch, not once per payload, to avoid repeated
-      // credential store round-trips.
-      let secret: string | undefined;
-      if (signatureVerificationEnabled) {
-        secret = await context.credentials.get("signatureSecret");
-      }
-
-      const records: DataRecord[] = [];
-      const processedIds: string[] = [];
-
-      for (const payloadId of pageIds) {
-        const payload = await context.cache.get<WebhookPayload>(
-          pendingPayloadKey(instanceId, payloadId),
-        );
-
-        if (payload === null) {
-          // Payload TTL-expired or was manually removed. Skip gracefully — removing
-          // it from the index prevents repeated lookups for a gone entry.
-          context.logger.warn("Webhook payload not found in cache (possible TTL expiry)", {
-            instanceId,
-            payloadId,
-          });
-          processedIds.push(payloadId);
-          continue;
+        if (allIds.length === 0) {
+          context.logger.debug("Webhook staging queue is empty", { instanceId });
+          return {
+            records: [],
+            nextCursor: null,
+            hasMore: false,
+            fetchedAt: new Date().toISOString(),
+          };
         }
 
-        if (payload.rawBody.length > effectiveMaxPayloadBytes) {
-          context.logger.warn("Webhook payload exceeds maximum size — skipping", {
-            instanceId,
-            payloadId,
-            size: payload.rawBody.length,
-            maxPayloadBytes: effectiveMaxPayloadBytes,
-          });
-          processedIds.push(payloadId);
-          continue;
+        // Always start from index 0 of the current (already-pruned) index.
+        // Processed IDs are removed from the index at the end of each batch, so
+        // the next call sees only unprocessed entries starting at position 0.
+        const startIndex = 0;
+
+        const pageIds = allIds.slice(startIndex, startIndex + batchSize);
+
+        if (pageIds.length === 0) {
+          return {
+            records: [],
+            nextCursor: null,
+            hasMore: false,
+            fetchedAt: new Date().toISOString(),
+          };
         }
 
-        if (signatureVerificationEnabled && secret !== undefined && handleMeta.signatureHeader !== undefined) {
-          try {
-            await verifySignature(payload, handleMeta.signatureHeader, signatureAlgorithm, secret);
-          } catch (err) {
-            if (err instanceof PluginAuthError) {
-              context.logger.warn("Webhook payload failed signature verification — skipping", {
-                instanceId,
-                payloadId,
-                error: err.message,
-              });
-              // Still mark as processed to prevent infinite re-inspection of an
-              // unauthenticated payload. The warn log creates an audit trail.
-              processedIds.push(payloadId);
-              continue;
+        // Retrieve secret once per batch, not once per payload, to avoid repeated
+        // credential store round-trips. Assert it is non-empty before processing
+        // any payloads so we never silently skip HMAC verification on a missing secret.
+        let secret: string | undefined;
+        if (signatureVerificationEnabled) {
+          const resolvedSecret = await context.credentials.get("signatureSecret");
+          if (typeof resolvedSecret !== "string" || resolvedSecret.length === 0) {
+            throw new PluginAuthError(
+              "signatureSecret credential resolved to an empty value — HMAC verification cannot proceed. " +
+              "Bind a non-empty HMAC secret as the 'signatureSecret' credential.",
+            );
+          }
+          secret = resolvedSecret;
+        }
+
+        const records: DataRecord[] = [];
+        const processedIds: string[] = [];
+
+        for (const payloadId of pageIds) {
+          const payload = await context.cache.get<WebhookPayload>(
+            pendingPayloadKey(instanceId, payloadId),
+          );
+
+          if (payload === null) {
+            // Payload TTL-expired or was manually removed. Skip gracefully — removing
+            // it from the index prevents repeated lookups for a gone entry.
+            context.logger.warn("Webhook payload not found in cache (possible TTL expiry)", {
+              instanceId,
+              payloadId,
+            });
+            processedIds.push(payloadId);
+            continue;
+          }
+
+          // Measure the UTF-8 BYTE length, not the JS string length (UTF-16 code
+          // units). CJK/emoji bodies have ~2-3 bytes per char, so a char-length
+          // check would let payloads exceed the declared byte maximum by up to ~3x.
+          const payloadByteLength = new TextEncoder().encode(payload.rawBody).length;
+          if (payloadByteLength > effectiveMaxPayloadBytes) {
+            context.logger.warn("Webhook payload exceeds maximum size — skipping", {
+              instanceId,
+              payloadId,
+              size: payloadByteLength,
+              maxPayloadBytes: effectiveMaxPayloadBytes,
+            });
+            processedIds.push(payloadId);
+            continue;
+          }
+
+          if (signatureVerificationEnabled && handleMeta.signatureHeader !== undefined) {
+            // Replay-window guard: a captured, validly-signed payload can be
+            // re-delivered forever because the HMAC alone never expires. Reject
+            // payloads whose receivedAt is outside the configured window so a
+            // replayed delivery is dropped rather than re-ingested as new.
+            const replayWindowSeconds = handleMeta.replayWindowSeconds ?? DEFAULT_REPLAY_WINDOW_SECONDS;
+            if (replayWindowSeconds > 0) {
+              const receivedAtMs = Date.parse(payload.receivedAt);
+              const ageSeconds = (Date.now() - receivedAtMs) / 1000;
+              if (Number.isNaN(receivedAtMs) || ageSeconds > replayWindowSeconds) {
+                context.logger.warn("Webhook payload outside replay window — skipping", {
+                  instanceId,
+                  payloadId,
+                  receivedAt: payload.receivedAt,
+                  ageSeconds: Number.isNaN(receivedAtMs) ? null : Math.round(ageSeconds),
+                  replayWindowSeconds,
+                });
+                processedIds.push(payloadId);
+                continue;
+              }
             }
-            throw err;
+            try {
+              await verifySignature(payload, handleMeta.signatureHeader, signatureAlgorithm, secret!);
+            } catch (err) {
+              if (err instanceof PluginAuthError) {
+                context.logger.warn("Webhook payload failed signature verification — skipping", {
+                  instanceId,
+                  payloadId,
+                  error: err.message,
+                });
+                // Still mark as processed to prevent infinite re-inspection of an
+                // unauthenticated payload. The warn log creates an audit trail.
+                processedIds.push(payloadId);
+                continue;
+              }
+              throw err;
+            }
+          }
+
+          try {
+            const record = mapPayloadToRecord(payload, idField);
+            records.push(record);
+            processedIds.push(payloadId);
+          } catch (err) {
+            context.logger.warn("Failed to map webhook payload — skipping", {
+              instanceId,
+              payloadId,
+              error: String(err),
+            });
+            processedIds.push(payloadId);
+            continue;
           }
         }
 
-        try {
-          const record = mapPayloadToRecord(payload, idField);
-          records.push(record);
-          processedIds.push(payloadId);
-        } catch (err) {
-          context.logger.warn("Failed to map webhook payload — skipping", {
-            instanceId,
-            payloadId,
-            error: String(err),
-          });
-          processedIds.push(payloadId);
-          continue;
+        // Remove processed IDs from the index and their individual cache entries.
+        // Compute remainingIds unconditionally so that hasMore and estimatedTotal
+        // reflect the true post-batch state even when all records in the page were
+        // skipped (failed HMAC or TTL-expired). Without this, hasMore could be true
+        // while nextCursor is null (violating the BatchResult contract) whenever every
+        // record in a page is skipped but more IDs remain beyond the page window.
+        const processedSet = new Set(processedIds);
+        const remainingIds = allIds.filter((id) => !processedSet.has(id));
+
+        if (processedIds.length > 0) {
+          await context.cache.set<PendingIndex>(pendingIndexKey(instanceId), { ids: remainingIds });
+          await Promise.all(processedIds.map((id) => context.cache.delete(pendingPayloadKey(instanceId, id))));
         }
+
+        // hasMore is true iff there are IDs left to process after this batch.
+        // Using remainingIds.length (post-processing) rather than the raw page-window
+        // arithmetic ensures nextCursor is always non-null when hasMore is true,
+        // satisfying the BatchResult invariant documented in connector.ts line 40.
+        const hasMore = remainingIds.length > 0;
+        // Use a sentinel cursor rather than a payload ID. Since processed IDs are
+        // removed from the index within fetchBatch, a payload-ID cursor would always
+        // resolve to indexOf==-1 on the next call. The sentinel "continue" signals
+        // to the caller that more data exists without encoding a resumable position.
+        const nextCursor = hasMore ? "continue" : null;
+
+        span.setAttribute("recordCount", records.length);
+        span.setAttribute("hasMore", hasMore);
+
+        context.logger.info("Webhook fetchBatch complete", {
+          instanceId,
+          processed: processedIds.length,
+          records: records.length,
+          hasMore,
+        });
+
+        return {
+          records,
+          nextCursor,
+          hasMore,
+          fetchedAt: new Date().toISOString(),
+          // Use remainingIds.length so the UI shows the count of payloads still
+          // waiting, not the stale snapshot count from before this batch ran.
+          estimatedTotal: remainingIds.length,
+        };
+      } finally {
+        await lock.release();
       }
-
-      // Remove processed IDs from the index and their individual cache entries.
-      // Compute remainingIds unconditionally so that hasMore and estimatedTotal
-      // reflect the true post-batch state even when all records in the page were
-      // skipped (failed HMAC or TTL-expired). Without this, hasMore could be true
-      // while nextCursor is null (violating the BatchResult contract) whenever every
-      // record in a page is skipped but more IDs remain beyond the page window.
-      const processedSet = new Set(processedIds);
-      const remainingIds = allIds.filter((id) => !processedSet.has(id));
-
-      if (processedIds.length > 0) {
-        await context.cache.set<PendingIndex>(pendingIndexKey(instanceId), { ids: remainingIds });
-        await Promise.all(processedIds.map((id) => context.cache.delete(pendingPayloadKey(instanceId, id))));
-      }
-
-      // hasMore is true iff there are IDs left to process after this batch.
-      // Using remainingIds.length (post-processing) rather than the raw page-window
-      // arithmetic ensures nextCursor is always non-null when hasMore is true,
-      // satisfying the BatchResult invariant documented in connector.ts line 40.
-      const hasMore = remainingIds.length > 0;
-      // Use a sentinel cursor rather than a payload ID. Since processed IDs are
-      // removed from the index within fetchBatch, a payload-ID cursor would always
-      // resolve to indexOf==-1 on the next call. The sentinel "continue" signals
-      // to the caller that more data exists without encoding a resumable position.
-      const nextCursor = hasMore ? "continue" : null;
-
-      span.setAttribute("recordCount", records.length);
-      span.setAttribute("hasMore", hasMore);
-
-      context.logger.info("Webhook fetchBatch complete", {
-        instanceId,
-        processed: processedIds.length,
-        records: records.length,
-        hasMore,
-      });
-
-      return {
-        records,
-        nextCursor,
-        hasMore,
-        fetchedAt: new Date().toISOString(),
-        // Use remainingIds.length so the UI shows the count of payloads still
-        // waiting, not the stale snapshot count from before this batch ran.
-        estimatedTotal: remainingIds.length,
-      };
     } finally {
       span.end();
     }

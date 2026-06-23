@@ -262,6 +262,18 @@ function extractConfig(raw: Record<string, unknown>): CsvConfig {
       "delimiter",
     );
   }
+  // Reject characters that are structural to the CSV format itself. Using '\n'
+  // or '\r' as a delimiter collapses rows because the parser treats line
+  // terminators as field separators, producing corrupt output with no visible
+  // error. '"' would break quoted-field parsing immediately. Tab is allowed as
+  // a legitimate TSV delimiter.
+  const DISALLOWED_DELIMITERS = new Set(["\n", "\r", '"']);
+  if (typeof rawDelimiter === "string" && rawDelimiter.length === 1 && DISALLOWED_DELIMITERS.has(rawDelimiter)) {
+    throw new PluginConfigError(
+      `config.delimiter "${JSON.stringify(rawDelimiter)}" is not allowed — newline, carriage return, and double-quote characters cannot be used as delimiters`,
+      "delimiter",
+    );
+  }
   const delimiter =
     typeof rawDelimiter === "string" && rawDelimiter.length === 1
       ? rawDelimiter
@@ -342,11 +354,17 @@ class CsvConnector implements Connector {
   ): Promise<ConnectorHandle> {
     const cfg = extractConfig(config);
 
-    // Generate a stable connection ID from the URL so cache keys are predictable
-    // across reconnects to the same source.
-    const connectionId = `csv:${cfg.url}`;
+    // Generate a stable connection ID that incorporates the URL AND the parse
+    // config. Two connectors pointing at the same URL but with different
+    // delimiter/hasHeader/encoding would otherwise share the same cache entry
+    // and the first writer's parsed result would silently serve the second
+    // connector, producing wrong column names or a consumed header row.
+    const connectionId = `csv:${cfg.url}:d=${cfg.delimiter}:h=${String(cfg.hasHeader)}:e=${cfg.encoding}`;
 
-    context.logger.info("CSV connector connecting", { url: cfg.url });
+    // Log only the origin, not the full URL. Full CSV URLs often contain
+    // presigned tokens (S3, GCS) or API keys in query parameters that would
+    // be leaked into log storage if logged verbatim.
+    context.logger.info("CSV connector connecting", { urlOrigin: new URL(cfg.url).origin });
 
     // Eagerly validate that the remote URL is reachable. We use HEAD to avoid
     // downloading the full file during connect() (which must be < 5 seconds).
@@ -422,7 +440,8 @@ class CsvConnector implements Connector {
     if (cached !== null) {
       parsed = cached;
     } else {
-      context.logger.info("Fetching CSV file", { url });
+      // Log only the origin to avoid leaking presigned/tokenized URLs into logs.
+      context.logger.info("Fetching CSV file", { urlOrigin: new URL(url).origin });
 
       const headers = buildRequestHeaders(context, bearerToken);
       let response: Response;

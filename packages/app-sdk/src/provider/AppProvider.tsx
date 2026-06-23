@@ -29,6 +29,7 @@ import React from "react";
 import { BffClient } from "../client/BffClient.js";
 import { PermissionCache } from "../cache/PermissionCache.js";
 import { WebSocketManager } from "../ws/WebSocketManager.js";
+import { queryCache } from "../cache/QueryCache.js";
 import { AppContext } from "./AppContext.js";
 import type { AppProviderProps, OPAppConfig, AppProviderInitState } from "./types.js";
 import type { UserContext } from "../types/entities.js";
@@ -274,6 +275,16 @@ export function AppProvider({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- retryCount drives re-runs; test overrides are stable
   }, [retryCount]);
+
+  // Clear the module-level query cache on true unmount so a replaced provider
+  // (e.g. a different tenant/app mounted in an embed iframe) never observes the
+  // previous provider's cached rows. Empty deps → runs once on unmount only,
+  // not on retryCount-driven re-runs.
+  React.useEffect(() => {
+    return () => {
+      queryCache.clear();
+    };
+  }, []);
 
   // Step 5: re-seed permissions on visibility change.
   // Debounced 2 seconds so we don't hammer the BFF immediately on tab switch.

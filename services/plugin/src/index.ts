@@ -361,11 +361,15 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   const marketplaceRoutes = createMarketplaceRoutes({
     marketplaceService,
     onInstallPlugin: async ({ manifest, tenantId, installedBy }) => {
-      // The marketplace stores the full manifest. For marketplace installs we
-      // create the plugin record directly via the plugin repository, skipping
-      // the bundle upload step (marketplace plugins are pre-validated during
-      // the publish flow). The plugin is created in 'installed' status so an
-      // admin can activate it.
+      // Marketplace installs must go through the regular bundle upload flow
+      // (POST /api/v1/plugins with a real .tgz bundle) so that the Execution
+      // Service can fetch the bundle from MinIO when the plugin is activated.
+      // Previously this callback created a fabricated bundle_key that pointed
+      // to a non-existent MinIO object, causing a 404 at activation time.
+      //
+      // The manifest from the marketplace listing is recorded purely for
+      // telemetry (via marketplaceService.installPlugin above). Admins must
+      // separately upload the plugin bundle via the regular install endpoint.
       const manifestData = manifest as unknown as import("./schemas/index.js").PluginManifest;
 
       const existing = await pluginRepo.findByManifestIdAndVersion(
@@ -373,43 +377,22 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
         manifestData.version,
       );
       if (existing !== null) {
-        // Already installed — idempotent, no error.
+        // Already installed via the bundle upload flow — idempotent, no error.
+        logger.info("Marketplace install: plugin already installed via bundle upload", {
+          manifestId: manifestData.id,
+          version: manifestData.version,
+          tenantId,
+        });
         return;
       }
 
-      await pluginRepo.create({
-        manifest_id: manifestData.id,
-        name: manifestData.name,
-        version: manifestData.version,
-        type: manifestData.type,
-        status: "installed",
-        bundle_bucket: bundleBucket,
-        bundle_key: `marketplace/${manifestData.id}/${manifestData.version}/bundle.js`,
-        manifest: manifestData,
-        is_platform_wide: false,
-        installed_by: installedBy,
-      });
-
-      await eventPublisher.publish({
-        eventType: "plugin.installed",
-        eventVersion: "1.0.0",
-        tenantId,
-        actor: { type: "user", id: installedBy },
-        data: {
-          pluginId: manifestData.id,
-          pluginName: manifestData.name,
-          version: manifestData.version,
-          installedBy,
-          source: "marketplace",
-        },
-      });
-
-      logger.info("Plugin installed from marketplace", {
-        manifestId: manifestData.id,
-        version: manifestData.version,
-        tenantId,
-        installedBy,
-      });
+      // Block the install with a clear message rather than creating a broken record.
+      // The caller (marketplace route) will surface this as a 400/500 to the admin.
+      throw new Error(
+        `Marketplace plugin '${manifestData.id}' v${manifestData.version} cannot be activated ` +
+        `without an uploaded bundle. Download the plugin package and install it via ` +
+        `POST /api/v1/plugins with the actual .tgz bundle file.`,
+      );
     },
   });
   app.route("/api/v1/marketplace", marketplaceRoutes);

@@ -61,6 +61,13 @@ COPY services/docker-bff ./services/docker-bff
 
 RUN pnpm --filter @oneplatform/docker-bff-service build
 
+# Produce a self-contained deployment with a real, flattened, symlink-free
+# node_modules. Copying the pnpm workspace node_modules directly would carry
+# cross-package symlinks into the .pnpm store (e.g. @hono/node-server resolves
+# via ../../../node_modules/.pnpm/...), which dangle once detached from the
+# workspace root and break ESM resolution at runtime.
+RUN pnpm --filter @oneplatform/docker-bff-service deploy --prod /prod
+
 # ─── Stage 2: Runner ─────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine AS runner
 
@@ -69,10 +76,9 @@ RUN addgroup --system --gid 1001 oneplatform && \
 
 WORKDIR /app
 
-COPY --from=builder --chown=oneplatform:oneplatform /build/node_modules ./node_modules
-COPY --from=builder --chown=oneplatform:oneplatform /build/services/docker-bff/dist ./dist
-COPY --from=builder --chown=oneplatform:oneplatform /build/services/docker-bff/node_modules ./node_modules
-COPY --from=builder --chown=oneplatform:oneplatform /build/services/docker-bff/package.json ./package.json
+COPY --from=builder --chown=oneplatform:oneplatform /prod/node_modules ./node_modules
+COPY --from=builder --chown=oneplatform:oneplatform /prod/dist ./dist
+COPY --from=builder --chown=oneplatform:oneplatform /prod/package.json ./package.json
 
 USER oneplatform
 

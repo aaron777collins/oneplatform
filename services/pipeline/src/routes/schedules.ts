@@ -73,6 +73,7 @@ export function createScheduleRoutes(
       timezone: d.timezone,
       enabled: d.enabled,
       inputTemplate: d.inputTemplate,
+      dependsOn: d.dependsOn,
     });
 
     return c.json({ data: schedule }, 201);
@@ -111,6 +112,7 @@ export function createScheduleRoutes(
     if (d.timezone !== undefined) updates.timezone = d.timezone;
     if (d.enabled !== undefined) updates.enabled = d.enabled;
     if (d.inputTemplate !== undefined) updates.inputTemplate = d.inputTemplate;
+    if (d.dependsOn !== undefined) updates.dependsOn = d.dependsOn;
 
     const schedule = await scheduleService.updateSchedule(
       user.tenantId,

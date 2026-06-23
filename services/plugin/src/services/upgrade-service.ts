@@ -181,13 +181,25 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
     client: pg.PoolClient,
     manifestId: string,
     oldPlugin: PluginRow,
-    newPlugin: PluginRow
+    newPlugin: PluginRow,
+    // Staged hook rows are passed in so they can be inserted inside this
+    // transaction. Inserting them before BEGIN (as they were previously) left
+    // orphaned rows whenever the swap itself failed, and retries would
+    // re-insert duplicates because no unique constraint existed on the table.
+    stagedHooks: import("../repositories/types.js").CreateHookData[]
   ): Promise<void> {
     // This transaction is the exclusive point where version activeness changes.
     // The unique partial index ensures only one version can be active per manifest_id.
     await client.query("BEGIN");
 
     try {
+      // Insert staged hooks inside the transaction so they roll back atomically
+      // if the swap fails. hookRepo.createMany accepts an optional client for
+      // exactly this purpose (see hook-repository.ts comment "B1 fix").
+      if (stagedHooks.length > 0) {
+        await hookRepo.createMany(stagedHooks, client);
+      }
+
       // Activate new version.
       await client.query(
         `UPDATE plugin.plugins SET status = 'active' WHERE id = $1`,
@@ -282,7 +294,11 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
         );
       }
 
-      // Step 1: Pre-register new version hooks as 'staged' (not yet in active chain).
+      // Step 1: Build staged hook rows for all enabled instances.
+      // We collect them here but do NOT insert yet — they are inserted inside
+      // the atomic-swap transaction so that a swap failure rolls them back
+      // automatically, preventing orphaned rows and retry-induced duplicates.
+      const stagedHooks: import("../repositories/types.js").CreateHookData[] = [];
       for (const instance of allInstances) {
         if (instance.enabled === "enabled") {
           const hookData = hookService.buildHookDataFromManifest(
@@ -291,7 +307,7 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
             instance.tenant_id,
             stagedPlugin.manifest
           );
-          await hookRepo.createMany(hookData.map((h) => ({ ...h, state: "staged" as const })));
+          stagedHooks.push(...hookData.map((h) => ({ ...h, state: "staged" as const })));
         }
       }
 
@@ -323,10 +339,10 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
       // This releases the event loop between ticks and does not block other requests.
       await waitForDrain(manifestId, 62_000);
 
-      // Step 4: Atomic swap.
+      // Step 4: Atomic swap — staged hook inserts happen inside this transaction.
       const client = await pool.connect();
       try {
-        await executeAtomicSwap(client, manifestId, activePlugin, stagedPlugin);
+        await executeAtomicSwap(client, manifestId, activePlugin, stagedPlugin, stagedHooks);
       } finally {
         client.release();
       }
@@ -402,9 +418,11 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
       await waitForDrain(manifestId, 62_000);
 
       // Atomic swap — re-activate the previous version.
+      // Rollback never creates new staged hooks (hooks for the previous version
+      // are already in the DB from the original install), so stagedHooks is empty.
       const client = await pool.connect();
       try {
-        await executeAtomicSwap(client, manifestId, currentActive, previousPlugin);
+        await executeAtomicSwap(client, manifestId, currentActive, previousPlugin, []);
       } finally {
         client.release();
       }

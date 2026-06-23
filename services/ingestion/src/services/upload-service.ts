@@ -169,10 +169,10 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
   // module-level default.
   const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
-  // TODO(#PLAT-???): No Worker consumes "ontology:map" yet — jobs accumulate in Redis
+  // TODO(#PLAT-???): No Worker consumes "ontology.map" yet — jobs accumulate in Redis
   // until the ontology service implements a consumer. Retry config matches the platform
   // standard so jobs are not silently discarded on enqueue failures.
-  const ontologyQueue = new Queue("ontology:map", {
+  const ontologyQueue = new Queue("ontology.map", {
     connection: { lazyConnect: true, url: redisUrl },
     defaultJobOptions: {
       attempts: 5,
@@ -630,7 +630,9 @@ async function processCsvStream(
   try {
     while (true) {
       const read = await reader.read();
-      const chunk = read.done ? "" : decoder.decode(read.value, { stream: !read.done });
+      // When the stream ends, flush the decoder so any incomplete multibyte
+      // sequence in the final chunk is resolved rather than silently dropped.
+      const chunk = read.done ? decoder.decode() : decoder.decode(read.value, { stream: true });
 
       const segment = remainder + chunk;
       const lines = segment.split("\n");

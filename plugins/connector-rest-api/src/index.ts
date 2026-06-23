@@ -119,6 +119,77 @@ function decodeCursor(cursor: string): CursorPayload {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// SSRF guard
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Rejects URLs that could be used to reach internal/private infrastructure.
+ * Enforces: https/http scheme only; no loopback, RFC-1918, link-local, or
+ * cloud-metadata addresses.  Throws PluginConfigError on any violation.
+ */
+function assertSafeUrl(url: URL, field: string): void {
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new PluginConfigError(
+      `${field} scheme must be "http" or "https", got "${url.protocol.replace(":", "")}"`,
+      field,
+    );
+  }
+
+  const host = url.hostname.toLowerCase();
+
+  // Reject loopback / private / link-local / unspecified hosts.
+  // We check the textual hostname because DNS resolution happens later;
+  // preventing the literal forms covers the majority of SSRF vectors.
+  const blockedHostnames = new Set(["localhost", "0.0.0.0", "::1", "[::]", "[::1]"]);
+  if (blockedHostnames.has(host)) {
+    throw new PluginConfigError(
+      `${field} must not target a loopback or unspecified address (got "${url.hostname}")`,
+      field,
+    );
+  }
+
+  // Block private/link-local IPv4 ranges:
+  //   127.0.0.0/8   — loopback
+  //   10.0.0.0/8    — RFC-1918
+  //   172.16.0.0/12 — RFC-1918
+  //   192.168.0.0/16 — RFC-1918
+  //   169.254.0.0/16 — link-local (includes 169.254.169.254 cloud metadata)
+  const ipv4Parts = host.split(".").map(Number);
+  if (ipv4Parts.length === 4 && ipv4Parts.every((p) => !Number.isNaN(p))) {
+    const [a, b] = ipv4Parts as [number, number, number, number];
+    const isPrivate =
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254);
+    if (isPrivate) {
+      throw new PluginConfigError(
+        `${field} must not target a private or link-local IP address (got "${url.hostname}")`,
+        field,
+      );
+    }
+  }
+
+  // Block private IPv6: loopback (::1), ULA (fc00::/7), link-local (fe80::/10).
+  // We strip brackets that URL parsing may leave around IPv6 literals.
+  const bare = host.replace(/^\[|\]$/g, "");
+  if (bare === "::1") {
+    throw new PluginConfigError(
+      `${field} must not target a loopback IPv6 address (got "${url.hostname}")`,
+      field,
+    );
+  }
+  if (bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("fe8") ||
+      bare.startsWith("fe9") || bare.startsWith("fea") || bare.startsWith("feb")) {
+    throw new PluginConfigError(
+      `${field} must not target a private or link-local IPv6 address (got "${url.hostname}")`,
+      field,
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Config validation
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -150,6 +221,8 @@ function parseConfig(raw: Record<string, unknown>): RestApiConfig {
       "baseUrl",
     );
   }
+
+  assertSafeUrl(parsedBaseUrl, "baseUrl");
 
   const rawMethod = raw["method"];
   const method: HttpMethod =
@@ -403,13 +476,45 @@ function extractTimestamp(
  * Returns null if no next link is present.
  *
  * Example header: <https://api.example.com/items?page=2>; rel="next", <...>; rel="last"
+ * Also handles rel appearing after other params:
+ *   <url>; type="text/html"; rel="next"
+ *
+ * We parse generically: split entries on commas outside angle brackets, then
+ * split each entry on semicolons to find the rel param anywhere in the list.
+ * This conforms to RFC 8288 §3 which does not prescribe param ordering.
  */
 function parseNextLinkHeader(linkHeader: string): string | null {
-  // Use a regex-based parser that correctly handles commas inside angle-bracketed URLs.
-  const linkRegex = /<([^>]*)>\s*;\s*rel=["']?([^"',;]*)["']?/g;
-  let match: RegExpExecArray | null;
-  while ((match = linkRegex.exec(linkHeader)) !== null) {
-    if (match[2] === "next") return match[1];
+  // Split on commas that are NOT inside angle-bracketed URLs.
+  // We walk the string manually so that commas inside <...> are ignored.
+  const entries: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < linkHeader.length; i++) {
+    const ch = linkHeader[i];
+    if (ch === "<") depth++;
+    else if (ch === ">") depth--;
+    else if (ch === "," && depth === 0) {
+      entries.push(linkHeader.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  entries.push(linkHeader.slice(start).trim());
+
+  for (const entry of entries) {
+    // First segment is always <url>; remainder are params.
+    const urlMatch = /^<([^>]*)>/.exec(entry);
+    if (urlMatch === null) continue;
+    const url = urlMatch[1];
+
+    // Check each semicolon-delimited parameter for rel="next".
+    const params = entry.slice(urlMatch[0].length).split(";");
+    for (const param of params) {
+      const trimmed = param.trim();
+      // Match rel="next" or rel='next' or rel=next (unquoted).
+      if (/^rel\s*=\s*["']?next["']?$/i.test(trimmed)) {
+        return url;
+      }
+    }
   }
   return null;
 }
@@ -427,6 +532,18 @@ function buildUrl(
   const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
   const url = new URL(`${base}${path}`);
+
+  // Guard against path traversal: the resolved pathname must remain rooted
+  // within the base URL's pathname prefix. new URL() normalises ".." segments,
+  // so e.g. endpoint "/../../admin" on baseUrl "https://host/v1" would resolve
+  // to "/admin", escaping the "/v1" prefix. We detect and reject that here.
+  const basePath = new URL(base).pathname;
+  if (!url.pathname.startsWith(basePath)) {
+    throw new PluginConfigError(
+      `endpoint "${endpoint}" traverses outside the baseUrl path "${basePath}" — check for leading "../" segments`,
+      "endpoint",
+    );
+  }
 
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
@@ -624,20 +741,29 @@ class RestApiConnector implements Connector {
             { status: response.status, url: fetchUrl },
           );
         }
-        const redirectHeaders = { ...headers };
+        // Resolve and validate the redirect target BEFORE following it: a public
+        // API can return Location: http://169.254.169.254/… (cloud metadata) or
+        // a private-range host as an open-redirect SSRF. Reuse the same
+        // scheme/private-IP denylist applied to the configured baseUrl.
+        let resolvedRedirect: URL;
         try {
-          const originalOrigin = new URL(fetchUrl).origin;
-          const redirectOrigin = new URL(location, fetchUrl).origin;
-          if (originalOrigin !== redirectOrigin) {
-            delete redirectHeaders["Authorization"];
-            delete redirectHeaders["X-API-Key"];
-          }
+          resolvedRedirect = new URL(location, fetchUrl);
         } catch {
+          throw new PluginDataError(
+            `REST API returned ${response.status} redirect with an invalid Location header`,
+            { status: response.status, location },
+          );
+        }
+        assertSafeUrl(resolvedRedirect, "redirect Location");
+
+        const redirectHeaders = { ...headers };
+        const originalOrigin = new URL(fetchUrl).origin;
+        if (originalOrigin !== resolvedRedirect.origin) {
           delete redirectHeaders["Authorization"];
           delete redirectHeaders["X-API-Key"];
         }
         try {
-          response = await context.fetch.fetch(location, {
+          response = await context.fetch.fetch(resolvedRedirect.toString(), {
             method: meta.method,
             headers: redirectHeaders,
             redirect: "manual",
@@ -785,10 +911,24 @@ class RestApiConnector implements Connector {
     body: unknown,
     isLinkFollowRequest: boolean,
   ): { nextCursor: string | null; hasMore: boolean } {
+    // Carry the incremental high-water mark forward on EVERY call. Previously the
+    // cursor only propagated previousCursor?.since, which was undefined on the
+    // first call and stayed undefined forever — so `supportsIncremental` was
+    // effectively false and every sync was a full fetch. We track max(field).
+    const nextSince =
+      meta.incrementalField !== null
+        ? maxIncrementalValue(records, meta.incrementalField, previousCursor?.since)
+        : previousCursor?.since;
+
     // When no records came back there is nothing more to fetch regardless of
-    // pagination mode — avoids infinite loops on empty-page APIs.
+    // pagination mode — avoids infinite loops on empty-page APIs. We still emit a
+    // since-only cursor so the NEXT run resumes from the last high-water mark.
     if (records.length === 0) {
-      return { nextCursor: null, hasMore: false };
+      const carry = previousCursor?.since;
+      return {
+        nextCursor: carry !== undefined ? encodeCursor({ since: carry }) : null,
+        hasMore: false,
+      };
     }
 
     switch (meta.paginationType) {
@@ -798,11 +938,14 @@ class RestApiConnector implements Connector {
 
         // A page smaller than pageSize means we've reached the last page.
         if (records.length < meta.pageSize) {
-          return { nextCursor: null, hasMore: false };
+          return {
+            nextCursor: nextSince !== undefined ? encodeCursor({ since: nextSince }) : null,
+            hasMore: false,
+          };
         }
 
         return {
-          nextCursor: encodeCursor({ offset: nextOffset, since: previousCursor?.since }),
+          nextCursor: encodeCursor({ offset: nextOffset, since: nextSince }),
           hasMore: true,
         };
       }
@@ -810,38 +953,65 @@ class RestApiConnector implements Connector {
       case "cursor": {
         const nextToken = extractCursorToken(body);
         if (nextToken === null) {
-          return { nextCursor: null, hasMore: false };
+          return {
+            nextCursor: nextSince !== undefined ? encodeCursor({ since: nextSince }) : null,
+            hasMore: false,
+          };
         }
         return {
-          nextCursor: encodeCursor({ token: nextToken, since: previousCursor?.since }),
+          nextCursor: encodeCursor({ token: nextToken, since: nextSince }),
           hasMore: true,
         };
       }
 
       case "link": {
         const linkHeader = response.headers.get("Link");
-        if (linkHeader === null) {
-          return { nextCursor: null, hasMore: false };
-        }
-        const nextUrl = parseNextLinkHeader(linkHeader);
+        const nextUrl = linkHeader !== null ? parseNextLinkHeader(linkHeader) : null;
         if (nextUrl === null) {
-          return { nextCursor: null, hasMore: false };
+          return {
+            nextCursor: nextSince !== undefined ? encodeCursor({ since: nextSince }) : null,
+            hasMore: false,
+          };
         }
         return {
-          nextCursor: encodeCursor({ nextUrl, since: previousCursor?.since }),
+          nextCursor: encodeCursor({ nextUrl, since: nextSince }),
           hasMore: true,
         };
       }
 
       case "none":
       default:
-        // Single-page connector: one request, no continuation.
-        // If incrementalField is set the NEXT run will use the most recently
-        // updated record's value as the "since" filter — we don't need a
-        // within-run cursor for that.
-        return { nextCursor: null, hasMore: false };
+        // Single-page connector: one request, no within-run continuation. Persist
+        // the high-water mark so the NEXT run uses it as the "since" filter.
+        return {
+          nextCursor: nextSince !== undefined ? encodeCursor({ since: nextSince }) : null,
+          hasMore: false,
+        };
     }
   }
+}
+
+/**
+ * Returns the maximum value of `field` across `records` (compared as strings,
+ * which is correct for ISO-8601 timestamps and zero-padded numeric ids), or the
+ * carried-forward `previous` value when no record advances it. Used to populate
+ * the incremental cursor's `since`.
+ */
+function maxIncrementalValue(
+  records: DataRecord[],
+  field: string,
+  previous: string | undefined,
+): string | undefined {
+  let highest = previous;
+  for (const record of records) {
+    const value = record.data[field];
+    if (value === null || value === undefined) continue;
+    const asString = value instanceof Date ? value.toISOString() : String(value);
+    if (highest === undefined || asString > highest) {
+      highest = asString;
+    }
+  }
+  return highest;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

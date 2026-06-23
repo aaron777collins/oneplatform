@@ -5,6 +5,7 @@
 // only from this file so adding a new template is a one-line change.
 // ---------------------------------------------------------------------------
 
+export { escapeForTemplateLiteral } from "./escape.js";
 export { crudAdminTemplate }       from "./crud-admin.js";
 export { dashboardTemplate }       from "./dashboard.js";
 export { formBuilderTemplate }     from "./form-builder.js";

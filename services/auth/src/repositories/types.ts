@@ -28,6 +28,7 @@ export interface User {
   failed_login_count: number;
   locked_until: Date | null;
   metadata: Record<string, unknown>;
+  password_history: string[];
 }
 
 export interface Session {
@@ -146,7 +147,8 @@ export interface UpdateTenantData {
 
 export interface ListTenantsOptions {
   limit: number;
-  offset: number;
+  /** Opaque keyset cursor from the previous page response. Omit for first page. */
+  cursor?: string;
 }
 
 export interface CreateUserData {

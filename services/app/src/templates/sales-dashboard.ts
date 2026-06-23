@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const salesDashboardTemplate: AppTemplate = {
   meta: {
@@ -19,6 +20,7 @@ export const salesDashboardTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -111,7 +113,7 @@ export const salesDashboardTemplate: AppTemplate = {
         ``,
         `  return (`,
         `    <div style={wrap}>`,
-        `      <h1 style={heading}>${appName}</h1>`,
+        `      <h1 style={heading}>${safeName}</h1>`,
         `      <KpiGrid revenue={revenue} deals={data.length} avgDeal={avgDeal} winRate={winRate} />`,
         `      <h2 style={subheading}>Revenue by month</h2>`,
         `      <RevenueChart data={chartData} />`,

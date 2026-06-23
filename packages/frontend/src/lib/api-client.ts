@@ -135,6 +135,9 @@ async function apiFetch<T>(
         retryAfterMs = dateMs > 0 ? dateMs : 1000;
       }
     }
+    // Cap the delay so a server cannot freeze the tab with an arbitrarily large
+    // Retry-After (e.g. 86400s). 60s is the longest we will block before failing.
+    retryAfterMs = Math.min(retryAfterMs, 60_000);
     await delay(retryAfterMs);
     return apiFetch<T>(path, init, isRetry, retryCount + 1);
   }

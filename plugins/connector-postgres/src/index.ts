@@ -226,10 +226,28 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
     );
   }
 
-  const table = raw["table"];
+  // Allowlist for PostgreSQL identifier characters. Identifiers must start with
+  // a letter or underscore and contain only letters, digits, underscores, and
+  // dollar signs (max 63 chars per PostgreSQL limit). Spaces, semicolons, quotes,
+  // and other characters can break identifier quoting or enable SQL injection even
+  // when the proxy double-quotes identifiers.
+  const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$/;
+
+  function validateIdentifier(value: string, field: string): string {
+    const trimmed = value.trim();
+    if (!SAFE_IDENTIFIER.test(trimmed)) {
+      throw new PluginConfigError(
+        `${field} must start with a letter or underscore and contain only letters, digits, underscores, and dollar signs (max 63 characters). Received: "${trimmed}"`,
+        field,
+      );
+    }
+    return trimmed;
+  }
+
+  const rawTable = raw["table"];
   const customQuery = raw["customQuery"];
   if (
-    (typeof table !== "string" || table.trim() === "") &&
+    (typeof rawTable !== "string" || rawTable.trim() === "") &&
     (typeof customQuery !== "string" || customQuery.trim() === "")
   ) {
     throw new PluginConfigError(
@@ -237,6 +255,13 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
       "table",
     );
   }
+
+  // Trim and validate identifier before storing — validation alone with stored
+  // untrimmed values would leave leading/trailing whitespace reaching the proxy.
+  const table =
+    typeof rawTable === "string" && rawTable.trim() !== ""
+      ? validateIdentifier(rawTable, "table")
+      : undefined;
 
   const rawBatchSize = raw["batchSize"] ?? DEFAULT_BATCH_SIZE;
   if (typeof rawBatchSize !== "number" || !Number.isInteger(rawBatchSize)) {
@@ -249,13 +274,17 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
     );
   }
 
-  const incrementalColumn = raw["incrementalColumn"];
-  if (incrementalColumn !== undefined && typeof incrementalColumn !== "string") {
+  const rawIncrementalColumn = raw["incrementalColumn"];
+  if (rawIncrementalColumn !== undefined && typeof rawIncrementalColumn !== "string") {
     throw new PluginConfigError(
       "incrementalColumn must be a string when provided",
       "incrementalColumn",
     );
   }
+  const incrementalColumn =
+    typeof rawIncrementalColumn === "string" && rawIncrementalColumn.trim() !== ""
+      ? validateIdentifier(rawIncrementalColumn, "incrementalColumn")
+      : undefined;
 
   // A customQuery in combination with incrementalColumn is ambiguous — the SQL
   // already controls the WHERE clause. Callers should encode the cursor into
@@ -279,15 +308,26 @@ function parseConfig(raw: Record<string, unknown>): PostgresConfig {
     paginationStrategy = rawPaginationStrategy;
   }
 
+  const rawSchema = raw["schema"];
+  const schema =
+    typeof rawSchema === "string" && rawSchema.trim() !== ""
+      ? validateIdentifier(rawSchema, "schema")
+      : DEFAULT_SCHEMA;
+
+  const rawPrimaryKey = raw["primaryKey"];
+  const primaryKey =
+    typeof rawPrimaryKey === "string" && rawPrimaryKey.trim() !== ""
+      ? validateIdentifier(rawPrimaryKey, "primaryKey")
+      : DEFAULT_PRIMARY_KEY;
+
   return {
     proxyUrl: proxyUrl.replace(/\/+$/, ""), // strip trailing slash
-    ...(typeof table === "string" ? { table } : {}),
-    schema: typeof raw["schema"] === "string" ? raw["schema"] : DEFAULT_SCHEMA,
-    ...(typeof incrementalColumn === "string" ? { incrementalColumn } : {}),
+    ...(table !== undefined ? { table } : {}),
+    schema,
+    ...(incrementalColumn !== undefined ? { incrementalColumn } : {}),
     batchSize: rawBatchSize,
     ...(typeof customQuery === "string" ? { customQuery } : {}),
-    primaryKey:
-      typeof raw["primaryKey"] === "string" ? raw["primaryKey"] : DEFAULT_PRIMARY_KEY,
+    primaryKey,
     paginationStrategy,
   };
 }
@@ -598,7 +638,13 @@ class PostgresConnector implements Connector {
       "Accept": "application/json",
     });
 
-    const response = await context.fetch.fetch(url, { method: "GET", headers });
+    // Use fetchWithRetry (like every fetchBatch path) so a single transient proxy
+    // 503 / network blip during connect() does not abort sync setup that would
+    // otherwise survive mid-run.
+    const response = await fetchWithRetry(
+      () => context.fetch.fetch(url, { method: "GET", headers }),
+      SCHEMA_PATH,
+    );
 
     if (!response.ok) {
       const body = await response.text();
@@ -711,17 +757,18 @@ class PostgresConnector implements Connector {
     if (cursor !== null) {
       const parsed = decodeCursor(cursor);
       if (parsed.mode !== "keyset") {
-        // A cursor from a previous offset sync is incompatible with keyset mode.
-        // Treat it as "start from the beginning" rather than throwing — the
-        // operator may have changed paginationStrategy between syncs.
-        context.logger.warn("fetchBatch (keyset): cursor mode mismatch — restarting from beginning", {
-          table: cfg.table,
-          cursorMode: parsed.mode,
-        });
-        lastPkValue = null;
-      } else {
-        lastPkValue = parsed.lastPkValue;
+        // A cursor from a previous offset/incremental sync is incompatible with
+        // keyset mode. Silently resetting lastPkValue=null re-syncs the ENTIRE
+        // table, re-delivering every row as a duplicate. Throw like the offset
+        // and incremental paths do so the misconfiguration surfaces instead of
+        // causing silent data duplication.
+        throw new PluginConfigError(
+          "Cursor mode mismatch: expected 'keyset' but got '" + parsed.mode + "'. " +
+            "Do not change paginationStrategy after a sync has started — doing so " +
+            "would re-ingest the whole table.",
+        );
       }
+      lastPkValue = parsed.lastPkValue;
     }
 
     const params: Record<string, string> = {
@@ -863,10 +910,14 @@ class PostgresConnector implements Connector {
 
     const records = rowsToDataRecords(filteredRows, cfg.primaryKey);
 
+    // Derive hasMore from the raw proxy row count BEFORE client-side dedup.
+    // If the proxy returned a full batch, there may be more rows even if the
+    // dedup filter removed every row in this batch (P19-067).
+    const hasMore = payload.rows.length === cfg.batchSize;
+
     // Advance the cursor to the maximum incrementalColumn value seen in this batch.
     // Track lastId so the next batch can skip duplicate-cursor rows already delivered.
     let nextCursor: string | null = null;
-    let hasMore = false;
 
     if (records.length > 0) {
       const lastFilteredRow = filteredRows[filteredRows.length - 1];
@@ -880,12 +931,6 @@ class PostgresConnector implements Connector {
         );
       }
       const newLastId = String(lastFilteredRow?.[cfg.primaryKey] ?? "");
-      // hasMore is based on the PRE-filter row count from the proxy, not the
-      // post-filter record count. If the proxy returned a full batch, there may
-      // be more rows even if the client-side dedup filter removed some of them.
-      // Using records.length (post-filter) would cause premature termination
-      // whenever the dedup filter removes any rows from a full batch.
-      hasMore = payload.rows.length === cfg.batchSize;
       // Always persist the cursor so a partial (final) batch saves its
       // position.  Without this, restarting after a partial batch would
       // re-fetch rows that were already processed (V5-116).
@@ -894,6 +939,22 @@ class PostgresConnector implements Connector {
         lastValue: String(colValue),
         lastId: newLastId,
       });
+    } else if (hasMore) {
+      // The entire batch was removed by client-side dedup but the proxy signalled
+      // more rows exist. Advance the cursor based on the raw proxy rows so the next
+      // call fetches a new batch rather than re-fetching the same deduped rows.
+      const lastRawRow = payload.rows[payload.rows.length - 1];
+      if (lastRawRow !== undefined) {
+        const colValue = lastRawRow[cfg.incrementalColumn!];
+        const newLastId = String(lastRawRow[cfg.primaryKey] ?? "");
+        nextCursor = encodeCursor({
+          mode: "incremental",
+          lastValue: String(colValue ?? lastValue ?? ""),
+          lastId: newLastId,
+        });
+      }
+      // If lastRawRow is undefined (empty payload despite rows.length === batchSize)
+      // leave nextCursor as null — this is a proxy invariant violation; stop safely.
     }
 
     context.logger.debug("fetchBatch (incremental)", {

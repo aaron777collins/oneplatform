@@ -30,6 +30,13 @@ export interface OutputRenderer {
   warn(message: string): void;
   info(message: string): void;
   success(message: string): void;
+  /**
+   * Writes a one-time secret (e.g. a freshly generated API key) directly to
+   * stdout, bypassing the --quiet guard. The server never re-exposes these
+   * values, so suppressing them would lose them permanently. Always use this —
+   * not info() — for output the user cannot recover.
+   */
+  secret(message: string): void;
 }
 
 // ANSI color codes — avoids ESM-only chalk dependency
@@ -201,6 +208,12 @@ export function createOutputRenderer(
       if (quiet) return;
       const tick = colorize("✓", ANSI.green, colorEnabled);
       process.stdout.write(`${tick} ${message}\n`);
+    },
+
+    secret(message: string): void {
+      // Intentionally NOT guarded by `quiet`: one-time secrets are never
+      // re-exposed by the server, so suppressing them loses them forever.
+      process.stdout.write(`${message}\n`);
     },
   };
 }

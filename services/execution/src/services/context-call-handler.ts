@@ -306,7 +306,25 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     await assertHostnameResolvesToPublicIp(parsedUrl, dnsResolver);
 
     const MAX_RESPONSE_BYTES = 50 * 1024 * 1024; // 50 MB
-    const init = (args[1] ?? {}) as RequestInit;
+    // Cap outbound request body to 10 MB to prevent sandbox code from using the
+    // service's egress for bandwidth amplification. Also restrict init to a safe
+    // allowlist so sandbox code cannot set arbitrary headers (e.g. Host spoofing)
+    // or override the abort signal we install below.
+    const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+    const rawInit = (args[1] ?? {}) as RequestInit;
+    const init: RequestInit = {};
+    if (rawInit.method !== undefined) init.method = rawInit.method;
+    if (rawInit.headers !== undefined) init.headers = rawInit.headers;
+    if (rawInit.body !== undefined) {
+      const bodyStr = typeof rawInit.body === "string" ? rawInit.body : "";
+      if (Buffer.byteLength(bodyStr, "utf8") > MAX_REQUEST_BODY_BYTES) {
+        throw {
+          code: "EXECUTION_FETCH_BLOCKED",
+          message: `Request body exceeds the ${MAX_REQUEST_BODY_BYTES / (1024 * 1024)} MB limit.`,
+        };
+      }
+      init.body = rawInit.body;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
 

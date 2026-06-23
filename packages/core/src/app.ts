@@ -106,6 +106,24 @@ export interface CreateAppConfig {
    */
   publicRoutes: string[];
 
+  /**
+   * Expected JWT issuer (`iss` claim) passed to `authMiddleware`.
+   * Defaults to `'oneplatform'` (the value hardcoded by the auth service's
+   * token-service). Set to `undefined` to disable issuer validation.
+   *
+   * Enforcing `iss` prevents cross-issuer token replay (P19-039).
+   */
+  jwtIssuer?: string;
+
+  /**
+   * Expected JWT audience (`aud` claim) passed to `authMiddleware`.
+   * Defaults to `'oneplatform'` (the value hardcoded by the auth service's
+   * token-service). Set to `undefined` to disable audience validation.
+   *
+   * Enforcing `aud` prevents cross-audience token replay (P19-039).
+   */
+  jwtAudience?: string;
+
   /** The name of *this* service used to verify incoming service-to-service tokens. */
   targetService: string;
   /** Ed25519 public keys keyed by service name, loaded from `/data/service-keys/` at startup. */
@@ -197,7 +215,10 @@ export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariabl
 
   // 5. (Rate limit enforcement belongs to Gateway; other services skip it)
 
-  // 6. User auth — JWT / API key / public route bypass
+  // 6. User auth — JWT / API key / public route bypass.
+  // jwtIssuer/jwtAudience default to 'oneplatform' (the values hardcoded by
+  // token-service) to enforce iss/aud on every deployment without requiring
+  // callers to set them explicitly. Pass undefined explicitly to opt out (P19-039).
   app.use(
     "*",
     authMiddleware({
@@ -206,6 +227,8 @@ export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariabl
       redis: config.redis,
       validateApiKey: config.validateApiKey,
       publicRoutes: config.publicRoutes,
+      issuer: "jwtIssuer" in config ? config.jwtIssuer : "oneplatform",
+      audience: "jwtAudience" in config ? config.jwtAudience : "oneplatform",
     })
   );
 

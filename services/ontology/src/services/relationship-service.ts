@@ -40,7 +40,7 @@ export interface RelationshipServiceDeps {
 export interface RelationshipService {
   createRelationship(tenantId: string, input: CreateRelationshipInput): Promise<RelationshipDetail>;
   getRelationships(tenantId: string, entitySlug: string): Promise<RelationshipDetail[]>;
-  deleteRelationship(id: string): Promise<void>;
+  deleteRelationship(tenantId: string, id: string): Promise<void>;
 }
 
 export function createRelationshipService(deps: RelationshipServiceDeps): RelationshipService {
@@ -141,8 +141,11 @@ export function createRelationshipService(deps: RelationshipServiceDeps): Relati
       return rels.map(toDetail);
     },
 
-    async deleteRelationship(id) {
-      await relationshipRepo.delete(id);
+    async deleteRelationship(tenantId, id) {
+      // Filter by tenant_id to prevent cross-tenant deletion of relationships
+      // that share the same UUID (latent gap — this method currently has no route
+      // but is closed here before one is added).
+      await relationshipRepo.delete(id, tenantId);
     },
   };
 }

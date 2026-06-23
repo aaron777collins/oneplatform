@@ -81,6 +81,7 @@ function makeStorageService(overrides: Partial<StorageService> = {}): StorageSer
       url: "http://minio:9000/tenant-abc-file-uploads/report.csv?X-Amz-Signature=fake",
       expiresAt: "2024-03-01T13:00:00.000Z",
     }),
+    putObject: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

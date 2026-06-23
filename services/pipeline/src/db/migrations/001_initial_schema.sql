@@ -397,18 +397,13 @@ CREATE TABLE IF NOT EXISTS pipeline.schema_migrations (
 --
 -- In a multi-instance deployment, multiple pipeline service
 -- instances may receive the same Redis pub/sub event simultaneously.
--- This UNIQUE constraint ensures only one run is created per
--- (pipeline_id, eventId) pair — duplicate INSERTs fail silently.
+-- This ensures only one run is created per (pipeline_id, eventId) pair —
+-- duplicate INSERTs fail silently.
+--
+-- A table UNIQUE constraint cannot index an expression or carry a WHERE clause,
+-- so the idempotency guard is expressed as a partial UNIQUE INDEX over the
+-- extracted eventId, scoped to event-triggered runs.
 -- ============================================================
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-     WHERE conname = 'runs_event_idempotency_unique'
-  ) THEN
-    ALTER TABLE pipeline.runs ADD CONSTRAINT runs_event_idempotency_unique
-        UNIQUE (pipeline_id, (trigger_meta->>'eventId'))
-        WHERE triggered_by = 'event' AND trigger_meta->>'eventId' IS NOT NULL;
-  END IF;
-END;
-$$;
+CREATE UNIQUE INDEX IF NOT EXISTS runs_event_idempotency_unique
+    ON pipeline.runs (pipeline_id, (trigger_meta->>'eventId'))
+    WHERE triggered_by = 'event' AND trigger_meta->>'eventId' IS NOT NULL;

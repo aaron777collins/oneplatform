@@ -105,9 +105,13 @@ export class ExecutionRepository {
     if (query.cursor !== undefined) {
       // Resolve the started_at for the cursor row so we can use a keyset cursor
       // that works correctly across the partition boundary.
+      // Scope the cursor lookup to the same tenant to prevent cross-tenant
+      // timing disclosure (IDOR). An attacker passing another tenant's UUID
+      // as the cursor would get no row, and the cursor condition is skipped,
+      // returning results from the beginning of the tenant's own list.
       const cursorRow = await this.pool.query<{ started_at: Date }>(
-        `SELECT started_at FROM execution.executions WHERE id = $1 LIMIT 1`,
-        [query.cursor]
+        `SELECT started_at FROM execution.executions WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [query.cursor, tenantId]
       );
       const cursorStartedAt = cursorRow.rows[0]?.["started_at"];
       if (cursorStartedAt !== undefined) {

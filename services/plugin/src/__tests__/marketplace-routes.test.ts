@@ -422,8 +422,19 @@ describe("Marketplace Routes", () => {
   // -------------------------------------------------------------------------
 
   describe("POST /api/v1/marketplace/plugins/:id/install", () => {
-    it("returns 200 with status recorded", async () => {
+    // Install requires platform-admin role (mirrors the regular install route guard).
+    it("returns 403 when caller lacks platform-admin role", async () => {
+      // Default buildApp user has roles: ["user"] — not platform-admin.
       const app = buildApp(svc);
+      const res = await app.request(
+        "/api/v1/marketplace/plugins/mp-id-1234/install",
+        { method: "POST" }
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 with status recorded when caller is platform-admin", async () => {
+      const app = buildApp(svc, { roles: ["platform-admin"] });
       const res = await app.request(
         "/api/v1/marketplace/plugins/mp-id-1234/install",
         { method: "POST" }
@@ -438,6 +449,7 @@ describe("Marketplace Routes", () => {
       const app = buildApp(svc, {
         userId: "user-xyz",
         tenantId: "tenant-xyz",
+        roles: ["platform-admin"],
       });
       await app.request("/api/v1/marketplace/plugins/mp-id-1234/install", {
         method: "POST",
@@ -453,7 +465,7 @@ describe("Marketplace Routes", () => {
       (svc.installPlugin as ReturnType<typeof vi.fn>).mockRejectedValue(
         new MarketplacePluginNotFoundError("not found")
       );
-      const app = buildApp(svc);
+      const app = buildApp(svc, { roles: ["platform-admin"] });
       const res = await app.request(
         "/api/v1/marketplace/plugins/no-such-id/install",
         { method: "POST" }

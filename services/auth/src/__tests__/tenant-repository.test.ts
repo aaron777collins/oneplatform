@@ -49,7 +49,7 @@ function makePool(
 // ---------------------------------------------------------------------------
 
 describe("TenantRepository.list()", () => {
-  it("returns tenants and total from paginated query", async () => {
+  it("returns tenants, total, and nextCursor from paginated query", async () => {
     const tenant = makeTenantRow();
     const pool = makePool(
       { rows: [{ count: "5" }] },     // COUNT query
@@ -57,26 +57,27 @@ describe("TenantRepository.list()", () => {
     );
     const repo = new TenantRepository(pool);
 
-    const result = await repo.list({ limit: 20, offset: 0 });
+    const result = await repo.list({ limit: 20 });
 
     expect(result.total).toBe(5);
     expect(result.tenants).toHaveLength(1);
     expect(result.tenants[0]).toMatchObject({ id: "tenant-1", name: "Acme Corp" });
+    // Only 1 row returned but limit is 20 — no next page
+    expect(result.nextCursor).toBeNull();
   });
 
-  it("passes limit and offset as parameterized values", async () => {
+  it("returns nextCursor when results fill the page", async () => {
+    // Return exactly `limit` rows to trigger nextCursor generation
+    const tenant = makeTenantRow();
     const pool = makePool(
-      { rows: [{ count: "0" }] },
-      { rows: [] }
+      { rows: [{ count: "10" }] },
+      { rows: [tenant] }
     );
     const repo = new TenantRepository(pool);
 
-    await repo.list({ limit: 10, offset: 30 });
-
-    // The second call is the SELECT with LIMIT/OFFSET
-    const calls = (pool.query as ReturnType<typeof vi.fn>).mock.calls as unknown[][];
-    const selectCall = calls[1];
-    expect(selectCall?.[1]).toEqual([10, 30]);
+    const result = await repo.list({ limit: 1 });
+    // Exactly limit rows returned → nextCursor should be set
+    expect(result.nextCursor).not.toBeNull();
   });
 
   it("returns empty list and zero total when no tenants exist", async () => {
@@ -86,9 +87,10 @@ describe("TenantRepository.list()", () => {
     );
     const repo = new TenantRepository(pool);
 
-    const result = await repo.list({ limit: 20, offset: 0 });
+    const result = await repo.list({ limit: 20 });
     expect(result.total).toBe(0);
     expect(result.tenants).toHaveLength(0);
+    expect(result.nextCursor).toBeNull();
   });
 });
 

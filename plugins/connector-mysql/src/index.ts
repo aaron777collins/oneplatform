@@ -128,6 +128,17 @@ function decodeCursor(cursor: string): CursorPayload {
     );
   }
 
+  const obj = parsed as Record<string, unknown>;
+  const offset = obj["offset"] as number;
+  // A negative or non-integer offset would reach the proxy as OFFSET -1 or
+  // OFFSET 1.5, producing a SQL error that may leak internal error messages.
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new PluginConfigError(
+      "Invalid cursor value — offset must be a non-negative integer",
+      "cursor",
+    );
+  }
+
   return parsed as CursorPayload;
 }
 
@@ -629,7 +640,11 @@ function findHighWaterMark(
     if (value === null || value === undefined) {
       continue;
     }
-    const asString = String(value);
+    // Normalize Date objects (the proxy returns these for DATETIME/TIMESTAMP) to
+    // ISO 8601 before comparison. String(Date) yields a locale string that sorts
+    // lexicographically larger than any ISO string, which would advance the HWM
+    // to an unparseable value MySQL then rejects — silently ending ingestion.
+    const asString = value instanceof Date ? value.toISOString() : String(value);
     // Numeric column values (MySQL returns numbers for INT/BIGINT/DECIMAL) must
     // be compared numerically — string ordering breaks for multi-digit integers
     // (e.g. "9" > "10" lexicographically but 9 < 10 numerically).
@@ -810,23 +825,18 @@ class MySqlConnector implements Connector {
         nextCursor = finalSince !== null ? encodeCursor({ offset: 0, since: finalSince }) : null;
         hasMore = false;
       } else {
-        const nextSince =
-          meta.incrementalColumn !== null
-            ? findHighWaterMark(rows, meta.incrementalColumn, since)
-            : since;
-
-        let nextOffset: number;
-        if (meta.incrementalColumn !== null) {
-          if (nextSince !== null && nextSince === since) {
-            nextOffset = offset + records.length;
-          } else {
-            nextOffset = 0;
-          }
-        } else {
-          nextOffset = offset + records.length;
-        }
-
-        nextCursor = encodeCursor({ offset: nextOffset, since: nextSince });
+        // Within a single multi-page run we keep the WHERE filter fixed and
+        // paginate purely by OFFSET. We do NOT advance `since` mid-run, because:
+        //   - If since === null (first run, no WHERE filter), switching to
+        //     `col > HWM` mid-run while resetting offset to 0 drops rows whose
+        //     incremental value equals the HWM but sorted beyond this batch
+        //     (MySQL has no PK tiebreaker here).
+        //   - If since !== null, the filter `col > since` is already in effect;
+        //     advancing it AND continuing by offset would double-skip rows.
+        // The high-water mark is captured only on the final page (isLastPage
+        // branch above), so the *next run* starts from where this run ended.
+        const nextOffset = offset + records.length;
+        nextCursor = encodeCursor({ offset: nextOffset, since });
         hasMore = true;
       }
 

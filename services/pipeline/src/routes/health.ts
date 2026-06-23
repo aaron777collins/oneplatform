@@ -11,7 +11,6 @@ export interface HealthRouteDeps {
   pool: Pool;
   redis: Redis;
   runQueue: Queue;
-  cronQueue: Queue;
   serviceStartedAt: Date;
   isReady: () => boolean;
 }
@@ -22,7 +21,7 @@ export interface HealthRouteDeps {
 
 export function createHealthRoutes(deps: HealthRouteDeps): Hono {
   const routes = new Hono();
-  const { pool, redis, runQueue, cronQueue, serviceStartedAt, isReady } = deps;
+  const { pool, redis, runQueue, serviceStartedAt, isReady } = deps;
 
   // GET /healthz — liveness check (design spec §17.5)
   // Always returns 200 if the process is alive — Docker health check uses this.
@@ -53,12 +52,13 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono {
     }
 
     // Queue depth metrics (design spec §10.5)
+    // Note: pipeline:cron queue was removed (P19-101) — cron is driven by an
+    // in-process setInterval loop, not a BullMQ worker, so the queue was
+    // unused and reporting misleading metrics.
     let queueMetrics: {
-      "pipeline:run": { active: number; waiting: number; failed: number; dlq: number };
-      "pipeline:cron": { active: number; waiting: number; failed: number };
+      "pipeline.run": { active: number; waiting: number; failed: number; dlq: number };
     } = {
-      "pipeline:run": { active: 0, waiting: 0, failed: 0, dlq: 0 },
-      "pipeline:cron": { active: 0, waiting: 0, failed: 0 },
+      "pipeline.run": { active: 0, waiting: 0, failed: 0, dlq: 0 },
     };
 
     try {
@@ -67,20 +67,9 @@ export function createHealthRoutes(deps: HealthRouteDeps): Hono {
         runQueue.getWaitingCount(),
         runQueue.getFailedCount(),
       ]);
-      queueMetrics["pipeline:run"] = { active: runActive, waiting: runWaiting, failed: runFailed, dlq: 0 };
+      queueMetrics["pipeline.run"] = { active: runActive, waiting: runWaiting, failed: runFailed, dlq: 0 };
     } catch {
       // Queue metrics are informational — do not fail readyz for this
-    }
-
-    try {
-      const [cronActive, cronWaiting, cronFailed] = await Promise.all([
-        cronQueue.getActiveCount(),
-        cronQueue.getWaitingCount(),
-        cronQueue.getFailedCount(),
-      ]);
-      queueMetrics["pipeline:cron"] = { active: cronActive, waiting: cronWaiting, failed: cronFailed };
-    } catch {
-      // Queue metrics are informational
     }
 
     const allOk = isReady() && Object.values(checks).every((v) => v === "ok");

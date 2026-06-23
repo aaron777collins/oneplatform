@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AppTemplate } from "./types.js";
+import { escapeForTemplateLiteral } from "./escape.js";
 
 export const activityFeedTemplate: AppTemplate = {
   meta: {
@@ -20,6 +21,7 @@ export const activityFeedTemplate: AppTemplate = {
   },
 
   render(appName: string, slug: string): Record<string, string> {
+    const safeName = escapeForTemplateLiteral(appName);
     return {
       "/package.json": JSON.stringify(
         {
@@ -104,7 +106,7 @@ export const activityFeedTemplate: AppTemplate = {
         `    <div style={wrap}>`,
         `      {/* Page header */}`,
         `      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "16px" }}>`,
-        `        <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>${appName}</h1>`,
+        `        <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>${safeName}</h1>`,
         `        <span style={{ fontSize: "0.875rem", color: "#64748b" }}>{filtered.length} event{filtered.length !== 1 ? "s" : ""}</span>`,
         `      </div>`,
         ``,

@@ -51,9 +51,17 @@ function makeDeps(
     ...repoOverrides,
   };
 
+  const storageService = {
+    putObject: vi.fn().mockResolvedValue(undefined),
+    generatePresignedDownloadUrl: vi
+      .fn()
+      .mockResolvedValue({ url: "https://storage.example/download" }),
+  };
+
   return {
     gdprRequestRepo: repo as never,
     logger: makeLogger() as never,
+    storageService: storageService as never,
     config: {
       authServiceUrl: "http://auth",
       loggingServiceUrl: "http://logging",
@@ -318,7 +326,7 @@ describe("GdprService.handleExportRequest()", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns a result_url starting with data:application/json;base64 on success", async () => {
+  it("returns a presigned storage result_url on success", async () => {
     const deps = makeDeps();
     const svc = createGdprService(deps);
 
@@ -334,7 +342,7 @@ describe("GdprService.handleExportRequest()", () => {
     const result = await svc.handleExportRequest("req-0001", "user-1", "tenant-1");
 
     expect(result.requestId).toBe("req-0001");
-    expect(result.resultUrl).toMatch(/^data:application\/json;base64,/);
+    expect(result.resultUrl).toBe("https://storage.example/download");
   });
 
   it("persists result_url to the repository row", async () => {
@@ -357,6 +365,6 @@ describe("GdprService.handleExportRequest()", () => {
       (c) => c[1].result_url !== undefined,
     );
     expect(exportUpdateCall).toBeDefined();
-    expect(exportUpdateCall?.[1].result_url).toMatch(/^data:application\/json;base64,/);
+    expect(exportUpdateCall?.[1].result_url).toBe("https://storage.example/download");
   });
 });

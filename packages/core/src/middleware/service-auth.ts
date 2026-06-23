@@ -189,10 +189,16 @@ export function serviceAuthMiddleware(config: ServiceAuthConfig) {
         if (
           typeof parsed["userId"] !== "string" ||
           typeof parsed["tenantId"] !== "string" ||
-          !Array.isArray(parsed["roles"])
+          !Array.isArray(parsed["roles"]) ||
+          !(parsed["roles"] as unknown[]).every((r) => typeof r === "string") ||
+          !Array.isArray(parsed["scopes"]) ||
+          !(parsed["scopes"] as unknown[]).every((s) => typeof s === "string") ||
+          typeof parsed["isService"] !== "boolean" ||
+          typeof parsed["isGuest"] !== "boolean" ||
+          typeof parsed["emailVerified"] !== "boolean"
         ) {
           return c.json(
-            { error: { code: "UNAUTHORIZED", message: "X-User-Context is missing required fields (userId, tenantId, roles).", requestId } },
+            { error: { code: "UNAUTHORIZED", message: "X-User-Context has missing or invalid fields (userId, tenantId, roles, scopes, isService, isGuest, emailVerified).", requestId } },
             401
           );
         }

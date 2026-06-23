@@ -99,12 +99,12 @@ CREATE TABLE IF NOT EXISTS ingestion.credentials (
 CREATE INDEX IF NOT EXISTS idx_credentials_connector_id
   ON ingestion.credentials (connector_id);
 
--- Partial index for key rotation: only rows that have not yet been
--- re-encrypted to the current (maximum) key version appear here,
--- so the rotation job never performs a full-table scan.
+-- Index on key_version for the key-rotation job. A partial predicate cannot be
+-- used here because PostgreSQL forbids subqueries in index predicates (the max
+-- key version is not a constant). A plain b-tree index on key_version still lets
+-- the rotation job efficiently range-scan rows below the current maximum.
 CREATE INDEX IF NOT EXISTS idx_credentials_key_version
-  ON ingestion.credentials (key_version)
-  WHERE key_version < (SELECT max(key_version) FROM ingestion.credentials);
+  ON ingestion.credentials (key_version);
 
 CREATE OR REPLACE TRIGGER set_credentials_updated_at
   BEFORE UPDATE ON ingestion.credentials

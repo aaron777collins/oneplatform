@@ -324,10 +324,17 @@ function buildOperation(
       target: "openApi3",
       $refStrategy: "none",
     });
+    // Use the route-declared content-type for 2xx responses so SSE endpoints
+    // (text/event-stream) are not misdocumented as application/json.
+    const isSuccess = Number(statusCode) >= 200 && Number(statusCode) < 300;
+    const contentType =
+      isSuccess && route.responseContentType !== undefined
+        ? route.responseContentType
+        : "application/json";
     responses[statusCode] = {
       description: httpStatusText(Number(statusCode)),
       content: {
-        "application/json": {
+        [contentType]: {
           schema: { $ref: `#/components/schemas/${schemaName}` },
         },
       },

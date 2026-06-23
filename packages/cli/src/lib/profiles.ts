@@ -27,7 +27,8 @@ interface GlobalConfig {
 }
 
 function ensureDirs(): void {
-  mkdirSync(PROFILES_DIR, { recursive: true });
+  // 0o700 so other local users cannot list or read the config directory.
+  mkdirSync(PROFILES_DIR, { recursive: true, mode: 0o700 });
 }
 
 function readGlobalConfig(): GlobalConfig {
@@ -39,7 +40,8 @@ function readGlobalConfig(): GlobalConfig {
 
 function writeGlobalConfig(cfg: GlobalConfig): void {
   ensureDirs();
-  writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
+  // 0o600 so only the owning user can read the config (contains active profile pointer)
+  writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { encoding: "utf8", mode: 0o600 });
 }
 
 // Profile names are used as filesystem path components — restrict to safe chars.
@@ -80,7 +82,8 @@ export function loadProfile(name: string): Profile | null {
 /** Writes a profile to disk. Creates or updates. */
 export function saveProfile(profile: Profile): void {
   ensureDirs();
-  writeFileSync(profilePath(profile.name), JSON.stringify(profile, null, 2), "utf8");
+  // 0o600 so other local users cannot read platformUrl/tenantId from profile files
+  writeFileSync(profilePath(profile.name), JSON.stringify(profile, null, 2), { encoding: "utf8", mode: 0o600 });
 }
 
 /** Lists all profiles on disk. */

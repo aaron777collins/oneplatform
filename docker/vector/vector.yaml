@@ -11,6 +11,13 @@
 #
 # Ref: OA-5 in docs/designs/friction-fixes.md
 
+# Vector persists source checkpoints and buffers under data_dir. The default
+# /var/lib/vector is not writable by the non-root user (65534) this container
+# runs as, causing "Permission denied" at startup. Point it at the writable
+# log-data volume mount (which already exists, so Vector does not need to create
+# it) and let Vector create its per-source checkpoint subdirectories there.
+data_dir: /var/log/oneplatform
+
 sources:
   docker_file_logs:
     type: file
@@ -31,7 +38,7 @@ transforms:
       # Parse the outer envelope first to extract the raw log line.
       parsed, err = parse_json(.message)
       if err == null {
-        .message = strip_whitespace(string!(parsed.log) ?? "")
+        .message = strip_whitespace(string(parsed.log) ?? "")
         .stream  = string(parsed.stream) ?? "stdout"
         .time    = string(parsed.time) ?? ""
       }
@@ -41,14 +48,18 @@ transforms:
       # that level, requestId, tenantId etc. are top-level for downstream sinks.
       inner, err2 = parse_json(.message)
       if err2 == null {
-        . = merge(., inner)
+        merged, merge_err = merge(., inner)
+        if merge_err == null {
+          . = merged
+        }
       }
 
       # Extract the container ID from the source file path as a fallback identifier.
       # Path format: /var/lib/docker/containers/<container-id>/<container-id>-json.log
-      container_id_match = parse_regex(.file, r'/var/lib/docker/containers/(?P<id>[a-f0-9]+)/.+')
-      if is_ok(container_id_match) {
-        .container_id = container_id_match.ok.id
+      # parse_regex is fallible, so capture its error rather than assigning bare.
+      container_id_match, regex_err = parse_regex(.file, r'/var/lib/docker/containers/(?P<id>[a-f0-9]+)/.+')
+      if regex_err == null {
+        .container_id = container_id_match.id
       }
 
       # Prefer the service name from structured JSON logs (emitted by createLogger)

@@ -97,9 +97,11 @@ export function createLogger(config: LoggerConfig): Logger {
     // Consumers subscribe to logs:<service> for live tailing; the channel is
     // named by service so subscribers can filter cheaply. Failures are swallowed
     // because the stdout transport already guarantees durability.
-    config.redis
-      .publish(`logs:${config.serviceName}`, JSON.stringify(event))
-      .catch(() => {});
+    if (typeof config.redis.publish === "function") {
+      config.redis
+        .publish(`logs:${config.serviceName}`, JSON.stringify(event))
+        .catch(() => {});
+    }
   }
 
   function makeLogger(traceId: string): Logger {
@@ -122,12 +124,29 @@ export function createLogger(config: LoggerConfig): Logger {
           traceId,
         };
         // Audit events are durable — they go through BullMQ with the same
-        // retry/backoff policy as other pipeline jobs so no event is silently
-        // dropped on transient failures.
-        await config.auditQueue.add("audit.event", full, {
-          attempts: 5,
-          backoff: { type: "exponential", delay: 1_000 },
-        });
+        // retry/backoff policy as other pipeline jobs. When the queue itself
+        // is unavailable (e.g. Redis down), we fall back to stderr so the event
+        // is captured by the container runtime and never silently lost.
+        try {
+          await config.auditQueue.add("audit.event", full, {
+            attempts: 5,
+            backoff: { type: "exponential", delay: 1_000 },
+            // Move to a DLQ after all retry attempts are exhausted so events
+            // are not evicted when the removeOnFail count overflows.
+            removeOnFail: false,
+          });
+        } catch (err) {
+          // BullMQ enqueue failed — write to stderr as a guaranteed fallback so
+          // the compliance record is never silently dropped.
+          process.stderr.write(
+            JSON.stringify({
+              level: "error",
+              message: "audit-queue-enqueue-failed",
+              auditEvent: full,
+              error: err instanceof Error ? err.message : String(err),
+            }) + "\n",
+          );
+        }
       },
 
       withTraceId(newTraceId: string): Logger {

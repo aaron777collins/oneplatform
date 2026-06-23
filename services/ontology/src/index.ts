@@ -32,6 +32,7 @@ import { createMigrationService } from "./services/migration-service.js";
 import { createCacheService } from "./services/cache-service.js";
 import { createInferenceService } from "./services/inference-service.js";
 import { createCleanupService } from "./services/cleanup-service.js";
+import { createQueryService } from "./services/query-service.js";
 import { registerRoutes } from "./routes/index.js";
 
 export interface ServiceApp {
@@ -179,6 +180,10 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
   });
 
+  const queryService = createQueryService({
+    db, entityRepo, fieldRepo,
+  });
+
   const cleanupService = createCleanupService({
     db, redis, logger, shadowRegistryRepo,
   });
@@ -216,6 +221,7 @@ export async function createServiceApp(config: OntologyConfig): Promise<ServiceA
     cacheService,
     mappingService,
     inferenceService,
+    queryService,
     migrationRepo,
     mappingRuleRepo,
     mappingErrorRepo,

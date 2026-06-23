@@ -4,7 +4,7 @@ import type { User, CreateUserData, UpdateUserData } from "./types.js";
 const USER_COLUMNS = `
   id, tenant_id, email, password_hash, email_verified, is_active,
   display_name, roles, created_at, updated_at, last_login_at,
-  failed_login_count, locked_until, metadata
+  failed_login_count, locked_until, metadata, password_history
 `;
 
 // Default page size when the caller does not supply a limit.
@@ -115,23 +115,6 @@ export class UserRepository {
       throw new Error(`UPDATE auth.users found no row with id=${id}`);
     }
     return row;
-  }
-
-  // Atomically increments the failed login counter and, when the threshold is
-  // reached, sets locked_until to 15 minutes from now in a single statement.
-  async incrementFailedLogin(id: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE auth.users
-            SET failed_login_count = failed_login_count + 1,
-                locked_until = CASE
-                  WHEN failed_login_count + 1 >= 10
-                    THEN now() + INTERVAL '15 minutes'
-                  ELSE locked_until
-                END,
-                updated_at = now()
-          WHERE id = $1`,
-      [id]
-    );
   }
 
   async resetFailedLogin(id: string): Promise<void> {

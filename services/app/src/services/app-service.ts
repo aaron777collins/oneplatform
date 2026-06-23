@@ -20,6 +20,7 @@ import {
   AppSlugConflictError,
   AppFileInvalidPathError,
 } from "./errors.js";
+import { escapeForTemplateLiteral } from "../templates/escape.js";
 
 // ---------------------------------------------------------------------------
 // Default VFS template — seeded on every new app creation
@@ -27,6 +28,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function renderDefaultTemplate(appName: string, slug: string): Record<string, string> {
+  const safeName = escapeForTemplateLiteral(appName);
   return {
     "/package.json": JSON.stringify(
       {
@@ -81,7 +83,7 @@ function renderDefaultTemplate(appName: string, slug: string): Record<string, st
       ``,
       `  return (`,
       `    <div>`,
-      `      <h1>${appName}</h1>`,
+      `      <h1>${safeName}</h1>`,
       `      <p>Hello, {user.displayName}!</p>`,
       `    </div>`,
       `  );`,
@@ -221,14 +223,29 @@ export function createAppService(deps: AppServiceDeps): AppService {
       }
     }
 
-    const app = await appRepo.create({
-      tenant_id:   tenantId,
-      name:        input.name,
-      slug:        input.slug,
-      access_mode: input.accessMode,
-      created_by:  userId,
-      ...(input.description !== undefined ? { description: input.description } : {}),
-    });
+    // The pre-flight conflict check above is advisory — a concurrent INSERT
+    // between the check and the INSERT can still violate the unique index.
+    // Catching error code 23505 (unique_violation) converts that raw PG error
+    // into the expected AppSlugConflictError instead of a 500.
+    let app: AppRow;
+    try {
+      app = await appRepo.create({
+        tenant_id:   tenantId,
+        name:        input.name,
+        slug:        input.slug,
+        access_mode: input.accessMode,
+        created_by:  userId,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+      });
+    } catch (err: unknown) {
+      if (
+        typeof err === "object" && err !== null &&
+        "code" in err && (err as { code: unknown }).code === "23505"
+      ) {
+        throw new AppSlugConflictError(`Slug "${input.slug}" is already in use.`);
+      }
+      throw err;
+    }
 
     // Seed default template files into VFS
     const template = renderDefaultTemplate(input.name, input.slug);
@@ -322,7 +339,19 @@ export function createAppService(deps: AppServiceDeps): AppService {
     if (input.accessMode !== undefined) updateData.access_mode = input.accessMode;
     if (input.allowedModules !== undefined) updateData.allowed_modules = input.allowedModules;
 
-    const updated = await appRepo.update(id, updateData);
+    // Same TOCTOU guard as createApp: catch concurrent slug conflicts.
+    let updated: AppRow | null;
+    try {
+      updated = await appRepo.update(id, updateData);
+    } catch (err: unknown) {
+      if (
+        typeof err === "object" && err !== null &&
+        "code" in err && (err as { code: unknown }).code === "23505"
+      ) {
+        throw new AppSlugConflictError(`Slug "${input.slug ?? ""}" is already in use.`);
+      }
+      throw err;
+    }
     if (updated === null) {
       throw new AppNotFoundError(`App "${id}" not found.`, { appId: id, tenantId });
     }

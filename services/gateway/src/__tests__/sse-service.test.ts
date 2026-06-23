@@ -155,8 +155,8 @@ describe("replay — basic semantics", () => {
     svc.stopPubSubListener();
   });
 
-  it("returns 'overflow' when the tenant has no buffer", () => {
-    expect(svc.replay("nonexistent", "any-id", ["*"])).toBe("overflow");
+  it("returns an empty array when the tenant has no buffer", () => {
+    expect(svc.replay("nonexistent", "any-id", ["*"])).toEqual([]);
   });
 
   it("returns 'overflow' when lastEventId is not in the buffer", () => {

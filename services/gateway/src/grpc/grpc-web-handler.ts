@@ -48,7 +48,9 @@ const GRPC_WEB_CONTENT_TYPE_PREFIX = "application/grpc-web";
 const GRPC_WEB_RESPONSE_CONTENT_TYPE = "application/grpc-web+json";
 
 // Status code returned when no handler is registered for the requested path.
-const UNIMPLEMENTED_STATUS = GrpcStatus.INTERNAL;
+// Must be UNIMPLEMENTED (12), not INTERNAL (13) — gRPC clients treat INTERNAL
+// as a transient error and retry; UNIMPLEMENTED signals a permanent failure.
+const UNIMPLEMENTED_STATUS = GrpcStatus.UNIMPLEMENTED;
 const UNIMPLEMENTED_MESSAGE = "method not implemented";
 
 // ---------------------------------------------------------------------------

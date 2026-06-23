@@ -57,7 +57,7 @@ export function createWorker<T = unknown, R = unknown>(
  * Move unrecoverable jobs here manually after exhausting retries so they are
  * isolated from active work and can be replayed or archived independently.
  *
- * The DLQ name is `{primaryQueueName}:dlq`.
+ * The DLQ name is `{primaryQueueName}.dlq`.
  *
  * @param primaryQueueName - The name of the primary queue this DLQ mirrors.
  * @param connection       - ioredis connection options or a `Redis` instance.
@@ -66,5 +66,6 @@ export function createDlqQueue(
   primaryQueueName: string,
   connection: ConnectionOptions
 ): Queue {
-  return new Queue(`${primaryQueueName}:dlq`, { connection });
+  // BullMQ v5 rejects queue names containing ":" — use "." as the separator.
+  return new Queue(`${primaryQueueName}.dlq`, { connection });
 }

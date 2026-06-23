@@ -83,10 +83,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS app_builds_app_version_idx ON app.builds (app_
 CREATE INDEX IF NOT EXISTS app_builds_app_id_created_idx ON app.builds (app_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS app_builds_app_status_idx ON app.builds (app_id, status, created_at DESC);
 
--- Add current_build_id FK after app.builds exists (deferred forward reference)
-ALTER TABLE app.apps
-  ADD CONSTRAINT IF NOT EXISTS app_apps_current_build_id_fkey
-  FOREIGN KEY (current_build_id) REFERENCES app.builds(id) ON DELETE SET NULL;
+-- Add current_build_id FK after app.builds exists (deferred forward reference).
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so guard on pg_constraint to
+-- keep the statement idempotent.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'app_apps_current_build_id_fkey'
+  ) THEN
+    ALTER TABLE app.apps
+      ADD CONSTRAINT app_apps_current_build_id_fkey
+      FOREIGN KEY (current_build_id) REFERENCES app.builds(id) ON DELETE SET NULL;
+  END IF;
+END$$;
 
 -- ---------------------------------------------------------------------------
 -- app.env_vars — encrypted environment variables

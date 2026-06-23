@@ -60,7 +60,7 @@ function makeTenantRepository(
     create: vi.fn(),
     list: vi
       .fn()
-      .mockResolvedValue({ tenants: [makeTenantRow()], total: 1 }),
+      .mockResolvedValue({ tenants: [makeTenantRow()], total: 1, nextCursor: null }),
     update: vi.fn().mockResolvedValue(makeTenantRow()),
     delete: vi.fn().mockResolvedValue(true),
     ...overrides,
@@ -110,26 +110,20 @@ describe("GET /api/v1/tenants", () => {
       name: "Acme Corp",
       slug: "acme-corp",
     });
-    expect(body["pagination"]).toMatchObject({ total: 1, limit: 20, offset: 0 });
+    expect(body["pagination"]).toMatchObject({ total: 1, limit: 20, nextCursor: null });
   });
 
-  it("passes limit and offset query params to the repository", async () => {
+  it("passes limit and cursor query params to the repository", async () => {
     const repo = makeTenantRepository();
     const app = buildApp(repo, makeDb());
 
-    await app.request("/api/v1/tenants?limit=5&offset=10");
-    expect(repo.list).toHaveBeenCalledWith({ limit: 5, offset: 10 });
+    await app.request("/api/v1/tenants?limit=5&cursor=abc123");
+    expect(repo.list).toHaveBeenCalledWith({ limit: 5, cursor: "abc123" });
   });
 
   it("returns 422 when limit is out of range", async () => {
     const app = buildApp(makeTenantRepository(), makeDb());
     const res = await app.request("/api/v1/tenants?limit=200");
-    expect(res.status).toBe(422);
-  });
-
-  it("returns 422 when offset is negative", async () => {
-    const app = buildApp(makeTenantRepository(), makeDb());
-    const res = await app.request("/api/v1/tenants?offset=-1");
     expect(res.status).toBe(422);
   });
 

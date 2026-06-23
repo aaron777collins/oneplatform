@@ -180,13 +180,13 @@ describe("GrpcWebHandler unary dispatch", () => {
     expect(frames).toEqual([{ echoed: "hello" }]);
   });
 
-  it("returns INTERNAL status for an unregistered method", async () => {
+  it("returns UNIMPLEMENTED status for an unregistered method", async () => {
     const frame = encodeDataFrame({ message: "hi" });
     const res = await invokeHandler("/test.v1.EchoService/NoSuchMethod", frame);
 
     expect(res.status).toBe(200);
     const grpcStatus = res.headers.get("grpc-status");
-    expect(grpcStatus).toBe(String(GrpcStatus.INTERNAL));
+    expect(grpcStatus).toBe(String(GrpcStatus.UNIMPLEMENTED));
   });
 
   it("sets content-type to application/grpc-web+json", async () => {

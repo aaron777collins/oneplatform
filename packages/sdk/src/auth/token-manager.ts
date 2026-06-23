@@ -52,11 +52,16 @@ export class TokenManager {
       }
 
       this.currentToken = newToken;
-      return newToken;
-    } finally {
-      // Clear only after currentToken is updated so no caller sees a null
-      // refreshInFlight before the new token is stored.
+      // Clear after currentToken is updated so concurrent callers immediately
+      // see the fresh token rather than a null in-flight promise.
       this.refreshInFlight = null;
+      return newToken;
+    } catch (err) {
+      // Clear before re-throwing so a caller that enters between the rejection
+      // and the finally does not see null and start a duplicate refresh on an
+      // already-failed token.
+      this.refreshInFlight = null;
+      throw err;
     }
   }
 }

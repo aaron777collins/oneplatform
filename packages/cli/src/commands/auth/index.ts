@@ -168,8 +168,9 @@ async function generateKeyAction(opts: GenerateKeyOpts, ctx: CommandContext): Pr
     body,
   );
   ctx.renderer.warn("Store this key securely. It will not be shown again.");
-  ctx.renderer.info(`Key ID: ${resp.id}`);
-  ctx.renderer.info(`Key:    ${resp.key}`);
+  // One-time secrets bypass --quiet: the server never re-exposes the key.
+  ctx.renderer.secret(`Key ID: ${resp.id}`);
+  ctx.renderer.secret(`Key:    ${resp.key}`);
 }
 
 async function listKeysAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {
@@ -201,8 +202,9 @@ async function rotateKeyAction(keyId: string, opts: RotateKeyOpts, ctx: CommandC
     { overlap },
   );
   ctx.renderer.warn("Store this new key securely. It will not be shown again.");
-  ctx.renderer.info(`New key: ${resp.newKey}`);
-  ctx.renderer.info(`Old key valid until: ${resp.overlapExpiresAt}`);
+  // One-time secrets bypass --quiet: the server never re-exposes the key.
+  ctx.renderer.secret(`New key: ${resp.newKey}`);
+  ctx.renderer.secret(`Old key valid until: ${resp.overlapExpiresAt}`);
 }
 
 async function emergencyRotateAction(_opts: Record<string, never>, ctx: CommandContext): Promise<void> {

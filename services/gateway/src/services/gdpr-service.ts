@@ -25,6 +25,7 @@ import { NotFoundError, ForbiddenError } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import type { GdprRequestRepository } from "../repositories/gdpr-request-repository.js";
 import type { GdprRequestRow, GdprRequestType } from "../repositories/types.js";
+import type { StorageService } from "./storage-service.js";
 
 // ---------------------------------------------------------------------------
 // Configuration & dependencies
@@ -43,12 +44,18 @@ export interface GdprServiceConfig {
   serviceToken: string;
   /** How many days of audit logs to retain on deletion. Default: 90. */
   auditRetentionDays?: number;
+  /** Bucket name where GDPR exports are stored. Defaults to "gdpr-exports". */
+  gdprExportBucket?: string;
+  /** Presigned URL TTL in seconds for GDPR exports. Defaults to 86400 (24 h). */
+  gdprExportUrlTtlSeconds?: number;
 }
 
 export interface GdprServiceDeps {
   gdprRequestRepo: GdprRequestRepository;
   logger: Logger;
   config: GdprServiceConfig;
+  /** Object storage used to upload GDPR export files and generate presigned URLs. */
+  storageService: StorageService;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +185,7 @@ async function callService(
 // ---------------------------------------------------------------------------
 
 export function createGdprService(deps: GdprServiceDeps): GdprService {
-  const { gdprRequestRepo, logger, config } = deps;
+  const { gdprRequestRepo, logger, config, storageService } = deps;
   const auditRetentionDays = config.auditRetentionDays ?? 90;
 
   // -------------------------------------------------------------------------
@@ -459,14 +466,24 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
     // Access is a superset of what export needs; reuse the same fan-out.
     const payload = await handleAccessRequest(requestId, userId, tenantId);
 
-    // Encode the export as a data URI. In production this should be uploaded to
-    // object storage (S3/GCS) and a time-limited signed URL returned instead.
-    // Data URIs are safe for small payloads and require no external dependency.
+    // Upload the export to object storage under a tenant-scoped key so that
+    // full PII is never stored inline in the DB as a data URI. A presigned URL
+    // with a TTL is returned instead; the object is stored under the tenant
+    // prefix so IAM bucket policies can enforce tenant isolation.
+    const bucket = config.gdprExportBucket ?? "gdpr-exports";
+    const ttlSeconds = config.gdprExportUrlTtlSeconds ?? 86400; // 24 hours
+    const objectKey = `${tenantId}/${requestId}/export.json`;
     const jsonBytes = Buffer.from(JSON.stringify(payload, null, 2), "utf8");
-    const resultUrl = `data:application/json;base64,${jsonBytes.toString("base64")}`;
+
+    await storageService.putObject(bucket, objectKey, jsonBytes, "application/json");
+    const { url: resultUrl } = await storageService.generatePresignedDownloadUrl(
+      bucket,
+      objectKey,
+      ttlSeconds,
+    );
 
     // The status was already set to completed by handleAccessRequest above.
-    // We overwrite it with the result_url.
+    // We overwrite it with the presigned result_url.
     await gdprRequestRepo.updateStatus(requestId, {
       status: "completed",
       completed_at: new Date(),

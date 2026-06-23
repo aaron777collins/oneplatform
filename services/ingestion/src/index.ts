@@ -38,6 +38,7 @@ import {
   createReconciliationService,
   createConnectorRegistryService,
   registerBuiltinConnectors,
+  createStreamingIngestionService,
 } from "./services/index.js";
 import type { SyncJobPayload, BatchJobPayload, ReconcileJobPayload } from "./services/index.js";
 import type { FileParseJobPayload } from "./services/upload-service.js";
@@ -53,6 +54,7 @@ import {
   createCdcRoutes,
   createReconciliationRoutes,
   createConnectorRegistryRoutes,
+  createStreamingRoutes,
 } from "./routes/index.js";
 
 // TTL for reconciliation report data stored in BullMQ job results (7 days).
@@ -219,6 +221,14 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   });
 
   const cdcIngestionService = createCdcIngestionService({
+    connectorRepo,
+    syncStateRepo,
+    rawTableRepo,
+    redis,
+    logger,
+  });
+
+  const streamingIngestionService = createStreamingIngestionService({
     connectorRepo,
     syncStateRepo,
     rawTableRepo,
@@ -415,6 +425,17 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
 
   const cdcRoutes = createCdcRoutes({ connectorService, cdcIngestionService });
   app.route("/api/v1/connectors", cdcRoutes);
+
+  // connectorFactory returns null for all connector IDs at this wiring layer.
+  // The streaming routes still function correctly: auth, tenant ownership, and
+  // status polling all work. A factory that resolves real KafkaConnector instances
+  // from connector config would be wired here when a Kafka-aware registry exists.
+  const streamingRoutes = createStreamingRoutes({
+    connectorService,
+    streamingIngestionService,
+    connectorFactory: () => null,
+  });
+  app.route("/api/v1/connectors", streamingRoutes);
 
   const connectorRegistryRoutes = createConnectorRegistryRoutes({ connectorRegistryService });
   app.route("/api/v1/connector-registry", connectorRegistryRoutes);

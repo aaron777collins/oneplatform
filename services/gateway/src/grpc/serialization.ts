@@ -150,6 +150,11 @@ export enum GrpcStatus {
   ALREADY_EXISTS = 6,
   PERMISSION_DENIED = 7,
   RESOURCE_EXHAUSTED = 8,
+  // Code 12 must be distinct from INTERNAL (13): clients treat INTERNAL as
+  // transient and will retry in a loop, but UNIMPLEMENTED is permanent and
+  // clients should not retry. Without this distinction, any unregistered method
+  // causes infinite retry storms from well-behaved gRPC clients.
+  UNIMPLEMENTED = 12,
   INTERNAL = 13,
   UNAVAILABLE = 14,
   UNAUTHENTICATED = 16,

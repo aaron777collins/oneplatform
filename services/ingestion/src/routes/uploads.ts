@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { Hono } from "hono";
 import { Queue } from "bullmq";
 import type { AppVariables } from "@oneplatform/core";
@@ -32,7 +33,7 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
   // Queue is created inside the factory so it uses the validated config URL
   // rather than reading process.env at import time. This also ensures the queue
   // is scoped to this route instance and can be closed during graceful shutdown.
-  const fileParseQueue = new Queue<FileParseJobPayload>("ingestion:file-parse", {
+  const fileParseQueue = new Queue<FileParseJobPayload>("ingestion.file-parse", {
     connection: { lazyConnect: true, url: deps.redisUrl },
     defaultJobOptions: {
       attempts: 5,
@@ -68,9 +69,13 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
       );
     }
 
-    const filename = typeof formData["filename"] === "string"
+    // Sanitize the filename to prevent path traversal via '../../' sequences in
+    // the user-supplied value. basename strips all directory components; the
+    // replace guards against any residual separators on non-POSIX platforms.
+    const rawFilename = typeof formData["filename"] === "string"
       ? formData["filename"]
       : file.name || "upload";
+    const filename = basename(rawFilename).replace(/[/\\]/g, "_") || "upload";
 
     const connectorId = typeof formData["connectorId"] === "string"
       ? formData["connectorId"]

@@ -35,6 +35,7 @@ import {
   PluginConfigError,
   PluginTimeoutError,
 } from "@oneplatform/plugin-sdk";
+import { randomUUID } from "node:crypto";
 import { fetchDiscoveryDocument } from "./discovery.js";
 import { verifyJwt } from "./jwks.js";
 
@@ -363,7 +364,7 @@ class OidcAuthProvider implements AuthProvider {
    * there is one OidcAuthProvider instance per plugin instance, so the map stays
    * small (one entry per concurrent auth flow for that instance).
    */
-  private readonly redirectUriByState = new Map<string, { uri: string; expiresAt: number }>();
+  private readonly redirectUriByState = new Map<string, { uri: string; nonce: string; expiresAt: number }>();
   private static readonly REDIRECT_URI_TTL_MS = 10 * 60 * 1000; // 10 minutes
   private static readonly MAX_PENDING_REDIRECTS = 10_000;
 
@@ -489,8 +490,14 @@ class OidcAuthProvider implements AuthProvider {
     params.set("scope", this.mergeScopes(cfg.scopes, options.scopes).join(" "));
     params.set("state", state);
 
-    // Cache the redirect_uri keyed by state so handleCallback() can retrieve the
-    // exact URI that was used in this authorization request. This avoids the
+    // Generate a cryptographically random nonce and include it in the authorization
+    // request. The IdP embeds it in the id_token so handleCallback() can verify the
+    // token was issued in response to THIS specific request (replay prevention).
+    const nonce = randomUUID();
+    params.set("nonce", nonce);
+
+    // Cache the redirect_uri and nonce keyed by state so handleCallback() can
+    // retrieve the exact values that were sent to the IdP. This avoids the
     // fragile pattern of reading redirect_uri from tenant config during callback.
 
     // Evict expired entries first to free space before checking the cap.
@@ -506,6 +513,7 @@ class OidcAuthProvider implements AuthProvider {
 
     this.redirectUriByState.set(state, {
       uri: options.redirectUri,
+      nonce,
       expiresAt: Date.now() + OidcAuthProvider.REDIRECT_URI_TTL_MS,
     });
 
@@ -555,29 +563,29 @@ class OidcAuthProvider implements AuthProvider {
       );
     }
 
-    // Retrieve the redirect_uri cached during getAuthorizationUrl() using the
-    // state parameter as the lookup key. This ensures the token exchange uses the
-    // exact same redirect_uri that was sent to the IdP, avoiding mismatches that
-    // cause "redirect_uri_mismatch" errors from the provider.
-    let redirectUri: string;
-    if (params.state !== undefined) {
-      const cached = this.redirectUriByState.get(params.state);
-      if (cached !== undefined && cached.expiresAt > Date.now()) {
-        redirectUri = cached.uri;
-        // Clean up after use — each state is single-use.
-        this.redirectUriByState.delete(params.state);
-      } else {
-        // State expired or was not found. Fall back to tenant config.
-        context.logger.warn(
-          "redirect_uri not found in state cache — falling back to tenant config",
-          { state: params.state },
-        );
-        redirectUri = (context.tenant.config["redirectUri"] as string) ?? "";
-      }
-    } else {
-      // No state param passed (legacy callers). Fall back to tenant config.
-      redirectUri = (context.tenant.config["redirectUri"] as string) ?? "";
+    // Retrieve the redirect_uri and nonce cached during getAuthorizationUrl() using
+    // the state parameter as the lookup key. This ensures the token exchange uses the
+    // exact same redirect_uri that was sent to the IdP, and gives us the nonce
+    // needed to verify the id_token was issued for this specific auth request.
+    // OAuth state is REQUIRED for CSRF protection. An absent or unknown state
+    // means the callback was not initiated by a getAuthorizationUrl() we issued
+    // (forged login / replayed callback), so we reject rather than silently
+    // falling back to tenant config (which also bypassed nonce verification).
+    if (params.state === undefined || params.state === "") {
+      throw new PluginAuthError(
+        "OIDC callback is missing the 'state' parameter — possible CSRF; rejecting",
+      );
     }
+    const cachedState = this.redirectUriByState.get(params.state);
+    if (cachedState === undefined || cachedState.expiresAt <= Date.now()) {
+      throw new PluginAuthError(
+        "OIDC callback 'state' is unknown or expired — possible CSRF or stale login; rejecting",
+      );
+    }
+    const redirectUri: string = cachedState.uri;
+    const expectedNonce: string | undefined = cachedState.nonce;
+    // Each state is single-use — consume it so a captured callback cannot replay.
+    this.redirectUriByState.delete(params.state);
 
     context.logger.info("Exchanging OIDC authorization code for tokens");
 
@@ -594,20 +602,53 @@ class OidcAuthProvider implements AuthProvider {
       context.logger,
     );
 
-    const claims =
-      tokenResponse.id_token !== undefined
-        ? decodeJwtPayloadUnsafe(tokenResponse.id_token)
-        : decodeJwtPayloadUnsafe(tokenResponse.access_token);
-
+    // For id_token flows: verify signature, iss, aud, exp, iat, and nonce against
+    // the provider's JWKS. This replaces the previous unsafe decode-only path
+    // (P19-080). The discovery document was already fetched above — reuse it.
+    // For access_token-only (OAuth2-only providers that omit id_token): keep the
+    // unsafe decode because that path has no JWKS binding and is out of scope.
+    let claims: Record<string, unknown>;
     if (tokenResponse.id_token !== undefined) {
+      const idTokenResult = await verifyJwt(tokenResponse.id_token, {
+        issuerUrl: cfg.issuerUrl,
+        clientId: cfg.clientId,
+        jwksUri: discovery.jwks_uri,
+        cacheTtlSeconds: cfg.jwksCacheTtlSeconds,
+        fetch: fetchProxy,
+        cache: context.cache,
+        logger: context.logger,
+        // Nonce enforcement is conditional: only when a nonce was stored during
+        // getAuthorizationUrl(). If expectedNonce is undefined (state-cache miss /
+        // legacy caller), the nonce check is skipped inside verifyJwt.
+        ...(expectedNonce !== undefined ? { expectedNonce } : {}),
+      });
+
+      if (!idTokenResult.valid) {
+        throw new PluginAuthError(
+          `ID token verification failed: ${idTokenResult.error ?? "unknown error"}`,
+          { reason: idTokenResult.error },
+        );
+      }
+
+      // idTokenResult.claims is guaranteed present when valid === true.
+      claims = idTokenResult.claims as Record<string, unknown>;
+
+      // Defense-in-depth aud check (P19-079): verifyJwt already enforces aud
+      // inside validateClaims, but we keep this explicit guard to make the
+      // intent clear in code review and to catch any future refactoring that
+      // might weaken the upstream check.
       const aud = claims["aud"];
       const audValues = typeof aud === "string" ? [aud] : Array.isArray(aud) ? aud.map(String) : [];
-      if (audValues.length > 0 && !audValues.includes(cfg.clientId)) {
+      if (audValues.length === 0 || !audValues.includes(cfg.clientId)) {
         throw new PluginAuthError(
-          `ID token audience does not match client_id: expected "${cfg.clientId}", got "${audValues.join(", ")}"`,
+          `ID token audience does not match client_id: expected "${cfg.clientId}", got "${audValues.join(", ") || "(none)"}"`,
           { expectedAud: cfg.clientId, actualAud: audValues },
         );
       }
+    } else {
+      // OAuth2-only fallback: no id_token. Decode the access_token payload for
+      // claim extraction only — the token came over TLS directly from the provider.
+      claims = decodeJwtPayloadUnsafe(tokenResponse.access_token);
     }
 
     const providerUserId = typeof claims["sub"] === "string" ? claims["sub"] : "";

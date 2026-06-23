@@ -284,7 +284,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
   const executionServiceUrl =
     deps.executionServiceUrl ??
     process.env["EXECUTION_SERVICE_URL"] ??
-    "http://execution-service:3005";
+    "http://execution-service:3000";
 
   // Derive BullMQ Redis URL from the injected dependency, falling back to the
   // module-level default. This ensures queues connect to the same Redis instance
@@ -294,7 +294,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
   // Queues are created lazily once — constructed at module level but connected
   // on first use. This defers connection errors to the first actual enqueue,
   // not service startup, which is the BullMQ recommended pattern.
-  const syncQueue = new Queue<SyncJobPayload>("ingestion:sync", {
+  const syncQueue = new Queue<SyncJobPayload>("ingestion.sync", {
     connection: { lazyConnect: true, url: redisUrl },
     defaultJobOptions: {
       attempts: 3,
@@ -304,7 +304,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     },
   });
 
-  const batchQueue = new Queue<BatchJobPayload>("ingestion:batch", {
+  const batchQueue = new Queue<BatchJobPayload>("ingestion.batch", {
     connection: { lazyConnect: true, url: redisUrl },
     defaultJobOptions: {
       attempts: 5,
@@ -314,10 +314,10 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     },
   });
 
-  // TODO(#PLAT-???): No Worker consumes "ontology:map" yet — jobs accumulate in Redis
+  // TODO(#PLAT-???): No Worker consumes "ontology.map" yet — jobs accumulate in Redis
   // until the ontology service implements a consumer. Retry config is set to match
   // the platform standard so jobs are not silently discarded on enqueue failures.
-  const ontologyQueue = new Queue("ontology:map", {
+  const ontologyQueue = new Queue("ontology.map", {
     connection: { lazyConnect: true, url: redisUrl },
     defaultJobOptions: {
       attempts: 5,
@@ -469,7 +469,10 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     progress['processedRecords'] = (progress['processedRecords'] or 0) + recordIncr
     progress['lastBatchAt'] = lastBatchAt
     local encoded = cjson.encode(progress)
-    redis.call('SET', key, encoded)
+    -- KEEPTTL preserves any TTL set by processSyncJob on the terminal-state key,
+    -- preventing the key from becoming permanent when a concurrent batch job
+    -- updates the key after the terminal EX has already been applied.
+    redis.call('SET', key, encoded, 'KEEPTTL')
     redis.call('PUBLISH', pubChannel, encoded)
     return 1
   `;
@@ -511,7 +514,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     end
     progress['errors'] = errors
     local encoded = cjson.encode(progress)
-    redis.call('SET', key, encoded)
+    -- KEEPTTL mirrors the fix in incrProgressScript: preserve any EX applied by
+    -- processSyncJob so the terminal-state key is not leaked as a permanent key.
+    redis.call('SET', key, encoded, 'KEEPTTL')
     redis.call('PUBLISH', pubChannel, encoded)
     return 1
   `;
@@ -1093,12 +1098,10 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
         recordCount: records.length,
       });
 
-      // Attempt to clean up temp file on failure so it does not persist
-      // across BullMQ retries (each retry re-reads from the file; the file
-      // is recreated by processSyncJob on a fresh batch, not here).
-      if (recordsFile !== undefined) {
-        await unlink(recordsFile).catch(() => { /* best-effort */ });
-      }
+      // Do NOT delete the temp file on failure. BullMQ will retry this job
+      // using the same recordsFile path; deleting it here would make every
+      // subsequent attempt throw ENOENT and fail permanently. The file is
+      // deleted only on the success path above.
 
       logger.error("Batch job failed", {
         syncJobId,

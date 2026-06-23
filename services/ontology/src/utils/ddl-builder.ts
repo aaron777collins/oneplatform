@@ -196,6 +196,35 @@ export interface UnionViewFieldSpec {
   isRemoved?: boolean;
 }
 
+/**
+ * Validate that a defaultExpression stored in change_plan JSONB is on the
+ * create-time allowlist before splicing it into a CREATE VIEW DDL statement.
+ *
+ * Allowed forms (mirrors buildMigrationFieldSpec in entity-service.ts):
+ *   NULL
+ *   'some string literal'  (single-quoted, with '' escaping)
+ *   finite numeric literal (e.g. 42, 3.14, -1)
+ *   TRUE | FALSE
+ *
+ * Throws with a descriptive message when the expression does not match, so
+ * a corrupted or tampered change_plan is caught at migration time rather than
+ * silently injected into SQL.
+ */
+export function validateDefaultExpression(expr: string): void {
+  if (expr === "NULL" || expr === "TRUE" || expr === "FALSE") return;
+
+  // Single-quoted string literal: starts and ends with ', with '' for internal quotes
+  if (/^'[^']*(?:''[^']*)*'$/.test(expr)) return;
+
+  // Finite numeric literal (integer or decimal, optional leading minus)
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(expr)) return;
+
+  throw new Error(
+    `Invalid defaultExpression in change_plan: "${expr}". ` +
+    `Must be NULL, TRUE, FALSE, a single-quoted string literal, or a finite numeric literal.`,
+  );
+}
+
 export function buildUnionViewDDL(
   schemaName: string,
   entitySlug: string,
@@ -211,6 +240,16 @@ export function buildUnionViewDDL(
   // They are fixed, known-safe names so we quote them directly.
   const systemCols = ["_id", "_created_at", "_updated_at", "_version", "_source_id", "_ingested_by"];
   const systemSelect = systemCols.map((c) => `"${c}"`).join(", ");
+
+  // Re-validate every defaultExpression before splicing into SQL.  The values
+  // are read back from stored change_plan JSONB whose cast is unchecked, so
+  // validation at create time is not sufficient — a corrupted or tampered
+  // payload must be rejected here with a clear error rather than injected.
+  for (const f of fields) {
+    if (f.defaultExpression !== undefined) {
+      validateDefaultExpression(f.defaultExpression);
+    }
+  }
 
   const activeFields = fields.filter((f) => !f.isRemoved);
 
