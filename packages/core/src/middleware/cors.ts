@@ -77,7 +77,10 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
 
     await next();
 
-    // Set CORS headers on the actual response after route handler runs
-    setCorsHeaders(origin, c.res.headers);
+    try {
+      setCorsHeaders(origin, c.res.headers);
+    } catch {
+      // Headers may be immutable (e.g. streaming). Best-effort.
+    }
   });
 }

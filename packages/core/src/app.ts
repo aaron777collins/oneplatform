@@ -196,12 +196,16 @@ export function createApp(config: CreateAppConfig): Hono<{ Variables: AppVariabl
   // Permissions-Policy denies sensor APIs that this platform never uses.
   app.use("*", async (_c, next) => {
     await next();
-    _c.res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-    _c.res.headers.set("X-Content-Type-Options", "nosniff");
-    _c.res.headers.set("X-Frame-Options", "DENY");
-    _c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-    _c.res.headers.set("X-XSS-Protection", "0");
-    _c.res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    try {
+      _c.res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+      _c.res.headers.set("X-Content-Type-Options", "nosniff");
+      _c.res.headers.set("X-Frame-Options", "DENY");
+      _c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+      _c.res.headers.set("X-XSS-Protection", "0");
+      _c.res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    } catch {
+      // Response headers may be immutable (e.g. streaming). Best-effort.
+    }
   });
 
   // 3. OTEL instrumentation — placed after requestId (which sets the request

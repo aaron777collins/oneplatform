@@ -243,12 +243,12 @@ export function otelMiddleware(
       exportSpanToOtlp(span, otlpEndpoint);
     }
 
-    // W3C Trace Context response header — downstream services and browsers use
-    // this to continue the trace without needing to contact the collector.
-    c.res.headers.set("traceparent", `00-${traceId}-${spanId}-01`);
-
-    // Server-Timing lets browser DevTools display backend latency in the
-    // Network panel without exposing internal details.
-    c.res.headers.set("server-timing", `total;dur=${durationMs}`);
+    try {
+      c.res.headers.set("traceparent", `00-${traceId}-${spanId}-01`);
+      c.res.headers.set("server-timing", `total;dur=${durationMs}`);
+    } catch {
+      // Headers may be immutable (e.g. streaming responses). Diagnostic
+      // headers are best-effort — never crash the request for them.
+    }
   });
 }
