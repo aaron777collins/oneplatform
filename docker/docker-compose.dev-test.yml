@@ -902,7 +902,7 @@ services:
     labels:
       <<: *dev-test-labels
     environment:
-      OP_TLS_MODE:  ${OP_TLS_MODE:-internal}
+      OP_TLS_MODE:  ${OP_TLS_MODE:-off}
       OP_DOMAIN:    ${OP_DOMAIN:-localhost}
       OP_TLS_EMAIL: ${OP_TLS_EMAIL:-}
     volumes:
