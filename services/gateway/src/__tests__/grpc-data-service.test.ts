@@ -347,7 +347,7 @@ describe("DataService.BulkIngest", () => {
 
     const svc = createDataService({
       ingestionServiceUrl: INGESTION_URL,
-      serviceToken: "svc-token-abc",
+      serviceTokenSigner: { sign: async () => "svc-token-abc" },
     });
     const records = (async function* () {
       yield { connectorId: "c1", tenantId: "t1", dataJson: "{}", externalId: "" };

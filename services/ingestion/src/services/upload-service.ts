@@ -1,4 +1,5 @@
 import { Queue, type Job } from "bullmq";
+import { bullmqConnection } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import {
   UploadJobNotFoundError,
@@ -170,7 +171,7 @@ export function createUploadService(deps: UploadServiceDeps): UploadService {
   const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
   const ontologyQueue = new Queue("ontology.map", {
-    connection: { lazyConnect: true, url: redisUrl },
+    connection: { ...bullmqConnection(redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 5,
       backoff: { type: "exponential", delay: 1_000 },

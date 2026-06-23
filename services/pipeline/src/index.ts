@@ -14,6 +14,7 @@ import {
   loadServicePrivateKey,
   readPackageVersion,
   setupProcessErrorHandlers,
+  bullmqConnection,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -176,7 +177,7 @@ export async function createServiceApp(config: PipelineConfig): Promise<ServiceA
   const triggerRepo = new TriggerRepository(db);
 
   // BullMQ queues
-  const redisConnection = { url: config.redisUrl };
+  const redisConnection = bullmqConnection(config.redisUrl);
 
   const runQueue = createQueue("queue.pipeline.run", redisConnection);
   // Note: a pipeline:cron BullMQ queue was previously created here but never

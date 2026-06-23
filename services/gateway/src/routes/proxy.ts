@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AppVariables } from "@oneplatform/core";
+import type { AppVariables, ServiceTokenSigner } from "@oneplatform/core";
 import { NotFoundError } from "@oneplatform/core";
 import type { ProxyService } from "../services/proxy-service.js";
 import type { CircuitBreaker } from "../utils/circuit-breaker.js";
@@ -7,12 +7,12 @@ import type { CircuitBreaker } from "../utils/circuit-breaker.js";
 export interface ProxyRouteDeps {
   proxyService: ProxyService;
   circuitBreakers: Map<string, CircuitBreaker>;
-  serviceToken?: string;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { proxyService, circuitBreakers, serviceToken } = deps;
+  const { proxyService, circuitBreakers, serviceTokenSigner } = deps;
 
   // SECURITY BOUNDARY: /internal/* routes must never be reachable from external
   // traffic. This catch-all returns 404 (not 403) to avoid leaking that an
@@ -44,7 +44,7 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
       proxyService.proxyRequest(c, resolved.serviceUrl + pathWithSearch, {
         timeoutMs: proxyService.getServiceTimeout(resolved.serviceName),
         serviceName: resolved.serviceName,
-        ...(serviceToken ? { serviceToken } : {}),
+        ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
         ...(user?.tenantId ? { tenantId: user.tenantId } : {}),
         ...(user?.userId ? { userId: user.userId } : {}),
         ...(user?.roles ? { roles: user.roles } : {}),

@@ -28,6 +28,7 @@ import type {
 } from "@oneplatform/sdk/grpc-types";
 import type { DataServiceImpl } from "@oneplatform/sdk/grpc-types";
 import { UnauthorizedError, NotFoundError } from "@oneplatform/core";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 import type { RpcContext } from "../service-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -38,8 +39,8 @@ import type { RpcContext } from "../service-registry.js";
 export interface DataServiceDeps {
   /** Base URL of the ingestion service. */
   readonly ingestionServiceUrl: string;
-  /** Bearer token for service-to-service authentication. */
-  readonly serviceToken?: string;
+  /** Signer for service-to-service authentication (Ed25519 JWT). */
+  readonly serviceTokenSigner?: ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,8 +92,7 @@ async function expectJson<T>(response: Response, context: string): Promise<T> {
 // The registry registration in index.ts casts via `as unknown as Record<string, RpcHandler>`
 // so the SDK interface contract is advisory, not enforced at the call site.
 export function createDataService(deps: DataServiceDeps) {
-  const { ingestionServiceUrl, serviceToken } = deps;
-  const headers = buildHeaders(serviceToken);
+  const { ingestionServiceUrl, serviceTokenSigner } = deps;
 
   // Verify the tenant ID in the request body matches the JWT-verified tenant.
   // This prevents a caller from accessing another tenant's data by crafting
@@ -110,6 +110,7 @@ export function createDataService(deps: DataServiceDeps) {
       throw new Error("GetEntity: entityType, id, and tenantId are required");
     }
     assertTenantMatch(request.tenantId, ctx, "GetEntity");
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     const url = `${ingestionServiceUrl}/api/v1/data/${encodeURIComponent(request.entityType)}/${encodeURIComponent(request.id)}`;
     const response = await fetch(url, {
@@ -131,6 +132,7 @@ export function createDataService(deps: DataServiceDeps) {
       throw new Error("ListEntities: entityType and tenantId are required");
     }
     assertTenantMatch(request.tenantId, ctx, "ListEntities");
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     const params = new URLSearchParams();
     if (request.pageSize > 0) params.set("pageSize", String(request.pageSize));
@@ -154,6 +156,7 @@ export function createDataService(deps: DataServiceDeps) {
       throw new Error("CreateEntity: entityType, tenantId, and dataJson are required");
     }
     assertTenantMatch(request.tenantId, ctx, "CreateEntity");
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     let parsedData: unknown;
     try {
@@ -180,6 +183,7 @@ export function createDataService(deps: DataServiceDeps) {
       throw new Error("UpdateEntity: entityType, id, tenantId, and dataJson are required");
     }
     assertTenantMatch(request.tenantId, ctx, "UpdateEntity");
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     let parsedData: unknown;
     try {
@@ -209,6 +213,7 @@ export function createDataService(deps: DataServiceDeps) {
       throw new Error("DeleteEntity: entityType, id, and tenantId are required");
     }
     assertTenantMatch(request.tenantId, ctx, "DeleteEntity");
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     const url = `${ingestionServiceUrl}/api/v1/data/${encodeURIComponent(request.entityType)}/${encodeURIComponent(request.id)}`;
     const response = await fetch(url, {
@@ -251,6 +256,7 @@ export function createDataService(deps: DataServiceDeps) {
       if (cursor !== undefined) params.set("cursor", cursor);
       if (request.filterJson) params.set("filter", request.filterJson);
 
+      const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
       const url = `${ingestionServiceUrl}/api/v1/data/${encodeURIComponent(request.entityType)}?${params.toString()}`;
       const response = await fetch(url, {
         method: "GET",
@@ -323,6 +329,7 @@ export function createDataService(deps: DataServiceDeps) {
     }
 
     if (parsedRecords.length > 0) {
+      const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
       const url = `${ingestionServiceUrl}/api/v1/connectors/${encodeURIComponent(connectorId)}/ingest`;
       const response = await fetch(url, {
         method: "POST",

@@ -22,6 +22,7 @@
 
 import { Queue, type Job } from "bullmq";
 import type { Redis } from "ioredis";
+import { bullmqConnection } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import type { ConnectorRepository } from "./connector-service.js";
 import type { CredentialService } from "./credential-service.js";
@@ -375,7 +376,7 @@ export function createReconciliationService(
   const redisUrl = deps.redisUrl ?? DEFAULT_REDIS_URL;
 
   const reconcileQueue = new Queue<ReconcileJobPayload>("ingestion.reconcile", {
-    connection: { lazyConnect: true, url: redisUrl },
+    connection: { ...bullmqConnection(redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 2,
       backoff: { type: "exponential", delay: 5_000 },

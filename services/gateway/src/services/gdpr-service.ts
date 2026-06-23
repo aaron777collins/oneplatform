@@ -22,7 +22,7 @@
 // user_id stored there is the original ID, not personal data.
 
 import { NotFoundError, ForbiddenError } from "@oneplatform/core";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import type { GdprRequestRepository } from "../repositories/gdpr-request-repository.js";
 import type { GdprRequestRow, GdprRequestType } from "../repositories/types.js";
 import type { StorageService } from "./storage-service.js";
@@ -40,8 +40,8 @@ export interface GdprServiceConfig {
   ingestionServiceUrl: string;
   /** URL of the app service internal API. */
   appServiceUrl: string;
-  /** Bearer token appended to all service-to-service calls. */
-  serviceToken: string;
+  /** Signer for service-to-service calls (Ed25519 JWT). */
+  serviceTokenSigner?: ServiceTokenSigner;
   /** How many days of audit logs to retain on deletion. Default: 90. */
   auditRetentionDays?: number;
   /** Bucket name where GDPR exports are stored. Defaults to "gdpr-exports". */
@@ -265,19 +265,21 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
   ): Promise<GdprAccessPayload> {
     await gdprRequestRepo.updateStatus(requestId, { status: "processing" });
 
+    const token = config.serviceTokenSigner !== undefined ? await config.serviceTokenSigner.sign() : "";
+
     try {
       // Fetch the user's profile from auth service
       const profileData = await callService(
         `${config.authServiceUrl}/internal/gdpr/users/${userId}`,
         "GET",
-        config.serviceToken,
+        token,
       );
 
       // Fetch recent audit log entries for the user from the logging service
       const auditData = await callService(
         `${config.loggingServiceUrl}/internal/gdpr/audit-log?userId=${encodeURIComponent(userId)}&tenantId=${encodeURIComponent(tenantId)}`,
         "GET",
-        config.serviceToken,
+        token,
       );
 
       const payload: GdprAccessPayload = {
@@ -344,6 +346,7 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
   ): Promise<void> {
     await gdprRequestRepo.updateStatus(requestId, { status: "processing" });
 
+    const token = config.serviceTokenSigner !== undefined ? await config.serviceTokenSigner.sign() : "";
     const errors: string[] = [];
 
     // Each service call is attempted independently so a partial failure still
@@ -356,7 +359,7 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
       await callService(
         `${config.authServiceUrl}/internal/gdpr/users/${userId}/anonymise`,
         "POST",
-        config.serviceToken,
+        token,
         { tenantId },
       );
     } catch (err) {
@@ -371,7 +374,7 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
       await callService(
         `${config.loggingServiceUrl}/internal/gdpr/audit-log`,
         "DELETE",
-        config.serviceToken,
+        token,
         { userId, tenantId, olderThan: cutoff.toISOString() },
       );
     } catch (err) {
@@ -384,7 +387,7 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
       await callService(
         `${config.ingestionServiceUrl}/internal/gdpr/connectors`,
         "DELETE",
-        config.serviceToken,
+        token,
         { userId, tenantId },
       );
     } catch (err) {
@@ -397,7 +400,7 @@ export function createGdprService(deps: GdprServiceDeps): GdprService {
       await callService(
         `${config.appServiceUrl}/internal/gdpr/apps`,
         "DELETE",
-        config.serviceToken,
+        token,
         { userId, tenantId },
       );
     } catch (err) {

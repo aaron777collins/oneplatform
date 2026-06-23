@@ -157,7 +157,7 @@ function makeDeps(overrides?: {
     hookRepo: (overrides?.hookRepo ?? makeHookRepo()) as unknown as HookRepository,
     hookService: (overrides?.hookService ?? makeHookService()) as unknown as HookService,
     executionServiceUrl: "http://execution:3000",
-    serviceToken: "token-123",
+    serviceTokenSigner: { sign: async () => "token-123" },
     logger: overrides?.logger ?? makeLogger(),
     eventPublisher: overrides?.eventPublisher ?? makeEventPublisher(),
   };

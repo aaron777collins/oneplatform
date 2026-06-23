@@ -7,6 +7,7 @@ import {
   appConfigSchema,
   createDbClient,
   createRedisClient,
+  bullmqConnection,
   createLogger,
   createApp,
   loadMasterKey,
@@ -353,7 +354,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
 
   if (startWorkers) {
     retentionQueue = new Queue(retentionQueueName, {
-      connection:        { url: redisUrl },
+      connection:        bullmqConnection(redisUrl),
       defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 5_000 } },
     });
 
@@ -374,7 +375,7 @@ export async function createServiceApp(config: AppConfig): Promise<ServiceApp> {
         await buildService.runRetentionCleanup(buildRetentionCount);
       },
       {
-        connection:       { url: redisUrl },
+        connection:       bullmqConnection(redisUrl),
         concurrency:      1,
         removeOnComplete: { count: 10 },
         removeOnFail:     { count: 100 },

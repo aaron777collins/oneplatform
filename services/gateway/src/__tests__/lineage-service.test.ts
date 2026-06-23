@@ -29,7 +29,7 @@ function makeDeps(overrides: Partial<LineageServiceDeps["config"]> = {}): Lineag
       ontologyServiceUrl: "http://ontology",
       pipelineServiceUrl: "http://pipeline",
       appServiceUrl: "http://app",
-      serviceToken: "test-token",
+      serviceTokenSigner: { sign: async () => "test-token" },
       ...overrides,
     },
     logger: makeLogger() as never,

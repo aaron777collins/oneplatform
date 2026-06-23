@@ -12,7 +12,10 @@ import {
   loadMasterKey,
   readPackageVersion,
   setupProcessErrorHandlers,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import { WebhookRepository } from "./repositories/webhook-repository.js";
 import { WebhookDeliveryRepository } from "./repositories/webhook-delivery-repository.js";
@@ -107,8 +110,8 @@ export interface GatewayConfig {
   appServiceUrl?: string;
   /** URL of the pipeline service (internal). Used by lineage. */
   pipelineServiceUrl?: string;
-  /** Bearer token for outbound service-to-service requests. */
-  serviceToken?: string;
+  /** Signer for outbound service-to-service requests (Ed25519 JWT). */
+  serviceTokenSigner?: ServiceTokenSigner;
   /** Directory containing peer service public key files. Defaults to /data/service-keys. */
   serviceKeysDir?: string;
   /** Requests per minute before rate limiting kicks in. Defaults to 1000. */
@@ -176,7 +179,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const ontologyCache = createOntologyCache({
     logger,
     ontologyServiceUrl: config.ontologyServiceUrl,
-    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
   });
 
   // Storage service is constructed early because it is shared between the
@@ -199,7 +202,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
       loggingServiceUrl: config.loggingServiceUrl ?? process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
       ingestionServiceUrl: config.ingestionServiceUrl,
       appServiceUrl: config.appServiceUrl ?? process.env["APP_SERVICE_URL"] ?? "http://app-service:3000",
-      serviceToken: config.serviceToken ?? "",
+      ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
     },
   });
 
@@ -209,7 +212,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
       ontologyServiceUrl: config.ontologyServiceUrl,
       pipelineServiceUrl: config.pipelineServiceUrl ?? process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
       appServiceUrl: config.appServiceUrl ?? process.env["APP_SERVICE_URL"] ?? "http://app-service:3000",
-      serviceToken: config.serviceToken ?? "",
+      ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
     },
     logger,
   });
@@ -316,8 +319,8 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(config.serviceToken !== undefined
-            ? { "X-Service-Token": config.serviceToken }
+          ...(config.serviceTokenSigner !== undefined
+            ? { "X-Service-Token": await config.serviceTokenSigner.sign() }
             : {}),
         },
         body: JSON.stringify({ apiKey }),
@@ -499,7 +502,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     proxyService,
     ingestionServiceUrl: config.ingestionServiceUrl,
     ...(ingestionBreaker !== undefined ? { circuitBreaker: ingestionBreaker } : {}),
-    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
   });
   app.route("/api/v1/data", dataRoutes);
 
@@ -528,7 +531,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
     ontologyCache,
     ontologyServiceUrl: config.ontologyServiceUrl,
     ingestionServiceUrl: config.ingestionServiceUrl,
-    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
   });
   app.route("/api/v1/graphql", graphqlRoutes);
 
@@ -538,11 +541,11 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const grpcServiceRegistry = createServiceRegistry();
   const grpcDataService = createDataService({
     ingestionServiceUrl: config.ingestionServiceUrl,
-    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
   });
   const grpcIngestionService = createIngestionService({
     ingestionServiceUrl: config.ingestionServiceUrl,
-    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
   });
   grpcServiceRegistry.register(
     DataServiceDescriptor,
@@ -586,7 +589,7 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const proxyRoutes = createProxyRoutes({
     proxyService,
     circuitBreakers,
-    ...(config.serviceToken !== undefined ? { serviceToken: config.serviceToken } : {}),
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
   });
   app.route("/", proxyRoutes);
 
@@ -658,7 +661,14 @@ async function main(): Promise<void> {
     }
   }
 
-  const serviceToken = process.env["OP_SERVICE_TOKEN"];
+  const keysDir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
+  let serviceTokenSigner: ServiceTokenSigner | undefined;
+  try {
+    const privateKeyPem = await loadServicePrivateKey("gateway-service", keysDir);
+    serviceTokenSigner = await createServiceTokenSigner("gateway-service", privateKeyPem);
+  } catch (err) {
+    console.warn("gateway-service: could not load service private key:", err instanceof Error ? err.message : String(err));
+  }
 
   const { app, cleanup } = await createServiceApp({
     databaseUrl: config.OP_DATABASE_URL,
@@ -668,14 +678,8 @@ async function main(): Promise<void> {
     allowedOrigins: config.OP_ALLOWED_ORIGINS,
     ontologyServiceUrl: process.env["ONTOLOGY_SERVICE_URL"] ?? "http://ontology-service:3000",
     ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
-    ...(serviceToken !== undefined ? { serviceToken } : {}),
-    // Accept both names: docker-compose sets OP_GLOBAL_RATE_LIMIT, while older
-    // configs/tests use OP_RATE_LIMIT_PER_MIN. Reading only the latter ignored
-    // the compose-configured value and always used the 1000/min default.
-    rateLimitPerMinute: parseInt(
-      process.env["OP_RATE_LIMIT_PER_MIN"] ?? process.env["OP_GLOBAL_RATE_LIMIT"] ?? "1000",
-      10,
-    ),
+    ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
+    rateLimitPerMinute: parseInt(process.env["OP_RATE_LIMIT_PER_MIN"] ?? "1000", 10),
     replicaCount: parseInt(process.env["OP_GATEWAY_REPLICAS"] ?? "1", 10),
     circuitBreakerThreshold: parseInt(process.env["OP_CIRCUIT_BREAKER_THRESHOLD"] ?? "5", 10),
     circuitBreakerResetMs: parseInt(process.env["OP_CIRCUIT_BREAKER_RESET_MS"] ?? "10000", 10),

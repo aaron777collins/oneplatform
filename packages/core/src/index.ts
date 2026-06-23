@@ -114,8 +114,8 @@ export type { DbClientConfig } from "./db.js";
 // ---------------------------------------------------------------------------
 // Redis client
 // ---------------------------------------------------------------------------
-export { createRedisClient } from "./redis.js";
-export type { RedisClientConfig } from "./redis.js";
+export { createRedisClient, bullmqConnection } from "./redis.js";
+export type { RedisClientConfig, BullmqConnectionOptions } from "./redis.js";
 
 // ---------------------------------------------------------------------------
 // Queue / BullMQ helpers

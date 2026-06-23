@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { LRUCache } from "lru-cache";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // PluginBundleCache — in-process LRU cache for compiled plugin bundles
@@ -42,8 +42,8 @@ export interface PluginBundleCacheDeps {
   logger: Logger;
   /** Base URL of the Plugin Service for bundle fetches */
   pluginServiceUrl: string;
-  /** Service token added to outbound Plugin Service requests */
-  serviceToken: string;
+  /** Service token signer for outbound Plugin Service requests */
+  serviceTokenSigner: ServiceTokenSigner;
 }
 
 // Cache configuration — design spec §10.2 table
@@ -53,7 +53,7 @@ const MAX_BUNDLE_BYTES = 10 * 1024 * 1024;  // 10 MB per entry
 const MAX_TOTAL_BYTES = 200 * 1024 * 1024;  // 200 MB total
 
 export function createPluginBundleCache(deps: PluginBundleCacheDeps): PluginBundleCache {
-  const { logger, pluginServiceUrl, serviceToken } = deps;
+  const { logger, pluginServiceUrl, serviceTokenSigner } = deps;
 
   let hitCount = 0;
   let missCount = 0;
@@ -110,7 +110,7 @@ export function createPluginBundleCache(deps: PluginBundleCacheDeps): PluginBund
     try {
       response = await fetch(url, {
         headers: {
-          "X-Service-Token": serviceToken,
+          "X-Service-Token": await serviceTokenSigner.sign(),
           "Content-Type": "application/json",
         },
         signal: AbortSignal.timeout(30_000),

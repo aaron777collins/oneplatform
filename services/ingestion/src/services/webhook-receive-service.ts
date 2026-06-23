@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Queue } from "bullmq";
+import { bullmqConnection } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import type { CredentialService } from "./credential-service.js";
 import { WebhookReceiverNotFoundError } from "./errors.js";
@@ -183,7 +184,7 @@ export function createWebhookReceiveService(
   const cache = new LruCache(CACHE_CAPACITY, CACHE_TTL_MS);
 
   const ontologyQueue = new Queue("ontology.map", {
-    connection: { lazyConnect: true, url: redisUrl },
+    connection: { ...bullmqConnection(redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 5,
       backoff: { type: "exponential", delay: 1_000 },

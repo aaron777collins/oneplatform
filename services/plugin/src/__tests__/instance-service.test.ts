@@ -185,7 +185,7 @@ function makeDeps(overrides?: {
     connectorService: (overrides?.connectorService ?? makeConnectorService()) as unknown as ConnectorRegistrationService,
     hookService: (overrides?.hookService ?? makeHookService()) as unknown as HookService,
     executionServiceUrl: "http://execution:3000",
-    serviceToken: "token-123",
+    serviceTokenSigner: { sign: async () => "token-123" },
     drainGraceSeconds: 60,
     logger: overrides?.logger ?? makeLogger(),
     eventPublisher: overrides?.eventPublisher ?? makeEventPublisher(),

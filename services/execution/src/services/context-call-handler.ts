@@ -1,5 +1,5 @@
 import { promises as dns } from "node:dns";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // ContextCallHandler — handles PluginContext API calls from the sandbox
@@ -70,8 +70,8 @@ export interface ContextCallHandlerDeps {
   pluginServiceUrl: string;
   /** Base URL of the Pipeline Service for pipeline.trigger() */
   pipelineServiceUrl: string;
-  /** Service token for outbound calls */
-  serviceToken: string;
+  /** Service token signer for outbound calls */
+  serviceTokenSigner: ServiceTokenSigner;
   /**
    * Optional DNS resolver override for testing. Production callers omit this
    * and the handler uses the system dns.promises. Tests inject a mock resolver
@@ -253,14 +253,9 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     ingestionServiceUrl,
     pluginServiceUrl,
     pipelineServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     dnsResolver = dns,
   } = deps;
-
-  const authHeaders = {
-    "X-Service-Token": serviceToken,
-    "Content-Type": "application/json",
-  };
 
   // ---------------------------------------------------------------------------
   // Individual method handlers
@@ -420,7 +415,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     }
 
     const url = `${ingestionServiceUrl}/internal/ingestion/credentials/${encodeURIComponent(credentialBundleId)}/field/${encodeURIComponent(key)}`;
-    const response = await fetch(url, { headers: authHeaders });
+    const response = await fetch(url, { headers: { "X-Service-Token": await serviceTokenSigner.sign(), "Content-Type": "application/json" } });
 
     if (!response.ok) {
       throw {
@@ -454,7 +449,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     }
 
     const url = `${ingestionServiceUrl}/internal/ingestion/credentials/${encodeURIComponent(credentialBundleId)}`;
-    const response = await fetch(url, { headers: authHeaders });
+    const response = await fetch(url, { headers: { "X-Service-Token": await serviceTokenSigner.sign(), "Content-Type": "application/json" } });
 
     if (!response.ok) {
       throw {
@@ -478,7 +473,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     }
 
     const url = `${pluginServiceUrl}/internal/plugins/cache/${encodeURIComponent(executionCtx.tenantId)}/${encodeURIComponent(executionCtx.pluginId)}/${encodeURIComponent(key)}`;
-    const response = await fetch(url, { headers: authHeaders });
+    const response = await fetch(url, { headers: { "X-Service-Token": await serviceTokenSigner.sign(), "Content-Type": "application/json" } });
     if (!response.ok) return null;
 
     const body = await response.json() as { data: { value: unknown } };
@@ -501,7 +496,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     const url = `${pluginServiceUrl}/internal/plugins/cache/${encodeURIComponent(executionCtx.tenantId)}/${encodeURIComponent(executionCtx.pluginId)}/${encodeURIComponent(key)}`;
     await fetch(url, {
       method: "PUT",
-      headers: authHeaders,
+      headers: { "X-Service-Token": await serviceTokenSigner.sign(), "Content-Type": "application/json" },
       body: JSON.stringify({
         value,
         ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
@@ -520,7 +515,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     }
 
     const url = `${pluginServiceUrl}/internal/plugins/cache/${encodeURIComponent(executionCtx.tenantId)}/${encodeURIComponent(executionCtx.pluginId)}/${encodeURIComponent(key)}`;
-    await fetch(url, { method: "DELETE", headers: authHeaders });
+    await fetch(url, { method: "DELETE", headers: { "X-Service-Token": await serviceTokenSigner.sign(), "Content-Type": "application/json" } });
   }
 
   async function handlePipelineTrigger(
@@ -548,7 +543,7 @@ export function createContextCallHandler(deps: ContextCallHandlerDeps): ContextC
     const payload = args[1] ?? {};
     await fetch(`${pipelineServiceUrl}/internal/pipeline/trigger`, {
       method: "POST",
-      headers: authHeaders,
+      headers: { "X-Service-Token": await serviceTokenSigner.sign(), "Content-Type": "application/json" },
       body: JSON.stringify({
         pipelineId,
         tenantId: executionCtx.tenantId,

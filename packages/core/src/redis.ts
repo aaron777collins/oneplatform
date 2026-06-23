@@ -42,3 +42,37 @@ export function createRedisClient(config: RedisClientConfig): RedisType {
     connectionName: process.env["SERVICE_NAME"] ?? "op-service",
   });
 }
+
+/** BullMQ-compatible ioredis connection options parsed from a Redis URL. */
+export interface BullmqConnectionOptions {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  db?: number;
+  maxRetriesPerRequest: null;
+}
+
+/**
+ * Parses a `redis://user:pass@host:port/db` URL into BullMQ-compatible ioredis
+ * connection options.
+ *
+ * BullMQ's `connection` option takes ioredis `RedisOptions`, which has NO `url`
+ * field — passing `{ url }` silently falls back to localhost:6379 with no auth
+ * (ioredis ignores the unknown key). BullMQ also mandates
+ * `maxRetriesPerRequest: null` because its blocking commands (BRPOPLPUSH etc.)
+ * must never be aborted mid-wait. This helper produces the correct shape.
+ */
+export function bullmqConnection(url: string): BullmqConnectionOptions {
+  const parsed = new URL(url);
+  const opts: BullmqConnectionOptions = {
+    host: parsed.hostname,
+    port: parsed.port ? Number(parsed.port) : 6379,
+    maxRetriesPerRequest: null,
+  };
+  if (parsed.username) opts.username = decodeURIComponent(parsed.username);
+  if (parsed.password) opts.password = decodeURIComponent(parsed.password);
+  const dbPath = parsed.pathname.replace(/^\//, "");
+  if (dbPath) opts.db = Number(dbPath);
+  return opts;
+}

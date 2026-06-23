@@ -178,7 +178,7 @@ function makeDeps(overrides?: {
     hookService: (overrides?.hookService ?? makeHookService()) as unknown as HookService,
     redis: { del: vi.fn() } as unknown as import("ioredis").Redis,
     executionServiceUrl: "http://execution:3000",
-    serviceToken: "token-123",
+    serviceTokenSigner: { sign: async () => "token-123" },
     logger: overrides?.logger ?? makeLogger(),
     eventPublisher: overrides?.eventPublisher ?? makeEventPublisher(),
     bundleBucket: "plugin-bundles",

@@ -18,7 +18,7 @@
 // should leave it enabled (the default).
 
 import { Hono } from "hono";
-import type { AppVariables } from "@oneplatform/core";
+import type { AppVariables, ServiceTokenSigner } from "@oneplatform/core";
 import { UnauthorizedError, ValidationError } from "@oneplatform/core";
 import type { OntologyCache } from "../services/ontology-cache.js";
 import { buildSchemaFromOntology } from "../graphql/schema-builder.js";
@@ -31,7 +31,7 @@ export interface GraphQLRouteDeps {
   ontologyCache: OntologyCache;
   ontologyServiceUrl: string;
   ingestionServiceUrl: string;
-  serviceToken?: string;
+  serviceTokenSigner?: ServiceTokenSigner;
   /** Max query nesting depth. Defaults to 5. */
   maxDepth?: number;
   /**
@@ -177,7 +177,7 @@ export function createGraphQLRoutes(deps: GraphQLRouteDeps): Hono<{ Variables: A
       userId: user.userId,
       roles: user.roles ?? [],
       scopes: user.scopes ?? [],
-      serviceToken: deps.serviceToken ?? "",
+      serviceToken: deps.serviceTokenSigner !== undefined ? await deps.serviceTokenSigner.sign() : "",
       ontologyServiceUrl: deps.ontologyServiceUrl,
       ingestionServiceUrl: deps.ingestionServiceUrl,
     };

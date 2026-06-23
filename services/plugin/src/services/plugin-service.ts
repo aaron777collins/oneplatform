@@ -5,7 +5,8 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as semver from "semver";
 import type pg from "pg";
-import type { Logger, EventPublisher } from "@oneplatform/core";
+import { bullmqConnection } from "@oneplatform/core";
+import type { Logger, EventPublisher, ServiceTokenSigner } from "@oneplatform/core";
 import type { PluginRepository } from "../repositories/plugin-repository.js";
 import type { InstanceRepository } from "../repositories/instance-repository.js";
 import type { HookRepository } from "../repositories/hook-repository.js";
@@ -120,7 +121,7 @@ export interface PluginServiceDeps {
   hookService: HookService;
   redis: Redis;
   executionServiceUrl: string;
-  serviceToken: string;
+  serviceTokenSigner: ServiceTokenSigner;
   logger: Logger;
   eventPublisher: EventPublisher;
   bundleBucket: string;
@@ -182,7 +183,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     hookService: _hookService,
     redis: _redis,
     executionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     logger,
     eventPublisher,
     bundleBucket,
@@ -198,14 +199,9 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
   async function getBullMQQueue(): Promise<BullMQQueue> {
     if (bullmqQueue === null) {
       const { Queue } = await import("bullmq");
-      // The entrypoint exports OP_REDIS_URL; REDIS_URL is the legacy/local name.
-      // Reading only REDIS_URL connected to localhost in production, so the
-      // pre-uninstall active-jobs check silently failed (getJobs threw, was
-      // caught, and the safety check was skipped). Match index.ts's fallback order.
-      const redisUrl =
-        process.env["OP_REDIS_URL"] ?? process.env["REDIS_URL"] ?? "redis://localhost:6379";
+      const redisUrl = process.env["REDIS_URL"] ?? "redis://localhost:6379";
       bullmqQueue = new Queue("execution", {
-        connection: { url: redisUrl } as { url: string },
+        connection: bullmqConnection(redisUrl),
       });
     }
     return bullmqQueue;
@@ -300,7 +296,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Service-Token": serviceToken,
+          "X-Service-Token": await serviceTokenSigner.sign(),
         },
         body: JSON.stringify({
           pluginId: manifestId,
@@ -544,7 +540,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           const resp = await fetch(
             `${ontologyServiceUrl}/internal/ontology/data-sources/${encodeURIComponent(plugin.manifest_id)}/count`,
             {
-              headers: { "X-Service-Token": serviceToken },
+              headers: { "X-Service-Token": await serviceTokenSigner.sign() },
               signal: AbortSignal.timeout(5_000),
             }
           );

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import Ajv, { type ValidateFunction } from "ajv";
 import type pg from "pg";
-import type { Logger, EventPublisher } from "@oneplatform/core";
+import type { Logger, EventPublisher, ServiceTokenSigner } from "@oneplatform/core";
 import type { PluginRepository } from "../repositories/plugin-repository.js";
 import type { InstanceRepository } from "../repositories/instance-repository.js";
 import type { HookRepository } from "../repositories/hook-repository.js";
@@ -68,7 +68,7 @@ export interface UpgradeServiceDeps {
   hookRepo: HookRepository;
   hookService: HookService;
   executionServiceUrl: string;
-  serviceToken: string;
+  serviceTokenSigner: ServiceTokenSigner;
   logger: Logger;
   eventPublisher: EventPublisher;
 }
@@ -101,7 +101,7 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
     hookRepo,
     hookService,
     executionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     logger,
     eventPublisher,
   } = deps;
@@ -134,7 +134,7 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Service-Token": serviceToken,
+          "X-Service-Token": await serviceTokenSigner.sign(),
         },
         body: JSON.stringify({
           pluginId: manifestId,
@@ -160,7 +160,7 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Service-Token": serviceToken,
+          "X-Service-Token": await serviceTokenSigner.sign(),
         },
         body: JSON.stringify({
           pluginId: manifestId,
@@ -317,7 +317,7 @@ export function createUpgradeService(deps: UpgradeServiceDeps): UpgradeService {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Service-Token": serviceToken,
+            "X-Service-Token": await serviceTokenSigner.sign(),
           },
           body: JSON.stringify({
             pluginId: manifestId,

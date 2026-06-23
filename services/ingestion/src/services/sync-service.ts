@@ -1,6 +1,6 @@
 import { Queue, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { AppError } from "@oneplatform/core";
+import { AppError, bullmqConnection } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -295,7 +295,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
   // on first use. This defers connection errors to the first actual enqueue,
   // not service startup, which is the BullMQ recommended pattern.
   const syncQueue = new Queue<SyncJobPayload>("ingestion.sync", {
-    connection: { lazyConnect: true, url: redisUrl },
+    connection: { ...bullmqConnection(redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: "exponential", delay: 5_000 },
@@ -305,7 +305,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
   });
 
   const batchQueue = new Queue<BatchJobPayload>("ingestion.batch", {
-    connection: { lazyConnect: true, url: redisUrl },
+    connection: { ...bullmqConnection(redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 5,
       backoff: { type: "exponential", delay: 1_000 },
@@ -315,7 +315,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
   });
 
   const ontologyQueue = new Queue("ontology.map", {
-    connection: { lazyConnect: true, url: redisUrl },
+    connection: { ...bullmqConnection(redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 5,
       backoff: { type: "exponential", delay: 1_000 },

@@ -1,4 +1,4 @@
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import { ConnectorRegistrationFailedError } from "./errors.js";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@ import { ConnectorRegistrationFailedError } from "./errors.js";
 
 export interface ConnectorRegistrationConfig {
   ingestionServiceUrl: string;
-  serviceToken: string;
+  serviceTokenSigner: ServiceTokenSigner;
   logger: Logger;
 }
 
@@ -33,12 +33,12 @@ export interface ConnectorRegistrationService {
 export function createConnectorRegistrationService(
   config: ConnectorRegistrationConfig
 ): ConnectorRegistrationService {
-  const { ingestionServiceUrl, serviceToken, logger } = config;
+  const { ingestionServiceUrl, serviceTokenSigner, logger } = config;
 
-  function headers(): Record<string, string> {
+  async function headers(): Promise<Record<string, string>> {
     return {
       "Content-Type": "application/json",
-      "X-Service-Token": serviceToken,
+      "X-Service-Token": await serviceTokenSigner.sign(),
     };
   }
 
@@ -50,7 +50,7 @@ export function createConnectorRegistrationService(
       try {
         response = await fetch(url, {
           method: "POST",
-          headers: headers(),
+          headers: await headers(),
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(10_000),
         });
@@ -82,7 +82,7 @@ export function createConnectorRegistrationService(
       try {
         const response = await fetch(url, {
           method: "DELETE",
-          headers: headers(),
+          headers: await headers(),
           signal: AbortSignal.timeout(10_000),
         });
 
@@ -107,7 +107,7 @@ export function createConnectorRegistrationService(
       try {
         const response = await fetch(url, {
           method: "DELETE",
-          headers: headers(),
+          headers: await headers(),
           signal: AbortSignal.timeout(10_000),
         });
 

@@ -46,7 +46,7 @@ function makeDeps(dnsResolver = makeDnsResolver()) {
     ingestionServiceUrl: "http://ingestion:3000",
     pluginServiceUrl: "http://plugin:3001",
     pipelineServiceUrl: "http://pipeline:3002",
-    serviceToken: "secret-service-token",
+    serviceTokenSigner: { sign: async () => "secret-service-token" },
     dnsResolver,
   };
 }

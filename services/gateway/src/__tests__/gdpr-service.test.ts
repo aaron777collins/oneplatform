@@ -67,7 +67,7 @@ function makeDeps(
       loggingServiceUrl: "http://logging",
       ingestionServiceUrl: "http://ingestion",
       appServiceUrl: "http://app",
-      serviceToken: "svc-token",
+      serviceTokenSigner: { sign: async () => "svc-token" },
     },
   };
 }

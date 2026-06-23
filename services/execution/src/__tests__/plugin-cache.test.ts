@@ -30,7 +30,7 @@ function makeDeps(logger = makeLogger()) {
   return {
     logger,
     pluginServiceUrl: "http://plugin-service:3001",
-    serviceToken: "secret",
+    serviceTokenSigner: { sign: async () => "secret" },
   };
 }
 

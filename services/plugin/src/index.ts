@@ -11,6 +11,8 @@ import {
   createEventPublisher,
   readPackageVersion,
   setupProcessErrorHandlers,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -116,7 +118,6 @@ export interface PluginConfig {
   bundleBucket: string;
   executionServiceUrl: string;
   ingestionServiceUrl: string;
-  serviceToken: string;
   retentionDays: number;
   drainGraceSeconds: number;
   serviceKeysDir: string;
@@ -147,7 +148,6 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     bundleBucket,
     executionServiceUrl,
     ingestionServiceUrl,
-    serviceToken,
     retentionDays,
     drainGraceSeconds,
     serviceKeysDir,
@@ -237,10 +237,14 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
   // Step 8: Create event publisher.
   const eventPublisher = createEventPublisher({ redis });
 
+  // Step 8a: Create service token signer (Ed25519-signed JWT).
+  const privateKeyPem = await loadServicePrivateKey("plugin-service", serviceKeysDir);
+  const serviceTokenSigner = await createServiceTokenSigner("plugin-service", privateKeyPem);
+
   // Step 9: Create connector registration service.
   const connectorService = createConnectorRegistrationService({
     ingestionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     logger,
   });
 
@@ -258,7 +262,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     hookService,
     redis,
     executionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     logger,
     eventPublisher,
     bundleBucket,
@@ -274,7 +278,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     connectorService,
     hookService,
     executionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     drainGraceSeconds,
     logger,
     eventPublisher,
@@ -296,7 +300,7 @@ export async function createServiceApp(config: PluginConfig): Promise<ServiceApp
     hookRepo,
     hookService,
     executionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     logger,
     eventPublisher,
   });
@@ -427,16 +431,6 @@ async function main(): Promise<void> {
   const masterKey = loadMasterKey();
   void masterKey; // Reserved for future field-level config encryption (spec §15.4)
 
-  // Guard against empty string so internal endpoints are not accidentally left
-  // open in misconfigured deploys. Standardized on OP_SERVICE_TOKEN across all services.
-  const serviceToken = process.env["OP_SERVICE_TOKEN"] ?? "";
-  if (serviceToken === "") {
-    console.error(
-      "FATAL: OP_SERVICE_TOKEN is not set. Internal endpoints will reject all requests."
-    );
-    process.exit(1);
-  }
-
   const pluginConfig: PluginConfig = {
     databaseUrl:        process.env["DATABASE_URL"]          ?? config.OP_DATABASE_URL,
     redisUrl:           process.env["REDIS_URL"]             ?? config.OP_REDIS_URL,
@@ -448,9 +442,8 @@ async function main(): Promise<void> {
     s3SecretKey:        process.env["OP_S3_SECRET_KEY"]      ?? "",
     s3Region:           process.env["OP_S3_REGION"]          ?? "us-east-1",
     bundleBucket:       process.env["OP_PLUGIN_BUNDLE_BUCKET"] ?? "plugin-bundles",
-    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
-    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
-    serviceToken,
+    executionServiceUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3000",
+    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
     retentionDays:      parseInt(process.env["OP_PLUGIN_BUNDLE_RETENTION_DAYS"] ?? "7", 10),
     drainGraceSeconds:  parseInt(process.env["OP_PLUGIN_DRAIN_GRACE_SECONDS"] ?? "60", 10),
     serviceKeysDir:     process.env["OP_SERVICE_KEYS_DIR"]   ?? "/data/service-keys",
@@ -460,7 +453,7 @@ async function main(): Promise<void> {
 
   const { app, cleanup } = await createServiceApp(pluginConfig);
 
-  const port = parseInt(process.env["PORT"] ?? "3008", 10);
+  const port = parseInt(process.env["PORT"] ?? "3000", 10);
 
   const server = createServer(
     (req: IncomingMessage, res: ServerResponse): void => {

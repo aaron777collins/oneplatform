@@ -16,7 +16,7 @@
 //   accuracy at query time. Caching can be layered in later if benchmarks
 //   show the fan-out calls are a bottleneck.
 
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // Public graph types
@@ -64,7 +64,7 @@ export interface LineageServiceConfig {
   ontologyServiceUrl: string;
   pipelineServiceUrl: string;
   appServiceUrl: string;
-  serviceToken: string;
+  serviceTokenSigner?: ServiceTokenSigner;
   /** Per-call HTTP timeout. Defaults to 10 000 ms. */
   timeoutMs?: number;
 }
@@ -265,7 +265,9 @@ export function createLineageService(deps: LineageServiceDeps): LineageService {
 
     try {
       const response = await fetch(url, {
-        headers: { "X-Service-Token": config.serviceToken },
+        headers: config.serviceTokenSigner !== undefined
+          ? { "X-Service-Token": await config.serviceTokenSigner.sign() }
+          : {},
         signal: controller.signal,
       });
 

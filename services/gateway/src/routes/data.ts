@@ -5,13 +5,14 @@ import { UnauthorizedError, NotFoundError, ForbiddenError } from "@oneplatform/c
 import type { OntologyCache } from "../services/ontology-cache.js";
 import type { ProxyService } from "../services/proxy-service.js";
 import type { CircuitBreaker } from "../utils/circuit-breaker.js";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 
 export interface DataRouteDeps {
   ontologyCache: OntologyCache;
   proxyService: ProxyService;
   ingestionServiceUrl: string;
   circuitBreaker?: CircuitBreaker;
-  serviceToken?: string;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 export function createDataRoutes(deps: DataRouteDeps): Hono<{ Variables: AppVariables }> {
@@ -75,7 +76,7 @@ async function handleDataRoute(
       tenantId: user.tenantId,
       userId: user.userId,
       requestId: c.var.requestId,
-      ...(deps.serviceToken ? { serviceToken: deps.serviceToken } : {}),
+      ...(deps.serviceTokenSigner !== undefined ? { serviceTokenSigner: deps.serviceTokenSigner } : {}),
     });
 
   if (deps.circuitBreaker) {

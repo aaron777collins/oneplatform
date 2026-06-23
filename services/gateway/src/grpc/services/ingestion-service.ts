@@ -18,6 +18,7 @@ import type {
 } from "@oneplatform/sdk/grpc-types";
 import type { IngestionServiceImpl } from "@oneplatform/sdk/grpc-types";
 import { UnauthorizedError, NotFoundError } from "@oneplatform/core";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 import type { RpcContext } from "../service-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@ interface SyncProgressResponse {
 
 export interface IngestionServiceDeps {
   readonly ingestionServiceUrl: string;
-  readonly serviceToken?: string;
+  readonly serviceTokenSigner?: ServiceTokenSigner;
   /**
    * Polling interval for StreamSyncEvents when heartbeat is not supplied
    * by the caller. Defaults to 2000ms.
@@ -143,9 +144,8 @@ function sleep(ms: number): Promise<void> {
 // The registry registration in index.ts casts via `as unknown as Record<string, RpcHandler>`
 // so the SDK interface contract is advisory, not enforced at the call site.
 export function createIngestionService(deps: IngestionServiceDeps) {
-  const { ingestionServiceUrl, serviceToken } = deps;
+  const { ingestionServiceUrl, serviceTokenSigner } = deps;
   const pollIntervalMs = deps.streamPollIntervalMs ?? 2_000;
-  const headers = buildHeaders(serviceToken);
 
   // Verify the tenant ID in the request body matches the JWT-verified tenant.
   // This prevents a caller from accessing another tenant's sync jobs by crafting
@@ -166,6 +166,7 @@ export function createIngestionService(deps: IngestionServiceDeps) {
       throw new Error("TriggerSync: connectorId and tenantId are required");
     }
     assertTenantMatch(request.tenantId, ctx, "TriggerSync");
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     const url = `${ingestionServiceUrl}/api/v1/connectors/${encodeURIComponent(request.connectorId)}/sync`;
     const body: Record<string, unknown> = {};
@@ -204,6 +205,7 @@ export function createIngestionService(deps: IngestionServiceDeps) {
     // GetSyncStatus is keyed by syncJobId (not tenantId), so we can't enforce
     // tenant isolation here without a lookup. The ingestion service enforces
     // tenant ownership on its side via its own auth middleware.
+    const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
 
     const url = `${ingestionServiceUrl}/api/v1/connectors/sync/${encodeURIComponent(request.syncJobId)}/progress`;
     const response = await fetch(url, {
@@ -235,6 +237,7 @@ export function createIngestionService(deps: IngestionServiceDeps) {
     let lastStatus: string | null = null;
 
     while (true) {
+      const headers = buildHeaders(serviceTokenSigner !== undefined ? await serviceTokenSigner.sign() : undefined);
       const url = `${ingestionServiceUrl}/api/v1/connectors/sync/${encodeURIComponent(request.syncJobId)}/progress`;
       const response = await fetch(url, {
         method: "GET",

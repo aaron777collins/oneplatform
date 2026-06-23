@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import Ajv, { type ValidateFunction } from "ajv";
 import type pg from "pg";
-import type { Logger, EventPublisher } from "@oneplatform/core";
+import type { Logger, EventPublisher, ServiceTokenSigner } from "@oneplatform/core";
 import type { InstanceRepository } from "../repositories/instance-repository.js";
 import type { HookRepository } from "../repositories/hook-repository.js";
 import type { PluginRepository } from "../repositories/plugin-repository.js";
@@ -142,7 +142,7 @@ export interface InstanceServiceDeps {
   connectorService: ConnectorRegistrationService;
   hookService: HookService;
   executionServiceUrl: string;
-  serviceToken: string;
+  serviceTokenSigner: ServiceTokenSigner;
   drainGraceSeconds: number;
   logger: Logger;
   eventPublisher: EventPublisher;
@@ -184,7 +184,7 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
     connectorService,
     hookService,
     executionServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
     drainGraceSeconds,
     logger,
     eventPublisher,
@@ -286,7 +286,7 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Service-Token": serviceToken,
+          "X-Service-Token": await serviceTokenSigner.sign(),
         },
         body: JSON.stringify({
           pluginId: instance.plugin_manifest_id,
@@ -331,7 +331,7 @@ export function createInstanceService(deps: InstanceServiceDeps): InstanceServic
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Service-Token": serviceToken,
+          "X-Service-Token": await serviceTokenSigner.sign(),
         },
         body: JSON.stringify({
           pluginId: instance.plugin_manifest_id,

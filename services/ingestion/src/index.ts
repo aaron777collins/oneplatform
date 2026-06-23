@@ -13,6 +13,7 @@ import {
   setupProcessErrorHandlers,
   createServiceTokenSigner,
   loadServicePrivateKey,
+  bullmqConnection,
 } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
@@ -286,7 +287,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       "ingestion.sync",
       async (job) => syncService.processSyncJob(job),
       {
-        connection: { url: config.redisUrl },
+        connection: bullmqConnection(config.redisUrl),
         concurrency: parseInt(process.env["OP_SYNC_WORKER_CONCURRENCY"] ?? "3", 10),
         removeOnComplete: { age: 604_800 },
         removeOnFail: { age: 604_800 },
@@ -297,7 +298,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       "ingestion.batch",
       async (job) => syncService.processBatchJob(job),
       {
-        connection: { url: config.redisUrl },
+        connection: bullmqConnection(config.redisUrl),
         concurrency: parseInt(process.env["OP_BATCH_WORKER_CONCURRENCY"] ?? "10", 10),
         removeOnComplete: { age: 604_800 },
         removeOnFail: { age: 604_800 },
@@ -308,7 +309,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       "ingestion.file-parse",
       async (job) => uploadService.processUploadJob(job),
       {
-        connection: { url: config.redisUrl },
+        connection: bullmqConnection(config.redisUrl),
         concurrency: parseInt(process.env["OP_FILE_PARSE_WORKER_CONCURRENCY"] ?? "5", 10),
         removeOnComplete: { age: 86_400 },
         removeOnFail: { age: 604_800 },
@@ -319,7 +320,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       "ingestion.reconcile",
       async (job) => reconciliationService.processReconcileJob(job),
       {
-        connection: { url: config.redisUrl },
+        connection: bullmqConnection(config.redisUrl),
         concurrency: parseInt(process.env["OP_RECONCILE_WORKER_CONCURRENCY"] ?? "2", 10),
         removeOnComplete: { age: REPORT_REDIS_TTL_SECONDS },
         removeOnFail: { age: REPORT_REDIS_TTL_SECONDS },
@@ -349,7 +350,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       "ontology.map",
       async (job) => ontologyMapWorkerService.processOntologyMapJob(job.data),
       {
-        connection: { url: config.redisUrl },
+        connection: bullmqConnection(config.redisUrl),
         concurrency: parseInt(process.env["OP_ONTOLOGY_MAP_WORKER_CONCURRENCY"] ?? "3", 10),
         removeOnComplete: { age: 86_400 },
         removeOnFail: { age: 604_800 },

@@ -1,5 +1,5 @@
 import type { Redis } from "ioredis";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 
 export interface EntityDefinition {
   id: string;
@@ -38,7 +38,7 @@ export interface OntologyCache {
 export interface OntologyCacheDeps {
   logger: Logger;
   ontologyServiceUrl: string;
-  serviceToken?: string;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 const SAFETY_POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -69,8 +69,8 @@ export function createOntologyCache(deps: OntologyCacheDeps): OntologyCache {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (deps.serviceToken) {
-      headers["X-Service-Token"] = deps.serviceToken;
+    if (deps.serviceTokenSigner !== undefined) {
+      headers["X-Service-Token"] = await deps.serviceTokenSigner.sign();
     }
     if (etag) {
       headers["If-None-Match"] = etag;

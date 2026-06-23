@@ -9,7 +9,10 @@ import {
   loadMasterKey,
   readPackageVersion,
   setupProcessErrorHandlers,
+  createServiceTokenSigner,
+  loadServicePrivateKey,
 } from "@oneplatform/core";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 import { runMigrations } from "./db/migrate.js";
 import {
   ExecutionRepository,
@@ -111,7 +114,7 @@ export interface ExecutionConfig {
   ingestionServiceUrl: string;
   pipelineServiceUrl: string;
   serviceBaseUrl: string;
-  serviceToken: string;
+  serviceKeysDir?: string;
   retentionDays: number;
 }
 
@@ -133,9 +136,12 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
     ingestionServiceUrl,
     pipelineServiceUrl,
     serviceBaseUrl,
-    serviceToken,
     retentionDays,
   } = config;
+
+  const keysDir = config.serviceKeysDir ?? "/data/service-keys";
+  const privateKeyPem = await loadServicePrivateKey("execution-service", keysDir);
+  const serviceTokenSigner = await createServiceTokenSigner("execution-service", privateKeyPem);
 
   // Step 1: Create DB pool (NO Redis — ADR-5, ADR-19)
   const db = createDbClient({
@@ -193,13 +199,12 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
   await connectToSandbox();
 
   // Step 6: Create plugin bundle cache.
-  // Service token for outbound Plugin Service calls is loaded from the mounted
-  // keypair at /data/. For now we use a placeholder; the actual signing mechanism
-  // is wired in the observability/auth task.
+  // Service token for outbound Plugin Service calls is signed with the
+  // Ed25519 keypair loaded from the mounted service-keys directory.
   const pluginBundleCache = createPluginBundleCache({
     logger,
     pluginServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
   });
 
   // Step 7: Create context call handler
@@ -208,7 +213,7 @@ export async function createServiceApp(config: ExecutionConfig): Promise<Service
     ingestionServiceUrl,
     pluginServiceUrl,
     pipelineServiceUrl,
-    serviceToken,
+    serviceTokenSigner,
   });
 
   // Step 8: Create SSE manager
@@ -341,17 +346,16 @@ async function main(): Promise<void> {
     masterKey,
     allowedOrigins: config.OP_ALLOWED_ORIGINS,
     sandboxSocketPath: process.env["OP_SANDBOX_SOCKET_PATH"] ?? "/run/sandbox/op.sock",
-    pluginServiceUrl: process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3008",
-    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3002",
-    pipelineServiceUrl: process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3004",
-    serviceBaseUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3005",
-    serviceToken: process.env["OP_SERVICE_TOKEN"] ?? "",
+    pluginServiceUrl: process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3000",
+    ingestionServiceUrl: process.env["INGESTION_SERVICE_URL"] ?? "http://ingestion-service:3000",
+    pipelineServiceUrl: process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
+    serviceBaseUrl: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3000",
     retentionDays: parseInt(process.env["OP_EXECUTION_LOG_RETENTION_DAYS"] ?? "30", 10),
   };
 
   const { app, cleanup } = await createServiceApp(executionConfig);
 
-  const port = parseInt(process.env["PORT"] ?? "3005", 10);
+  const port = parseInt(process.env["PORT"] ?? "3000", 10);
 
   const server = createServer(
     (req: IncomingMessage, res: ServerResponse): void => {

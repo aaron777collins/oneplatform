@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { ServiceUnavailableError } from "@oneplatform/core";
-import type { AppVariables } from "@oneplatform/core";
+import type { AppVariables, ServiceTokenSigner } from "@oneplatform/core";
 
 // ---------------------------------------------------------------------------
 // Service URL map (L2 §6.2)
@@ -106,7 +106,7 @@ export interface ProxyRequestOptions {
   roles?: string[];
   keyId?: string;
   requestId?: string;
-  serviceToken?: string;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ export function createProxyService(): ProxyService {
       roles,
       keyId,
       requestId = "",
-      serviceToken,
+      serviceTokenSigner,
     } = options;
 
     const timeoutMs = options.timeoutMs ?? getServiceTimeout(serviceName);
@@ -231,8 +231,8 @@ export function createProxyService(): ProxyService {
     if (keyId !== undefined) {
       outboundHeaders.set("x-oneplatform-key-id", keyId);
     }
-    if (serviceToken !== undefined) {
-      outboundHeaders.set("x-service-token", serviceToken);
+    if (serviceTokenSigner !== undefined) {
+      outboundHeaders.set("x-service-token", await serviceTokenSigner.sign());
     }
 
     // Propagate W3C Trace Context

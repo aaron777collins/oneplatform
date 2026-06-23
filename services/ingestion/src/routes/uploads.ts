@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { Hono } from "hono";
 import { Queue } from "bullmq";
 import type { AppVariables } from "@oneplatform/core";
-import { UnauthorizedError, ValidationError } from "@oneplatform/core";
+import { UnauthorizedError, ValidationError, bullmqConnection } from "@oneplatform/core";
 import type { UploadService, ObjectStorageClient, FileParseJobPayload } from "../services/upload-service.js";
 import { UploadFileTooLargeError, UploadUnsupportedTypeError } from "../services/errors.js";
 
@@ -34,7 +34,7 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: App
   // rather than reading process.env at import time. This also ensures the queue
   // is scoped to this route instance and can be closed during graceful shutdown.
   const fileParseQueue = new Queue<FileParseJobPayload>("ingestion.file-parse", {
-    connection: { lazyConnect: true, url: deps.redisUrl },
+    connection: { ...bullmqConnection(deps.redisUrl), lazyConnect: true },
     defaultJobOptions: {
       attempts: 5,
       backoff: { type: "exponential", delay: 1_000 },
