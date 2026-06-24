@@ -322,24 +322,32 @@ export function createBootstrapService(
         [refreshJti, sessionId]
       );
 
-      // Step 9: Zero the in-memory token and best-effort erase the file
-      clearInMemoryToken();
-
-      // File erasure is handled by the startup/route layer that owns the path;
-      // the service layer signals completion via clearInMemoryToken().
-
       logger.info("Bootstrap completed successfully", {
         tenantId,
         adminUserId,
       });
 
-      await events.publish({
-        eventType: "auth.bootstrap.completed",
-        eventVersion: "1.0",
-        tenantId,
-        actor: { type: "system", id: adminUserId },
-        data: { tenantId, adminUserId },
-      });
+      // Best-effort event publish — must not block the response or prevent
+      // token clearing. The DB transaction already committed; losing this event
+      // is acceptable (operators see the log line above).
+      try {
+        await events.publish({
+          eventType: "auth.bootstrap.completed",
+          eventVersion: "1.0",
+          tenantId,
+          actor: { type: "system", id: adminUserId },
+          data: { tenantId, adminUserId },
+        });
+      } catch (publishErr) {
+        logger.warn("Failed to publish bootstrap.completed event", {
+          error: publishErr instanceof Error ? publishErr.message : String(publishErr),
+        });
+      }
+
+      // Step 9: Zero the in-memory token AFTER all operations succeed.
+      // Previously this ran before events.publish(), so a publish failure
+      // left the token cleared with no way to retry.
+      clearInMemoryToken();
 
       return {
         tenantId,
