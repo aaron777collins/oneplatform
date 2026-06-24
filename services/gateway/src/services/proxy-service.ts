@@ -217,6 +217,17 @@ export function createProxyService(): ProxyService {
     const isHttps = c.req.url.startsWith("https://")
       || process.env["OP_FORCE_HTTPS"] === "true";
     outboundHeaders.set("x-forwarded-proto", isHttps ? "https" : "http");
+
+    // Forward the public-facing host to internal services so their CORS
+    // same-origin detection can compare the browser's Origin against the
+    // original request host rather than the internal Docker service hostname
+    // (e.g. "auth-service:3000"). Without this, internal CORS middleware sees
+    // Host: auth-service:3000 which never matches Origin: https://example.com.
+    const publicHost = c.req.header("Host") ?? c.req.header("x-forwarded-host");
+    if (publicHost !== undefined) {
+      outboundHeaders.set("x-forwarded-host", publicHost);
+    }
+
     outboundHeaders.set("x-oneplatform-request-id", requestId);
 
     if (tenantId !== undefined) {

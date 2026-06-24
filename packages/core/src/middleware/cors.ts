@@ -1,5 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import type { MiddlewareHandler } from "hono";
+import type { Logger } from "../logger.js";
 
 export interface CorsConfig {
   allowedOrigins: string[];
@@ -11,6 +12,27 @@ const ALLOWED_HEADERS = "Authorization, Content-Type, X-API-Key, X-Requested-Wit
 const EXPOSE_HEADERS =
   "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-RateLimit-Policy, X-OnePlatform-Request-ID";
 const MAX_AGE = "86400";
+
+/**
+ * Extract the request-scoped logger from the Hono context variable bag.
+ *
+ * The logger is injected per-request by an upstream middleware (e.g. the
+ * logging middleware) and carries the request's trace ID.  We consume it
+ * optionally so the CORS middleware stays usable without a full logging stack
+ * (e.g. in unit tests or lightweight service configurations).
+ */
+function getLogger(vars: Record<string, unknown>): Logger | undefined {
+  const candidate = vars["logger"];
+  if (
+    candidate !== null &&
+    typeof candidate === "object" &&
+    typeof (candidate as Logger).warn === "function" &&
+    typeof (candidate as Logger).debug === "function"
+  ) {
+    return candidate as Logger;
+  }
+  return undefined;
+}
 
 /**
  * Hono middleware that enforces the `OP_ALLOWED_ORIGINS` allowlist.
@@ -50,15 +72,21 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
       return;
     }
 
-    // Same-origin auto-detection: browsers include Origin on cross-origin requests,
-    // but Caddy (and most reverse proxies) forward the original Host unchanged.
-    // When Origin's host matches the Host header the request comes from the same
-    // deployment and must be allowed regardless of the explicit allowlist — this
-    // lets the platform work on any domain without per-deployment CORS config.
+    // Same-origin auto-detection: browsers include Origin on cross-origin requests.
+    // We compare the Origin's host against the public-facing host so the platform
+    // works on any domain without per-deployment CORS config.
+    //
+    // Header priority (most-to-least authoritative for the public host):
+    //   1. X-Forwarded-Host — set by the gateway when proxying to internal services;
+    //      reflects the original public host the browser connected to.
+    //   2. Host             — direct connections (external Caddy → gateway); when
+    //      the gateway calls an upstream service via fetch(), the Fetch API
+    //      overrides Host with the internal service hostname (e.g. auth-service:3000),
+    //      so for proxied requests Host is NOT the public host.
     let isSameOrigin = false;
     try {
       const originHost = new URL(origin).host;
-      const requestHost = c.req.header("Host") ?? c.req.header("X-Forwarded-Host") ?? "";
+      const requestHost = c.req.header("X-Forwarded-Host") ?? c.req.header("Host") ?? "";
       isSameOrigin = originHost === requestHost;
     } catch {
       // Malformed origin URL — fall through to allowlist check
@@ -70,17 +98,40 @@ export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
         const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };
         return map[ch] ?? ch;
       });
+
+      // Log at WARN so operators can detect misconfigured clients or probing
+      // attempts without having to inspect raw HTTP access logs.
+      const requestId: string = c.var["requestId"] ?? "";
+      const logger = getLogger(c.var as Record<string, unknown>);
+      logger?.warn("cors: origin rejected", {
+        origin: safeOrigin,
+        method: c.req.method,
+        path: c.req.path,
+        requestId,
+      });
+
       return c.json(
         {
           error: {
             code: "ORIGIN_NOT_ALLOWED",
             message: `Origin '${sanitized}' is not permitted.`,
-            requestId: c.var["requestId"] ?? "",
+            requestId,
           },
         },
         403
       );
     }
+
+    // Log allowed origins at DEBUG — useful when diagnosing CORS failures in
+    // development or when OP_LOG_LEVEL=debug is set in a test environment.
+    const logger = getLogger(c.var as Record<string, unknown>);
+    logger?.debug("cors: origin allowed", {
+      origin,
+      method: c.req.method,
+      path: c.req.path,
+      requestId: c.var["requestId"] ?? "",
+      isSameOrigin,
+    });
 
     if (c.req.method === "OPTIONS") {
       // Preflight: respond with headers and terminate — no further processing
