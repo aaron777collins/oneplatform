@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 19 COMPLETE — Full System Analysis, Docker Fleet Manager & Dev Stack
+## Current Phase: Phase 20 — Bootstrap Setup Wizard Fix (Redis ACL + Error Resilience)
 
 ### Completed Phases
 
@@ -379,6 +379,14 @@ This document tracks the current state of development. Read this FIRST when resu
 
 **Build & Test Status:** 25/25 builds passing, 29/29 test suites passing.
 **Dev-Test Stack:** All 22 containers healthy at https://localhost:8443
+
+#### Phase 20: Bootstrap Setup Wizard Fix (2026-06-24)
+- [x] Fixed Redis ACL: `op_auth` user was missing the `&events:*` channel permission in `docker/redis/users.acl.template`, which caused a `NOPERM` error when the auth service published `bootstrap.completed` events
+- [x] Fixed bootstrap-service.ts error resilience: moved `clearInMemoryToken()` to run after `events.publish()`, and wrapped the event publish in a try/catch so a publish failure no longer aborts bootstrap completion
+- [x] Auth service rebuilt and restarted; bootstrap state reset for a clean run
+- [x] The bootstrap setup wizard at test.aaroncollins.info now works end-to-end
+- Commit: da0b76b
+- Files changed: `docker/redis/users.acl.template`, `services/auth/src/services/bootstrap-service.ts`
 
 ## Test Totals
 

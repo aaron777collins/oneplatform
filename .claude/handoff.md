@@ -1,4 +1,28 @@
-# OnePlatform Session Handoff — 2026-06-23 (Phase 19 COMPLETE)
+# OnePlatform Session Handoff — 2026-06-24 (Bootstrap Setup Wizard Fix)
+
+## Latest Session — Bootstrap Fix (2026-06-24)
+
+### What Was Done
+Fixed the bootstrap setup wizard failure (two root causes):
+1. **Redis ACL** — `op_auth` user was missing the `&events:*` channel permission in `docker/redis/users.acl.template`, causing a `NOPERM` error when publishing `bootstrap.completed` events.
+2. **Error resilience** — In `services/auth/src/services/bootstrap-service.ts`, moved `clearInMemoryToken()` to run after `events.publish()` and wrapped the event publish in a try/catch so a publish failure no longer aborts bootstrap completion.
+
+### Current State
+- Bootstrap state has been reset.
+- Auth service rebuilt and restarted.
+- Ready for the user to complete the setup wizard at test.aaroncollins.info.
+
+### What's Next
+- User should try the setup wizard at test.aaroncollins.info end-to-end.
+
+### Key Files Changed
+- `docker/redis/users.acl.template`
+- `services/auth/src/services/bootstrap-service.ts`
+- Commit: da0b76b
+
+---
+
+# Prior Session — 2026-06-23 (Phase 19 COMPLETE)
 
 ## IMPORTANT: Read These Docs After Every Compaction
 1. `DEVELOPMENT-PROCESS.md` — Full dev pipeline
