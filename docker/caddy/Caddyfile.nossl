@@ -25,6 +25,10 @@
 		reverse_proxy gateway-service:3000 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP         {remote_host}
+			# Preserve the original Host so upstream CORS same-origin detection works.
+			# Without this Caddy rewrites Host to the upstream address (gateway-service:3000)
+			# and the middleware can never match it against the browser's Origin header.
+			header_up Host              {host}
 		}
 	}
 
@@ -32,6 +36,7 @@
 		reverse_proxy gateway-service:3000 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP         {remote_host}
+			header_up Host              {host}
 		}
 	}
 
@@ -39,6 +44,7 @@
 		reverse_proxy gateway-service:3000 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP         {remote_host}
+			header_up Host              {host}
 			flush_interval -1
 		}
 	}
@@ -47,6 +53,7 @@
 		reverse_proxy frontend:80 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP         {remote_host}
+			header_up Host              {host}
 		}
 	}
 }
