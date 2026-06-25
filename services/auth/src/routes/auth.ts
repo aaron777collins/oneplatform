@@ -140,7 +140,27 @@ return count`,
     if (!parsed.success) {
       throw new ValidationError("Invalid login request", parsed.error.issues);
     }
-    const result = await authService.login(parsed.data);
+
+    // Resolve the tenant when the client omits tenantId (single-tenant
+    // deployments). A login carries one specific user identity, so we can only
+    // auto-resolve when the deployment is unambiguously single-tenant.
+    let tenantId = parsed.data.tenantId;
+    if (tenantId === undefined) {
+      const { tenants, total } = await tenantRepository.list({ limit: 2 });
+      if (total !== 1 || tenants[0] === undefined) {
+        throw new ValidationError(
+          "tenantId is required when multiple tenants exist.",
+          [],
+        );
+      }
+      tenantId = tenants[0].id;
+    }
+
+    const result = await authService.login({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      tenantId,
+    });
 
     // Dual-mode token delivery: browser clients receive httpOnly cookies so tokens
     // are never accessible to JavaScript (mitigates XSS-based token theft).

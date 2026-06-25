@@ -135,7 +135,9 @@ export const loginRequest = z.object({
   // min(1) because we must call bcrypt.compare regardless — Zod rejects empty
   // passwords before they reach the bcrypt path
   password: z.string().min(1).max(128),
-  tenantId: z.string().uuid(),
+  // Optional for single-tenant deployments: when omitted the login route
+  // resolves the tenant automatically if exactly one exists.
+  tenantId: z.string().uuid().optional(),
 });
 
 const loginUser = z.object({

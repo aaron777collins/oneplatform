@@ -43,7 +43,6 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
   const adminEmail = useWizardStore((state) => state.adminEmail);
   const adminPassword = useWizardStore((state) => state.adminPassword);
   const orgName = useWizardStore((state) => state.orgName);
-  const reset = useWizardStore((state) => state.reset);
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [serverError, setServerError] = React.useState<string | null>(null);
@@ -71,8 +70,7 @@ export function ReviewStep({ bootstrapToken, onNext, onPrev }: ReviewStepProps) 
         tenantName: orgName,
         bootstrapToken,
       });
-      reset();
-      onNext();
+      useWizardStore.getState().goToStep(5);
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.statusCode === 410) {
