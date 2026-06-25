@@ -163,42 +163,42 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
 
     const requestId: string = c.var["requestId"] ?? "";
 
-    // Try Bearer JWT first
+    // Extract JWT from Bearer header or op_access_token cookie.
+    // Bearer takes precedence; cookie is the browser-session path.
     const authHeader = c.req.header("Authorization");
+    let jwtToken: string | undefined;
+
     if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.slice(7);
+      jwtToken = authHeader.slice(7);
+    } else {
+      const cookieHeader = c.req.header("cookie") ?? "";
+      const cookieMatch = cookieHeader.match(/(?:^|;\s*)op_access_token=([^;]+)/);
+      if (cookieMatch?.[1]) {
+        jwtToken = cookieMatch[1];
+      }
+    }
+
+    if (jwtToken) {
       let claims: JwtClaims;
 
       try {
-        const alg = readTokenAlgorithm(token);
+        const alg = readTokenAlgorithm(jwtToken);
         if (alg === "EdDSA") {
-          // EdDSA requires the public key to be configured — reject loudly if
-          // it was not provided rather than silently falling back to HS256.
           if (!edDsaPublicKey) {
             return c.json(
-              {
-                error: {
-                  code: "UNAUTHORIZED",
-                  message: "EdDSA token received but no public key is configured.",
-                  requestId,
-                },
-              },
+              { error: { code: "UNAUTHORIZED", message: "EdDSA token received but no public key is configured.", requestId } },
               401
             );
           }
-          const { payload } = await jwtVerify(token, edDsaPublicKey, {
+          const { payload } = await jwtVerify(jwtToken, edDsaPublicKey, {
             algorithms: ["EdDSA"],
-            // Enforce iss/aud when configured to prevent cross-issuer and
-            // cross-audience token replay attacks (P19-039).
             ...(config.issuer !== undefined ? { issuer: config.issuer } : {}),
             ...(config.audience !== undefined ? { audience: config.audience } : {}),
           });
           claims = payload as JwtClaims;
         } else {
-          const { payload } = await jwtVerify(token, secretBytes, {
+          const { payload } = await jwtVerify(jwtToken, secretBytes, {
             algorithms: ["HS256"],
-            // Enforce iss/aud when configured to prevent cross-issuer and
-            // cross-audience token replay attacks (P19-039).
             ...(config.issuer !== undefined ? { issuer: config.issuer } : {}),
             ...(config.audience !== undefined ? { audience: config.audience } : {}),
           });
@@ -211,8 +211,6 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
         );
       }
 
-      // Spec §4: all access tokens MUST carry jti. Reject tokens without jti
-      // to prevent irrevocable token bypass via the revocation blocklist.
       if (!claims.jti) {
         return c.json(
           { error: { code: "UNAUTHORIZED", message: "Token missing required jti claim.", requestId } },
@@ -220,8 +218,6 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
         );
       }
 
-      // Check Redis revocation blocklist — every request, O(1) (spec §4 JWT Strategy)
-      // Two blocklist levels: per-token (logout) and per-user (deactivation/password reset).
       const [tokenRevoked, userRevoked] = await Promise.all([
         config.redis.exists(`revocation:${claims.jti}`),
         config.redis.exists(`revocation:user:${claims.sub}`),
@@ -233,8 +229,6 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
         );
       }
 
-      // Unverified users: downgrade to viewer-only, preserve emailVerified=false flag
-      // so downstream code can prompt them to verify (spec §4 Email Verification).
       let roles = claims.roles ?? [];
       let scopes = claims.scopes ?? [];
       const isUnverified = claims.unverified === true;

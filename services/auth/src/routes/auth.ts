@@ -328,14 +328,20 @@ return count`,
 
     const result = await tokenService.rotateRefreshToken(refreshToken);
 
-    // If the request came from a browser (Origin header present), set the new
-    // refresh token as an HttpOnly cookie so the cycle continues without the
-    // frontend needing to read the token from the response body.
-    if (c.req.header("Origin") !== undefined && result.refreshToken) {
+    // If the request came from a browser (Origin header present), set both the
+    // new access token and refresh token as HttpOnly cookies so the browser
+    // automatically sends them on subsequent requests without the frontend
+    // needing to read tokens from the response body.
+    if (c.req.header("Origin") !== undefined) {
       const isSecure = isSecureRequest(c);
       c.header(
         "Set-Cookie",
+        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Lax; Path=/${isSecure ? "; Secure" : ""}`,
+      );
+      c.header(
+        "Set-Cookie",
         `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+        { append: true },
       );
     }
 
