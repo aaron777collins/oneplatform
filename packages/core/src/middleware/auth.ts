@@ -1,25 +1,16 @@
 import { createMiddleware } from "hono/factory";
-import { jwtVerify, type JWTPayload } from "jose";
 import { createPublicKey } from "crypto";
 import type { KeyLike } from "jose";
 import type { Redis } from "ioredis";
 import type { UserContext } from "../types.js";
-
-// Roles that unverified users may NOT hold (spec §4 Email Verification).
-// An unverified user is capped at viewer regardless of their token claims.
-const ELEVATED_ROLES = new Set([
-  "platform-admin", "tenant-admin", "developer", "editor",
-]);
-
-interface JwtClaims extends JWTPayload {
-  sub: string;
-  tid: string;
-  roles: string[];
-  scopes: string[];
-  unverified?: boolean;
-  email?: string;
-  displayName?: string;
-}
+import {
+  BearerTokenExtractor,
+  CookieTokenExtractor,
+  ApiKeyExtractor,
+  createCredentialChain,
+  type CredentialExtractor,
+} from "./credential-extractor.js";
+import { createJwtValidator } from "./jwt-validator.js";
 
 export interface AuthMiddlewareConfig {
   jwtSecret: string;
@@ -48,22 +39,13 @@ export interface AuthMiddlewareConfig {
    * Omit to skip audience validation (backward-compatible default).
    */
   audience?: string;
+  /**
+   * Additional credential extractors prepended before the built-in chain.
+   * Plugins use this to inject custom auth schemes (e.g. SAML assertions, mTLS).
+   */
+  credentialExtractors?: CredentialExtractor[];
 }
 
-/**
- * Primary user-facing authentication middleware.
- *
- * Accepts either a `Bearer` JWT or an `X-API-Key` header. Sets `c.var.user`
- * to the resolved {@link UserContext} on success. Bypasses auth for routes
- * listed in `config.publicRoutes`.
- *
- * Supports both HS256 (symmetric) and EdDSA (Ed25519 asymmetric) tokens.
- * The algorithm is read from the token header; the appropriate key is selected
- * automatically. EdDSA verification requires `config.jwtPublicKey` to be set.
- *
- * Runs after `requestId` and `cors`, before `serviceAuth` (spec §5).
- * Wired automatically by {@link createApp}.
- */
 export function authMiddleware(config: AuthMiddlewareConfig) {
   const secretBytes = new TextEncoder().encode(config.jwtSecret);
   const exactPublicRoutes = new Set<string>();
@@ -121,29 +103,24 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
     return false;
   }
 
-  /**
-   * Reads the `alg` field from the JWT header without verifying the signature.
-   * Used to pick the correct verification key before calling jwtVerify.
-   * Returns "HS256" as the default when the header cannot be decoded or has
-   * an unrecognised algorithm — the downstream jwtVerify call will reject it.
-   */
-  function readTokenAlgorithm(token: string): "HS256" | "EdDSA" {
-    try {
-      const headerPart = token.split(".")[0];
-      if (!headerPart) return "HS256";
-      const header = JSON.parse(
-        Buffer.from(headerPart, "base64url").toString("utf8")
-      ) as { alg?: string };
-      return header.alg === "EdDSA" ? "EdDSA" : "HS256";
-    } catch {
-      return "HS256";
-    }
-  }
+  const jwtValidator = createJwtValidator({
+    secretBytes,
+    edDsaPublicKey,
+    redis: config.redis,
+    issuer: config.issuer,
+    audience: config.audience,
+  });
+
+  const credentialChain = createCredentialChain(
+    ...(config.credentialExtractors ?? []),
+    new BearerTokenExtractor(),
+    new CookieTokenExtractor(),
+    new ApiKeyExtractor(),
+  );
 
   return createMiddleware(async (c, next) => {
     const path = new URL(c.req.url).pathname;
 
-    // Skip auth entirely for explicitly public routes (healthz, bootstrap, etc.)
     if (isPublicRoute(path)) {
       await next();
       return;
@@ -163,103 +140,30 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
 
     const requestId: string = c.var["requestId"] ?? "";
 
-    // Extract JWT from Bearer header or op_access_token cookie.
-    // Bearer takes precedence; cookie is the browser-session path.
-    const authHeader = c.req.header("Authorization");
-    let jwtToken: string | undefined;
+    const credential = credentialChain.extract(c);
 
-    if (authHeader?.startsWith("Bearer ")) {
-      jwtToken = authHeader.slice(7);
-    } else {
-      const cookieHeader = c.req.header("cookie") ?? "";
-      const cookieMatch = cookieHeader.match(/(?:^|;\s*)op_access_token=([^;]+)/);
-      if (cookieMatch?.[1]) {
-        jwtToken = cookieMatch[1];
-      }
+    if (!credential) {
+      return c.json(
+        { error: { code: "UNAUTHORIZED", message: "Authentication required.", requestId } },
+        401
+      );
     }
 
-    if (jwtToken) {
-      let claims: JwtClaims;
-
-      try {
-        const alg = readTokenAlgorithm(jwtToken);
-        if (alg === "EdDSA") {
-          if (!edDsaPublicKey) {
-            return c.json(
-              { error: { code: "UNAUTHORIZED", message: "EdDSA token received but no public key is configured.", requestId } },
-              401
-            );
-          }
-          const { payload } = await jwtVerify(jwtToken, edDsaPublicKey, {
-            algorithms: ["EdDSA"],
-            ...(config.issuer !== undefined ? { issuer: config.issuer } : {}),
-            ...(config.audience !== undefined ? { audience: config.audience } : {}),
-          });
-          claims = payload as JwtClaims;
-        } else {
-          const { payload } = await jwtVerify(jwtToken, secretBytes, {
-            algorithms: ["HS256"],
-            ...(config.issuer !== undefined ? { issuer: config.issuer } : {}),
-            ...(config.audience !== undefined ? { audience: config.audience } : {}),
-          });
-          claims = payload as JwtClaims;
-        }
-      } catch {
+    if (credential.type === "jwt") {
+      const result = await jwtValidator.validate(credential.token);
+      if (!result.valid) {
         return c.json(
-          { error: { code: "UNAUTHORIZED", message: "Invalid or expired token.", requestId } },
+          { error: { code: "UNAUTHORIZED", message: result.message, requestId } },
           401
         );
       }
-
-      if (!claims.jti) {
-        return c.json(
-          { error: { code: "UNAUTHORIZED", message: "Token missing required jti claim.", requestId } },
-          401
-        );
-      }
-
-      const [tokenRevoked, userRevoked] = await Promise.all([
-        config.redis.exists(`revocation:${claims.jti}`),
-        config.redis.exists(`revocation:user:${claims.sub}`),
-      ]);
-      if (tokenRevoked || userRevoked) {
-        return c.json(
-          { error: { code: "UNAUTHORIZED", message: "Token has been revoked.", requestId } },
-          401
-        );
-      }
-
-      let roles = claims.roles ?? [];
-      let scopes = claims.scopes ?? [];
-      const isUnverified = claims.unverified === true;
-
-      if (isUnverified) {
-        roles = roles.filter((r) => !ELEVATED_ROLES.has(r));
-        if (!roles.includes("viewer")) roles = ["viewer"];
-        scopes = ["data:read", "ontology:read", "pipelines:read", "apps:read", "logs:read"];
-      }
-
-      const user: UserContext = {
-        userId: claims.sub,
-        tenantId: claims.tid,
-        roles,
-        scopes,
-        isGuest: false,
-        isService: false,
-        emailVerified: !isUnverified,
-        ...(claims.email ? { email: claims.email } : {}),
-        ...(claims.displayName ? { displayName: claims.displayName } : {}),
-      };
-
-      c.set("user", user);
+      c.set("user", result.user);
       await next();
       return;
     }
 
-    // Try X-API-Key header
-    const apiKey = c.req.header("X-API-Key");
-    if (apiKey) {
-      const user = await config.validateApiKey(apiKey);
+    if (credential.type === "apiKey") {
+      const user = await config.validateApiKey(credential.key);
       if (!user) {
         return c.json(
           { error: { code: "UNAUTHORIZED", message: "Invalid API key.", requestId } },
@@ -270,11 +174,5 @@ export function authMiddleware(config: AuthMiddlewareConfig) {
       await next();
       return;
     }
-
-    // No auth credential provided
-    return c.json(
-      { error: { code: "UNAUTHORIZED", message: "Authentication required.", requestId } },
-      401
-    );
   });
 }

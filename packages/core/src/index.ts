@@ -179,6 +179,21 @@ export { corsMiddleware } from "./middleware/cors.js";
 export type { CorsConfig } from "./middleware/cors.js";
 export { authMiddleware } from "./middleware/auth.js";
 export type { AuthMiddlewareConfig } from "./middleware/auth.js";
+export {
+  BearerTokenExtractor,
+  CookieTokenExtractor,
+  ApiKeyExtractor,
+  createCredentialChain,
+} from "./middleware/credential-extractor.js";
+export type {
+  CredentialExtractor,
+  ExtractedCredential,
+} from "./middleware/credential-extractor.js";
+export { createJwtValidator } from "./middleware/jwt-validator.js";
+export type {
+  JwtValidatorConfig,
+  JwtValidationResult,
+} from "./middleware/jwt-validator.js";
 export { serviceAuthMiddleware, signUserContext } from "./middleware/service-auth.js";
 export type { ServiceAuthConfig } from "./middleware/service-auth.js";
 export { responseEnvelopeMiddleware } from "./middleware/response-envelope.js";
