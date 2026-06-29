@@ -737,10 +737,17 @@ async function main(): Promise<void> {
 
         const responseOrPromise = app.fetch(fetchRequest);
         const handleResponse = (response: Response): void => {
-          res.writeHead(
-            response.status,
-            Object.fromEntries(response.headers.entries()),
-          );
+          const outHeaders: Record<string, string | string[]> = {};
+          response.headers.forEach((value, name) => {
+            if (name.toLowerCase() !== "set-cookie") {
+              outHeaders[name] = value;
+            }
+          });
+          const setCookies = response.headers.getSetCookie?.() ?? [];
+          if (setCookies.length > 0) {
+            outHeaders["set-cookie"] = setCookies;
+          }
+          res.writeHead(response.status, outHeaders);
 
           // SSE and other streaming responses have a ReadableStream body.
           // Buffering the entire stream via arrayBuffer() would block until

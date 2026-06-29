@@ -365,7 +365,7 @@ services:
       LOGGING_SERVICE_URL: http://op-dev-test-logging:3000
       PLUGIN_SERVICE_URL: http://op-dev-test-plugin:3000
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       OP_GLOBAL_RATE_LIMIT: ${OP_GLOBAL_RATE_LIMIT:-10000}
       OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
@@ -407,7 +407,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       OP_REQUIRE_EMAIL_VERIFICATION: ${OP_REQUIRE_EMAIL_VERIFICATION:-false}
       OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
@@ -448,7 +448,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       # Internal service-to-service URLs (all services listen on :3000).
       EXECUTION_SERVICE_URL: http://op-dev-test-execution:3000
       ONTOLOGY_SERVICE_URL: http://op-dev-test-ontology:3000
@@ -487,7 +487,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       # Internal service-to-service URLs (all services listen on :3000).
       EXECUTION_SERVICE_URL: http://op-dev-test-execution:3000
       OP_MIGRATION_TIMEOUT: ${OP_MIGRATION_TIMEOUT:-3600}
@@ -525,7 +525,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       # Internal service-to-service URLs (all services listen on :3000).
       EXECUTION_SERVICE_URL: http://op-dev-test-execution:3000
       INGESTION_SERVICE_URL: http://op-dev-test-ingestion:3000
@@ -607,7 +607,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       # Internal service-to-service URLs (all services listen on :3000).
       EXECUTION_SERVICE_URL: http://op-dev-test-execution:3000
       INGESTION_SERVICE_URL: http://op-dev-test-ingestion:3000
@@ -664,7 +664,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       # Internal service-to-service URLs (all services listen on :3000).
       AUTH_SERVICE_URL: http://op-dev-test-auth:3000
       EXECUTION_SERVICE_URL: http://op-dev-test-execution:3000
@@ -709,7 +709,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
     volumes:
@@ -743,7 +743,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
-      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443}
+      OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088}
       # Internal service-to-service URLs (all services listen on :3000).
       EXECUTION_SERVICE_URL: http://op-dev-test-execution:3000
       INGESTION_SERVICE_URL: http://op-dev-test-ingestion:3000

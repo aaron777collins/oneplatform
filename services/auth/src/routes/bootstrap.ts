@@ -106,22 +106,18 @@ export function createBootstrapRoutes(deps: BootstrapRouteDeps): Hono<{ Variable
 
     if (c.req.header("Origin") !== undefined && result.accessToken !== undefined) {
       const isSecure = isSecureRequest(c);
-      c.res = new Response(JSON.stringify(result), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      });
+      const secureSuffix = isSecure ? "; Secure" : "";
       c.header(
         "Set-Cookie",
-        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/${isSecure ? "; Secure" : ""}`,
+        `op_access_token=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/${secureSuffix}`,
       );
       if (result.refreshToken !== undefined) {
         c.header(
           "Set-Cookie",
-          `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh${isSecure ? "; Secure" : ""}`,
+          `op_refresh_token=${result.refreshToken}; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh${secureSuffix}`,
           { append: true },
         );
       }
-      return c.res;
     }
 
     return c.json(result, 201);

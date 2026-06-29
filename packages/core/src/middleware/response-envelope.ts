@@ -64,20 +64,25 @@ export function responseEnvelopeMiddleware() {
 
     const status = c.res.status as 200 | 201 | 202 | 203;
 
-    // Preserve ALL headers the handler set (ETag, Cache-Control, Location,
-    // Content-Disposition, Set-Cookie, WWW-Authenticate, custom headers, …),
-    // overriding only Content-Type to the JSON envelope. An allowlist here
-    // silently dropped any header not explicitly enumerated.
     const merged = new Headers(c.res.headers);
     merged.set("Content-Type", "application/json");
-    // c.newResponse expects a HeaderRecord, not a Headers instance. Flatten the
-    // merged Headers into a plain record so multi-valued headers (e.g.
-    // Set-Cookie) collapse via the standard comma-join the Headers API performs.
+
+    const setCookies = c.res.headers.getSetCookie?.() ?? [];
+
     const preservedHeaders: Record<string, string> = {};
     merged.forEach((value, name) => {
-      preservedHeaders[name] = value;
+      if (name.toLowerCase() !== "set-cookie") {
+        preservedHeaders[name] = value;
+      }
     });
 
-    c.res = c.newResponse(JSON.stringify({ data: body }), status, preservedHeaders);
+    const wrapped = new Response(JSON.stringify({ data: body }), {
+      status,
+      headers: preservedHeaders,
+    });
+    for (const cookie of setCookies) {
+      wrapped.headers.append("Set-Cookie", cookie);
+    }
+    c.res = wrapped;
   });
 }
