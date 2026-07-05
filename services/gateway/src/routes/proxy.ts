@@ -40,6 +40,20 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
     }
 
     const user = c.var.user;
+
+    // When the inbound request was authenticated via cookie (no Authorization
+    // header), extract the raw access token so the proxy can inject it as a
+    // Bearer header on the upstream request. This ensures upstream services
+    // authenticate correctly without needing cookie-parsing support.
+    let accessToken: string | undefined;
+    if (user && !c.req.header("Authorization")) {
+      const cookieHeader = c.req.header("cookie") ?? "";
+      const match = cookieHeader.match(/(?:^|;\s*)op_access_token=([^;]+)/);
+      if (match?.[1]) {
+        accessToken = match[1];
+      }
+    }
+
     const doProxy = () =>
       proxyService.proxyRequest(c, resolved.serviceUrl + pathWithSearch, {
         timeoutMs: proxyService.getServiceTimeout(resolved.serviceName),
@@ -48,6 +62,7 @@ export function createProxyRoutes(deps: ProxyRouteDeps): Hono<{ Variables: AppVa
         ...(user?.tenantId ? { tenantId: user.tenantId } : {}),
         ...(user?.userId ? { userId: user.userId } : {}),
         ...(user?.roles ? { roles: user.roles } : {}),
+        ...(accessToken !== undefined ? { accessToken } : {}),
         requestId: c.var.requestId,
       });
 

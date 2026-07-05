@@ -107,6 +107,13 @@ export interface ProxyRequestOptions {
   keyId?: string;
   requestId?: string;
   serviceTokenSigner?: ServiceTokenSigner;
+  /**
+   * When the gateway authenticated the request via a cookie (no Bearer header),
+   * pass the raw access token here so it is injected as an Authorization header
+   * on the upstream request. This ensures upstream services can authenticate the
+   * request even if they lack cookie-extraction support.
+   */
+  accessToken?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +224,15 @@ export function createProxyService(): ProxyService {
     const isHttps = c.req.url.startsWith("https://")
       || process.env["OP_FORCE_HTTPS"] === "true";
     outboundHeaders.set("x-forwarded-proto", isHttps ? "https" : "http");
+
+    // Inject Authorization header when the gateway authenticated via cookie.
+    // The inbound request carries op_access_token as an HttpOnly cookie but no
+    // Authorization header. Upstream services may not support cookie extraction
+    // so we normalise the credential to the standard Bearer scheme. This also
+    // avoids the need for every downstream service to duplicate cookie-parsing.
+    if (options.accessToken && !outboundHeaders.has("authorization")) {
+      outboundHeaders.set("authorization", `Bearer ${options.accessToken}`);
+    }
 
     // Forward the public-facing host to internal services so their CORS
     // same-origin detection can compare the browser's Origin against the

@@ -370,6 +370,10 @@ services:
       OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
       OP_WEBHOOK_ALLOW_HTTP: ${OP_WEBHOOK_ALLOW_HTTP:-false}
+      # When deployed behind a TLS-terminating proxy the internal Docker Caddy
+      # sees plain HTTP; OP_FORCE_HTTPS ensures the proxy injects x-forwarded-proto:
+      # https so downstream auth services set the Secure flag on cookies.
+      OP_FORCE_HTTPS: "true"
     ports:
       # Direct gateway access for API testing / debugging. 127.0.0.1 only.
       - "127.0.0.1:4080:3000"
