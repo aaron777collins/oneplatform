@@ -48,8 +48,27 @@ function getLogger(vars: Record<string, unknown>): Logger | undefined {
  */
 export function corsMiddleware(config: CorsConfig): MiddlewareHandler {
   const allowAll = config.allowedOrigins.includes("*");
-  const rejectAll = config.allowedOrigins.length === 0;
-  const originSet = new Set(config.allowedOrigins);
+
+  // Derive the origin from OP_BASE_URL so any deployment works without also
+  // having to add the same host to OP_ALLOWED_ORIGINS. The two env vars
+  // serve different purposes: OP_BASE_URL is the canonical public URL of the
+  // platform; OP_ALLOWED_ORIGINS is an explicit override/addition list.
+  const baseUrlOrigin = (() => {
+    const raw = process.env["OP_BASE_URL"];
+    if (!raw) return null;
+    try {
+      return new URL(raw).origin;
+    } catch {
+      return null;
+    }
+  })();
+
+  const effectiveOrigins = baseUrlOrigin
+    ? [...config.allowedOrigins, baseUrlOrigin]
+    : config.allowedOrigins;
+
+  const rejectAll = effectiveOrigins.length === 0;
+  const originSet = new Set(effectiveOrigins);
 
   function setCorsHeaders(origin: string, headers: Headers): void {
     headers.set("Access-Control-Allow-Origin", origin);
