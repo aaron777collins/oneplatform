@@ -23,7 +23,7 @@ import { PluginCard, type PluginCardData, type PluginType } from "@/components/p
 import { PluginInstallDialog } from "@/components/plugins/PluginInstallDialog.js";
 import { useApiClient } from "@/lib/api-client.js";
 import { useScope } from "@/hooks/use-auth.js";
-import type { PaginatedResponse } from "@/lib/api-client.js";
+
 
 const ALL_TYPES: Array<PluginType | "all"> = [
   "all",
@@ -54,10 +54,10 @@ export function PluginsPage() {
   const query = useQuery({
     queryKey: ["plugins"],
     queryFn: ({ signal }) =>
-      client.get<PaginatedResponse<PluginCardData>>("/v1/plugins", undefined, { signal }),
+      client.get<{ items: PluginCardData[]; nextCursor: string | null; total: number }>("/v1/plugins", undefined, { signal }),
   });
 
-  const plugins = query.data?.data ?? [];
+  const plugins = query.data?.items ?? [];
 
   const filtered = React.useMemo(() => {
     if (typeFilter === "all") return plugins;

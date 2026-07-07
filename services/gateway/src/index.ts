@@ -483,7 +483,17 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   app.use("*", meteringMiddleware({ recorder: meteringService }));
 
   // Step 11: Register routes
-  const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt });
+  const healthServiceUrls: Record<string, string> = {
+    auth: config.authServiceUrl ?? process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
+    ingestion: config.ingestionServiceUrl,
+    ontology: config.ontologyServiceUrl,
+    pipeline: config.pipelineServiceUrl ?? process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
+    execution: process.env["EXECUTION_SERVICE_URL"] ?? "http://execution-service:3000",
+    app: config.appServiceUrl ?? process.env["APP_SERVICE_URL"] ?? "http://app-service:3000",
+    logging: config.loggingServiceUrl ?? process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
+    plugin: process.env["PLUGIN_SERVICE_URL"] ?? "http://plugin-service:3000",
+  };
+  const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt, serviceUrls: healthServiceUrls });
   app.route("/", healthRoutes);
 
   const webhookRoutes = createWebhookRoutes({ webhookService, deliveryRepo });

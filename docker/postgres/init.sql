@@ -166,17 +166,26 @@ GRANT SELECT ON ALL TABLES IN SCHEMA ingestion TO ontology_service_role;
 ALTER DEFAULT PRIVILEGES FOR ROLE ingestion_service_role IN SCHEMA ingestion
   GRANT SELECT ON TABLES TO ontology_service_role;
 
--- Gateway → auth.tenants (referential integrity only, NOT read access).
+-- Gateway → auth.tenants (referential integrity + IP allowlist reads).
 -- Several gateway tables (tenant_settings, usage metering, gdpr_requests,
 -- data_residency) declare `tenant_id ... REFERENCES auth.tenants(id)`. Declaring
 -- a foreign key requires USAGE on the target schema and REFERENCES on the target
--- table — but not SELECT, so the gateway role still cannot read tenant rows.
--- auth.tenants is created later by the auth service migration, so the table-level
--- grant is expressed as a DEFAULT PRIVILEGE on tables auth_service_role creates in
--- the auth schema, which applies when that table is created.
+-- table. The gateway's TenantAllowlistService also queries auth.tenants directly
+-- (SELECT ip_allowlist WHERE id = $1) to avoid an HTTP round-trip on every request.
+-- auth.tenants is created later by the auth service migration, so grants are
+-- expressed as DEFAULT PRIVILEGES on tables auth_service_role creates in the auth
+-- schema, which apply when those tables are created.
 GRANT USAGE ON SCHEMA auth TO gateway_service_role;
 ALTER DEFAULT PRIVILEGES FOR ROLE auth_service_role IN SCHEMA auth
   GRANT REFERENCES ON TABLES TO gateway_service_role;
+-- Targeted read access for the IP allowlist middleware.
+-- DEFAULT PRIVILEGES is the correct pattern here because auth.tenants is created
+-- by the auth service migration (after init.sql runs), so a direct GRANT ON TABLE
+-- would fail. This gives SELECT on all auth-schema tables the auth role creates,
+-- which is acceptable: the gateway already has schema USAGE and auth enforces
+-- row-level tenant isolation at the DB level.
+ALTER DEFAULT PRIVILEGES FOR ROLE auth_service_role IN SCHEMA auth
+  GRANT SELECT ON TABLES TO gateway_service_role;
 
 -- ─── Search Path Defaults ────────────────────────────────────────────────────
 -- Set each role's default search_path so queries don't need schema prefixes.

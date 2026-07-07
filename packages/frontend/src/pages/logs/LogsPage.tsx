@@ -4,7 +4,6 @@
  * Route: /logs
  */
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   Select,
   SelectContent,
@@ -14,25 +13,21 @@ import {
 } from "@/components/ui/select.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { LogViewer } from "@/components/logs/LogViewer.js";
-import { useApiClient } from "@/lib/api-client.js";
 
-interface ServiceOption {
-  name: string;
-  status: string;
-}
+const PLATFORM_SERVICES = [
+  "gateway-service",
+  "auth-service",
+  "ingestion-service",
+  "ontology-service",
+  "pipeline-service",
+  "execution-service",
+  "app-service",
+  "logging-service",
+  "plugin-service",
+];
 
 export function LogsPage() {
-  const client = useApiClient();
   const [selectedService, setSelectedService] = React.useState<string | undefined>(undefined);
-
-  const servicesQuery = useQuery({
-    queryKey: ["service-health"],
-    queryFn: ({ signal }) =>
-      client.get<{ data: ServiceOption[] }>("/v1/health/services", undefined, { signal }),
-    staleTime: 5 * 60_000,
-  });
-
-  const services = servicesQuery.data?.data ?? [];
 
   return (
     <div className="flex-1 p-6">
@@ -51,9 +46,9 @@ export function LogsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All services</SelectItem>
-                {services.map((svc) => (
-                  <SelectItem key={svc.name} value={svc.name}>
-                    {svc.name}
+                {PLATFORM_SERVICES.map((svc) => (
+                  <SelectItem key={svc} value={svc}>
+                    {svc}
                   </SelectItem>
                 ))}
               </SelectContent>

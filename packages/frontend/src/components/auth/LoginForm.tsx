@@ -16,9 +16,8 @@ import { Link } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 
 import { useApiClient, ApiError } from "@/lib/api-client.js";
-import { useAuthStore } from "@/stores/auth.store.js";
-import type { Session } from "@/stores/auth.store.js";
 import type { ApiResponse } from "@/lib/api-client.js";
+import { useAuthStore } from "@/stores/auth.store.js";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import {
@@ -67,11 +66,30 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
   async function handleSubmit(values: LoginFormValues): Promise<void> {
     setServerError(null);
     try {
-      const result = await client.post<ApiResponse<Session>>(
+      const result = await client.post<ApiResponse<{
+        user: {
+          id: string;
+          email: string;
+          displayName: string | null;
+          tenantId: string;
+          roles: string[];
+          emailVerified: boolean;
+        };
+      }>>(
         "/v1/auth/login",
         { email: values.email, password: values.password },
       );
-      setSession(result.data);
+      const { user } = result.data;
+      setSession({
+        userId: user.id,
+        tenantId: user.tenantId,
+        roles: user.roles,
+        scopes: [],
+        isGuest: false,
+        emailVerified: user.emailVerified,
+        email: user.email,
+        displayName: user.displayName,
+      });
       onSuccess();
     } catch (err) {
       if (err instanceof ApiError) {

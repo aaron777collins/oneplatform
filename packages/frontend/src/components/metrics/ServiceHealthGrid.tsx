@@ -14,7 +14,7 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton.js";
-import { useApiClient, ApiError } from "@/lib/api-client.js";
+import { ApiError } from "@/lib/api-client.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -178,8 +178,6 @@ export interface ServiceHealthGridProps {
 }
 
 export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
-  const client = useApiClient();
-
   // Ring buffer of health snapshots per service — gives operators a quick
   // stability signal without requiring a separate time-series endpoint (PA-016).
   const [healthHistory, setHealthHistory] = React.useState<ServiceHealthHistory>(new Map());
@@ -189,7 +187,9 @@ export function ServiceHealthGrid({ className }: ServiceHealthGridProps) {
     queryFn: async (): Promise<{ data: ServiceHealth[] }> => {
       const start = Date.now();
       try {
-        const result = await client.get<HealthzResponse>("/healthz");
+        const response = await fetch("/healthz");
+        if (!response.ok) throw new Error(`Health check failed: ${response.status}`);
+        const result = await response.json() as HealthzResponse;
         const latencyMs = Date.now() - start;
 
         // If the gateway returns per-service status, use it

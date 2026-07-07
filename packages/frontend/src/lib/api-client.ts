@@ -99,26 +99,34 @@ async function apiFetch<T>(
   });
 
   // --- 401: Attempt session refresh, then retry once ---
+  // Public auth endpoints (login, register) return 401 to signal bad credentials,
+  // not an expired session. Skip the refresh/redirect flow so callers receive a
+  // normal ApiError they can display to the user.
   if (response.status === 401) {
-    if (isRetry) {
-      // Second consecutive 401 — session is genuinely expired, not a race condition.
-      clearSessionFn?.();
-      window.location.href = "/login";
-      throw new AuthError("Session expired");
+    const isPublicAuth =
+      path.startsWith("/v1/auth/login") ||
+      path.startsWith("/v1/auth/register");
+
+    if (!isPublicAuth) {
+      if (isRetry) {
+        clearSessionFn?.();
+        window.location.href = "/login";
+        throw new AuthError("Session expired");
+      }
+
+      const refreshResponse = await fetch("/api/v1/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!refreshResponse.ok) {
+        clearSessionFn?.();
+        window.location.href = "/login";
+        throw new AuthError("Session expired");
+      }
+
+      return apiFetch<T>(path, init, true, 0);
     }
-
-    const refreshResponse = await fetch("/api/v1/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-    });
-
-    if (!refreshResponse.ok) {
-      clearSessionFn?.();
-      window.location.href = "/login";
-      throw new AuthError("Session expired");
-    }
-
-    return apiFetch<T>(path, init, true, 0);
   }
 
   // --- 429: Retry after Retry-After header (max 2 retries) ---

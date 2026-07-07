@@ -1017,11 +1017,11 @@ function TransformerFields({
   const client = useApiClient();
   const { data: pluginListData, isLoading: pluginsLoading } = useQuery({
     queryKey: ["plugins", "transformers"],
-    queryFn: () => client.get<{ data: TransformerPlugin[] }>("/v1/plugins", { type: "transformer" }),
+    queryFn: () => client.get<{ items: TransformerPlugin[]; nextCursor: string | null; total: number }>("/v1/plugins", { type: "transformer" }),
     staleTime: 60_000,
   });
 
-  const plugins: TransformerPlugin[] = pluginListData?.data ?? [];
+  const plugins: TransformerPlugin[] = pluginListData?.items ?? [];
   const selectedId = (config["transformerId"] as string | undefined) ?? "";
 
   return (

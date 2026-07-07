@@ -19,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton.js";
 import { VirtualizedList } from "@/components/shared/VirtualizedList.js";
 import { LogRow, type LogEntry, type LogLevel } from "./LogRow.js";
 import { useApiClient } from "@/lib/api-client.js";
-import type { PaginatedResponse } from "@/lib/api-client.js";
+
 import { cn } from "@/lib/utils.js";
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ export function LogViewer({ service, height = 600, className }: LogViewerProps) 
   const query = useInfiniteQuery({
     queryKey: ["logs", { service }],
     queryFn: ({ pageParam, signal }) =>
-      client.get<PaginatedResponse<LogEntry>>(
+      client.get<{ data: LogEntry[]; pagination: { cursor: string | null; limit: number; hasMore: boolean } }>(
         "/v1/logs",
         {
           limit: "100",
@@ -67,7 +67,7 @@ export function LogViewer({ service, height = 600, className }: LogViewerProps) 
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.pagination.cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
     staleTime: 5_000,
   });

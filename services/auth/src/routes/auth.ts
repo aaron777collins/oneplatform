@@ -198,6 +198,9 @@ return count`,
       tenantId: found.tenant_id,
       tenantName: tenant?.name ?? found.tenant_id,
       roles: found.roles,
+      scopes: [],
+      isGuest: false,
+      emailVerified: found.email_verified ?? false,
     });
   });
 

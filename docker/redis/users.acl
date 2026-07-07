@@ -6,5 +6,5 @@ user op_logging on >CHANGE_ME_logging ~log:* ~audit:* &logs:* &audit:* +@read +@
 user op_gateway on >CHANGE_ME_gateway ~ratelimit:* ~gateway:* ~webhook:* &events:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
 user op_ingestion on >CHANGE_ME_ingestion ~queue:ingestion:* ~ingestion:sync:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
 user op_ontology on >CHANGE_ME_ontology ~ontology:* &ontology:* +@read +@write +@string +@hash +@set +@sortedset +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
-user op_app on >CHANGE_ME_app ~guest-session:* &events:* +@read +@write +@string +@hash +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
+user op_app on >CHANGE_ME_app ~app:* ~bff:* ~guest-session:* &events:* +@read +@write +@string +@hash +@set +@sortedset +@list +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
 user op_plugin on >CHANGE_ME_plugin ~plugin:* &events:* +@read +@write +@string +@hash +@set +@pubsub +expire +del +exists +ttl +pttl -select -flushdb -flushall -keys -debug
