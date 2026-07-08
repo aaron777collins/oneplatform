@@ -12,10 +12,15 @@ import { defineConfig, devices } from "@playwright/test";
 import { resolve } from "path";
 
 const E2E_DIR = resolve(import.meta.dirname);
+const AUTH_STATE = resolve(E2E_DIR, ".auth/state.json");
 
 export default defineConfig({
   testDir: E2E_DIR,
   testMatch: "**/*.spec.ts",
+
+  // Authenticate with Authelia SSO once before any tests run when targeting
+  // a remote URL. On localhost the global setup is a no-op.
+  globalSetup: resolve(E2E_DIR, "global-setup.ts"),
 
   // Maximum time each test may run before it is marked failed.
   timeout: 30_000,
@@ -40,7 +45,11 @@ export default defineConfig({
   ],
 
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: process.env["PLAYWRIGHT_BASE_URL"] || "http://localhost:5173",
+
+    // Load the Authelia session cookie saved by global-setup.ts so tests
+    // can access the SSO-protected remote site without re-authenticating.
+    storageState: process.env["PLAYWRIGHT_BASE_URL"] ? AUTH_STATE : undefined,
 
     // Always take a screenshot so every test run produces visual evidence
     // regardless of pass/fail status.
@@ -79,20 +88,17 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    // Start the Vite dev server once before any tests run, shared across all
-    // worker processes. Turborepo is not used here because `playwright test`
-    // is itself invoked from the root package.json — Turbo would be redundant
-    // and would add a layer of process management that complicates port detection.
-    command: "pnpm --filter @oneplatform/frontend dev",
-    url: "http://localhost:5173",
-    // Reuse an already-running dev server when developing locally to avoid the
-    // ~3 second cold start on every test run.
-    reuseExistingServer: !process.env["CI"],
-    timeout: 60_000,
-    // Surface Vite's startup output in the terminal so port conflicts are
-    // visible immediately rather than timing out silently.
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  // Only start the local Vite dev server when not targeting a remote URL.
+  // When PLAYWRIGHT_BASE_URL points to a deployed site, there is no local
+  // server to start and the webServer block must be omitted entirely.
+  webServer: process.env["PLAYWRIGHT_BASE_URL"]
+    ? undefined
+    : {
+        command: "pnpm --filter @oneplatform/frontend dev",
+        url: "http://localhost:5173",
+        reuseExistingServer: !process.env["CI"],
+        timeout: 60_000,
+        stdout: "pipe",
+        stderr: "pipe",
+      },
 });
