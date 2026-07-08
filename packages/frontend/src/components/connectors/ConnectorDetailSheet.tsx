@@ -286,9 +286,9 @@ export function ConnectorDetailSheet({
             </p>
 
             {/* Tags */}
-            {entry.tags.length > 0 && (
+            {(entry.tags ?? []).length > 0 && (
               <div className="mb-4 flex flex-wrap gap-1.5">
-                {entry.tags.map((tag) => (
+                {(entry.tags ?? []).map((tag) => (
                   <Badge
                     key={tag}
                     variant="outline"

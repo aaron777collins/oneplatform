@@ -267,7 +267,7 @@ export function TeamsPage() {
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
                     {/* Active roles as static badges; click a toggle button to change */}
-                    {member.roles.map((role) => (
+                    {(member.roles ?? []).map((role) => (
                       <Badge
                         key={role}
                         variant={ROLE_BADGE_VARIANT[role as Role] ?? "outline"}
@@ -280,7 +280,8 @@ export function TeamsPage() {
                         dialog before any change is applied to prevent accidental misclicks. */}
                     <div className="mt-1 flex flex-wrap gap-1 border-t border-[var(--color-border)]/50 pt-1 w-full">
                       {ALL_ROLES.map((role) => {
-                        const active = member.roles.includes(role);
+                        const memberRoles = member.roles ?? [];
+                        const active = memberRoles.includes(role);
                         return (
                           <button
                             key={role}
@@ -292,8 +293,8 @@ export function TeamsPage() {
                             }`}
                             onClick={() => {
                               const next = active
-                                ? member.roles.filter((r) => r !== role)
-                                : [...member.roles, role];
+                                ? memberRoles.filter((r) => r !== role)
+                                : [...memberRoles, role];
                               // Prevent removing the last role — every user needs at least one
                               if (next.length === 0) return;
                               setPendingRoleChange({

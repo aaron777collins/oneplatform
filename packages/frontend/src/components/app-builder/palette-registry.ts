@@ -21,8 +21,17 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
     category: "Data Display",
     icon: "Table",
     defaultProps: {
-      data: [],
-      columns: [],
+      data: [
+        { id: 1, name: "Alice Johnson", status: "Active", role: "Admin" },
+        { id: 2, name: "Bob Smith", status: "Inactive", role: "Editor" },
+        { id: 3, name: "Carol White", status: "Active", role: "Viewer" },
+      ],
+      columns: [
+        { key: "id", header: "ID", sortable: true },
+        { key: "name", header: "Name", sortable: true },
+        { key: "status", header: "Status" },
+        { key: "role", header: "Role" },
+      ],
       pageSize: 10,
       emptyMessage: "No data to display.",
       "aria-label": "Data table",
@@ -35,19 +44,23 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
         key: "columns",
         label: "Column configuration",
         inputType: "json",
-        defaultValue: [],
-        description: "Array of column definitions. Each column has: header (display name), field (data key), width (optional CSS width), sortable (boolean).",
+        defaultValue: [
+          { key: "id", header: "ID", sortable: true },
+          { key: "name", header: "Name", sortable: true },
+        ],
+        description: "Array of column definitions. Each column has: key (data field name), header (display name), sortable (boolean).",
         jsonSchema: {
           type: "array",
           items: {
             type: "object",
             properties: {
+              key: { type: "string", description: "Data field key to display (must match a property in each data row)" },
               header: { type: "string", description: "Column display header" },
-              field: { type: "string", description: "Data field key to display" },
-              width: { type: "string", description: "CSS width, e.g. '150px' or '20%'" },
               sortable: { type: "boolean", description: "Whether column is sortable" },
+              headerClassName: { type: "string", description: "Optional CSS class applied to the column header" },
+              cellClassName: { type: "string", description: "Optional CSS class applied to each cell in this column" },
             },
-            required: ["header", "field"],
+            required: ["key", "header"],
           },
         },
       },

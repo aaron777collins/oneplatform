@@ -95,7 +95,7 @@ export function ComponentPreview({ component }: ComponentPreviewProps) {
   switch (type) {
     case "DataTable":
       return (
-        <div style={style}>
+        <div style={style} className="w-full overflow-hidden p-3">
           <DataTable {...(props as unknown as DataTableProps<Record<string, unknown>>)} />
         </div>
       );

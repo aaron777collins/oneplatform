@@ -246,9 +246,9 @@ export function WebhooksPage() {
                     {webhook.url}
                   </TableCell>
                   <TableCell className="text-xs text-[var(--color-muted-foreground)]">
-                    {webhook.events.length === 0
+                    {(webhook.events ?? []).length === 0
                       ? "All events"
-                      : webhook.events.map((e) => EVENT_LABEL_MAP[e] ?? e).join(", ")}
+                      : (webhook.events ?? []).map((e) => EVENT_LABEL_MAP[e] ?? e).join(", ")}
                   </TableCell>
                   <TableCell className="text-sm">
                     {webhook.lastDeliveryAt !== undefined ? (
