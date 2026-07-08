@@ -86,7 +86,7 @@ export function BuildHistoryTable({ appId, onViewDiff, className }: BuildHistory
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.pagination?.nextCursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
 

@@ -70,7 +70,7 @@ export function AuditLogTable({ from, to, className }: AuditLogTableProps) {
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.pagination?.nextCursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
 

@@ -69,7 +69,7 @@ export function PipelineDetailPage() {
         `/v1/pipelines/${id}/runs`,
         { ...(pageParam !== undefined ? { cursor: pageParam as string } : {}) },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.pagination?.nextCursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
 

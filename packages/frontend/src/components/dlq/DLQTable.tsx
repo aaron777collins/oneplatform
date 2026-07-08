@@ -70,7 +70,7 @@ export function DLQTable({ queueName, search = "", className }: DLQTableProps) {
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.pagination?.nextCursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
 

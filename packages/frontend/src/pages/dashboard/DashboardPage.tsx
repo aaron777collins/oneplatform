@@ -397,9 +397,11 @@ export default function DashboardPage() {
     result: PaginatedResponse<{ id: string }> | undefined,
   ): number {
     if (result === undefined) return 0;
-    // Use server-side total when available — more accurate than page length
-    if (result.pagination.total !== null) return result.pagination.total;
-    return result.data.length;
+    // Use server-side total when available — more accurate than page length.
+    // Guard pagination itself: older API versions may omit the field entirely.
+    const total = result.pagination?.total;
+    if (total !== null && total !== undefined) return total;
+    return result.data?.length ?? 0;
   }
 
   const connectorCount = resolveCount(connectorsData);

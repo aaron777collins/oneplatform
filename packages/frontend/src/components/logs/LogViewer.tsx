@@ -67,7 +67,7 @@ export function LogViewer({ service, height = 600, className }: LogViewerProps) 
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination.cursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.pagination?.cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
     staleTime: 5_000,
   });
