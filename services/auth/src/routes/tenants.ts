@@ -44,7 +44,7 @@ function formatTenant(t: {
   id: string;
   name: string;
   slug: string;
-  settings: Record<string, unknown>;
+  settings: Record<string, unknown> | null;
   created_at: Date;
   updated_at: Date;
 }) {
@@ -52,7 +52,7 @@ function formatTenant(t: {
     id: t.id,
     name: t.name,
     slug: t.slug,
-    settings: t.settings,
+    settings: t.settings ?? {},
     createdAt: t.created_at.toISOString(),
     updatedAt: t.updated_at.toISOString(),
   };

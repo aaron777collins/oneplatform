@@ -231,13 +231,17 @@ export function AdminPage() {
 
   const tenantData = configQuery.data as TenantResponse | undefined;
 
+  // settings may be null/undefined for tenants created before preferences
+  // existed, so guard it before reading individual keys.
+  const settings = tenantData?.settings ?? {};
+
   const form = useForm<TenantValues>({
     resolver: zodResolver(tenantSchema),
     values: {
       tenantName: tenantData?.name ?? "",
-      timezone: (tenantData?.settings.timezone as string | undefined) ?? "UTC",
-      dateFormat: ((tenantData?.settings.dateFormat as string | undefined) ?? "YYYY-MM-DD") as TenantValues["dateFormat"],
-      defaultPageSize: ((tenantData?.settings.defaultPageSize as number | undefined) ?? 25) as TenantValues["defaultPageSize"],
+      timezone: (settings.timezone as string | undefined) ?? "UTC",
+      dateFormat: ((settings.dateFormat as string | undefined) ?? "YYYY-MM-DD") as TenantValues["dateFormat"],
+      defaultPageSize: ((settings.defaultPageSize as number | undefined) ?? 25) as TenantValues["defaultPageSize"],
     },
   });
 
