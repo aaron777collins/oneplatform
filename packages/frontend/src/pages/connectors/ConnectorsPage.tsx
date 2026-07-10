@@ -114,7 +114,10 @@ export function ConnectorsPage() {
     },
   });
 
-  const connectors = data?.items ?? [];
+  const inner = data?.data ?? data;
+  const connectors: ConnectorWithSyncStateApi[] = Array.isArray(inner)
+    ? inner
+    : (inner as unknown as { items?: ConnectorWithSyncStateApi[] })?.items ?? [];
 
   const filtered = search.trim().length === 0
     ? connectors

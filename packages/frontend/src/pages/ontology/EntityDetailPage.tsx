@@ -204,7 +204,9 @@ export function EntityDetailPage() {
   });
 
   const entity = entityData?.data;
-  const allEntityTypes = (allEntitiesData?.data ?? [])
+  const rawAllEntities = allEntitiesData?.data;
+  const allEntities: EntitySummary[] = Array.isArray(rawAllEntities) ? rawAllEntities : (rawAllEntities as unknown as Record<string, unknown> | undefined)?.["items"] as EntitySummary[] ?? [];
+  const allEntityTypes = allEntities
     .map((e) => e.name)
     .filter((n) => n !== entityType);
 

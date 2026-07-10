@@ -23,7 +23,9 @@ export function formatDate(
     minute: "2-digit",
   },
 ): string {
-  return new Intl.DateTimeFormat(undefined, options).format(new Date(value));
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return new Intl.DateTimeFormat(undefined, options).format(d);
 }
 
 /**

@@ -1827,7 +1827,8 @@ export function QueryBuilderPage() {
     enabled: selectedEntityType !== "",
   });
 
-  const entityList = entityListData?.data ?? [];
+  const rawEntityList = entityListData?.data;
+  const entityList: EntitySummary[] = Array.isArray(rawEntityList) ? rawEntityList : (rawEntityList as unknown as Record<string, unknown> | undefined)?.["items"] as EntitySummary[] ?? [];
   const entityDetail = entityDetailData?.data;
 
   const fieldOptions: Array<{ slug: string; name: string; fieldType?: string }> = entityDetail

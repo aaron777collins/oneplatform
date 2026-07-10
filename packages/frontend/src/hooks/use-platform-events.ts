@@ -98,7 +98,8 @@ export function usePlatformEvents(
     [queryClient],
   );
 
-  return useSSEStream("/api/v1/events/stream", {
+  const eventsParam = eventFilter.length > 0 ? eventFilter.join(",") : "*";
+  return useSSEStream(`/api/v1/events?events=${encodeURIComponent(eventsParam)}`, {
     enabled: true,
     onEvent,
   });

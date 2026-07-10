@@ -99,7 +99,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     const user = c.var.user;
     if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
-    const app = await appService.getApp(user.tenantId, c.req.param("id"));
+    const id = c.req.param("id");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid app ID format." } }, 400);
+    }
+
+    const app = await appService.getApp(user.tenantId, id);
     return c.json({ data: formatAppDetail(app) });
   });
 
@@ -107,6 +112,11 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
   routes.patch("/:id", async (c) => {
     const user = c.var.user;
     if (user === undefined) throw new UnauthorizedError("Authentication required.");
+
+    const id = c.req.param("id");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid app ID format." } }, 400);
+    }
 
     const body = await c.req.json().catch(() => null);
     const parsed = PatchAppSchema.safeParse(body);
@@ -130,7 +140,12 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     const user = c.var.user;
     if (user === undefined) throw new UnauthorizedError("Authentication required.");
 
-    await appService.deleteApp(user.tenantId, c.req.param("id"));
+    const id = c.req.param("id");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return c.json({ error: { code: "VALIDATION_ERROR", message: "Invalid app ID format." } }, 400);
+    }
+
+    await appService.deleteApp(user.tenantId, id);
     return new Response(null, { status: 204 });
   });
 

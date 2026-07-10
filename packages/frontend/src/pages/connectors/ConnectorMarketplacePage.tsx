@@ -50,12 +50,18 @@ interface RegistryListResult {
 }
 
 interface ConnectorApiRecord {
-  id: string;
-  plugin_id: string;
+  connector: {
+    id: string;
+    plugin_id: string;
+  };
+  syncState: unknown;
 }
 
 interface InstalledConnectorsResult {
+  items: ConnectorApiRecord[];
   data: ConnectorApiRecord[];
+  nextCursor: string | null;
+  total: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,9 +130,14 @@ export function ConnectorMarketplacePage() {
   });
 
   // Build a set of plugin_id values (connector types) already in this tenant.
+  // The response may be envelope-wrapped: { data: { items: [...], data: [...], ... } }
   const installedTypes = React.useMemo<ReadonlySet<string>>(() => {
-    const records = installedQuery.data?.data ?? [];
-    return new Set(records.map((r) => r.plugin_id));
+    const raw = installedQuery.data;
+    const inner = raw?.data;
+    const records: ConnectorApiRecord[] = Array.isArray(inner)
+      ? inner
+      : (inner as unknown as { items?: ConnectorApiRecord[] })?.items ?? [];
+    return new Set(records.map((r) => r.connector.plugin_id));
   }, [installedQuery.data]);
 
   // One-click install: POST to registry to record the install event, then

@@ -85,7 +85,8 @@ export function OntologyPage() {
     },
   });
 
-  const entities = data?.data ?? [];
+  const rawData = data?.data;
+  const entities: EntitySummary[] = Array.isArray(rawData) ? rawData : (rawData as unknown as Record<string, unknown>)?.["items"] as EntitySummary[] ?? [];
   const pendingMigrations = (migrationsData?.data ?? []).filter(
     (m) => m.status === "pending" || m.status === "running",
   );
