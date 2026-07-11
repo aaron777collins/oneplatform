@@ -1,19 +1,66 @@
-# OnePlatform Session Handoff — 2026-06-24 (Bootstrap Setup Wizard Fix)
+# OnePlatform Session Handoff — 2026-07-11 (Stale Container Investigation)
 
-## Latest Session — Bootstrap Fix (2026-06-24)
+## IMPORTANT: Read These Docs After Every Compaction
+1. `DEVELOPMENT-PROCESS.md` — Full dev pipeline
+2. `docs/WORKING-STATE.md` — Current development state
+3. This file (`.claude/handoff.md`) — Session continuity
+
+## Latest Session — Stale Container Investigation (2026-07-11)
 
 ### What Was Done
+Investigated three user-reported runtime blockers and traced all of them to stale Docker containers, not missing code fixes.
+
+**Root cause:** The running dev-test containers were built on 2026-07-08. Commit bd38e0e (2026-07-10) had already fixed all three issues in source, but the containers never received those changes.
+
+**Three bugs (all fixed in bd38e0e):**
+1. **Connector marketplace empty** — envelope unwrap `g.data?.data??g.data` was the fix; connector list API returns `{data: {data: [...], total: N}}` double-wrapped.
+2. **App builder crash on stat editing** — builder store was capturing `layout` from outer closure (stale snapshot); fix reads `s.layout` inside the `set()` callback.
+3. **Code editor not showing files** — file API was returning `isDirectory: true` for files; fix sets `isDirectory: false` and the FileTree component filters `isDirectory === true` for folder icons.
+
+**Actions taken:**
+- Identified stale container timestamps via `docker inspect`
+- Verified fixes present in JS source with `grep`
+- Reverted any agent re-fix attempts (would have doubled the logic)
+- Rebuilt `op-dev-test-frontend`, `op-dev-test-gateway`, `op-dev-test-ingestion` containers
+- Resolved Docker build cache issue: `--no-cache` did not produce the correct frontend bundle (likely Vite/turborepo artifact); correct dist was copied from the host `packages/frontend/dist/` into the container
+- Verified fix signatures in the served JavaScript bundle
+
+### Current Container State
+- `op-dev-test-frontend`: rebuilt 2026-07-11 05:58, dist copied from host
+- `op-dev-test-gateway`: rebuilt 2026-07-11 05:58
+- `op-dev-test-ingestion`: rebuilt 2026-07-11 05:58
+- All other 15 containers: unchanged, healthy
+- **Total: all 18 containers healthy**
+
+### Outstanding / User Action Required
+The automated agents cannot complete an Authelia-gated browser test. The user should manually verify:
+1. **Connector marketplace** — navigate to Connectors → Marketplace; expect 5 built-in connectors listed
+2. **App builder stat editing** — open an app, edit a stat component's value; should not crash
+3. **Code editor file tree** — open code editor for an app; file tree should list files (not blank)
+
+### Docker Build Cache Warning
+After rebuilding with `docker build --no-cache`, the frontend bundle was still stale. Root cause not fully diagnosed — Vite or Turborepo may cache outputs outside the Docker layer context. If this recurs:
+```bash
+# Clean host build artifacts before Docker build
+rm -rf packages/frontend/dist packages/frontend/.turbo
+pnpm --filter @oneplatform/frontend build
+docker build -f docker/Dockerfile.frontend -t op-frontend .
+```
+
+### Key Files
+- `packages/frontend/src/pages/ConnectorsPage.tsx` — marketplace envelope unwrap
+- `packages/frontend/src/stores/builder-store.ts` — layout read inside `set()` callback
+- `packages/frontend/src/components/editor/FileTree.tsx` — `isDirectory === true` check
+- `docker/docker-compose.dev-test.yml` — dev-test stack definition
+
+---
+
+# Prior Session — 2026-06-24 (Bootstrap Setup Wizard Fix)
+
+## What Was Done
 Fixed the bootstrap setup wizard failure (two root causes):
 1. **Redis ACL** — `op_auth` user was missing the `&events:*` channel permission in `docker/redis/users.acl.template`, causing a `NOPERM` error when publishing `bootstrap.completed` events.
 2. **Error resilience** — In `services/auth/src/services/bootstrap-service.ts`, moved `clearInMemoryToken()` to run after `events.publish()` and wrapped the event publish in a try/catch so a publish failure no longer aborts bootstrap completion.
-
-### Current State
-- Bootstrap state has been reset.
-- Auth service rebuilt and restarted.
-- Ready for the user to complete the setup wizard at test.aaroncollins.info.
-
-### What's Next
-- User should try the setup wizard at test.aaroncollins.info end-to-end.
 
 ### Key Files Changed
 - `docker/redis/users.acl.template`
@@ -23,11 +70,6 @@ Fixed the bootstrap setup wizard failure (two root causes):
 ---
 
 # Prior Session — 2026-06-23 (Phase 19 COMPLETE)
-
-## IMPORTANT: Read These Docs After Every Compaction
-1. `DEVELOPMENT-PROCESS.md` — Full dev pipeline
-2. `docs/WORKING-STATE.md` — Current development state
-3. This file (`.claude/handoff.md`) — Session continuity
 
 ## Current State
 **Phase 19 — ALL sub-phases COMPLETE**
@@ -77,7 +119,3 @@ Fixed the bootstrap setup wizard failure (two root causes):
 
 ### Blockers
 None.
-
-## What's Next
-Phase 19 complete. Platform ready for user testing.
-Potential Phase 20 areas: load testing, production deployment, advanced features, UI polish.

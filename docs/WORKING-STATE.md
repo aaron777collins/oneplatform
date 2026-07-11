@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 20 — Bootstrap Setup Wizard Fix (Redis ACL + Error Resilience)
+## Current Phase: Phase 21 — Stale Container Investigation & Runtime Bug Verification (2026-07-11)
 
 ### Completed Phases
 
@@ -387,6 +387,29 @@ This document tracks the current state of development. Read this FIRST when resu
 - [x] The bootstrap setup wizard at test.aaroncollins.info now works end-to-end
 - Commit: da0b76b
 - Files changed: `docker/redis/users.acl.template`, `services/auth/src/services/bootstrap-service.ts`
+
+#### Phase 21: Stale Container Investigation & Runtime Bug Fixes (2026-07-11)
+- [x] Investigated three user-reported blockers: empty connector marketplace, code editor not showing files, app builder crash on stat editing
+- [x] Root cause identified: all three fixes were already present in source (commit bd38e0e, 2026-07-10) — running Docker containers were stale (built 2026-07-08, missing 2026-07-10+ commits)
+- [x] Reverted unnecessary agent changes (agents had attempted to re-fix already-fixed code)
+- [x] Rebuilt frontend, gateway, and ingestion Docker images from current source
+- [x] Resolved Docker build cache issue: `--no-cache` flag did not produce correct frontend bundle; correct dist was copied manually into the container
+- [x] Verified all three runtime fixes active in served JavaScript:
+  - Connector marketplace: `g.data?.data??g.data` envelope unwrap pattern active
+  - App builder store: `s.layout` read inside `set()` callbacks (no stale closure capture)
+  - File tree: `isDirectory: false` set in API response, `isDirectory === true` comparison in FileTree
+- [x] All 18 dev-test containers healthy post-rebuild
+
+**Container rebuild timestamps (2026-07-11):**
+- `op-dev-test-frontend`: rebuilt 05:58, dist copied from host
+- `op-dev-test-gateway`: rebuilt 05:58
+- `op-dev-test-ingestion`: rebuilt 05:58
+- All other containers: unchanged, healthy
+
+**Outstanding:**
+- Full E2E browser verification requires Authelia credentials (not available to automated agents)
+- User should confirm in browser: connector marketplace shows 5 connectors, app builder stat editing works, code editor file tree loads
+- Docker build cache behavior warrants investigation — frontend dist may require manual copy after `docker build` even with `--no-cache`
 
 ## Test Totals
 
