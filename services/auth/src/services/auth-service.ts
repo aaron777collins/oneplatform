@@ -351,7 +351,8 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     // 1. Look up user by (tenant_id, email)
     const userResult = await db.query<UserRow>(
       `SELECT id, tenant_id, email, password_hash, email_verified,
-              is_active, display_name, roles, failed_login_count, locked_until
+              is_active, display_name, roles, failed_login_count, locked_until,
+              password_history
        FROM auth.users
        WHERE tenant_id = $1 AND lower(email) = lower($2)`,
       [data.tenantId, data.email]
