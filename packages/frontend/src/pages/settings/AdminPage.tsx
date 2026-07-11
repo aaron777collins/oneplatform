@@ -226,10 +226,11 @@ export function AdminPage() {
     placeholderData: MOCK_STATS,
   });
 
-  const adminData: AdminStatsResponse = statsQuery.data ?? MOCK_STATS;
+  const statsInner = (statsQuery.data as unknown as { data?: AdminStatsResponse })?.data ?? statsQuery.data;
+  const adminData: AdminStatsResponse = statsInner ?? MOCK_STATS;
   const isMockData = statsQuery.isError && !statsQuery.data;
 
-  const tenantData = configQuery.data as TenantResponse | undefined;
+  const tenantData = ((configQuery.data as unknown as { data?: TenantResponse })?.data ?? configQuery.data) as TenantResponse | undefined;
 
   // settings may be null/undefined for tenants created before preferences
   // existed, so guard it before reading individual keys.

@@ -85,9 +85,10 @@ export function OntologyPage() {
     },
   });
 
-  const rawData = data?.data;
-  const entities: EntitySummary[] = Array.isArray(rawData) ? rawData : (rawData as unknown as Record<string, unknown>)?.["items"] as EntitySummary[] ?? [];
-  const pendingMigrations = (migrationsData?.data ?? []).filter(
+  const ontologyInner = (data as unknown as { data?: PaginatedResponse<EntitySummary> })?.data ?? data;
+  const entities: EntitySummary[] = ontologyInner?.data ?? [];
+  const migrationsInner = (migrationsData as unknown as { data?: { data: PendingMigration[] } })?.data?.data ?? (migrationsData as { data: PendingMigration[] } | undefined)?.data ?? [];
+  const pendingMigrations = migrationsInner.filter(
     (m) => m.status === "pending" || m.status === "running",
   );
 

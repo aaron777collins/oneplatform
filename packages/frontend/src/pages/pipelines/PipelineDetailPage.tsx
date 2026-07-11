@@ -69,7 +69,10 @@ export function PipelineDetailPage() {
         `/v1/pipelines/${id}/runs`,
         { ...(pageParam !== undefined ? { cursor: pageParam as string } : {}) },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination?.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => {
+      const innerPage = (lastPage as unknown as { data?: PaginatedResponse<PipelineRun> })?.data ?? lastPage;
+      return innerPage.pagination?.nextCursor ?? undefined;
+    },
     initialPageParam: undefined as string | undefined,
   });
 
@@ -94,7 +97,7 @@ export function PipelineDetailPage() {
     },
   });
 
-  const pipeline = data?.data;
+  const pipeline = (data as unknown as { data?: ApiResponse<PipelineDetail> })?.data?.data ?? (data as ApiResponse<PipelineDetail> | undefined)?.data;
 
   if (isError) {
     return (

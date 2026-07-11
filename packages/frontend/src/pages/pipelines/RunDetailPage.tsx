@@ -151,7 +151,8 @@ export function RunDetailPage() {
     queryFn: () => client.get<ApiResponse<RunDetail>>(`/v1/pipeline-runs/${runId}`),
     // Refresh every 5s while run is still active
     refetchInterval: (query) => {
-      const run = query.state.data?.data;
+      const rawState = query.state.data;
+      const run = (rawState as unknown as { data?: ApiResponse<RunDetail> })?.data?.data ?? (rawState as ApiResponse<RunDetail> | undefined)?.data;
       if (run === undefined) return false;
       return run.status === "running" || run.status === "queued" ? 5000 : false;
     },
@@ -169,7 +170,7 @@ export function RunDetailPage() {
     },
   });
 
-  const run = data?.data;
+  const run = (data as unknown as { data?: ApiResponse<RunDetail> })?.data?.data ?? (data as ApiResponse<RunDetail> | undefined)?.data;
 
   if (isError) {
     return (

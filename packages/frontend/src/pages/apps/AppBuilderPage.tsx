@@ -94,7 +94,10 @@ export function AppBuilderPage() {
           className="text-xs text-[var(--color-muted-foreground,#6b7280)] hover:text-[var(--color-foreground,#111)] transition-colors"
           aria-label="Back to app detail"
         >
-          ← {query.data.data.name}
+          {(() => {
+            const appMeta = (query.data as unknown as { data?: { data: AppMeta } })?.data?.data ?? (query.data as { data: AppMeta } | undefined)?.data;
+            return `← ${appMeta?.name ?? "App"}`;
+          })()}
         </button>
         <span className="text-xs text-[var(--color-muted-foreground,#6b7280)]">/</span>
         <span className="text-xs font-medium text-[var(--color-foreground,#111)]">Visual Builder</span>

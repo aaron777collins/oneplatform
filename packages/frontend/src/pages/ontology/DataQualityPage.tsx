@@ -126,8 +126,9 @@ export function DataQualityPage() {
     placeholderData: MOCK_QUALITY,
   });
 
-  // Prefer real data if loaded, otherwise fall back to mock
-  const quality: QualityResponse = data ?? MOCK_QUALITY;
+  // Unwrap envelope and prefer real data if loaded, otherwise fall back to mock
+  const qualityInner = (data as unknown as { data?: QualityResponse })?.data ?? data;
+  const quality: QualityResponse = qualityInner ?? MOCK_QUALITY;
 
   return (
     <div className="flex-1 overflow-y-auto">

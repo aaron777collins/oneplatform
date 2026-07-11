@@ -66,7 +66,7 @@ export function AppEditorPage() {
     );
   }
 
-  const app = query.data.data;
+  const app = (query.data as unknown as { data?: { data: AppMeta } })?.data?.data ?? (query.data as { data: AppMeta } | undefined)?.data ?? { name: "", slug: "" };
 
   return (
     // Full-viewport layout — overrides AppShell's main content area

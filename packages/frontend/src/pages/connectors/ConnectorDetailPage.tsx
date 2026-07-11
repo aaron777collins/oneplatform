@@ -229,7 +229,7 @@ export function ConnectorDetailPage() {
     },
   });
 
-  const connector = data?.data;
+  const connector = (data as unknown as { data?: ApiResponse<ConnectorDetail> })?.data?.data ?? (data as ApiResponse<ConnectorDetail> | undefined)?.data;
 
   if (isError) {
     return (
@@ -353,7 +353,7 @@ export function ConnectorDetailPage() {
               {syncsLoading ? (
                 <Skeleton className="h-32 w-full" />
               ) : (
-                <SyncHistoryTable syncs={syncsData?.data ?? []} />
+                <SyncHistoryTable syncs={(syncsData as unknown as { data?: { data: SyncRecord[] } })?.data?.data ?? (syncsData as { data: SyncRecord[] } | undefined)?.data ?? []} />
               )}
             </TabsContent>
 

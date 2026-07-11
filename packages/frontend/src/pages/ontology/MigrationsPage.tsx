@@ -99,7 +99,8 @@ export function MigrationsPage() {
     },
   });
 
-  const migrations = data?.data ?? [];
+  const migrationsInner = (data as unknown as { data?: { data: MigrationRecord[] } })?.data?.data ?? (data as { data: MigrationRecord[] } | undefined)?.data;
+  const migrations = migrationsInner ?? [];
 
   return (
     <div className="flex-1 overflow-y-auto">

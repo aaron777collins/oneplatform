@@ -106,8 +106,9 @@ export function PipelineBuilderPage() {
 
   // Populate form state from fetched data (once)
   React.useEffect(() => {
-    if (pipelineData?.data !== undefined && !loaded) {
-      const p = pipelineData.data;
+    const pipelineInner = (pipelineData as unknown as { data?: ApiResponse<PipelineConfig> })?.data?.data ?? (pipelineData as ApiResponse<PipelineConfig> | undefined)?.data;
+    if (pipelineInner !== undefined && !loaded) {
+      const p = pipelineInner;
       setName(p.name);
       setTriggerType(p.triggerType);
       if (p.cronExpression !== undefined) setCronExpression(p.cronExpression);
@@ -238,7 +239,7 @@ export function PipelineBuilderPage() {
         breadcrumbs={[
           { label: "Platform" },
           { label: "Pipelines", href: "/pipelines" },
-          { label: isNew ? "New" : (pipelineData?.data?.name ?? id) },
+          { label: isNew ? "New" : (((pipelineData as unknown as { data?: ApiResponse<PipelineConfig> })?.data?.data ?? (pipelineData as ApiResponse<PipelineConfig> | undefined)?.data)?.name ?? id) },
         ]}
       />
 

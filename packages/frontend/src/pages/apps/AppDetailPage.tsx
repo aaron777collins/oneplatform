@@ -80,7 +80,7 @@ export function AppDetailPage() {
       client.get<{ data: AppDetail }>(`/v1/apps/${id}`, undefined, { signal }),
   });
 
-  const app = query.data?.data;
+  const app = (query.data as unknown as { data?: { data: AppDetail } })?.data?.data ?? (query.data as { data: AppDetail } | undefined)?.data;
 
   const form = useForm<SettingsValues>({
     resolver: zodResolver(settingsSchema),

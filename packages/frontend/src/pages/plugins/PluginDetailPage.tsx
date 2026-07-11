@@ -69,7 +69,7 @@ export function PluginDetailPage() {
       client.get<{ data: PluginDetailData }>(`/v1/plugins/${id}`, undefined, { signal }),
   });
 
-  const plugin = query.data?.data;
+  const plugin = (query.data as unknown as { data?: { data: PluginDetailData } })?.data?.data ?? (query.data as { data: PluginDetailData } | undefined)?.data;
 
   const updateConfigMutation = useMutation({
     mutationFn: (values: ConnectorFormValues) =>

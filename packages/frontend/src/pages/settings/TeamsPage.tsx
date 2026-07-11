@@ -112,7 +112,8 @@ export function TeamsPage() {
       client.get<PaginatedResponse<Member>>("/v1/users", undefined, { signal }),
   });
 
-  const members = membersQuery.data?.data ?? [];
+  const membersInner = (membersQuery.data as unknown as { data?: PaginatedResponse<Member> })?.data ?? membersQuery.data;
+  const members = membersInner?.data ?? [];
 
   const inviteForm = useForm<InviteValues>({
     resolver: zodResolver(inviteSchema),

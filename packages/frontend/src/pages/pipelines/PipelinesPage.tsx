@@ -54,7 +54,8 @@ export function PipelinesPage() {
     queryFn: () => client.get<PaginatedResponse<PipelineApiRecord>>("/v1/pipelines"),
   });
 
-  const pipelines = data?.data ?? [];
+  const inner = (data as unknown as { data?: PaginatedResponse<PipelineApiRecord> })?.data ?? data;
+  const pipelines = inner?.data ?? [];
   const filtered = search.trim().length === 0
     ? pipelines
     : pipelines.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));

@@ -397,11 +397,13 @@ export default function DashboardPage() {
     result: PaginatedResponse<{ id: string }> | undefined,
   ): number {
     if (result === undefined) return 0;
+    // Unwrap the response envelope if the middleware wrapped the paginated response
+    const inner = (result as unknown as { data?: PaginatedResponse<{ id: string }> })?.data ?? result;
     // Use server-side total when available — more accurate than page length.
     // Guard pagination itself: older API versions may omit the field entirely.
-    const total = result.pagination?.total;
+    const total = inner.pagination?.total;
     if (total !== null && total !== undefined) return total;
-    return result.data?.length ?? 0;
+    return inner.data?.length ?? 0;
   }
 
   const connectorCount = resolveCount(connectorsData);
@@ -423,8 +425,10 @@ export default function DashboardPage() {
 
   const showQuickStart = !dismissed && !checklist_loading && !allStepsComplete;
 
-  const pipelines = pipelinesListData?.data ?? [];
-  const activities = activityData?.data ?? [];
+  const pipelinesListInner = (pipelinesListData as unknown as { data?: PaginatedResponse<PipelineSummary> })?.data ?? pipelinesListData;
+  const pipelines = pipelinesListInner?.data ?? [];
+  const activityInner = (activityData as unknown as { data?: PaginatedResponse<ActivityEvent> })?.data ?? activityData;
+  const activities = activityInner?.data ?? [];
 
   // Widget ordering state — persisted across reloads
   const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(loadWidgetOrder);

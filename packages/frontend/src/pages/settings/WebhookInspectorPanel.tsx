@@ -145,7 +145,7 @@ function DeliveryDetailView({
       ),
   });
 
-  const detail = detailQuery.data?.data;
+  const detail = (detailQuery.data as unknown as { data?: ApiResponse<DeliveryDetail> })?.data?.data ?? (detailQuery.data as ApiResponse<DeliveryDetail> | undefined)?.data;
 
   return (
     <div className="flex flex-col gap-4">
@@ -284,7 +284,8 @@ function DeliveryListView({
     refetchInterval: 30_000,
   });
 
-  const deliveries = listQuery.data?.data ?? [];
+  const deliveriesInner = (listQuery.data as unknown as { data?: PaginatedResponse<DeliveryEntry> })?.data ?? listQuery.data;
+  const deliveries = deliveriesInner?.data ?? [];
 
   if (listQuery.isLoading) {
     return (
@@ -377,7 +378,7 @@ function DeliveryListView({
       </Table>
 
       <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
-        Showing {deliveries.length} of {listQuery.data?.pagination.total ?? "?"} deliveries.
+        Showing {deliveries.length} of {deliveriesInner?.pagination?.total ?? "?"} deliveries.
         Up to 100 deliveries are retained per webhook.
       </p>
     </>

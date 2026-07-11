@@ -88,7 +88,8 @@ export function DLQPage() {
     staleTime: 30_000,
   });
 
-  const queues = queuesQuery.data?.data ?? [];
+  const queuesInner = (queuesQuery.data as unknown as { data?: { data: QueueInfo[] } })?.data?.data ?? (queuesQuery.data as { data: QueueInfo[] } | undefined)?.data;
+  const queues = queuesInner ?? [];
 
   // Bulk replay all jobs in the selected queue
   const bulkReplayMutation = useMutation({
