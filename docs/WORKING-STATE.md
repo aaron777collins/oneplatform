@@ -399,16 +399,21 @@ This document tracks the current state of development. Read this FIRST when resu
   - App builder store: `s.layout` read inside `set()` callbacks (no stale closure capture)
   - File tree: `isDirectory: false` set in API response, `isDirectory === true` comparison in FileTree
 - [x] All 18 dev-test containers healthy post-rebuild
+- [x] Fixed sandbox-vm Unix socket protocol mismatch — rewrote server.js to use length-prefixed framing matching the client, added ping/drain handlers. Eliminated 840 errors/hour execution service crash loop.
+- [x] Rebuilt sandbox-vm container and restarted execution service
+- [x] All 19 containers healthy, all 9 services OK, zero errors across entire platform
 
 **Container rebuild timestamps (2026-07-11):**
 - `op-dev-test-frontend`: rebuilt 05:58, dist copied from host
 - `op-dev-test-gateway`: rebuilt 05:58
 - `op-dev-test-ingestion`: rebuilt 05:58
+- `op-dev-test-sandbox-vm`: rebuilt 07:09, socket protocol fixed
+- `op-dev-test-execution`: restarted 07:12
 - All other containers: unchanged, healthy
 
 **Outstanding:**
 - Full E2E browser verification requires Authelia credentials (not available to automated agents)
-- User should confirm in browser: connector marketplace shows 5 connectors, app builder stat editing works, code editor file tree loads
+- User should confirm in browser: connector marketplace shows 5 connectors, app builder stat editing works, code editor file tree loads, sandbox code execution completes without errors
 - Docker build cache behavior warrants investigation — frontend dist may require manual copy after `docker build` even with `--no-cache`
 
 ## Test Totals

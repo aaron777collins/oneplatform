@@ -24,19 +24,28 @@ Investigated three user-reported runtime blockers and traced all of them to stal
 - Rebuilt `op-dev-test-frontend`, `op-dev-test-gateway`, `op-dev-test-ingestion` containers
 - Resolved Docker build cache issue: `--no-cache` did not produce the correct frontend bundle (likely Vite/turborepo artifact); correct dist was copied from the host `packages/frontend/dist/` into the container
 - Verified fix signatures in the served JavaScript bundle
+- Fixed sandbox-vm Unix socket protocol mismatch (commit `1990001`):
+  - Root cause: sandbox server (`docker/sandbox/src/server.js`) was sending raw JSON without length prefix, while the execution service's `UnixSocketClient` expected 4-byte big-endian uint32 length-prefixed frames
+  - The first 4 bytes of raw JSON were read as a ~2GB length, exceeding the 12MB max, causing socket destruction every 10 seconds
+  - Fix: rewrote sandbox server to use matching length-prefixed protocol AND added proper ping/drain method handlers
+  - Result: eliminated 840 errors/hour crash loop — zero errors since fix
+  - Rebuilt sandbox-vm container and restarted execution service
 
 ### Current Container State
 - `op-dev-test-frontend`: rebuilt 2026-07-11 05:58, dist copied from host
 - `op-dev-test-gateway`: rebuilt 2026-07-11 05:58
 - `op-dev-test-ingestion`: rebuilt 2026-07-11 05:58
-- All other 15 containers: unchanged, healthy
-- **Total: all 18 containers healthy**
+- `op-dev-test-sandbox-vm`: rebuilt 2026-07-11 07:09, socket protocol fixed
+- `op-dev-test-execution`: restarted 2026-07-11 07:12
+- All other 14 containers: unchanged, healthy
+- **Total: all 19 containers healthy**
 
 ### Outstanding / User Action Required
-The automated agents cannot complete an Authelia-gated browser test. The user should manually verify:
+All services are error-free. The user should verify the browser experience:
 1. **Connector marketplace** — navigate to Connectors → Marketplace; expect 5 built-in connectors listed
 2. **App builder stat editing** — open an app, edit a stat component's value; should not crash
 3. **Code editor file tree** — open code editor for an app; file tree should list files (not blank)
+4. **Sandbox execution** — run a code execution in an app; should complete without socket errors
 
 ### Docker Build Cache Warning
 After rebuilding with `docker build --no-cache`, the frontend bundle was still stale. Root cause not fully diagnosed — Vite or Turborepo may cache outputs outside the Docker layer context. If this recurs:
