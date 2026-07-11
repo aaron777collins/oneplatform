@@ -1,9 +1,11 @@
+import type pg from "pg";
 import type { Logger } from "@oneplatform/core";
 import type { CredentialService } from "./credential-service.js";
 import {
   ConnectorNotFoundError,
   ConnectorDisabledError,
 } from "./errors.js";
+import { withTenant } from "../db/tenant-context.js";
 
 // ---------------------------------------------------------------------------
 // Repository row shapes — mirror the concrete repository types.ts exactly.
@@ -68,8 +70,8 @@ export interface UpdateConnectorData {
 // ---------------------------------------------------------------------------
 
 export interface ConnectorRepository {
-  create(data: CreateConnectorData): Promise<ConnectorRow>;
-  findById(id: string): Promise<ConnectorRow | null>;
+  create(data: CreateConnectorData, client?: pg.PoolClient): Promise<ConnectorRow>;
+  findById(id: string, client?: pg.PoolClient): Promise<ConnectorRow | null>;
   findByTenantId(tenantId: string, options?: { cursor?: string; limit?: number }): Promise<ConnectorRow[]>;
   findByPluginId(pluginId: string): Promise<ConnectorRow[]>;
   countByTenantId(tenantId: string): Promise<number>;
@@ -85,7 +87,7 @@ export interface ConnectorRepository {
   disableByInstanceId(instanceId: string): Promise<number>;
   // list() supports cross-tenant iteration when tenantId is "*" — used by
   // the retention scheduler and internal plugin-management routes only.
-  list(tenantId: string, options: ListConnectorsOptions): Promise<ConnectorListResult>;
+  list(tenantId: string, options: ListConnectorsOptions, client?: pg.PoolClient): Promise<ConnectorListResult>;
 }
 
 export interface SyncStateRepository {
@@ -100,7 +102,7 @@ export interface SyncStateRepository {
     last_error_code?: string;
     rows_last_sync?: number;
     rows_total?: number;
-  }): Promise<SyncStateRow>;
+  }, client?: pg.PoolClient): Promise<SyncStateRow>;
   findByConnectorId(connectorId: string): Promise<SyncStateRow | null>;
   findByConnectorIds(connectorIds: string[]): Promise<Map<string, SyncStateRow>>;
   updateStatus(
@@ -232,6 +234,7 @@ export interface ConnectorServiceDeps {
   masterKey: Buffer;
   executionServiceUrl: string;
   logger: Logger;
+  pool: pg.Pool;
 }
 
 export function createConnectorService(
@@ -244,6 +247,7 @@ export function createConnectorService(
     masterKey,
     executionServiceUrl,
     logger,
+    pool,
   } = deps;
 
   // -------------------------------------------------------------------------
@@ -254,8 +258,9 @@ export function createConnectorService(
   async function requireConnectorForTenant(
     tenantId: string,
     id: string,
+    client?: pg.PoolClient,
   ): Promise<ConnectorRow> {
-    const connector = await connectorRepo.findById(id);
+    const connector = await connectorRepo.findById(id, client);
     if (connector === null) {
       throw new ConnectorNotFoundError(
         `Connector ${id} not found.`,
@@ -301,43 +306,45 @@ export function createConnectorService(
     // _callerMasterKey accepted for API compatibility; internal deps key used.
     _callerMasterKey?: Buffer,
   ): Promise<ConnectorWithSyncState> {
-    const connector = await connectorRepo.create({
-      tenant_id: tenantId,
-      plugin_id: input.pluginId,
-      // instance_id starts as a new UUID; the Plugin Service overwrites it when
-      // it sends a POST /internal/ingestion/connectors registration.
-      instance_id: crypto.randomUUID(),
-      name: input.name,
-      config: input.config,
-      sync_mode: input.syncMode,
-      created_by: userId,
-      is_enabled: input.isEnabled,
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.scheduleCron !== undefined ? { schedule_cron: input.scheduleCron } : {}),
+    return withTenant(pool, tenantId, async (client) => {
+      const connector = await connectorRepo.create({
+        tenant_id: tenantId,
+        plugin_id: input.pluginId,
+        // instance_id starts as a new UUID; the Plugin Service overwrites it when
+        // it sends a POST /internal/ingestion/connectors registration.
+        instance_id: crypto.randomUUID(),
+        name: input.name,
+        config: input.config,
+        sync_mode: input.syncMode,
+        created_by: userId,
+        is_enabled: input.isEnabled,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.scheduleCron !== undefined ? { schedule_cron: input.scheduleCron } : {}),
+      }, client);
+
+      if (Object.keys(input.credentials).length > 0) {
+        await credentialService.storeCredentials(
+          connector.id,
+          input.credentials,
+          masterKey,
+        );
+      }
+
+      // Initialise sync state — one row per connector, created eagerly so the
+      // list endpoint can always join without a LEFT JOIN.
+      const syncState = await syncStateRepo.upsert({
+        connector_id: connector.id,
+        sync_mode: input.syncMode,
+      }, client);
+
+      logger.info("Connector created", {
+        connectorId: connector.id,
+        tenantId,
+        pluginId: input.pluginId,
+      });
+
+      return { connector, syncState };
     });
-
-    if (Object.keys(input.credentials).length > 0) {
-      await credentialService.storeCredentials(
-        connector.id,
-        input.credentials,
-        masterKey,
-      );
-    }
-
-    // Initialise sync state — one row per connector, created eagerly so the
-    // list endpoint can always join without a LEFT JOIN.
-    const syncState = await syncStateRepo.upsert({
-      connector_id: connector.id,
-      sync_mode: input.syncMode,
-    });
-
-    logger.info("Connector created", {
-      connectorId: connector.id,
-      tenantId,
-      pluginId: input.pluginId,
-    });
-
-    return { connector, syncState };
   }
 
   // -------------------------------------------------------------------------
@@ -348,9 +355,11 @@ export function createConnectorService(
     tenantId: string,
     id: string,
   ): Promise<ConnectorWithSyncState> {
-    const connector = await requireConnectorForTenant(tenantId, id);
-    const syncState = await requireSyncState(connector.id, connector.sync_mode);
-    return { connector, syncState };
+    return withTenant(pool, tenantId, async (client) => {
+      const connector = await requireConnectorForTenant(tenantId, id, client);
+      const syncState = await requireSyncState(connector.id, connector.sync_mode);
+      return { connector, syncState };
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -364,7 +373,9 @@ export function createConnectorService(
     // Use the repo's list() method for all code paths so that pluginId
     // filtering, status filtering, and pagination all happen at the SQL level.
     // The repo JOIN already includes sync_state, so no separate fetch is needed.
-    return connectorRepo.list(tenantId, query);
+    return withTenant(pool, tenantId, async (client) => {
+      return connectorRepo.list(tenantId, query, client);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -379,34 +390,36 @@ export function createConnectorService(
     // _callerMasterKey accepted for API compatibility; internal deps key used.
     _callerMasterKey?: Buffer,
   ): Promise<ConnectorWithSyncState> {
-    // Verify ownership before mutating.
-    await requireConnectorForTenant(tenantId, id);
+    return withTenant(pool, tenantId, async (client) => {
+      // Verify ownership before mutating.
+      await requireConnectorForTenant(tenantId, id, client);
 
-    const updated = await connectorRepo.update(id, {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.config !== undefined ? { config: input.config } : {}),
-      ...(input.syncMode !== undefined ? { sync_mode: input.syncMode } : {}),
-      ...(input.scheduleCron !== undefined ? { schedule_cron: input.scheduleCron } : {}),
-      ...(input.isEnabled !== undefined ? { is_enabled: input.isEnabled } : {}),
+      const updated = await connectorRepo.update(id, {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.config !== undefined ? { config: input.config } : {}),
+        ...(input.syncMode !== undefined ? { sync_mode: input.syncMode } : {}),
+        ...(input.scheduleCron !== undefined ? { schedule_cron: input.scheduleCron } : {}),
+        ...(input.isEnabled !== undefined ? { is_enabled: input.isEnabled } : {}),
+      });
+
+      if (updated === null) {
+        throw new ConnectorNotFoundError(
+          `Connector ${id} not found after update.`,
+          { connectorId: id },
+        );
+      }
+
+      // Re-encrypt only the explicitly provided credential fields.
+      if (input.credentials !== undefined && Object.keys(input.credentials).length > 0) {
+        await credentialService.storeCredentials(id, input.credentials, masterKey);
+      }
+
+      const syncState = await requireSyncState(updated.id, updated.sync_mode);
+
+      logger.info("Connector updated", { connectorId: id, tenantId });
+      return { connector: updated, syncState };
     });
-
-    if (updated === null) {
-      throw new ConnectorNotFoundError(
-        `Connector ${id} not found after update.`,
-        { connectorId: id },
-      );
-    }
-
-    // Re-encrypt only the explicitly provided credential fields.
-    if (input.credentials !== undefined && Object.keys(input.credentials).length > 0) {
-      await credentialService.storeCredentials(id, input.credentials, masterKey);
-    }
-
-    const syncState = await requireSyncState(updated.id, updated.sync_mode);
-
-    logger.info("Connector updated", { connectorId: id, tenantId });
-    return { connector: updated, syncState };
   }
 
   // -------------------------------------------------------------------------
@@ -420,16 +433,18 @@ export function createConnectorService(
     // _callerMasterKey accepted for API compatibility; unused in delete path.
     _callerMasterKey?: Buffer,
   ): Promise<void> {
-    // Ownership check raises ConnectorNotFoundError for unknown/cross-tenant IDs.
-    await requireConnectorForTenant(tenantId, id);
+    return withTenant(pool, tenantId, async (client) => {
+      // Ownership check raises ConnectorNotFoundError for unknown/cross-tenant IDs.
+      await requireConnectorForTenant(tenantId, id, client);
 
-    await connectorRepo.softDelete(id);
+      await connectorRepo.softDelete(id);
 
-    // Credential deletion is synchronous on connector delete — credentials
-    // must not outlive the logical connector record for compliance reasons.
-    await credentialService.deleteByConnectorId(id);
+      // Credential deletion is synchronous on connector delete — credentials
+      // must not outlive the logical connector record for compliance reasons.
+      await credentialService.deleteByConnectorId(id);
 
-    logger.info("Connector deleted", { connectorId: id, tenantId });
+      logger.info("Connector deleted", { connectorId: id, tenantId });
+    });
   }
 
   // -------------------------------------------------------------------------

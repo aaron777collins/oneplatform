@@ -154,6 +154,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     masterKey: config.masterKey,
     executionServiceUrl: config.executionServiceUrl,
     logger,
+    pool: db,
   });
 
   const syncService = createSyncService({

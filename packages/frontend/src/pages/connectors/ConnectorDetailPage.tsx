@@ -36,6 +36,32 @@ import type { ConnectorConfigSchema } from "@/components/connectors/ConnectorFor
 // API types
 // ---------------------------------------------------------------------------
 
+interface ConnectorRowApi {
+  id: string;
+  plugin_id: string;
+  name: string;
+  description: string | null;
+  config: Record<string, unknown>;
+  sync_mode: "full" | "incremental";
+  schedule_cron: string | null;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SyncStateRowApi {
+  status: "never_run" | "running" | "success" | "failed" | "cancelled";
+  last_sync_at: string | null;
+  last_sync_job_id: string | null;
+  rows_last_sync: string;
+  rows_total: string;
+}
+
+interface ConnectorApiResponse {
+  connector: ConnectorRowApi;
+  syncState: SyncStateRowApi;
+}
+
 interface SchemaFieldChange {
   field: string;
   changeType: "added" | "removed" | "type_changed";
@@ -194,6 +220,26 @@ export function ConnectorDetailPage() {
     queryFn: () => client.get<ApiResponse<ConnectorDetail>>(`/v1/connectors/${id}`),
   });
 
+  const registryQuery = useQuery({
+    queryKey: ["connector-registry"],
+    queryFn: () =>
+      client.get<{ items: Array<{ type: string; displayName: string; configSchema?: ConnectorConfigSchema | null }>; nextCursor: string | null; total: number }>(
+        "/v1/connector-registry",
+        { limit: "100" },
+      ),
+    staleTime: 300_000,
+  });
+
+  const registryMap = React.useMemo<Map<string, { displayName: string; configSchema: ConnectorConfigSchema }>>(() => {
+    const raw = registryQuery.data;
+    const inner = (raw as unknown as { data?: { items?: Array<{ type: string; displayName: string; configSchema?: ConnectorConfigSchema | null }> } })?.data ?? raw;
+    const entries = (inner as { items?: Array<{ type: string; displayName: string; configSchema?: ConnectorConfigSchema | null }> })?.items ?? [];
+    return new Map(entries.map((e) => [e.type, {
+      displayName: e.displayName,
+      configSchema: (e.configSchema as ConnectorConfigSchema) ?? { type: "object" as const, properties: {} },
+    }]));
+  }, [registryQuery.data]);
+
   const { data: syncsData, isLoading: syncsLoading } = useQuery({
     queryKey: ["connectors", id, "syncs"],
     queryFn: () => client.get<{ data: SyncRecord[] }>(`/v1/connectors/${id}/syncs`),
@@ -229,7 +275,33 @@ export function ConnectorDetailPage() {
     },
   });
 
-  const connector = (data as unknown as { data?: ApiResponse<ConnectorDetail> })?.data?.data ?? (data as ApiResponse<ConnectorDetail> | undefined)?.data;
+  const connector = React.useMemo<ConnectorDetail | undefined>(() => {
+    if (!data) return undefined;
+    const raw = (data as unknown as { data?: { data?: ConnectorApiResponse } })?.data?.data
+      ?? (data as unknown as { data?: ConnectorApiResponse })?.data;
+    if (!raw?.connector) return undefined;
+
+    const { connector: c, syncState: s } = raw;
+    const registry = registryMap.get(c.plugin_id);
+
+    const statusMap: Record<string, ConnectorStatus> = {
+      running: "syncing",
+      success: "active",
+      failed: "error",
+      cancelled: "disabled",
+      never_run: "disabled",
+    };
+
+    return {
+      id: c.id,
+      name: c.name,
+      typeName: registry?.displayName ?? c.plugin_id,
+      status: statusMap[s.status] ?? "disabled",
+      ...(s.last_sync_at !== null ? { lastSyncAt: s.last_sync_at } : {}),
+      configSchema: registry?.configSchema ?? { type: "object" as const, properties: {} },
+      config: c.config as ConnectorFormValues,
+    };
+  }, [data, registryMap]);
 
   if (isError) {
     return (

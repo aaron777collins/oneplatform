@@ -128,11 +128,26 @@ interface ServiceBundle {
   service: ReturnType<typeof createConnectorService>;
 }
 
+// Minimal pg.Pool mock that satisfies withTenant — connect() returns a client
+// whose query() is a no-op (BEGIN/set_config/COMMIT/ROLLBACK are swallowed)
+// and release() is a no-op. The mock repos handle the actual query results.
+function makeMockPool() {
+  const mockClient = {
+    query: vi.fn().mockResolvedValue({ rows: [] }),
+    release: vi.fn(),
+  };
+  return {
+    connect: vi.fn().mockResolvedValue(mockClient),
+    _client: mockClient,
+  };
+}
+
 function makeService(executionServiceUrl = "http://exec:3000"): ServiceBundle {
   const connectorRepo = makeConnectorRepo();
   const syncStateRepo = makeSyncStateRepo();
   const credentialService = makeCredentialService();
   const logger = makeLogger();
+  const pool = makeMockPool();
 
   const service = createConnectorService({
     connectorRepo: connectorRepo as unknown as ConnectorRepository,
@@ -141,6 +156,7 @@ function makeService(executionServiceUrl = "http://exec:3000"): ServiceBundle {
     masterKey: MASTER_KEY,
     executionServiceUrl,
     logger,
+    pool: pool as unknown as import("pg").Pool,
   });
 
   return { connectorRepo, syncStateRepo, credentialService, logger, service };

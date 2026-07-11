@@ -24,8 +24,9 @@ export class SyncStateRepository {
     last_error_code?: string;
     rows_last_sync?: number;
     rows_total?: number;
-  }): Promise<SyncStateRow> {
-    const result = await this.pool.query<SyncStateRow>(
+  }, client?: pg.PoolClient): Promise<SyncStateRow> {
+    const queryable = client ?? this.pool;
+    const result = await queryable.query<SyncStateRow>(
       `INSERT INTO ingestion.sync_state
          (connector_id, sync_mode, status, last_cursor, last_sync_at,
           last_sync_job_id, last_error, last_error_code,

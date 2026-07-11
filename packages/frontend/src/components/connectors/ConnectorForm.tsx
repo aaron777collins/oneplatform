@@ -85,7 +85,8 @@ function buildZodSchema(schema: ConnectorConfigSchema): z.ZodObject<z.ZodRawShap
     let field: z.ZodTypeAny;
 
     if (prop.type === "boolean") {
-      field = z.boolean();
+      const boolDefault = typeof prop.default === "boolean" ? prop.default : false;
+      field = z.boolean().default(boolDefault);
     } else if (prop.type === "number" || prop.type === "integer") {
       let numField = z.number();
       if (prop.minimum !== undefined) numField = numField.min(prop.minimum);
@@ -96,7 +97,8 @@ function buildZodSchema(schema: ConnectorConfigSchema): z.ZodObject<z.ZodRawShap
       if (first === undefined) {
         field = z.string();
       } else {
-        field = z.enum([first, ...rest] as [string, ...string[]]);
+        const enumField = z.enum([first, ...rest] as [string, ...string[]]);
+        field = isRequired ? enumField : enumField.optional();
       }
     } else {
       // default: string

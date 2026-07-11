@@ -72,12 +72,12 @@ function syncStatusToConnectorStatus(s: SyncStateRowApi["status"]): ConnectorSta
   }
 }
 
-function toCardData(record: ConnectorWithSyncStateApi): ConnectorCardData {
+function toCardData(record: ConnectorWithSyncStateApi, typeDisplayNames: Map<string, string>): ConnectorCardData {
   const { connector, syncState } = record;
   return {
     id: connector.id,
     name: connector.name,
-    typeName: connector.plugin_id,
+    typeName: typeDisplayNames.get(connector.plugin_id) ?? connector.plugin_id,
     status: syncStatusToConnectorStatus(syncState.status),
     ...(syncState.last_sync_at !== null ? { lastSyncAt: syncState.last_sync_at } : {}),
   };
@@ -97,6 +97,23 @@ export function ConnectorsPage() {
     queryKey: ["connectors"],
     queryFn: () => client.get<ConnectorListResponse>("/v1/connectors"),
   });
+
+  const registryQuery = useQuery({
+    queryKey: ["connector-registry"],
+    queryFn: () =>
+      client.get<{ items: Array<{ type: string; displayName: string }>; nextCursor: string | null; total: number }>(
+        "/v1/connector-registry",
+        { limit: "100" },
+      ),
+    staleTime: 300_000,
+  });
+
+  const typeDisplayNames = React.useMemo<Map<string, string>>(() => {
+    const raw = registryQuery.data;
+    const inner = (raw as unknown as { data?: { items?: Array<{ type: string; displayName: string }> } })?.data ?? raw;
+    const entries = (inner as { items?: Array<{ type: string; displayName: string }> })?.items ?? [];
+    return new Map(entries.map((e) => [e.type, e.displayName]));
+  }, [registryQuery.data]);
 
   const triggerSync = useMutation({
     mutationFn: (id: string) =>
@@ -193,7 +210,7 @@ export function ConnectorsPage() {
             {filtered.map((item) => (
               <ConnectorCard
                 key={item.connector.id}
-                connector={toCardData(item)}
+                connector={toCardData(item, typeDisplayNames)}
                 onSync={(id) => triggerSync.mutate(id)}
                 isSyncing={
                   triggerSync.isPending &&

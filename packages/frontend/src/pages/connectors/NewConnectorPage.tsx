@@ -8,6 +8,7 @@ import { useNavigate, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, XCircle, Loader2, Puzzle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
+import { Input } from "@/components/ui/input.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { ConnectorForm, type ConnectorFormValues } from "@/components/connectors/ConnectorForm.js";
@@ -21,12 +22,23 @@ import type { ConnectorConfigSchema } from "@/components/connectors/ConnectorFor
 
 type Step = "choose-type" | "configure" | "test" | "done";
 
-interface PluginEntry {
-  id: string;
-  name: string;
-  description: string;
+interface RegistryEntry {
   type: string;
+  displayName: string;
+  description: string;
+  version: string;
+  category: string;
+  author: string;
+  icon?: string;
   configSchema?: ConnectorConfigSchema | null;
+  installCount: number;
+  builtIn: boolean;
+}
+
+interface RegistryListResult {
+  items: RegistryEntry[];
+  nextCursor: string | null;
+  total: number;
 }
 
 interface ConnectorTypeOption {
@@ -102,35 +114,38 @@ export function NewConnectorPage() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState<Step>("choose-type");
   const [selectedType, setSelectedType] = useState<ConnectorTypeOption | null>(null);
+  const [connectorName, setConnectorName] = useState("");
   const [formValues, setFormValues] = useState<ConnectorFormValues | null>(null);
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [testError, setTestError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  // Fetch available connector plugins from the plugin registry
+  // Fetch available connector types from the built-in connector registry
   const { data: typesData, isLoading: typesLoading } = useQuery({
-    queryKey: ["connector-plugins"],
+    queryKey: ["connector-types"],
     queryFn: async () => {
-      const result = await client.get<{ items: PluginEntry[]; nextCursor: string | null; total: number }>("/v1/plugins", { type: "connector" });
-      // Unwrap response envelope: middleware wraps in { data: T }
-      const inner = (result as unknown as { data?: { items?: PluginEntry[] } })?.data ?? result;
-      const options: ConnectorTypeOption[] = (inner.items ?? []).map((p: PluginEntry) => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        configSchema: p.configSchema ?? { type: "object" as const, properties: {} },
+      const result = await client.get<RegistryListResult>("/v1/connector-registry", { limit: "100" });
+      // Unwrap response envelope if present
+      const inner = (result as unknown as { data?: RegistryListResult })?.data ?? result;
+      const entries = inner?.items ?? [];
+      const options: ConnectorTypeOption[] = entries.map((entry: RegistryEntry) => ({
+        id: entry.type,
+        name: entry.displayName,
+        description: entry.description,
+        configSchema: entry.configSchema ?? { type: "object" as const, properties: {} },
       }));
       return { data: options };
     },
   });
 
-  // V6-131: Auto-select plugin when pluginId is passed as a search param
+  // Auto-select connector type when pluginId (registry type string) is passed from marketplace
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pluginId = params.get("pluginId");
     if (pluginId !== null && typesData?.data !== undefined && currentStep === "choose-type") {
       const match = typesData.data.find((t) => t.id === pluginId);
       if (match !== undefined) {
+        setConnectorName(`My ${match.name}`);
         handleTypeSelect(match);
       }
     }
@@ -164,11 +179,10 @@ export function NewConnectorPage() {
     setCurrentStep("test");
     setTestStatus("testing");
     setTestError(null);
-    // Create the connector first, then test it
-    const connectorName = typeof values["name"] === "string" ? values["name"] : selectedType.name;
+    const finalName = connectorName.trim() || selectedType.name;
     createConnector.mutate({
       pluginId: selectedType.id,
-      name: connectorName,
+      name: finalName,
       config: values,
     });
   }
@@ -282,6 +296,18 @@ export function NewConnectorPage() {
         {currentStep === "configure" && selectedType !== null && (
           <div className="max-w-lg space-y-3">
             <h2 className="text-base font-semibold">Configure {selectedType.name}</h2>
+            <div className="space-y-2">
+              <label htmlFor="connector-name" className="text-sm font-medium">
+                Connector name
+                <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>
+              </label>
+              <Input
+                id="connector-name"
+                placeholder={`My ${selectedType.name} connector`}
+                value={connectorName}
+                onChange={(e) => setConnectorName(e.target.value)}
+              />
+            </div>
             <ConnectorForm
               schema={selectedType.configSchema}
               onSubmit={(values) => void handleConfigureSubmit(values)}

@@ -19,8 +19,9 @@ const CONNECTOR_COLUMNS = `
 export class ConnectorRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async create(data: CreateConnectorData): Promise<ConnectorRow> {
-    const result = await this.pool.query<ConnectorRow>(
+  async create(data: CreateConnectorData, client?: pg.PoolClient): Promise<ConnectorRow> {
+    const queryable = client ?? this.pool;
+    const result = await queryable.query<ConnectorRow>(
       `INSERT INTO ingestion.connectors
          (tenant_id, plugin_id, instance_id, name, description,
           config, sync_mode, schedule_cron, is_enabled, created_by)
@@ -47,8 +48,9 @@ export class ConnectorRepository {
     return row;
   }
 
-  async findById(id: string): Promise<ConnectorRow | null> {
-    const result = await this.pool.query<ConnectorRow>(
+  async findById(id: string, client?: pg.PoolClient): Promise<ConnectorRow | null> {
+    const queryable = client ?? this.pool;
+    const result = await queryable.query<ConnectorRow>(
       `SELECT ${CONNECTOR_COLUMNS}
          FROM ingestion.connectors
         WHERE id = $1
@@ -204,13 +206,14 @@ export class ConnectorRepository {
 
   // Tenant-scoped lookup by primary key. Returns null for cross-tenant access
   // so callers get a consistent not-found result rather than a data leak.
-  async findByTenantAndId(tenantId: string, id: string): Promise<ConnectorRow | null> {
+  async findByTenantAndId(tenantId: string, id: string, client?: pg.PoolClient): Promise<ConnectorRow | null> {
     // Empty tenantId is the internal "*" wildcard used by retention and plugin
     // uninstall paths — those callers receive the full row without tenant filtering.
     if (tenantId === "" || tenantId === "*") {
-      return this.findById(id);
+      return this.findById(id, client);
     }
-    const result = await this.pool.query<ConnectorRow>(
+    const queryable = client ?? this.pool;
+    const result = await queryable.query<ConnectorRow>(
       `SELECT ${CONNECTOR_COLUMNS}
          FROM ingestion.connectors
         WHERE id = $1
@@ -225,7 +228,8 @@ export class ConnectorRepository {
   // sync status. Supports cursor-based pagination, filtering by status / plugin,
   // and sorting. When tenantId is "*" or empty, lists across all tenants
   // (internal maintenance operations only).
-  async list(tenantId: string, options: ListConnectorsOptions): Promise<ConnectorListResult> {
+  async list(tenantId: string, options: ListConnectorsOptions, client?: pg.PoolClient): Promise<ConnectorListResult> {
+    const queryable = client ?? this.pool;
     const conditions: string[] = ["c.deleted_at IS NULL"];
     const values: unknown[] = [];
     let idx = 1;
@@ -263,7 +267,7 @@ export class ConnectorRepository {
 
     // Count total matching rows for pagination metadata.
     // Uses the conditions WITHOUT the cursor clause so total reflects the full result set.
-    const countResult = await this.pool.query<{ count: string }>(
+    const countResult = await queryable.query<{ count: string }>(
       `SELECT count(*) AS count
          FROM ingestion.connectors c
          ${countWhereClause}`,
@@ -307,7 +311,7 @@ export class ConnectorRepository {
 
     // Fetch the page with sync_state joined.
     values.push(options.limit);
-    const rows = await this.pool.query<JoinRow>(
+    const rows = await queryable.query<JoinRow>(
       `SELECT ${CONNECTOR_COLUMNS.trim()
           .split(",")
           .map((c) => `c.${c.trim()}`)
