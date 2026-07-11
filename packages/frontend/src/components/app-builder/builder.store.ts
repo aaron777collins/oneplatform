@@ -130,17 +130,14 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
   },
 
   removeRow: (rowId: string) => {
-    const { layout } = get();
-    set((s) => mutate(s, removeRow(layout, rowId)));
+    set((s) => mutate(s, removeRow(s.layout, rowId)));
   },
 
   moveRow: (fromIndex: number, toIndex: number) => {
-    const { layout } = get();
-    set((s) => mutate(s, moveRow(layout, fromIndex, toIndex)));
+    set((s) => mutate(s, moveRow(s.layout, fromIndex, toIndex)));
   },
 
   dropFromPalette: (paletteType: string, rowId: string, columnId: string) => {
-    const { layout } = get();
     const entry = getPaletteEntry(paletteType);
     if (entry === undefined) {
       throw new Error(`dropFromPalette: unknown component type "${paletteType}".`);
@@ -150,24 +147,23 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
       type: paletteType,
       props: { ...entry.defaultProps },
     };
-    const next = placeComponent(layout, rowId, columnId, component);
-    set((s) => ({ ...mutate(s, next), selectedComponentId: component.id }));
+    set((s) => {
+      const next = placeComponent(s.layout, rowId, columnId, component);
+      return { ...mutate(s, next), selectedComponentId: component.id };
+    });
   },
 
   moveComponent: (fromColumnId: string, toColumnId: string) => {
-    const { layout } = get();
-    set((s) => mutate(s, moveComponent(layout, fromColumnId, toColumnId)));
+    set((s) => mutate(s, moveComponent(s.layout, fromColumnId, toColumnId)));
   },
 
   applyRowPreset: (rowId: string, preset: ColumnPreset) => {
-    const { layout } = get();
-    set((s) => mutate(s, applyRowPreset(layout, rowId, preset)));
+    set((s) => mutate(s, applyRowPreset(s.layout, rowId, preset)));
   },
 
   removeComponent: (componentId: string) => {
-    const { layout } = get();
     set((s) => ({
-      ...mutate(s, removeComponent(layout, componentId)),
+      ...mutate(s, removeComponent(s.layout, componentId)),
       selectedComponentId: s.selectedComponentId === componentId ? null : s.selectedComponentId,
       // Prune connections that reference the deleted component so the
       // connection list never points at phantom component IDs.
@@ -178,33 +174,31 @@ export const useBuilderStore = create<BuilderState>()((set, get) => ({
   },
 
   updateProps: (componentId: string, props: Record<string, unknown>) => {
-    const { layout } = get();
-    set((s) => mutate(s, updateComponentProps(layout, componentId, props)));
+    set((s) => mutate(s, updateComponentProps(s.layout, componentId, props)));
   },
 
   updateStyles: (componentId: string, styles: Record<string, string>) => {
-    const { layout } = get();
-    set((s) => mutate(s, updateComponentStyles(layout, componentId, styles)));
+    set((s) => mutate(s, updateComponentStyles(s.layout, componentId, styles)));
   },
 
   updateDataBinding: (componentId: string, binding: DataBinding | undefined) => {
-    const { layout } = get();
-    const nextLayout: AppLayout = {
-      ...layout,
-      rows: layout.rows.map((row) => ({
-        ...row,
-        columns: row.columns.map((col) => {
-          if (col.component?.id !== componentId) return col;
-          if (binding === undefined) {
-            // Remove dataBinding property — required by exactOptionalPropertyTypes
-            const { dataBinding: _removed, ...rest } = col.component;
-            return { ...col, component: rest };
-          }
-          return { ...col, component: { ...col.component, dataBinding: binding } };
-        }),
-      })),
-    };
-    set((s) => mutate(s, nextLayout));
+    set((s) => {
+      const nextLayout: AppLayout = {
+        ...s.layout,
+        rows: s.layout.rows.map((row) => ({
+          ...row,
+          columns: row.columns.map((col) => {
+            if (col.component?.id !== componentId) return col;
+            if (binding === undefined) {
+              const { dataBinding: _removed, ...rest } = col.component;
+              return { ...col, component: rest };
+            }
+            return { ...col, component: { ...col.component, dataBinding: binding } };
+          }),
+        })),
+      };
+      return mutate(s, nextLayout);
+    });
   },
 
   selectComponent: (componentId: string | null) => {
