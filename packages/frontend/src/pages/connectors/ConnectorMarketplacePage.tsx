@@ -169,7 +169,11 @@ export function ConnectorMarketplacePage() {
     },
   });
 
-  const connectors = registryQuery.data?.items ?? [];
+  // The responseEnvelopeMiddleware wraps the payload in { data: T }; unwrap if present.
+  const registryInner =
+    (registryQuery.data as unknown as { data?: RegistryListResult } | undefined)?.data ??
+    registryQuery.data;
+  const connectors = registryInner?.items ?? [];
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -248,8 +252,8 @@ export function ConnectorMarketplacePage() {
         {/* Results count */}
         {!registryQuery.isLoading && connectors.length > 0 && (
           <p className="text-sm text-[var(--color-muted-foreground)]">
-            {registryQuery.data?.total ?? connectors.length} connector
-            {(registryQuery.data?.total ?? connectors.length) !== 1 ? "s" : ""} available
+            {registryInner?.total ?? connectors.length} connector
+            {(registryInner?.total ?? connectors.length) !== 1 ? "s" : ""} available
           </p>
         )}
 

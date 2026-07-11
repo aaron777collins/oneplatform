@@ -57,7 +57,11 @@ export function PluginsPage() {
       client.get<{ items: PluginCardData[]; nextCursor: string | null; total: number }>("/v1/plugins", undefined, { signal }),
   });
 
-  const plugins = query.data?.items ?? [];
+  // Unwrap response envelope: middleware wraps in { data: T }
+  const pluginsInner =
+    (query.data as unknown as { data?: { items?: PluginCardData[] } } | undefined)?.data ??
+    query.data;
+  const plugins = pluginsInner?.items ?? [];
 
   const filtered = React.useMemo(() => {
     if (typeFilter === "all") return plugins;
