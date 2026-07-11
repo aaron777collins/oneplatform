@@ -15,16 +15,73 @@ try { fs.unlinkSync(socketPath); } catch {}
 // Ensure parent directory exists.
 fs.mkdirSync(path.dirname(socketPath), { recursive: true });
 
+// Write a length-prefixed frame matching the client protocol defined in
+// unix-socket-client.ts §7.1: [4-byte BE uint32 length][JSON bytes]['\n']
+function writeFrame(socket, payload) {
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const header = Buffer.allocUnsafe(4);
+  header.writeUInt32BE(body.length, 0);
+  socket.write(Buffer.concat([header, body, Buffer.from('\n')]));
+}
+
 const server = net.createServer((socket) => {
   console.log('[sandbox-vm] client connected');
-  socket.on('data', (data) => {
-    // Stub: echo back with error until real implementation is in place.
-    const response = JSON.stringify({
-      id: null,
-      error: { code: -32603, message: 'sandbox-vm not yet implemented' }
-    });
-    socket.write(response + '\n');
+
+  let readBuffer = Buffer.alloc(0);
+  const HEADER_BYTES = 4;
+
+  socket.on('data', (chunk) => {
+    readBuffer = Buffer.concat([readBuffer, chunk]);
+
+    // Parse all complete frames from the read buffer before replying.
+    while (readBuffer.length >= HEADER_BYTES) {
+      const messageLength = readBuffer.readUInt32BE(0);
+      const totalFrame = HEADER_BYTES + messageLength + 1; // +1 for '\n'
+      if (readBuffer.length < totalFrame) break;
+
+      const jsonBytes = readBuffer.slice(HEADER_BYTES, HEADER_BYTES + messageLength);
+      readBuffer = readBuffer.slice(totalFrame);
+
+      let request;
+      try {
+        request = JSON.parse(jsonBytes.toString('utf8'));
+      } catch {
+        console.error('[sandbox-vm] failed to parse request frame');
+        continue;
+      }
+
+      const id = request.id ?? null;
+      const method = request.method ?? 'unknown';
+
+      if (method === 'ping') {
+        writeFrame(socket, {
+          id,
+          status: 'ok',
+          result: { pong: true, runCount: 0 },
+          meta: { durationMs: 0, memoryPeakMb: 0, exitCode: 0, lineCount: 0 },
+        });
+        continue;
+      }
+
+      if (method === 'drain') {
+        writeFrame(socket, {
+          id,
+          status: 'ok',
+          result: { drainedCount: 0, timedOutCount: 0 },
+          meta: { durationMs: 0, memoryPeakMb: 0, exitCode: 0, lineCount: 0 },
+        });
+        continue;
+      }
+
+      writeFrame(socket, {
+        id,
+        status: 'error',
+        error: { code: 'NOT_IMPLEMENTED', message: `sandbox-vm method '${method}' not yet implemented` },
+        meta: { durationMs: 0, memoryPeakMb: 0, exitCode: 1, lineCount: 0 },
+      });
+    }
   });
+
   socket.on('end', () => console.log('[sandbox-vm] client disconnected'));
 });
 
