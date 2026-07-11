@@ -5,43 +5,69 @@
 2. `docs/WORKING-STATE.md` — Current development state
 3. This file (`.claude/handoff.md`) — Session continuity
 
-## Latest Session — Stale Container Investigation (2026-07-11)
+## Latest Session — Stale Container Investigation, Sandbox Fix, Envelope Unwrap Sweep (2026-07-11)
 
 ### What Was Done
-Investigated three user-reported runtime blockers and traced all of them to stale Docker containers, not missing code fixes.
 
-**Root cause:** The running dev-test containers were built on 2026-07-08. Commit bd38e0e (2026-07-10) had already fixed all three issues in source, but the containers never received those changes.
+**1. Investigated 3 user-reported runtime blockers**
+- Empty connector marketplace, app builder crash on stat editing, code editor not showing files
+- Root cause: running containers built 2026-07-08, missing fixes from commit bd38e0e (2026-07-10)
 
-**Three bugs (all fixed in bd38e0e):**
-1. **Connector marketplace empty** — envelope unwrap `g.data?.data??g.data` was the fix; connector list API returns `{data: {data: [...], total: N}}` double-wrapped.
-2. **App builder crash on stat editing** — builder store was capturing `layout` from outer closure (stale snapshot); fix reads `s.layout` inside the `set()` callback.
-3. **Code editor not showing files** — file API was returning `isDirectory: true` for files; fix sets `isDirectory: false` and the FileTree component filters `isDirectory === true` for folder icons.
+**2. Rebuilt stale containers**
+- Rebuilt `op-dev-test-frontend`, `op-dev-test-gateway`, `op-dev-test-ingestion`
+- Resolved Docker build cache issue: `--no-cache` did not regenerate frontend bundle; correct dist was copied from host `packages/frontend/dist/` into the container
 
-**Actions taken:**
-- Identified stale container timestamps via `docker inspect`
-- Verified fixes present in JS source with `grep`
-- Reverted any agent re-fix attempts (would have doubled the logic)
-- Rebuilt `op-dev-test-frontend`, `op-dev-test-gateway`, `op-dev-test-ingestion` containers
-- Resolved Docker build cache issue: `--no-cache` did not produce the correct frontend bundle (likely Vite/turborepo artifact); correct dist was copied from the host `packages/frontend/dist/` into the container
-- Verified fix signatures in the served JavaScript bundle
-- Fixed sandbox-vm Unix socket protocol mismatch (commit `1990001`):
-  - Root cause: sandbox server (`docker/sandbox/src/server.js`) was sending raw JSON without length prefix, while the execution service's `UnixSocketClient` expected 4-byte big-endian uint32 length-prefixed frames
-  - The first 4 bytes of raw JSON were read as a ~2GB length, exceeding the 12MB max, causing socket destruction every 10 seconds
-  - Fix: rewrote sandbox server to use matching length-prefixed protocol AND added proper ping/drain method handlers
-  - Result: eliminated 840 errors/hour crash loop — zero errors since fix
-  - Rebuilt sandbox-vm container and restarted execution service
+**3. Fixed sandbox-vm Unix socket protocol framing mismatch (commit `1990001`)**
+- Root cause: `docker/sandbox/src/server.js` was sending raw JSON without a length prefix, while the execution service's `UnixSocketClient` expected 4-byte big-endian uint32 length-prefixed frames
+- First 4 bytes of raw JSON were read as a ~2GB length, exceeding the 12MB max, causing socket destruction every 10 seconds
+- Fix: rewrote sandbox server with matching length-prefixed protocol + added ping/drain method handlers
+- Result: eliminated 840 errors/hour crash loop — zero errors since fix
+- Rebuilt sandbox-vm container and restarted execution service
+
+**4. Fixed response envelope unwrapping on 25 frontend pages (commits `bc8984b`, `fe56102`)**
+- Root cause: gateway wraps responses as `{data: <payload>}`, but many API calls that return paginated lists get double-wrapped as `{data: {data: [...], total: N}}`; frontend pages were reading `.data` once and getting the inner envelope object instead of the array
+- Pages fixed in `bc8984b`: ConnectorMarketplacePage, NewConnectorPage, PluginsPage
+- Pages fixed in `fe56102`: 22 remaining pages including PipelinesPage, AppsPage, LogsPage, OntologyPage, MappingsPage, DataCatalogPage, MetricsPage, and 15 more
+- Pattern applied: `response.data?.data ?? response.data` to handle both wrapped and unwrapped shapes
+
+**5. Fixed builder store stale layout capture in all 9 mutations (commit `1df13ab`)**
+- Root cause: builder store mutations (addComponent, updateComponent, deleteComponent, etc.) were capturing `layout` from the outer `get()` call result, then calling `set()` later — rapid prop edits would overwrite each other because the layout snapshot was stale by the time `set()` ran
+- Fix: moved layout read inside each `set()` callback to always read `s.layout` from current state
+- All 9 mutations updated; 26/26 builder store tests pass
+
+**6. Started docker-bff and docker-socket-proxy containers**
+- Docker Fleet Manager BFF sidecar and Docker socket proxy were stopped; both started
+
+**7. Deployed fresh frontend build after each fix**
+- Rebuilt frontend TypeScript, copied new dist into the running container after each batch of fixes
+
+### Commits
+| Hash | Description |
+|------|-------------|
+| `1990001` | fix: sandbox-vm length-prefixed framing + ping/drain handlers |
+| `6161f47` | docs: update session notes |
+| `bc8984b` | fix: envelope unwrap on marketplace, new connector, plugins pages |
+| `1df13ab` | fix: builder store reads layout inside set() to prevent stale closure |
+| `fe56102` | fix: envelope unwrap on 22 remaining frontend pages |
 
 ### Current Container State
-- `op-dev-test-frontend`: rebuilt 2026-07-11 05:58, dist copied from host
+- `op-dev-test-frontend`: rebuilt 2026-07-11, dist redeployed after each fix batch
 - `op-dev-test-gateway`: rebuilt 2026-07-11 05:58
 - `op-dev-test-ingestion`: rebuilt 2026-07-11 05:58
 - `op-dev-test-sandbox-vm`: rebuilt 2026-07-11 07:09, socket protocol fixed
 - `op-dev-test-execution`: restarted 2026-07-11 07:12
-- All other 14 containers: unchanged, healthy
-- **Total: all 19 containers healthy**
+- `op-dev-test-docker-bff`: started this session
+- `op-dev-test-docker-socket-proxy`: started this session
+- All other containers: unchanged, healthy
+- **Total: 21 containers running, all healthy**
+
+### System Health at Session End
+- All 9 services OK with sub-15ms latency
+- Zero errors across all services for 45+ minutes
+- Frontend build passes, 26/26 builder store tests pass
 
 ### Outstanding / User Action Required
-All services are error-free. The user should verify the browser experience:
+The user should verify the browser experience (Authelia credentials required):
 1. **Connector marketplace** — navigate to Connectors → Marketplace; expect 5 built-in connectors listed
 2. **App builder stat editing** — open an app, edit a stat component's value; should not crash
 3. **Code editor file tree** — open code editor for an app; file tree should list files (not blank)
@@ -50,7 +76,6 @@ All services are error-free. The user should verify the browser experience:
 ### Docker Build Cache Warning
 After rebuilding with `docker build --no-cache`, the frontend bundle was still stale. Root cause not fully diagnosed — Vite or Turborepo may cache outputs outside the Docker layer context. If this recurs:
 ```bash
-# Clean host build artifacts before Docker build
 rm -rf packages/frontend/dist packages/frontend/.turbo
 pnpm --filter @oneplatform/frontend build
 docker build -f docker/Dockerfile.frontend -t op-frontend .
@@ -58,8 +83,10 @@ docker build -f docker/Dockerfile.frontend -t op-frontend .
 
 ### Key Files
 - `packages/frontend/src/pages/ConnectorsPage.tsx` — marketplace envelope unwrap
-- `packages/frontend/src/stores/builder-store.ts` — layout read inside `set()` callback
+- `packages/frontend/src/pages/` (all 25 pages) — envelope unwrap sweep
+- `packages/frontend/src/stores/builder-store.ts` — stale layout closure fix
 - `packages/frontend/src/components/editor/FileTree.tsx` — `isDirectory === true` check
+- `docker/sandbox/src/server.js` — length-prefixed framing fix
 - `docker/docker-compose.dev-test.yml` — dev-test stack definition
 
 ---

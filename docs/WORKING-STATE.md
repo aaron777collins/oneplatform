@@ -388,7 +388,7 @@ This document tracks the current state of development. Read this FIRST when resu
 - Commit: da0b76b
 - Files changed: `docker/redis/users.acl.template`, `services/auth/src/services/bootstrap-service.ts`
 
-#### Phase 21: Stale Container Investigation & Runtime Bug Fixes (2026-07-11)
+#### Phase 21: Stale Container Investigation, Sandbox Fix & Envelope Unwrap Sweep (2026-07-11)
 - [x] Investigated three user-reported blockers: empty connector marketplace, code editor not showing files, app builder crash on stat editing
 - [x] Root cause identified: all three fixes were already present in source (commit bd38e0e, 2026-07-10) — running Docker containers were stale (built 2026-07-08, missing 2026-07-10+ commits)
 - [x] Reverted unnecessary agent changes (agents had attempted to re-fix already-fixed code)
@@ -398,18 +398,45 @@ This document tracks the current state of development. Read this FIRST when resu
   - Connector marketplace: `g.data?.data??g.data` envelope unwrap pattern active
   - App builder store: `s.layout` read inside `set()` callbacks (no stale closure capture)
   - File tree: `isDirectory: false` set in API response, `isDirectory === true` comparison in FileTree
-- [x] All 18 dev-test containers healthy post-rebuild
-- [x] Fixed sandbox-vm Unix socket protocol mismatch — rewrote server.js to use length-prefixed framing matching the client, added ping/drain handlers. Eliminated 840 errors/hour execution service crash loop.
+- [x] Fixed sandbox-vm Unix socket protocol framing mismatch (commit `1990001`):
+  - `docker/sandbox/src/server.js` was sending raw JSON without a length prefix
+  - Execution service `UnixSocketClient` expected 4-byte big-endian uint32 length-prefixed frames
+  - First 4 bytes of raw JSON read as ~2GB length, exceeding 12MB max — socket destroyed every 10 seconds
+  - Rewrote server.js with matching length-prefixed protocol + ping/drain method handlers
+  - Eliminated 840 errors/hour execution service crash loop
 - [x] Rebuilt sandbox-vm container and restarted execution service
-- [x] All 19 containers healthy, all 9 services OK, zero errors across entire platform
+- [x] Fixed response envelope unwrapping on 25 frontend pages (commits `bc8984b`, `fe56102`):
+  - Gateway wraps responses as `{data: <payload>}`, paginated lists return `{data: {data: [...], total: N}}`
+  - 25 pages were reading `.data` once, receiving the inner envelope object instead of the array
+  - Applied `response.data?.data ?? response.data` pattern across all affected pages
+  - Pages covered: ConnectorMarketplacePage, NewConnectorPage, PluginsPage, PipelinesPage, AppsPage, LogsPage, OntologyPage, MappingsPage, DataCatalogPage, MetricsPage, and 15 more
+- [x] Fixed builder store stale layout closure in all 9 mutations (commit `1df13ab`):
+  - Mutations were capturing `layout` from outer `get()` call — rapid edits would overwrite each other
+  - Moved layout read inside each `set()` callback to always read current `s.layout`
+  - 26/26 builder store tests pass
+- [x] Started docker-bff and docker-socket-proxy containers (Docker Fleet Manager BFF)
+- [x] Deployed fresh frontend build after each fix batch
 
-**Container rebuild timestamps (2026-07-11):**
-- `op-dev-test-frontend`: rebuilt 05:58, dist copied from host
+**Commits this phase:**
+| Hash | Description |
+|------|-------------|
+| `1990001` | fix: sandbox-vm length-prefixed framing + ping/drain handlers |
+| `6161f47` | docs: update session notes |
+| `bc8984b` | fix: envelope unwrap on marketplace, new connector, plugins pages |
+| `1df13ab` | fix: builder store reads layout inside set() to prevent stale closure |
+| `fe56102` | fix: envelope unwrap on 22 remaining frontend pages |
+
+**Final container state (2026-07-11, 21 containers running):**
+- `op-dev-test-frontend`: rebuilt 05:58, dist redeployed after each fix batch
 - `op-dev-test-gateway`: rebuilt 05:58
 - `op-dev-test-ingestion`: rebuilt 05:58
 - `op-dev-test-sandbox-vm`: rebuilt 07:09, socket protocol fixed
 - `op-dev-test-execution`: restarted 07:12
-- All other containers: unchanged, healthy
+- `op-dev-test-docker-bff`: started this session
+- `op-dev-test-docker-socket-proxy`: started this session
+- All other 14 containers: unchanged, healthy
+
+**System health at session end:** All 9 services OK, sub-15ms latency, zero errors for 45+ minutes.
 
 **Outstanding:**
 - Full E2E browser verification requires Authelia credentials (not available to automated agents)
