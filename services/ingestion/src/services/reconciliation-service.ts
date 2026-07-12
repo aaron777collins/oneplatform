@@ -24,6 +24,7 @@ import { Queue, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { bullmqConnection } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 import type { ConnectorRepository } from "./connector-service.js";
 import type { CredentialService } from "./credential-service.js";
 import { ConnectorNotFoundError } from "./errors.js";
@@ -141,6 +142,8 @@ export interface ReconciliationServiceDeps {
   executionServiceUrl?: string;
   /** Redis URL for BullMQ queues. Falls back to OP_REDIS_URL env var. */
   redisUrl?: string;
+  /** Required for authenticating to the execution service's /internal/* routes. */
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 // Deps required by the standalone executeReconcileJob function. Separated so
@@ -154,6 +157,8 @@ export interface ExecuteReconcileJobDeps {
   masterKey: Buffer;
   logger: Logger;
   executionServiceUrl: string;
+  /** Required for authenticating to the execution service's /internal/* routes. */
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +198,7 @@ export async function executeReconcileJob(
     masterKey,
     logger,
     executionServiceUrl,
+    serviceTokenSigner,
   } = deps;
 
   const { jobId, connectorId, tenantId, options } = job.data;
@@ -222,6 +228,7 @@ export async function executeReconcileJob(
     executionServiceUrl,
     idField: options.idField,
     logger,
+    ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
   });
 
   // --- Step 2: collect platform record IDs from raw table ---
@@ -267,6 +274,7 @@ export async function executeReconcileJob(
       sampleIds,
       idField: options.idField,
       logger,
+      ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
     });
 
     // Fetch platform records for the same sample IDs.
@@ -364,6 +372,7 @@ export function createReconciliationService(
     redis,
     masterKey,
     logger,
+    serviceTokenSigner,
   } = deps;
 
   const executionServiceUrl =
@@ -394,6 +403,7 @@ export function createReconciliationService(
     masterKey,
     logger,
     executionServiceUrl,
+    ...(serviceTokenSigner !== undefined ? { serviceTokenSigner } : {}),
   };
 
   // -------------------------------------------------------------------------
@@ -590,6 +600,7 @@ interface FetchSourceIdsParams {
   executionServiceUrl: string;
   idField: string;
   logger: Logger;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 // fetchSourceIds calls the connector plugin via the Execution Service.
@@ -597,7 +608,7 @@ interface FetchSourceIdsParams {
 // to return IDs cheaply. If that method is unavailable (HTTP 400/404) it falls
 // back to paginating fetchBatch and extracting the idField from each record.
 async function fetchSourceIds(params: FetchSourceIdsParams): Promise<string[]> {
-  const { connector, tenantId, credentialFields, executionServiceUrl, idField, logger } = params;
+  const { connector, tenantId, credentialFields, executionServiceUrl, idField, logger, serviceTokenSigner } = params;
 
   // Try the dedicated reconcileList method first.
   // credentialBundleId must be the connector's primary key (id) — this is how
@@ -610,7 +621,7 @@ async function fetchSourceIds(params: FetchSourceIdsParams): Promise<string[]> {
     config: connector.config,
     credentialBundleId: connector.id,
     credentialFields,
-  });
+  }, serviceTokenSigner);
 
   if (listResponse.ok) {
     const body = await listResponse.json() as { ids?: unknown[] };
@@ -641,7 +652,7 @@ async function fetchSourceIds(params: FetchSourceIdsParams): Promise<string[]> {
       cursor,
       syncMode: "full",
       timeoutMs: 60_000,
-    });
+    }, serviceTokenSigner);
 
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({})) as Record<string, unknown>;
@@ -677,6 +688,7 @@ interface FetchSourceRecordsParams {
   sampleIds: string[];
   idField: string;
   logger: Logger;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 // fetchSourceRecords asks the connector plugin for the full record data of
@@ -684,7 +696,7 @@ interface FetchSourceRecordsParams {
 // falls back to filtering from a fetchBatch pass over the full dataset
 // when the connector does not implement fetchRecords.
 async function fetchSourceRecords(params: FetchSourceRecordsParams): Promise<DataRecord[]> {
-  const { connector, tenantId, credentialFields, executionServiceUrl, sampleIds, idField, logger } = params;
+  const { connector, tenantId, credentialFields, executionServiceUrl, sampleIds, idField, logger, serviceTokenSigner } = params;
 
   // Try the targeted fetchRecords method first.
   // credentialBundleId must be the connector's primary key (id) — this is how
@@ -699,7 +711,7 @@ async function fetchSourceRecords(params: FetchSourceRecordsParams): Promise<Dat
     credentialFields,
     recordIds: sampleIds,
     timeoutMs: 60_000,
-  });
+  }, serviceTokenSigner);
 
   if (res.ok) {
     const body = await res.json() as { records?: DataRecord[] };
@@ -732,7 +744,7 @@ async function fetchSourceRecords(params: FetchSourceRecordsParams): Promise<Dat
       cursor,
       syncMode: "full",
       timeoutMs: 60_000,
-    });
+    }, serviceTokenSigner);
 
     if (!batchRes.ok) break;
 
@@ -758,16 +770,25 @@ async function fetchSourceRecords(params: FetchSourceRecordsParams): Promise<Dat
 
 // callExecution is a thin wrapper around the Execution Service HTTP call,
 // adding a 65-second hard timeout to match the sync-service pattern.
+// The serviceTokenSigner is used to attach X-Service-Token so the execution
+// service's serviceAuthMiddleware accepts the request on /internal/* routes.
 async function callExecution(
   executionServiceUrl: string,
   payload: Record<string, unknown>,
+  serviceTokenSigner?: ServiceTokenSigner,
 ): Promise<Response> {
+  const serviceToken = serviceTokenSigner !== undefined
+    ? await serviceTokenSigner.sign()
+    : undefined;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 65_000);
   try {
     return await fetch(`${executionServiceUrl}/internal/execution/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(serviceToken !== undefined ? { "X-Service-Token": serviceToken } : {}),
+      },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

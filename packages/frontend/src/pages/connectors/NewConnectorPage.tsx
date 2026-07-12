@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { ConnectorForm, type ConnectorFormValues } from "@/components/connectors/ConnectorForm.js";
-import { useApiClient, type ApiResponse, ApiError } from "@/lib/api-client.js";
+import { useApiClient, ApiError } from "@/lib/api-client.js";
 import { toast } from "@/hooks/use-toast.js";
 import type { ConnectorConfigSchema } from "@/components/connectors/ConnectorForm.js";
 
@@ -21,6 +21,13 @@ import type { ConnectorConfigSchema } from "@/components/connectors/ConnectorFor
 // ---------------------------------------------------------------------------
 
 type Step = "choose-type" | "configure" | "test" | "done";
+
+interface CredentialFieldSpec {
+  name: string;
+  description: string;
+  type: "secret" | "token" | "password";
+  required: boolean;
+}
 
 interface RegistryEntry {
   type: string;
@@ -31,6 +38,7 @@ interface RegistryEntry {
   author: string;
   icon?: string;
   configSchema?: ConnectorConfigSchema | null;
+  requiredCredentials?: CredentialFieldSpec[];
   installCount: number;
   builtIn: boolean;
 }
@@ -46,11 +54,21 @@ interface ConnectorTypeOption {
   name: string;
   description: string;
   configSchema: ConnectorConfigSchema;
+  requiredCredentials: CredentialFieldSpec[];
 }
 
-interface CreatedConnector {
-  id: string;
-  name: string;
+interface ConnectorApiResponse {
+  connector: {
+    id: string;
+    name: string;
+    plugin_id: string;
+    config: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  syncState: {
+    status: string;
+    [key: string]: unknown;
+  };
 }
 
 type TestStatus = "idle" | "testing" | "success" | "failed";
@@ -119,6 +137,7 @@ export function NewConnectorPage() {
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [testError, setTestError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
 
   // Fetch available connector types from the built-in connector registry
   const { data: typesData, isLoading: typesLoading } = useQuery({
@@ -133,6 +152,7 @@ export function NewConnectorPage() {
         name: entry.displayName,
         description: entry.description,
         configSchema: entry.configSchema ?? { type: "object" as const, properties: {} },
+        requiredCredentials: entry.requiredCredentials ?? [],
       }));
       return { data: options };
     },
@@ -153,12 +173,14 @@ export function NewConnectorPage() {
 
   const createConnector = useMutation({
     mutationFn: (body: { pluginId: string; name: string; config: ConnectorFormValues; credentials?: Record<string, unknown> }) =>
-      client.post<ApiResponse<CreatedConnector>>("/v1/connectors", body),
+      client.post<{ data: ConnectorApiResponse }>("/v1/connectors", body),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ["connectors"] });
-      setCreatedId(result.data.id);
-      // After creation, test the connection
-      void testAfterCreate(result.data.id);
+      // Backend returns { data: { connector: { id, ... }, syncState: { ... } } }
+      const created = result.data;
+      const connectorId = created.connector.id;
+      setCreatedId(connectorId);
+      void testAfterCreate(connectorId);
     },
     onError: (err) => {
       const message = err instanceof ApiError ? err.message : "Failed to create connector";
@@ -180,10 +202,15 @@ export function NewConnectorPage() {
     setTestStatus("testing");
     setTestError(null);
     const finalName = connectorName.trim() || selectedType.name;
+    const creds: Record<string, string> = {};
+    for (const [key, val] of Object.entries(credentialValues)) {
+      if (val.trim() !== "") creds[key] = val;
+    }
     createConnector.mutate({
       pluginId: selectedType.id,
       name: finalName,
       config: values,
+      ...(Object.keys(creds).length > 0 ? { credentials: creds } : {}),
     });
   }
 
@@ -308,6 +335,27 @@ export function NewConnectorPage() {
                 onChange={(e) => setConnectorName(e.target.value)}
               />
             </div>
+            {selectedType.requiredCredentials.length > 0 && (
+              <div className="space-y-3 pt-2 border-t border-[var(--color-border)]">
+                <h3 className="text-sm font-semibold text-[var(--color-muted-foreground)]">Credentials</h3>
+                {selectedType.requiredCredentials.map((cred) => (
+                  <div key={cred.name} className="space-y-1">
+                    <label htmlFor={`cred-${cred.name}`} className="text-sm font-medium">
+                      {cred.name.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase()).trim()}
+                      {cred.required && <span className="ml-1 text-[var(--color-destructive)]" aria-hidden>*</span>}
+                    </label>
+                    <Input
+                      id={`cred-${cred.name}`}
+                      type="password"
+                      placeholder={cred.description}
+                      value={credentialValues[cred.name] ?? ""}
+                      onChange={(e) => setCredentialValues((prev) => ({ ...prev, [cred.name]: e.target.value }))}
+                    />
+                    <p className="text-xs text-[var(--color-muted-foreground)]">{cred.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             <ConnectorForm
               schema={selectedType.configSchema}
               onSubmit={(values) => void handleConfigureSubmit(values)}

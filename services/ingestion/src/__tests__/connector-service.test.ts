@@ -155,6 +155,7 @@ function makeService(executionServiceUrl = "http://exec:3000"): ServiceBundle {
     credentialService: credentialService as unknown as CredentialService,
     masterKey: MASTER_KEY,
     executionServiceUrl,
+    serviceTokenSigner: { sign: async () => "mock-service-token" },
     logger,
     pool: pool as unknown as import("pg").Pool,
   });

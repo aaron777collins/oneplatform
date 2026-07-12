@@ -2,6 +2,7 @@ import { Queue, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { AppError, bullmqConnection } from "@oneplatform/core";
 import type { Logger } from "@oneplatform/core";
+import type { ServiceTokenSigner } from "@oneplatform/core";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
@@ -19,6 +20,8 @@ import {
 } from "../utils/data-envelope.js";
 import type { SchemaDriftService } from "./schema-drift-service.js";
 import type { DataQualityService } from "./data-quality-service.js";
+import type pg from "pg";
+import { withTenant } from "../db/tenant-context.js";
 
 // ---------------------------------------------------------------------------
 // Raw table repository interface — matches the concrete RawTableRepository.
@@ -179,6 +182,10 @@ export interface SyncServiceDeps {
   schemaDriftService?: SchemaDriftService;
   /** Optional — when omitted, data quality analysis is skipped. */
   dataQualityService?: DataQualityService;
+  /** Required for authenticating to the execution service's /internal/* routes. */
+  serviceTokenSigner?: ServiceTokenSigner;
+  /** Pool for withTenant (RLS requires app.tenant_id GUC to be set). */
+  pool?: pg.Pool;
 }
 
 // BullMQ queue capacity guard. Exceeding this triggers QueueFullError so the
@@ -279,6 +286,8 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     logger,
     schemaDriftService,
     dataQualityService,
+    serviceTokenSigner,
+    pool,
   } = deps;
 
   const executionServiceUrl =
@@ -365,7 +374,15 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
     tenantId: string,
     options: { mode?: "full" | "incremental"; force?: boolean } = {},
   ): Promise<TriggerSyncResult> {
-    const connector = await connectorRepo.findById(connectorId);
+    // RLS requires app.tenant_id GUC; use withTenant when pool is available.
+    let connector: ConnectorRow | null;
+    if (pool) {
+      connector = await withTenant(pool, tenantId, async (client) => {
+        return connectorRepo.findById(connectorId, client);
+      });
+    } else {
+      connector = await connectorRepo.findById(connectorId);
+    }
     if (connector === null || connector.tenant_id !== tenantId) {
       throw new ConnectorNotFoundError(
         `Connector ${connectorId} not found.`,
@@ -753,6 +770,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
           timeoutMs: 60_000,
         };
 
+        const serviceToken = serviceTokenSigner !== undefined
+          ? await serviceTokenSigner.sign()
+          : undefined;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 65_000);
         let fetchResponse: Response;
@@ -761,7 +781,10 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
             `${executionServiceUrl}/internal/execution/run`,
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                ...(serviceToken !== undefined ? { "X-Service-Token": serviceToken } : {}),
+              },
               body: JSON.stringify(payload),
               signal: controller.signal,
             },

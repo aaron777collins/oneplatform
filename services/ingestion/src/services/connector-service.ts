@@ -1,5 +1,5 @@
 import type pg from "pg";
-import type { Logger } from "@oneplatform/core";
+import type { Logger, ServiceTokenSigner } from "@oneplatform/core";
 import type { CredentialService } from "./credential-service.js";
 import {
   ConnectorNotFoundError,
@@ -235,6 +235,9 @@ export interface ConnectorServiceDeps {
   executionServiceUrl: string;
   logger: Logger;
   pool: pg.Pool;
+  // Required so testConnector can authenticate to the execution service's
+  // /internal/* routes, which enforce serviceAuthMiddleware.
+  serviceTokenSigner: ServiceTokenSigner;
 }
 
 export function createConnectorService(
@@ -248,6 +251,7 @@ export function createConnectorService(
     executionServiceUrl,
     logger,
     pool,
+    serviceTokenSigner,
   } = deps;
 
   // -------------------------------------------------------------------------
@@ -448,6 +452,73 @@ export function createConnectorService(
   }
 
   // -------------------------------------------------------------------------
+  // Direct connectivity test for built-in connectors. Returns null when the
+  // plugin is not a recognized built-in, signalling the caller to fall through
+  // to the sandbox-based execution path.
+  // -------------------------------------------------------------------------
+
+  async function testBuiltInConnectorDirect(
+    pluginId: string,
+    config: Record<string, unknown>,
+  ): Promise<Omit<TestConnectorResult, "latencyMs"> | null> {
+    if (pluginId === "connector-csv") {
+      const url = config["url"];
+      if (typeof url !== "string" || url.trim() === "") {
+        return { success: false, message: "Connector test failed.", error: { code: "CONFIG_ERROR", message: "config.url is required" } };
+      }
+      if (!url.startsWith("https://")) {
+        return { success: false, message: "Connector test failed.", error: { code: "CONFIG_ERROR", message: "Only https:// URLs are supported" } };
+      }
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15_000);
+        let resp: Response;
+        try {
+          resp = await fetch(url, { method: "GET", signal: controller.signal, headers: { Range: "bytes=0-1023" } });
+        } finally {
+          clearTimeout(timer);
+        }
+        if (!resp.ok && resp.status !== 206) {
+          return { success: false, message: "Connector test failed.", error: { code: "CONNECTION_ERROR", message: `URL returned HTTP ${resp.status}` } };
+        }
+        const snippet = await resp.text();
+        const lines = snippet.split("\n").filter(Boolean);
+        const sampleRecords = lines.slice(0, 3).map((line) => ({ _raw: line }));
+        return { success: true, message: `Connection successful — received ${lines.length} sample lines.`, sampleRecords };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { success: false, message: "Connector test failed.", error: { code: "CONNECTION_ERROR", message: msg } };
+      }
+    }
+
+    if (pluginId === "connector-postgres" || pluginId === "connector-mysql") {
+      const proxyUrl = config["proxyUrl"];
+      if (typeof proxyUrl !== "string" || proxyUrl.trim() === "") {
+        return { success: false, message: "Connector test failed.", error: { code: "CONFIG_ERROR", message: "config.proxyUrl is required" } };
+      }
+      return { success: true, message: "Configuration accepted (live connection test requires sandbox)." };
+    }
+
+    if (pluginId === "connector-rest-api") {
+      const baseUrl = config["baseUrl"] ?? config["endpoint"];
+      if (typeof baseUrl !== "string" || baseUrl.trim() === "") {
+        return { success: false, message: "Connector test failed.", error: { code: "CONFIG_ERROR", message: "config.baseUrl or endpoint is required" } };
+      }
+      return { success: true, message: "Configuration accepted (live connection test requires sandbox)." };
+    }
+
+    if (pluginId === "connector-webhook") {
+      const webhookPath = config["webhookPath"];
+      if (typeof webhookPath !== "string" || webhookPath.trim() === "") {
+        return { success: false, message: "Connector test failed.", error: { code: "CONFIG_ERROR", message: "config.webhookPath is required" } };
+      }
+      return { success: true, message: "Configuration accepted — webhook endpoint will listen at the configured path." };
+    }
+
+    return null;
+  }
+
+  // -------------------------------------------------------------------------
   // testConnector — delegates execution to the Execution Service sandbox.
   // Never persists data. Overrides allow testing before saving a connector.
   // -------------------------------------------------------------------------
@@ -475,6 +546,19 @@ export function createConnectorService(
       ...(overrides?.config ?? {}),
     };
 
+    // Built-in connectors: test directly without the execution sandbox.
+    // The sandbox is not yet implemented for connector plugins (Phase 4),
+    // so built-in types validate connectivity inline.
+    const directResult = await testBuiltInConnectorDirect(
+      connector.plugin_id,
+      effectiveConfig,
+    );
+    if (directResult !== null) {
+      const latencyMs = Date.now() - startMs;
+      return { ...directResult, latencyMs };
+    }
+
+    // Non-built-in: delegate to the Execution Service sandbox.
     const credentialFields = await credentialService.listFieldNames(id);
     const credentialOverrides = overrides?.credentials ?? {};
 
@@ -494,11 +578,15 @@ export function createConnectorService(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 35_000);
 
+      const serviceToken = await serviceTokenSigner.sign();
       let response: Response;
       try {
         response = await fetch(`${executionServiceUrl}/internal/execution/run`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Service-Token": serviceToken,
+          },
           body: JSON.stringify(payload),
           signal: controller.signal,
         });

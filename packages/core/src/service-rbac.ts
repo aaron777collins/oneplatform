@@ -25,6 +25,7 @@ const MATRIX: Record<string, RbacRule[]> = {
     { target: "ontology-service",  method: "POST", pathPattern: "/internal/ontology/map" },
     { target: "ontology-service",  method: "POST", pathPattern: "/internal/ontology/infer" },
     { target: "pipeline-service",  method: "POST", pathPattern: "/internal/pipeline/trigger" },
+    { target: "execution-service", method: "POST", pathPattern: "/internal/execution/run" },
     { target: "execution-service", method: "POST", pathPattern: "/internal/execution/connector-run" },
     { target: "plugin-service",    method: "GET",  pathPattern: "/internal/plugins/connectors" },
   ],

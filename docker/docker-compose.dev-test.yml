@@ -464,6 +464,10 @@ services:
       - init-data:/data/init:ro
       - shared-pubkeys:/data/service-keys:ro
       - ./service-entrypoint.sh:/usr/local/bin/service-entrypoint.sh:ro
+    # Ingestion needs outbound HTTPS for connector data fetching (CSV URLs, REST APIs).
+    networks:
+      - op-dev-test-internal
+      - op-dev-test-public
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
       interval: 10s

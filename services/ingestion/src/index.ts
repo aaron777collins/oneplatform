@@ -142,6 +142,16 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   const reconciliationReportRepo = new ReconciliationReportRepositoryImpl(db);
 
   // Services
+
+  // Service token signer for service-to-service auth (used by connector, sync,
+  // and reconciliation services when calling the execution service).
+  const serviceKeysDir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
+  const ingestionPrivateKeyPem = await loadServicePrivateKey("ingestion-service", serviceKeysDir);
+  const serviceTokenSigner = await createServiceTokenSigner(
+    "ingestion-service",
+    ingestionPrivateKeyPem,
+  );
+
   const credentialService = createCredentialService({
     credentialRepo,
     logger,
@@ -153,6 +163,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     syncStateRepo,
     masterKey: config.masterKey,
     executionServiceUrl: config.executionServiceUrl,
+    serviceTokenSigner,
     logger,
     pool: db,
   });
@@ -166,6 +177,8 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     masterKey: config.masterKey,
     logger,
     executionServiceUrl: config.executionServiceUrl,
+    serviceTokenSigner,
+    pool: db,
   });
 
   const coreWebhookReceiveService = createWebhookReceiveService({
@@ -251,6 +264,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
     masterKey: config.masterKey,
     logger,
     executionServiceUrl: config.executionServiceUrl,
+    serviceTokenSigner,
   });
 
   // Connector registry — in-process catalog of available connector types.
@@ -328,22 +342,10 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
       },
     );
 
-    // Wire the ontology map worker.  The service token signer requires the
-    // ingestion service's Ed25519 private key so the ontology service can verify
-    // the caller's identity via serviceAuthMiddleware.  The key is loaded
-    // lazily here (inside the startWorkers block) so test environments that
-    // skip workers do not fail on a missing key file.
-    const serviceKeysDir = process.env["OP_SERVICE_KEYS_DIR"] ?? "/data/service-keys";
-    const ingestionPrivateKeyPem = await loadServicePrivateKey("ingestion-service", serviceKeysDir);
-    const ontologyMapTokenSigner = await createServiceTokenSigner(
-      "ingestion-service",
-      ingestionPrivateKeyPem,
-    );
-
     const ontologyMapWorkerService = createOntologyMapWorkerService({
       rawTableRepo,
       ontologyServiceUrl: config.ontologyServiceUrl,
-      serviceTokenSigner: ontologyMapTokenSigner,
+      serviceTokenSigner,
       logger,
     });
 
