@@ -366,7 +366,7 @@ services:
       PLUGIN_SERVICE_URL: http://op-dev-test-plugin:3000
       OP_BASE_URL: ${OP_BASE_URL:-https://localhost:8443}
       OP_ALLOWED_ORIGINS: ${OP_ALLOWED_ORIGINS:-https://localhost:8443,http://localhost:8088,https://test.aaroncollins.info}
-      OP_GLOBAL_RATE_LIMIT: ${OP_GLOBAL_RATE_LIMIT:-10000}
+      OP_RATE_LIMIT_PER_MIN: ${OP_RATE_LIMIT_PER_MIN:-10000}
       OP_MINIO_USER: ${OP_MINIO_USER:-op_dev_test_minio}
       OP_MINIO_PASSWORD: ${OP_MINIO_PASSWORD:-op_dev_test_minio_pw_2026}
       OP_WEBHOOK_ALLOW_HTTP: ${OP_WEBHOOK_ALLOW_HTTP:-false}

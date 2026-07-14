@@ -70,12 +70,19 @@ export function DLQTable({ queueName, search = "", className }: DLQTableProps) {
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination?.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => {
+      const inner = (lastPage as any)?.data ?? lastPage;
+      return inner?.pagination?.nextCursor ?? undefined;
+    },
     initialPageParam: undefined as string | undefined,
   });
 
   const allJobs = React.useMemo(
-    () => query.data?.pages.flatMap((p) => p.data) ?? [],
+    () =>
+      query.data?.pages.flatMap((p) => {
+        const inner = (p as any)?.data ?? p;
+        return Array.isArray(inner?.data) ? inner.data : Array.isArray(inner) ? inner : [];
+      }) ?? [],
     [query.data],
   );
 

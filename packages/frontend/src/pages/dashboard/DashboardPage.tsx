@@ -398,8 +398,15 @@ export default function DashboardPage() {
   ): number {
     if (result === undefined) return 0;
     const r = result as Record<string, unknown>;
-    const inner = (r.data != null && typeof r.data === "object" && !Array.isArray(r.data) && "data" in (r.data as object))
-      ? r.data as PaginatedResponse<{ id: string }>
+    // Unwrap gateway envelope: { data: { data|items: [...], pagination? } }
+    const rData = r.data;
+    const isNestedEnvelope =
+      rData != null &&
+      typeof rData === "object" &&
+      !Array.isArray(rData) &&
+      ("data" in (rData as object) || "items" in (rData as object));
+    const inner = isNestedEnvelope
+      ? rData as PaginatedResponse<{ id: string }>
       : r as unknown as PaginatedResponse<{ id: string }>;
     const total = inner.pagination?.total;
     if (total !== null && total !== undefined) return total;

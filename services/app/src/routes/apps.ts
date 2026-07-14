@@ -94,6 +94,65 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
     return c.json({ data: formatAppDetail(app) }, 201);
   });
 
+  // ---------------------------------------------------------------------------
+  // Templates — G-075
+  // Must be registered before /:id to prevent "templates" being captured as a param.
+  // ---------------------------------------------------------------------------
+
+  // GET /templates — list all available templates
+  routes.get("/templates", async (c) => {
+    return c.json({
+      data: ALL_TEMPLATES.map((t) => t.meta),
+    });
+  });
+
+  // POST /from-template — create an app from a pre-built template
+  routes.post("/from-template", async (c) => {
+    const user = c.var.user;
+    if (user === undefined) throw new UnauthorizedError("Authentication required.");
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = CreateAppFromTemplateSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError("Invalid request body.", parsed.error.issues);
+    }
+
+    const template = findTemplateById(parsed.data.templateId);
+    if (!template) {
+      throw new ValidationError(`Unknown template "${parsed.data.templateId}".`, []);
+    }
+
+    // Create the app first
+    const app = await appService.createApp(user.tenantId, user.userId, {
+      name:       parsed.data.name,
+      slug:       parsed.data.slug,
+      accessMode: parsed.data.accessMode,
+      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+    });
+
+    const files = template.render(parsed.data.name, parsed.data.slug);
+    for (const [filePath, content] of Object.entries(files)) {
+      const contentHash = sha256hex(content);
+      const created = await fileRepo.create({
+        app_id:       app.id,
+        path:         filePath,
+        content,
+        content_hash: contentHash,
+        updated_by:   user.userId,
+      });
+      if (created === null) {
+        await fileRepo.updateWithVersionCheck(app.id, filePath, {
+          content,
+          content_hash: contentHash,
+          updated_by:   user.userId,
+          file_version: 1,
+        });
+      }
+    }
+
+    return c.json({ data: formatAppDetail(app) }, 201);
+  });
+
   // GET /:id
   routes.get("/:id", async (c) => {
     const user = c.var.user;
@@ -511,64 +570,6 @@ export function createAppRoutes(deps: AppRouteDeps): Hono<{ Variables: AppVariab
       { error: "OAuth redirect-URI management requires Auth Service integration not yet wired to this route." },
       501
     );
-  });
-
-  // ---------------------------------------------------------------------------
-  // Templates — G-075
-  // ---------------------------------------------------------------------------
-
-  // GET /templates — list all available templates
-  routes.get("/templates", async (c) => {
-    return c.json({
-      data: ALL_TEMPLATES.map((t) => t.meta),
-    });
-  });
-
-  // POST /from-template — create an app from a pre-built template
-  routes.post("/from-template", async (c) => {
-    const user = c.var.user;
-    if (user === undefined) throw new UnauthorizedError("Authentication required.");
-
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreateAppFromTemplateSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new ValidationError("Invalid request body.", parsed.error.issues);
-    }
-
-    const template = findTemplateById(parsed.data.templateId);
-    if (!template) {
-      throw new ValidationError(`Unknown template "${parsed.data.templateId}".`, []);
-    }
-
-    // Create the app first
-    const app = await appService.createApp(user.tenantId, user.userId, {
-      name:       parsed.data.name,
-      slug:       parsed.data.slug,
-      accessMode: parsed.data.accessMode,
-      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-    });
-
-    const files = template.render(parsed.data.name, parsed.data.slug);
-    for (const [filePath, content] of Object.entries(files)) {
-      const contentHash = sha256hex(content);
-      const created = await fileRepo.create({
-        app_id:       app.id,
-        path:         filePath,
-        content,
-        content_hash: contentHash,
-        updated_by:   user.userId,
-      });
-      if (created === null) {
-        await fileRepo.updateWithVersionCheck(app.id, filePath, {
-          content,
-          content_hash: contentHash,
-          updated_by:   user.userId,
-          file_version: 1,
-        });
-      }
-    }
-
-    return c.json({ data: formatAppDetail(app) }, 201);
   });
 
   // ---------------------------------------------------------------------------

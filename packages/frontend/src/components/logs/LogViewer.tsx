@@ -67,14 +67,21 @@ export function LogViewer({ service, height = 600, className }: LogViewerProps) 
         },
         { signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.pagination?.cursor ?? undefined,
+    getNextPageParam: (lastPage) => {
+      const inner = (lastPage as any)?.data ?? lastPage;
+      return inner?.pagination?.cursor ?? undefined;
+    },
     initialPageParam: undefined as string | undefined,
     staleTime: 5_000,
   });
 
   // Flatten and filter client-side for level + text search
   const allLogs = React.useMemo(
-    () => query.data?.pages.flatMap((p) => p.data) ?? [],
+    () =>
+      query.data?.pages.flatMap((p) => {
+        const inner = (p as any)?.data ?? p;
+        return Array.isArray(inner?.data) ? inner.data : Array.isArray(inner) ? inner : [];
+      }) ?? [],
     [query.data],
   );
 

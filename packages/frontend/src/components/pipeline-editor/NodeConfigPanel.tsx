@@ -939,9 +939,12 @@ function ConnectorFields({
     staleTime: 60_000,
   });
 
-  const connectorListInner =
-    (connectorList as unknown as { data?: { items?: ConnectorListItem[] } } | undefined)?.data ??
+  const connectorListOuter =
+    (connectorList as unknown as { data?: { data?: { items?: ConnectorListItem[] }; items?: ConnectorListItem[] } } | undefined)?.data ??
     connectorList;
+  const connectorListInner =
+    (connectorListOuter as unknown as { data?: { items?: ConnectorListItem[] } } | undefined)?.data ??
+    connectorListOuter;
   const connectors: ConnectorListItem[] = connectorListInner?.items ?? [];
 
   const selectedId = (config["connectorInstanceId"] as string | undefined) ?? "";
@@ -1024,8 +1027,11 @@ function TransformerFields({
     staleTime: 60_000,
   });
 
+  const pluginOuter =
+    (pluginListData as unknown as { data?: { data?: { items?: TransformerPlugin[] }; items?: TransformerPlugin[] } } | undefined)?.data ??
+    pluginListData;
   const pluginInner =
-    (pluginListData as unknown as { data?: { items?: TransformerPlugin[] } } | undefined)?.data ?? pluginListData;
+    (pluginOuter as unknown as { data?: { items?: TransformerPlugin[] } } | undefined)?.data ?? pluginOuter;
   const plugins: TransformerPlugin[] = pluginInner?.items ?? [];
   const selectedId = (config["transformerId"] as string | undefined) ?? "";
 

@@ -115,7 +115,12 @@ export function StorageBrowserPage() {
       client.get<{ data: StorageBucket[] }>("/v1/storage/buckets", undefined, { signal }),
   });
 
-  const buckets = bucketsQuery.data?.data ?? [];
+  const bucketsInner = (bucketsQuery.data as unknown as { data?: { data?: StorageBucket[] } | StorageBucket[] } | undefined)?.data ?? bucketsQuery.data;
+  const buckets: StorageBucket[] = Array.isArray((bucketsInner as { data?: StorageBucket[] })?.data)
+    ? (bucketsInner as { data: StorageBucket[] }).data
+    : Array.isArray(bucketsInner)
+    ? (bucketsInner as StorageBucket[])
+    : [];
 
   // -------------------------------------------------------------------------
   // Object list query — only runs when a bucket is selected
@@ -133,7 +138,8 @@ export function StorageBrowserPage() {
     },
   });
 
-  const listResult = objectsQuery.data?.data;
+  const objectsInner = (objectsQuery.data as unknown as { data?: { data?: ListObjectsResult } | ListObjectsResult } | undefined)?.data ?? objectsQuery.data;
+  const listResult: ListObjectsResult | undefined = (objectsInner as { data?: ListObjectsResult })?.data ?? (objectsInner as ListObjectsResult | undefined);
   const allObjects = listResult?.objects ?? [];
 
   // Apply client-side search filter. Folders are always shown to allow
@@ -176,10 +182,12 @@ export function StorageBrowserPage() {
 
   async function handleDownload(obj: StorageObject): Promise<void> {
     try {
-      const response = await client.get<{ data: { url: string } }>(
+      const response = await client.get<{ data: { url: string } | { data: { url: string } } }>(
         `/v1/storage/buckets/${encodeURIComponent(selectedBucket!)}/download/${encodeObjectKeyPath(obj.key)}`,
       );
-      window.open(response.data.url, "_blank", "noopener,noreferrer");
+      const downloadInner = (response as unknown as { data?: { data?: { url: string }; url?: string } })?.data;
+      const url = (downloadInner as { data?: { url: string } })?.data?.url ?? (downloadInner as { url?: string })?.url;
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to generate download link.";
       toast({ title: "Download failed", description: message, variant: "destructive" });

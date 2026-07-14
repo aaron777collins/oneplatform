@@ -58,10 +58,12 @@ export function AppRollbackDialog({ appId, open, onOpenChange }: AppRollbackDial
     enabled: open,
   });
 
-  const successfulBuilds = React.useMemo(
-    () => (buildsQuery.data?.data ?? []).filter((b) => b.status === "success"),
-    [buildsQuery.data],
-  );
+  const successfulBuilds = React.useMemo(() => {
+    const envelope = buildsQuery.data as any;
+    const inner = envelope?.data ?? envelope;
+    const arr: AppBuild[] = Array.isArray(inner?.data) ? inner.data : Array.isArray(inner) ? inner : [];
+    return arr.filter((b) => b.status === "success");
+  }, [buildsQuery.data]);
 
   const selectedBuild = selectedBuildId !== undefined
     ? successfulBuilds.find((b) => b.id === selectedBuildId)
