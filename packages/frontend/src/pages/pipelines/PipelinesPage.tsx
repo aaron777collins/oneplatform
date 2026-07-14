@@ -11,32 +11,36 @@ import { Input } from "@/components/ui/input.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { PageHeader } from "@/components/layout/PageHeader.js";
 import { EmptyState } from "@/components/shared/EmptyState.js";
-import { PipelineCard, type PipelineCardData } from "@/components/pipelines/PipelineCard.js";
+import { PipelineCard, type PipelineCardData, type TriggerType } from "@/components/pipelines/PipelineCard.js";
 import { useApiClient, type PaginatedResponse } from "@/lib/api-client.js";
-import type { RunStatus } from "@/components/pipelines/RunStatusBadge.js";
-import type { TriggerType } from "@/components/pipelines/PipelineCard.js";
 
 // ---------------------------------------------------------------------------
-// API types
+// API types — the list endpoint returns { pipeline: PipelineRow, lastRunAt }
 // ---------------------------------------------------------------------------
 
-interface PipelineApiRecord {
+interface PipelineRow {
   id: string;
   name: string;
-  triggerType: TriggerType;
-  lastRunStatus?: RunStatus;
-  lastRunAt?: string;
-  nextRunAt?: string;
+  slug: string;
+  description?: string;
+  definition?: { steps?: Array<{ type?: string }> };
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
-function toCardData(record: PipelineApiRecord): PipelineCardData {
+interface PipelineListItem {
+  pipeline: PipelineRow;
+  lastRunAt?: string | null;
+}
+
+function toCardData(item: PipelineListItem): PipelineCardData {
+  const p = item.pipeline;
   return {
-    id: record.id,
-    name: record.name,
-    triggerType: record.triggerType,
-    ...(record.lastRunStatus !== undefined ? { lastRunStatus: record.lastRunStatus } : {}),
-    ...(record.lastRunAt !== undefined ? { lastRunAt: record.lastRunAt } : {}),
-    ...(record.nextRunAt !== undefined ? { nextRunAt: record.nextRunAt } : {}),
+    id: p.id,
+    name: p.name,
+    triggerType: "manual" as TriggerType,
+    ...(item.lastRunAt ? { lastRunAt: item.lastRunAt } : {}),
   };
 }
 
@@ -51,13 +55,13 @@ export function PipelinesPage() {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["pipelines"],
-    queryFn: () => client.get<PaginatedResponse<PipelineApiRecord>>("/v1/pipelines"),
+    queryFn: () => client.get<PaginatedResponse<PipelineListItem>>("/v1/pipelines"),
   });
 
-  const pipelines = data?.data ?? [];
+  const items: PipelineListItem[] = data?.data ?? [];
   const filtered = search.trim().length === 0
-    ? pipelines
-    : pipelines.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+    ? items
+    : items.filter((item) => item.pipeline.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -105,13 +109,13 @@ export function PipelinesPage() {
           </div>
         ) : filtered.length === 0 ? (
           <EmptyState
-            title={pipelines.length === 0 ? "No pipelines yet" : "No pipelines match your search"}
+            title={items.length === 0 ? "No pipelines yet" : "No pipelines match your search"}
             description={
-              pipelines.length === 0
+              items.length === 0
                 ? "Create your first pipeline to automate data processing."
                 : "Try a different search term."
             }
-            {...(pipelines.length === 0
+            {...(items.length === 0
               ? {
                   actionLabel: "New pipeline",
                   onAction: () => void navigate({ to: "/pipelines/new" }),
@@ -120,10 +124,10 @@ export function PipelinesPage() {
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((pipeline) => (
+            {filtered.map((item) => (
               <PipelineCard
-                key={pipeline.id}
-                pipeline={toCardData(pipeline)}
+                key={item.pipeline.id}
+                pipeline={toCardData(item)}
                 onClick={(id) => void navigate({ to: "/pipelines/$id", params: { id } })}
               />
             ))}

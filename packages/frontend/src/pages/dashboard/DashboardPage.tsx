@@ -425,8 +425,17 @@ export default function DashboardPage() {
 
   const showQuickStart = !dismissed && !checklist_loading && !allStepsComplete;
 
-  const pipelinesListInner = (pipelinesListData as unknown as { data?: PaginatedResponse<PipelineSummary> })?.data ?? pipelinesListData;
-  const pipelines = pipelinesListInner?.data ?? [];
+  const pipelinesListInner = (pipelinesListData as unknown as { data?: PaginatedResponse<Record<string, unknown>> })?.data ?? pipelinesListData;
+  const rawPipelines = pipelinesListInner?.data ?? [];
+  const pipelines: PipelineSummary[] = rawPipelines.map((item: Record<string, unknown>) => {
+    const p = (item as { pipeline?: Record<string, unknown> }).pipeline ?? item;
+    return {
+      id: (p.id as string) ?? (item.id as string) ?? "",
+      name: (p.name as string) ?? "",
+      lastRunStatus: (p.lastRunStatus ?? item.lastRunStatus) as PipelineSummary["lastRunStatus"],
+      lastRunAt: (item.lastRunAt ?? p.lastRunAt) as string | undefined,
+    };
+  });
   const activityInner = (activityData as unknown as { data?: PaginatedResponse<ActivityEvent> })?.data ?? activityData;
   const activities = activityInner?.data ?? [];
 

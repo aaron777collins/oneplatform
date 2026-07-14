@@ -36,13 +36,19 @@ interface PipelineNotifications {
 interface PipelineDetail {
   id: string;
   name: string;
-  triggerType: TriggerType;
+  slug?: string;
+  description?: string;
+  definition?: { steps?: Array<{ type?: string; name?: string }>; version?: number; entryStepId?: string };
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  triggerType?: TriggerType;
   cronExpression?: string;
   lastRunStatus?: RunStatus;
   lastRunAt?: string;
   nextRunAt?: string;
-  stepCount: number;
-  createdAt: string;
+  stepCount?: number;
+  createdAt?: string;
   notifications?: PipelineNotifications;
 }
 
@@ -65,10 +71,20 @@ export function PipelineDetailPage() {
   const runsQuery = useInfiniteQuery({
     queryKey: ["pipelines", id, "runs"],
     queryFn: ({ pageParam }) =>
-      client.get<PaginatedResponse<PipelineRun>>(
+      client.get<PaginatedResponse<Record<string, unknown>>>(
         `/v1/pipelines/${id}/runs`,
         { ...(pageParam !== undefined ? { cursor: pageParam as string } : {}) },
-      ),
+      ).then((res) => ({
+        ...res,
+        data: (res.data ?? []).map((r: Record<string, unknown>): PipelineRun => ({
+          id: (r.id as string) ?? "",
+          status: (r.status as PipelineRun["status"]) ?? "pending",
+          triggeredBy: (r.triggeredBy ?? r.triggered_by ?? "manual") as string,
+          startedAt: (r.startedAt ?? r.started_at ?? r.created_at ?? "") as string,
+          completedAt: (r.completedAt ?? r.completed_at) as string | undefined,
+          error: (r.error ?? undefined) as string | undefined,
+        })),
+      })),
     getNextPageParam: (lastPage) => {
       return lastPage.pagination?.nextCursor ?? undefined;
     },
@@ -96,7 +112,13 @@ export function PipelineDetailPage() {
     },
   });
 
-  const pipeline = data?.data;
+  const raw = data?.data;
+  const pipeline = raw ? {
+    ...raw,
+    triggerType: raw.triggerType ?? ("manual" as TriggerType),
+    stepCount: raw.stepCount ?? raw.definition?.steps?.length ?? 0,
+    createdAt: raw.createdAt ?? raw.created_at ?? "",
+  } : undefined;
 
   if (isError) {
     return (
