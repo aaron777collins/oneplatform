@@ -77,8 +77,7 @@ function DataPreviewTab({ entityName, fields }: { entityName: string; fields: En
     staleTime: 10_000,
   });
 
-  const previewInner = (data as unknown as { data?: DataPreviewResponse })?.data ?? data;
-  const rows = previewInner?.data ?? [];
+  const rows = data?.data ?? [];
   // Derive column names: prefer schema field order, then any extra keys from first row.
   // Accessing rows[0] only when rows.length > 0 (non-null assertion safe here).
   const schemaCols = fields.map((f) => f.name);
@@ -181,7 +180,7 @@ export function EntityDetailPage() {
       client.post<ApiResponse<EntityDetail>>("/v1/ontology", values),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ["ontology"] });
-      const createdEntity = (result as unknown as { data?: ApiResponse<EntityDetail> })?.data?.data ?? result.data;
+      const createdEntity = result.data;
       toast({ title: `Entity "${createdEntity.name}" created` });
       void navigate({ to: "/ontology/$entityType", params: { entityType: createdEntity.name } });
     },
@@ -205,9 +204,8 @@ export function EntityDetailPage() {
     },
   });
 
-  const entity = (entityData as unknown as { data?: ApiResponse<EntityDetail> })?.data?.data ?? (entityData as ApiResponse<EntityDetail> | undefined)?.data;
-  const allEntitiesInner = (allEntitiesData as unknown as { data?: { data: EntitySummary[] } })?.data?.data ?? (allEntitiesData as { data: EntitySummary[] } | undefined)?.data;
-  const allEntities: EntitySummary[] = Array.isArray(allEntitiesInner) ? allEntitiesInner : [];
+  const entity = entityData?.data;
+  const allEntities: EntitySummary[] = allEntitiesData?.data ?? [];
   const allEntityTypes = allEntities
     .map((e) => e.name)
     .filter((n) => n !== entityType);

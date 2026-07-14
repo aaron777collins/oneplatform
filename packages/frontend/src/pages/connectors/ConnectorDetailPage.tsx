@@ -242,7 +242,7 @@ export function ConnectorDetailPage() {
 
   const { data: syncsData, isLoading: syncsLoading } = useQuery({
     queryKey: ["connectors", id, "syncs"],
-    queryFn: () => client.get<{ data: SyncRecord[] }>(`/v1/connectors/${id}/syncs`),
+    queryFn: () => client.get<{ data: { items: SyncRecord[]; nextCursor: string | null; total: number } }>(`/v1/connectors/${id}/syncs`),
   });
 
   const triggerSync = useMutation({
@@ -284,19 +284,25 @@ export function ConnectorDetailPage() {
     const { connector: c, syncState: s } = raw;
     const registry = registryMap.get(c.plugin_id);
 
-    const statusMap: Record<string, ConnectorStatus> = {
-      running: "syncing",
-      success: "active",
-      failed: "error",
-      cancelled: "disabled",
-      never_run: "disabled",
-    };
+    let status: ConnectorStatus;
+    if (!c.is_enabled) {
+      status = "disabled";
+    } else {
+      const statusMap: Record<string, ConnectorStatus> = {
+        running: "syncing",
+        success: "active",
+        failed: "error",
+        cancelled: "active",
+        never_run: "active",
+      };
+      status = statusMap[s.status] ?? "active";
+    }
 
     return {
       id: c.id,
       name: c.name,
       typeName: registry?.displayName ?? c.plugin_id,
-      status: statusMap[s.status] ?? "disabled",
+      status,
       ...(s.last_sync_at !== null ? { lastSyncAt: s.last_sync_at } : {}),
       configSchema: registry?.configSchema ?? { type: "object" as const, properties: {} },
       config: c.config as ConnectorFormValues,
@@ -425,7 +431,7 @@ export function ConnectorDetailPage() {
               {syncsLoading ? (
                 <Skeleton className="h-32 w-full" />
               ) : (
-                <SyncHistoryTable syncs={(syncsData as unknown as { data?: { data: SyncRecord[] } })?.data?.data ?? (syncsData as { data: SyncRecord[] } | undefined)?.data ?? []} />
+                <SyncHistoryTable syncs={(syncsData as unknown as { data?: { items?: SyncRecord[] } })?.data?.items ?? []} />
               )}
             </TabsContent>
 

@@ -25,7 +25,7 @@ BEGIN
 
   -- Ingestion Service role
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ingestion_service_role') THEN
-    CREATE ROLE ingestion_service_role WITH LOGIN PASSWORD 'CHANGE_ME_ingestion';
+    CREATE ROLE ingestion_service_role WITH LOGIN BYPASSRLS PASSWORD 'CHANGE_ME_ingestion';
   END IF;
 
   -- Ontology Service role

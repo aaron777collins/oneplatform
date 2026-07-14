@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "@oneplatform/core";
 import { UnauthorizedError, ValidationError } from "@oneplatform/core";
@@ -7,6 +7,7 @@ import type {
   SyncService,
   SchemaDriftService,
 } from "../services/index.js";
+import type { ConnectorRegistryService } from "../services/connector-registry-service.js";
 import {
   listConnectorsQuery,
   createConnectorRequest,
@@ -21,6 +22,7 @@ export interface ConnectorRouteDeps {
   syncService: SyncService;
   masterKey: Buffer;
   schemaDriftService?: SchemaDriftService;
+  connectorRegistryService?: ConnectorRegistryService;
 }
 
 // UUID schema used to validate path parameters before hitting the database.
@@ -37,7 +39,33 @@ function requireValidId(id: string): void {
 
 export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { connectorService, syncService, masterKey, schemaDriftService } = deps;
+  const { connectorService, syncService, masterKey, schemaDriftService, connectorRegistryService } = deps;
+
+  // GET /types — must be registered before /:id to prevent "types" being
+  // treated as a UUID parameter and failing validation.
+  routes.get("/types", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+
+    if (connectorRegistryService !== undefined) {
+      const result = await connectorRegistryService.listConnectors({});
+      return c.json({ data: result.items });
+    }
+
+    // Fallback when registry service is not wired: return the static category list.
+    return c.json({
+      data: [
+        { type: "database", displayName: "Database" },
+        { type: "api", displayName: "API" },
+        { type: "file", displayName: "File" },
+        { type: "streaming", displayName: "Streaming" },
+        { type: "webhook", displayName: "Webhook" },
+        { type: "custom", displayName: "Custom" },
+      ],
+    });
+  });
 
   routes.get("/", async (c) => {
     const user = c.var.user;
@@ -189,13 +217,14 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
     return c.json({ data: result });
   });
 
-  routes.post("/:id/trigger", async (c) => {
+  async function handleTriggerSync(c: Context<{ Variables: AppVariables }>) {
     const user = c.var.user;
     if (!user?.tenantId) {
       throw new UnauthorizedError("Authentication required.");
     }
 
-    requireValidId(c.req.param("id"));
+    const connectorId = c.req.param("id")!;
+    requireValidId(connectorId);
     let options: { mode?: "full" | "incremental"; force?: boolean } | undefined;
     try {
       const body = await c.req.json();
@@ -210,9 +239,13 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): Hono<{ Variable
       // empty body uses defaults
     }
 
-    const result = await syncService.triggerSync(c.req.param("id"), user.tenantId, options);
+    const result = await syncService.triggerSync(connectorId, user.tenantId, options);
     return c.json({ data: result }, 202);
-  });
+  }
+
+  routes.post("/:id/trigger", handleTriggerSync);
+  // /sync is an alias for /trigger — both paths trigger a connector sync job.
+  routes.post("/:id/sync", handleTriggerSync);
 
   routes.get("/:id/syncs", async (c) => {
     const user = c.var.user;

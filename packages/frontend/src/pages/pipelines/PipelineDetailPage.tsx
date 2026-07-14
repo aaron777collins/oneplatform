@@ -70,8 +70,7 @@ export function PipelineDetailPage() {
         { ...(pageParam !== undefined ? { cursor: pageParam as string } : {}) },
       ),
     getNextPageParam: (lastPage) => {
-      const innerPage = (lastPage as unknown as { data?: PaginatedResponse<PipelineRun> })?.data ?? lastPage;
-      return innerPage.pagination?.nextCursor ?? undefined;
+      return lastPage.pagination?.nextCursor ?? undefined;
     },
     initialPageParam: undefined as string | undefined,
   });
@@ -97,7 +96,7 @@ export function PipelineDetailPage() {
     },
   });
 
-  const pipeline = (data as unknown as { data?: ApiResponse<PipelineDetail> })?.data?.data ?? (data as ApiResponse<PipelineDetail> | undefined)?.data;
+  const pipeline = data?.data;
 
   if (isError) {
     return (

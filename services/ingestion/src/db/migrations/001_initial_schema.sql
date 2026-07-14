@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS ingestion.sync_state (
   connector_id     UUID        PRIMARY KEY REFERENCES ingestion.connectors(id) ON DELETE CASCADE,
   last_cursor      TEXT,                   -- opaque; passed directly to connector
   last_sync_at     TIMESTAMPTZ,
-  last_sync_job_id UUID,                   -- BullMQ job ID of last completed sync
+  last_sync_job_id TEXT,                   -- BullMQ job ID of last completed sync (integer string, not UUID)
   sync_mode        TEXT        NOT NULL DEFAULT 'incremental'
                                CHECK (sync_mode IN ('full', 'incremental')),
   status           TEXT        NOT NULL DEFAULT 'never_run'

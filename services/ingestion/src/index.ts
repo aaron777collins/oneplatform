@@ -420,7 +420,7 @@ export async function createServiceApp(config: IngestionConfig): Promise<Service
   const healthRoutes = createHealthRoutes({ pool: db, redis, serviceStartedAt, storage, masterKey: config.masterKey });
   app.route("/", healthRoutes);
 
-  const connectorRoutes = createConnectorRoutes({ connectorService, syncService, masterKey: config.masterKey });
+  const connectorRoutes = createConnectorRoutes({ connectorService, syncService, masterKey: config.masterKey, connectorRegistryService });
   app.route("/api/v1/connectors", connectorRoutes);
 
   const connectorHealthRoutes = createConnectorHealthRoutes({ connectorHealthService });

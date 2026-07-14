@@ -42,8 +42,7 @@ export function AppsPage() {
       client.get<PaginatedResponse<AppCardData>>("/v1/apps", undefined, { signal }),
   });
 
-  const appsInner = (query.data as unknown as { data?: PaginatedResponse<AppCardData> })?.data ?? query.data;
-  const apps = appsInner?.data ?? [];
+  const apps = query.data?.data ?? [];
 
   const filtered = React.useMemo(() => {
     const lower = search.toLowerCase();

@@ -405,8 +405,10 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   const rateLimitPerMinute = config.rateLimitPerMinute ?? 1000;
   app.use("*", async (c, next) => {
     const path = new URL(c.req.url).pathname;
-    // Skip rate limiting for health probes to prevent probe self-throttling
-    if (path === "/healthz" || path === "/readyz") {
+    // Skip rate limiting for health probes and SSE connections. Health probes
+    // must never be throttled; SSE is a persistent long-lived connection so
+    // each page load would immediately consume the per-minute budget.
+    if (path === "/healthz" || path === "/readyz" || path.startsWith("/api/v1/events")) {
       await next();
       return;
     }

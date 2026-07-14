@@ -461,7 +461,7 @@ export function createConnectorService(
     pluginId: string,
     config: Record<string, unknown>,
   ): Promise<Omit<TestConnectorResult, "latencyMs"> | null> {
-    if (pluginId === "connector-csv") {
+    if (pluginId === "connector-csv" || pluginId === "oneplatform.csv") {
       const url = config["url"];
       if (typeof url !== "string" || url.trim() === "") {
         return { success: false, message: "Connector test failed.", error: { code: "CONFIG_ERROR", message: "config.url is required" } };

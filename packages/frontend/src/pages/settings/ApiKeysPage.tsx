@@ -207,8 +207,7 @@ export function ApiKeysPage() {
       client.get<PaginatedResponse<ApiKey>>("/v1/api-keys", undefined, { signal }),
   });
 
-  const keysInner = (keysQuery.data as unknown as { data?: PaginatedResponse<ApiKey> })?.data ?? keysQuery.data;
-  const allKeys = keysInner?.data ?? [];
+  const allKeys = keysQuery.data?.data ?? [];
   const keys = searchQuery
     ? allKeys.filter((k) => k.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : allKeys;

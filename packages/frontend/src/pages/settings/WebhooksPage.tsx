@@ -144,8 +144,7 @@ export function WebhooksPage() {
       client.get<PaginatedResponse<Webhook>>("/v1/webhooks", undefined, { signal }),
   });
 
-  const webhooksInner = (webhooksQuery.data as unknown as { data?: PaginatedResponse<Webhook> })?.data ?? webhooksQuery.data;
-  const webhooks = webhooksInner?.data ?? [];
+  const webhooks = webhooksQuery.data?.data ?? [];
 
   const form = useForm<WebhookValues>({
     resolver: zodResolver(webhookSchema),

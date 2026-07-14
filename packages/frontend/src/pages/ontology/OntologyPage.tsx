@@ -85,9 +85,8 @@ export function OntologyPage() {
     },
   });
 
-  const ontologyInner = (data as unknown as { data?: PaginatedResponse<EntitySummary> })?.data ?? data;
-  const entities: EntitySummary[] = ontologyInner?.data ?? [];
-  const migrationsInner = (migrationsData as unknown as { data?: { data: PendingMigration[] } })?.data?.data ?? (migrationsData as { data: PendingMigration[] } | undefined)?.data ?? [];
+  const entities: EntitySummary[] = data?.data ?? [];
+  const migrationsInner = migrationsData?.data ?? [];
   const pendingMigrations = migrationsInner.filter(
     (m) => m.status === "pending" || m.status === "running",
   );

@@ -44,7 +44,6 @@ interface ConnectorListItem {
 
 interface ConnectorListResponse {
   items?: ConnectorListItem[];
-  data?: ConnectorListItem[];
 }
 
 // Monaco is loaded lazily — it is a heavy dependency and not every user will
@@ -855,11 +854,13 @@ function SubWorkflowFields({
   const [searchTerm, setSearchTerm] = React.useState("");
   const { data: pipelineListData, isLoading: pipelinesLoading } = useQuery({
     queryKey: ["pipelines", "sub-workflow-picker"],
-    queryFn: () => client.get<{ data: PipelineSummary[] }>("/v1/pipelines"),
+    queryFn: () => client.get<{ data?: { data?: PipelineSummary[] } | PipelineSummary[] }>("/v1/pipelines"),
     staleTime: 60_000,
   });
 
-  const pipelines: PipelineSummary[] = pipelineListData?.data ?? [];
+  const pipelineInner =
+    (pipelineListData as unknown as { data?: { data?: PipelineSummary[] } } | undefined)?.data ?? pipelineListData;
+  const pipelines: PipelineSummary[] = (pipelineInner as { data?: PipelineSummary[] } | undefined)?.data ?? [];
   const filteredPipelines = searchTerm
     ? pipelines.filter((p) => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
     : pipelines;
@@ -938,8 +939,10 @@ function ConnectorFields({
     staleTime: 60_000,
   });
 
-  const connectors: ConnectorListItem[] =
-    connectorList?.items ?? connectorList?.data ?? [];
+  const connectorListInner =
+    (connectorList as unknown as { data?: { items?: ConnectorListItem[] } } | undefined)?.data ??
+    connectorList;
+  const connectors: ConnectorListItem[] = connectorListInner?.items ?? [];
 
   const selectedId = (config["connectorInstanceId"] as string | undefined) ?? "";
 
@@ -1017,11 +1020,13 @@ function TransformerFields({
   const client = useApiClient();
   const { data: pluginListData, isLoading: pluginsLoading } = useQuery({
     queryKey: ["plugins", "transformers"],
-    queryFn: () => client.get<{ items: TransformerPlugin[]; nextCursor: string | null; total: number }>("/v1/plugins", { type: "transformer" }),
+    queryFn: () => client.get<{ items?: TransformerPlugin[]; nextCursor: string | null; total: number }>("/v1/plugins", { type: "transformer" }),
     staleTime: 60_000,
   });
 
-  const plugins: TransformerPlugin[] = pluginListData?.items ?? [];
+  const pluginInner =
+    (pluginListData as unknown as { data?: { items?: TransformerPlugin[] } } | undefined)?.data ?? pluginListData;
+  const plugins: TransformerPlugin[] = pluginInner?.items ?? [];
   const selectedId = (config["transformerId"] as string | undefined) ?? "";
 
   return (

@@ -60,15 +60,16 @@ interface ConnectorListResponse {
   total: number;
 }
 
-/** Map sync-state status to the badge-level ConnectorStatus. */
-function syncStatusToConnectorStatus(s: SyncStateRowApi["status"]): ConnectorStatus {
-  switch (s) {
+/** Map sync-state status + is_enabled to the badge-level ConnectorStatus. */
+function toConnectorStatus(isEnabled: boolean, syncStatus: SyncStateRowApi["status"]): ConnectorStatus {
+  if (!isEnabled) return "disabled";
+  switch (syncStatus) {
     case "running": return "syncing";
     case "success": return "active";
     case "failed": return "error";
-    case "cancelled": return "disabled";
+    case "cancelled":
     case "never_run":
-    default: return "disabled";
+    default: return "active";
   }
 }
 
@@ -78,7 +79,7 @@ function toCardData(record: ConnectorWithSyncStateApi, typeDisplayNames: Map<str
     id: connector.id,
     name: connector.name,
     typeName: typeDisplayNames.get(connector.plugin_id) ?? connector.plugin_id,
-    status: syncStatusToConnectorStatus(syncState.status),
+    status: toConnectorStatus(connector.is_enabled, syncState.status),
     ...(syncState.last_sync_at !== null ? { lastSyncAt: syncState.last_sync_at } : {}),
   };
 }
