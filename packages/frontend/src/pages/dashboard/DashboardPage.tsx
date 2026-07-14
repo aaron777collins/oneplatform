@@ -397,10 +397,15 @@ export default function DashboardPage() {
     result: PaginatedResponse<{ id: string }> | undefined,
   ): number {
     if (result === undefined) return 0;
-    const inner = (result as unknown as { data?: PaginatedResponse<{ id: string }> & { items?: { id: string }[] } })?.data ?? result;
+    const r = result as Record<string, unknown>;
+    const inner = (r.data != null && typeof r.data === "object" && !Array.isArray(r.data) && "data" in (r.data as object))
+      ? r.data as PaginatedResponse<{ id: string }>
+      : r as unknown as PaginatedResponse<{ id: string }>;
     const total = inner.pagination?.total;
     if (total !== null && total !== undefined) return total;
-    const items = inner.data ?? (inner as { items?: { id: string }[] }).items;
+    const items = Array.isArray(inner.data)
+      ? inner.data
+      : (inner as unknown as { items?: unknown[] }).items;
     return items?.length ?? 0;
   }
 
