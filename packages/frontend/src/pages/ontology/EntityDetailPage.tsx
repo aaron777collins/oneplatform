@@ -205,7 +205,8 @@ export function EntityDetailPage() {
   });
 
   const entity = entityData?.data;
-  const allEntities: EntitySummary[] = allEntitiesData?.data ?? [];
+  const rawAllEntities = allEntitiesData?.data as { items?: EntitySummary[] } | EntitySummary[] | undefined;
+  const allEntities: EntitySummary[] = Array.isArray(rawAllEntities) ? rawAllEntities : (rawAllEntities?.items ?? []);
   const allEntityTypes = allEntities
     .map((e) => e.name)
     .filter((n) => n !== entityType);

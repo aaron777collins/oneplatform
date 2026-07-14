@@ -1827,8 +1827,8 @@ export function QueryBuilderPage() {
     enabled: selectedEntityType !== "",
   });
 
-  const entityListInner = (entityListData as unknown as { data?: PaginatedResponse<EntitySummary> })?.data ?? entityListData;
-  const entityList: EntitySummary[] = entityListInner?.data ?? [];
+  const entityListInner = (entityListData as unknown as { data?: PaginatedResponse<EntitySummary> & { items?: EntitySummary[] } })?.data ?? entityListData;
+  const entityList: EntitySummary[] = Array.isArray(entityListInner?.data) ? entityListInner.data : ((entityListInner as { items?: EntitySummary[] })?.items ?? []);
   const entityDetail = (entityDetailData as unknown as { data?: { data: EntityDetail } })?.data?.data ?? (entityDetailData as { data: EntityDetail } | undefined)?.data;
 
   const fieldOptions: Array<{ slug: string; name: string; fieldType?: string }> = entityDetail

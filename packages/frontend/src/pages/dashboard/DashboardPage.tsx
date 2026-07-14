@@ -397,13 +397,11 @@ export default function DashboardPage() {
     result: PaginatedResponse<{ id: string }> | undefined,
   ): number {
     if (result === undefined) return 0;
-    // Unwrap the response envelope if the middleware wrapped the paginated response
-    const inner = (result as unknown as { data?: PaginatedResponse<{ id: string }> })?.data ?? result;
-    // Use server-side total when available — more accurate than page length.
-    // Guard pagination itself: older API versions may omit the field entirely.
+    const inner = (result as unknown as { data?: PaginatedResponse<{ id: string }> & { items?: { id: string }[] } })?.data ?? result;
     const total = inner.pagination?.total;
     if (total !== null && total !== undefined) return total;
-    return inner.data?.length ?? 0;
+    const items = inner.data ?? (inner as { items?: { id: string }[] }).items;
+    return items?.length ?? 0;
   }
 
   const connectorCount = resolveCount(connectorsData);
