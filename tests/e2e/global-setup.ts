@@ -60,7 +60,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     await usernameInput.waitFor({ state: "visible", timeout: 20_000 });
 
     await usernameInput.fill(username);
-    await page.getByLabel(/password/i).fill(password);
+    await page.locator('input[type="password"]').fill(password);
     await page.getByRole("button", { name: /sign in|login/i }).click();
 
     // After successful auth, Authelia redirects back to the original destination.

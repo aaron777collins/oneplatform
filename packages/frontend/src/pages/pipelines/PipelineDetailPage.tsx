@@ -76,14 +76,18 @@ export function PipelineDetailPage() {
         { ...(pageParam !== undefined ? { cursor: pageParam as string } : {}) },
       ).then((res) => ({
         ...res,
-        data: (res.data ?? []).map((r: Record<string, unknown>): PipelineRun => ({
-          id: (r.id as string) ?? "",
-          status: (r.status as PipelineRun["status"]) ?? "pending",
-          triggeredBy: (r.triggeredBy ?? r.triggered_by ?? "manual") as string,
-          startedAt: (r.startedAt ?? r.started_at ?? r.created_at ?? "") as string,
-          completedAt: (r.completedAt ?? r.completed_at) as string | undefined,
-          error: (r.error ?? undefined) as string | undefined,
-        })),
+        data: (res.data ?? []).map((r: Record<string, unknown>): PipelineRun => {
+          const completedAt = ((r["completedAt"] ?? r["completed_at"]) as string) || undefined;
+          const error = (r["error"] as string) || undefined;
+          return {
+            id: (r["id"] as string) ?? "",
+            status: (r["status"] as PipelineRun["status"]) ?? "pending",
+            triggeredBy: (r["triggeredBy"] ?? r["triggered_by"] ?? "manual") as string,
+            startedAt: (r["startedAt"] ?? r["started_at"] ?? r["created_at"] ?? "") as string,
+            ...(completedAt !== undefined ? { completedAt } : {}),
+            ...(error !== undefined ? { error } : {}),
+          };
+        }),
       })),
     getNextPageParam: (lastPage) => {
       return lastPage.pagination?.nextCursor ?? undefined;

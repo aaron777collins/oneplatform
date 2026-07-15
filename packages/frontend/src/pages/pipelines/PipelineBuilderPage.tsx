@@ -108,15 +108,25 @@ export function PipelineBuilderPage() {
   React.useEffect(() => {
     const pipelineInner = (pipelineData as unknown as { data?: ApiResponse<PipelineConfig> })?.data?.data ?? (pipelineData as ApiResponse<PipelineConfig> | undefined)?.data;
     if (pipelineInner !== undefined && !loaded) {
-      const p = pipelineInner;
-      setName(p.name);
-      setTriggerType(p.triggerType);
-      if (p.cronExpression !== undefined) setCronExpression(p.cronExpression);
-      setInitialSteps(p.steps);
-      if (p.notifications !== undefined) {
-        setNotifyOnFailure(p.notifications.notifyOnFailure);
-        setEmailRecipients(p.notifications.emailRecipients);
-        setWebhookUrl(p.notifications.webhookUrl);
+      const p = pipelineInner as unknown as Record<string, unknown>;
+      setName((p["name"] as string) ?? "");
+
+      const trigger = (p["triggerType"] ?? p["trigger_type"] ?? "manual") as TriggerType;
+      setTriggerType(trigger);
+
+      const cron = (p["cronExpression"] ?? p["cron_expression"]) as string | undefined;
+      if (cron !== undefined) setCronExpression(cron);
+
+      // Steps can be at p.steps (expected) or p.definition.steps (actual API response)
+      const def = p["definition"] as { steps?: PipelineStep[]; version?: number; entryStepId?: string } | undefined;
+      const steps = (p["steps"] as PipelineStep[] | undefined) ?? def?.steps ?? [];
+      setInitialSteps(steps);
+
+      const notifs = p["notifications"] as PipelineNotifications | undefined;
+      if (notifs !== undefined) {
+        setNotifyOnFailure(notifs.notifyOnFailure);
+        setEmailRecipients(notifs.emailRecipients);
+        setWebhookUrl(notifs.webhookUrl);
       }
       setLoaded(true);
     }

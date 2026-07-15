@@ -399,7 +399,7 @@ export default function DashboardPage() {
     if (result === undefined) return 0;
     const r = result as Record<string, unknown>;
     // Unwrap gateway envelope: { data: { data|items: [...], pagination? } }
-    const rData = r.data;
+    const rData = r["data"];
     const isNestedEnvelope =
       rData != null &&
       typeof rData === "object" &&
@@ -441,11 +441,15 @@ export default function DashboardPage() {
     : (pipelinesListInner?.data ?? []) as Record<string, unknown>[];
   const pipelines: PipelineSummary[] = rawPipelines.map((item: Record<string, unknown>) => {
     const p = (item as { pipeline?: Record<string, unknown> }).pipeline ?? item;
+    const lastRunStatus = (p["lastRunStatus"] ?? item["lastRunStatus"]) as
+      | PipelineSummary["lastRunStatus"]
+      | undefined;
+    const lastRunAt = (item["lastRunAt"] ?? p["lastRunAt"]) as string | undefined;
     return {
-      id: (p.id as string) ?? (item.id as string) ?? "",
-      name: (p.name as string) ?? "",
-      lastRunStatus: (p.lastRunStatus ?? item.lastRunStatus) as PipelineSummary["lastRunStatus"],
-      lastRunAt: (item.lastRunAt ?? p.lastRunAt) as string | undefined,
+      id: (p["id"] as string) ?? (item["id"] as string) ?? "",
+      name: (p["name"] as string) ?? "",
+      ...(lastRunStatus !== undefined ? { lastRunStatus } : {}),
+      ...(lastRunAt !== undefined ? { lastRunAt } : {}),
     };
   });
   const activityInner = (activityData as unknown as { data?: PaginatedResponse<ActivityEvent> })?.data ?? activityData;
