@@ -436,7 +436,9 @@ export default function DashboardPage() {
   const showQuickStart = !dismissed && !checklist_loading && !allStepsComplete;
 
   const pipelinesListInner = (pipelinesListData as unknown as { data?: PaginatedResponse<Record<string, unknown>> })?.data ?? pipelinesListData;
-  const rawPipelines = pipelinesListInner?.data ?? [];
+  const rawPipelines: Record<string, unknown>[] = Array.isArray(pipelinesListInner)
+    ? pipelinesListInner
+    : (pipelinesListInner?.data ?? []) as Record<string, unknown>[];
   const pipelines: PipelineSummary[] = rawPipelines.map((item: Record<string, unknown>) => {
     const p = (item as { pipeline?: Record<string, unknown> }).pipeline ?? item;
     return {
@@ -447,7 +449,9 @@ export default function DashboardPage() {
     };
   });
   const activityInner = (activityData as unknown as { data?: PaginatedResponse<ActivityEvent> })?.data ?? activityData;
-  const activities = activityInner?.data ?? [];
+  const activities: ActivityEvent[] = Array.isArray(activityInner)
+    ? activityInner
+    : (activityInner?.data ?? []) as ActivityEvent[];
 
   // Widget ordering state — persisted across reloads
   const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(loadWidgetOrder);
