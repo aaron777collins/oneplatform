@@ -2,7 +2,7 @@
 
 This document tracks the current state of development. Read this FIRST when resuming work.
 
-## Current Phase: Phase 21 — Stale Container Investigation & Runtime Bug Verification (2026-07-11)
+## Current Phase: Phase 22 — Comprehensive Frontend E2E Audit & Bug Fixes (2026-07-15)
 
 ### Completed Phases
 
@@ -426,6 +426,22 @@ This document tracks the current state of development. Read this FIRST when resu
 | `1df13ab` | fix: builder store reads layout inside set() to prevent stale closure |
 | `fe56102` | fix: envelope unwrap on 22 remaining frontend pages |
 
+#### Phase 22: Comprehensive Frontend E2E Audit & Bug Fixes (2026-07-15)
+- [x] Wrote 98 Playwright E2E live-site tests covering every page, button, and flow
+  - `tests/e2e/live-spider.spec.ts` — 70 page-level tests
+  - `tests/e2e/live-interactions.spec.ts` — 28 button-interaction tests
+  - `tests/e2e/playwright-live.config.ts` — config targeting http://localhost:8088
+  - `tests/e2e/live-global-setup.ts` — authenticates via OnePlatform login form (bypasses Authelia)
+  - Run: `npx playwright test --config tests/e2e/playwright-live.config.ts`
+- [x] Fixed 5 bugs found during audit:
+  1. **Pipeline builder crash** — API returns `definition.steps`, not top-level `steps` (`55afe72`)
+  2. **Logs page "undefined" timestamps** — API returns `createdAt`, component expected `timestamp` (`1e243c9`)
+  3. **Settings Admin page redirect race** — `beforeLoad` guard ran before auth store hydrated (`1e243c9`)
+  4. **API retry delays not abort-aware** — stale 429/5xx retries could block after navigation (`1e243c9`)
+  5. **TypeScript build errors** — `exactOptionalPropertyTypes` + `TS4111` fixes in 3 files (`1e243c9`)
+- [x] Final E2E result: **97/98 tests pass, 0 failures, 1 skip** (plugin detail — needs a plugin installed)
+- [x] All pages verified working: Dashboard, Connectors, Data Models, Explore, Data Quality, Pipelines, Apps, Logs, Audit, DLQ, Metrics, Plugins, all Settings tabs, navigation, mobile, error handling
+
 **Final container state (2026-07-11, 21 containers running):**
 - `op-dev-test-frontend`: rebuilt 05:58, dist redeployed after each fix batch
 - `op-dev-test-gateway`: rebuilt 05:58
@@ -459,7 +475,8 @@ This document tracks the current state of development. Read this FIRST when resu
 | Phase 14 (P2-P4 gaps) | ~2,950 |
 | Phase 15 (V5 fixes) | 2 (skipIf conditional tests) |
 | Phase 18 (E2E Playwright) | 119 |
-| **Total** | **~9,727** |
+| Phase 22 (live-site E2E Playwright) | 98 |
+| **Total** | **~9,825** |
 
 24/24 builds passing. All test suites passing (600+ unit tests, 119 E2E tests). (auth-service has known turbo-parallel resource contention — passes in isolation.)
 
