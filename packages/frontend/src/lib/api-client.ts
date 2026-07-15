@@ -146,13 +146,13 @@ async function apiFetch<T>(
     // Cap the delay so a server cannot freeze the tab with an arbitrarily large
     // Retry-After (e.g. 86400s). 60s is the longest we will block before failing.
     retryAfterMs = Math.min(retryAfterMs, 60_000);
-    await delay(retryAfterMs);
+    await delay(retryAfterMs, init?.signal ?? null);
     return apiFetch<T>(path, init, isRetry, retryCount + 1);
   }
 
   // --- 5xx: Exponential backoff (max 2 retries: 1s, 2s) ---
   if (response.status >= 500 && retryCount < 2) {
-    await delay(1000 * Math.pow(2, retryCount));
+    await delay(1000 * Math.pow(2, retryCount), init?.signal ?? null);
     return apiFetch<T>(path, init, isRetry, retryCount + 1);
   }
 
@@ -179,8 +179,18 @@ async function apiFetch<T>(
   return response.json() as Promise<T>;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number, signal: AbortSignal | null = null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const id = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(id);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
 }
 
 // ---------------------------------------------------------------------------

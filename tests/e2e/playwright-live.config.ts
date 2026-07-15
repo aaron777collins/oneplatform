@@ -12,7 +12,7 @@ const AUTH_STATE = resolve(E2E_DIR, ".auth/live-state.json");
 
 export default defineConfig({
   testDir: E2E_DIR,
-  testMatch: "live-spider.spec.ts",
+  testMatch: ["live-spider.spec.ts", "live-interactions.spec.ts"],
 
   globalSetup: resolve(E2E_DIR, "live-global-setup.ts"),
 

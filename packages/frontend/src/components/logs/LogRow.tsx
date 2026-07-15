@@ -17,7 +17,9 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LogEntry {
   id: string;
-  timestamp: string;
+  /** API returns camelCase createdAt; timestamp is kept as a fallback for legacy shapes */
+  createdAt?: string;
+  timestamp?: string;
   level: LogLevel;
   service: string;
   message: string;
@@ -50,12 +52,14 @@ export function LogRow({ index, style, data }: ListChildComponentProps<LogEntry[
     >
       {/* Timestamp */}
       <span className="w-36 shrink-0 font-mono text-[var(--color-muted-foreground)]">
-        {formatDate(entry.timestamp, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          fractionalSecondDigits: 3,
-        })}
+        {(entry.createdAt ?? entry.timestamp) !== undefined
+          ? formatDate(entry.createdAt ?? entry.timestamp!, {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              fractionalSecondDigits: 3,
+            })
+          : "—"}
       </span>
 
       {/* Level badge */}

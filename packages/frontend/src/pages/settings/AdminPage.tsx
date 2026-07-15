@@ -197,7 +197,7 @@ const QUICK_LINKS: Array<{ label: string; description: string; to: string; icon:
 
 export function AdminPage() {
   const isAdmin = usePermission("tenant-admin");
-  const { tenantId } = useSession();
+  const { tenantId, isLoading: authLoading } = useSession();
   const client = useApiClient();
   const queryClient = useQueryClient();
 
@@ -286,6 +286,20 @@ export function AdminPage() {
       setRotateKeyOpen(false);
     },
   });
+
+  if (authLoading) {
+    return (
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-72" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mt-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (
