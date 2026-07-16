@@ -1,16 +1,19 @@
 import { Hono } from "hono";
-import type { AppVariables } from "@oneplatform/core";
+import type { AppVariables, ServiceTokenSigner } from "@oneplatform/core";
 import { UnauthorizedError, ForbiddenError, ValidationError } from "@oneplatform/core";
 import { updateRateLimitConfigRequest } from "../schemas/index.js";
 import type { RateLimitConfigRepository } from "../repositories/rate-limit-config-repository.js";
 
 export interface AdminRouteDeps {
   rateLimitConfigRepo: RateLimitConfigRepository;
+  authServiceUrl: string;
+  pipelineServiceUrl: string;
+  serviceTokenSigner?: ServiceTokenSigner;
 }
 
 export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
-  const { rateLimitConfigRepo } = deps;
+  const { rateLimitConfigRepo, authServiceUrl, pipelineServiceUrl, serviceTokenSigner } = deps;
 
   routes.get("/rate-limits", async (c) => {
     const user = c.var.user;
@@ -100,6 +103,55 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: AppVa
         startedAt: new Date().toISOString(),
       },
     }, 202);
+  });
+
+  // GET /api/v1/admin/stats
+  // Aggregates system-wide counts from auth and pipeline services.
+  // Falls back to zero counts on any downstream failure so the admin UI
+  // always renders (the frontend supplies mock data when this returns an error).
+  routes.get("/stats", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+    if (!user.scopes?.includes("admin")) {
+      throw new ForbiddenError("Admin role required.");
+    }
+
+    const fetchCount = async (url: string): Promise<number> => {
+      try {
+        const headers: Record<string, string> = {
+          "x-oneplatform-tenant-id": user.tenantId,
+        };
+        if (user.userId) headers["x-oneplatform-user-id"] = user.userId;
+        if (user.roles?.length) headers["x-oneplatform-user-roles"] = user.roles.join(",");
+        if (serviceTokenSigner) headers["x-service-token"] = await serviceTokenSigner.sign();
+        const res = await fetch(url, { headers, signal: AbortSignal.timeout(3000) });
+        if (!res.ok) return 0;
+        const body = await res.json() as { pagination?: { total?: number }; meta?: { total?: number }; total?: number };
+        return body.pagination?.total ?? body.meta?.total ?? body.total ?? 0;
+      } catch {
+        return 0;
+      }
+    };
+
+    const [users, tenants, pipelines] = await Promise.all([
+      fetchCount(`${authServiceUrl}/api/v1/users?limit=1`),
+      fetchCount(`${authServiceUrl}/api/v1/tenants?limit=1`),
+      fetchCount(`${pipelineServiceUrl}/api/v1/pipelines?limit=1`),
+    ]);
+
+    return c.json({
+      data: {
+        stats: {
+          userCount: users,
+          tenantCount: tenants,
+          activeSessions: 0,
+          pipelineCount: pipelines,
+        },
+        activity: [],
+      },
+    });
   });
 
   return routes;

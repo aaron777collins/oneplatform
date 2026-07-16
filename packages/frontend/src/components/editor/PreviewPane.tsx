@@ -12,7 +12,7 @@ import * as React from "react";
 import { RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { useQuery } from "@tanstack/react-query";
-import { useApiClient } from "@/lib/api-client.js";
+import { useApiClient, ApiError } from "@/lib/api-client.js";
 import { cn } from "@/lib/utils.js";
 
 // ---------------------------------------------------------------------------
@@ -36,15 +36,25 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
   const client = useApiClient();
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
-  // Determine preview mode from platform config (§11.7)
+  // Determine preview mode from platform config (§11.7).
+  // A 404 means the config endpoint is not deployed — treat as Mode B (no wildcard domain).
+  // Only surface an error for unexpected failures (5xx, network errors).
   const configQuery = useQuery({
     queryKey: ["config", "public"],
-    queryFn: ({ signal }) =>
-      client.get<{ data: PublicConfig }>("/v1/config/public", undefined, { signal }),
-    staleTime: 5 * 60 * 1000, // Config doesn't change often
+    queryFn: async ({ signal }) => {
+      try {
+        return await client.get<{ data: PublicConfig }>("/v1/config/public", undefined, { signal });
+      } catch (err) {
+        if (err instanceof ApiError && err.statusCode === 404) {
+          return null;
+        }
+        throw err;
+      }
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
-  const wildcardDomain = configQuery.data?.data.wildcardDomain;
+  const wildcardDomain = configQuery.data?.data?.wildcardDomain;
   const isModeA = wildcardDomain !== undefined && wildcardDomain.length > 0;
 
   // Mode A: preview served from distinct origin → safe to use allow-same-origin
@@ -59,8 +69,11 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
 
   // Subscribe to reload-stream SSE to auto-reload iframe on build completion
   React.useEffect(() => {
-    // Only subscribe to reload stream when using same-origin mode;
-    // in wildcard mode the preview origin manages its own reload
+    // Wait until config has loaded before subscribing — avoids connecting
+    // before we know the sandbox mode, and prevents a spurious connection
+    // that is immediately torn down when Mode A is confirmed.
+    if (configQuery.isLoading) return;
+    // Only subscribe in Mode B (same-origin); Mode A preview handles its own reload
     if (isModeA) return;
 
     const es = new EventSource(`/apps/${appSlug}/preview/reload-stream`, {
@@ -91,7 +104,7 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
     };
 
     return () => es.close();
-  }, [appSlug, isModeA]);
+  }, [appSlug, isModeA, configQuery.isLoading]);
 
   function handleManualRefresh() {
     if (iframeRef.current !== null) {
@@ -137,9 +150,8 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
             Loading preview…
           </div>
         ) : configQuery.isError ? (
-          // Render an explicit error rather than silently downgrading to Mode B
-          // (same-origin sandbox) when the runtime config fetch fails. A silent
-          // fallback would reduce isolation for operators who configured Mode A.
+          // Only reached for unexpected failures (5xx, network errors).
+          // 404 from /v1/config/public is handled in queryFn and treated as Mode B.
           <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-[var(--color-destructive)]">
             <span className="font-semibold">Preview unavailable</span>
             <span className="text-[var(--color-muted-foreground)]">
@@ -153,7 +165,6 @@ export function PreviewPane({ appSlug, className }: PreviewPaneProps) {
             sandbox={sandboxValue}
             className="h-full w-full border-0"
             title={`Preview of ${appSlug}`}
-            // Prevent the hosted app from navigating the top-level context
             referrerPolicy="strict-origin"
           />
         )}

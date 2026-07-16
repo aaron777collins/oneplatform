@@ -31,6 +31,9 @@ import { createWebhookRoutes } from "./routes/webhooks.js";
 import { createSseRoutes } from "./routes/sse.js";
 import { createDataRoutes } from "./routes/data.js";
 import { createAdminRoutes } from "./routes/admin.js";
+import { createMetricsRoutes } from "./routes/metrics.js";
+import { createDlqRoutes } from "./routes/dlq.js";
+import { createConfigRoutes } from "./routes/config.js";
 import { createHealthRoutes } from "./routes/health.js";
 import { createOpenApiRoutes } from "./routes/openapi.js";
 import { createGdprRoutes } from "./routes/gdpr.js";
@@ -395,6 +398,9 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
       // JWKS public key set — fetched unauthenticated by SDK clients verifying
       // platform-issued JWT signatures.
       "/api/v1/auth/.well-known/*",
+      // Public platform config — non-sensitive deployment hints consumed by
+      // the app editor's PreviewPane to determine iframe sandbox mode.
+      "/api/v1/config/public",
     ],
     targetService: "gateway-service",
     servicePublicKeys,
@@ -518,8 +524,26 @@ export async function createServiceApp(config: GatewayConfig): Promise<ServiceAp
   });
   app.route("/api/v1/data", dataRoutes);
 
-  const adminRoutes = createAdminRoutes({ rateLimitConfigRepo });
+  const adminRoutes = createAdminRoutes({
+    rateLimitConfigRepo,
+    authServiceUrl: config.authServiceUrl ?? process.env["AUTH_SERVICE_URL"] ?? "http://auth-service:3000",
+    pipelineServiceUrl: config.pipelineServiceUrl ?? process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
+  });
   app.route("/api/v1/admin", adminRoutes);
+
+  const metricsRoutes = createMetricsRoutes({
+    pipelineServiceUrl: config.pipelineServiceUrl ?? process.env["PIPELINE_SERVICE_URL"] ?? "http://pipeline-service:3000",
+    loggingServiceUrl: config.loggingServiceUrl ?? process.env["LOGGING_SERVICE_URL"] ?? "http://logging-service:3000",
+    ...(config.serviceTokenSigner !== undefined ? { serviceTokenSigner: config.serviceTokenSigner } : {}),
+  });
+  app.route("/api/v1/metrics", metricsRoutes);
+
+  const dlqRoutes = createDlqRoutes();
+  app.route("/api/v1/dlq", dlqRoutes);
+
+  const configRoutes = createConfigRoutes();
+  app.route("/api/v1/config", configRoutes);
 
   const gdprRoutes = createGdprRoutes({ gdprService });
   app.route("/api/v1/gdpr", gdprRoutes);

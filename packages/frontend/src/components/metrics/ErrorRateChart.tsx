@@ -51,7 +51,9 @@ export function ErrorRateChart() {
   const query = useQuery({
     queryKey: ["metrics", "error-rate"],
     queryFn: ({ signal }) =>
-      client.get<{ data: ErrorRateDataPoint[]; services: string[] }>(
+      // The gateway returns { data: { points, services } } — a single-key envelope
+      // that the responseEnvelopeMiddleware passes through without re-wrapping.
+      client.get<{ data: { points: ErrorRateDataPoint[]; services: string[] } }>(
         "/v1/metrics/error-rate",
         { window: "24h", interval: "1h" },
         { signal },
@@ -60,8 +62,8 @@ export function ErrorRateChart() {
     staleTime: 30_000,
   });
 
-  const dataPoints = query.data?.data ?? [];
-  const services = query.data?.services ?? [];
+  const dataPoints = query.data?.data?.points ?? [];
+  const services = query.data?.data?.services ?? [];
 
   const chartData = dataPoints.map((point) => ({
     time: formatDate(point.timestamp, { hour: "2-digit", minute: "2-digit" }),
