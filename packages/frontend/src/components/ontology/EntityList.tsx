@@ -32,6 +32,9 @@ import { useNavigate } from "@tanstack/react-router";
 
 export interface EntitySummary {
   name: string;
+  // Canonical URL-safe identifier used for entity detail routes and API lookups.
+  // Falls back to `name` in the UI only when a legacy record lacks a slug.
+  slug: string;
   description?: string;
   fieldCount: number;
   relationshipCount: number;
@@ -61,11 +64,11 @@ export interface EntityListProps {
 // ExpandedFieldsRow — fetches and renders schema fields for a single entity
 // ---------------------------------------------------------------------------
 
-function ExpandedFieldsRow({ entityName }: { entityName: string }) {
+function ExpandedFieldsRow({ entitySlug }: { entitySlug: string }) {
   const client = useApiClient();
   const { data, isLoading } = useQuery({
-    queryKey: ["ontology", entityName],
-    queryFn: () => client.get<{ data: EntityDetail }>(`/v1/ontology/${entityName}`),
+    queryKey: ["ontology", entitySlug],
+    queryFn: () => client.get<{ data: EntityDetail }>(`/v1/ontology/${entitySlug}`),
     // Keep cached — user may collapse and re-expand without a refetch
     staleTime: 30_000,
   });
@@ -234,7 +237,7 @@ export function EntityList({ entities, isLoading = false, isError = false, onRet
                   <div className="flex items-center gap-2">
                     <Link
                       to="/ontology/$entityType"
-                      params={{ entityType: entity.name }}
+                      params={{ entityType: entity.slug }}
                       className="text-xs text-[var(--color-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-sm"
                     >
                       View
@@ -246,7 +249,7 @@ export function EntityList({ entities, isLoading = false, isError = false, onRet
                       onClick={() =>
                         void navigate({
                           to: "/ontology/query",
-                          search: { entity: entity.name } as Record<string, string>,
+                          search: { entity: entity.slug } as Record<string, string>,
                         })
                       }
                       aria-label={`Query ${entity.name} entity`}
@@ -259,7 +262,7 @@ export function EntityList({ entities, isLoading = false, isError = false, onRet
               </TableRow>,
               // Render expanded schema row immediately after each entity row
               ...(isExpanded
-                ? [<ExpandedFieldsRow key={`${entity.name}-fields`} entityName={entity.name} />]
+                ? [<ExpandedFieldsRow key={`${entity.name}-fields`} entitySlug={entity.slug} />]
                 : []),
             ];
           })

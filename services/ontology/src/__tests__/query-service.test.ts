@@ -78,6 +78,7 @@ const entityRepo: EntityRepository = {
   findByTenantId: vi.fn(),
   findBySlug: vi.fn(),
   findById: vi.fn(),
+  findByName: vi.fn(),
   updateOptimistic: vi.fn(),
   bumpVersion: vi.fn(),
   softDelete: vi.fn(),

@@ -44,13 +44,16 @@ export function RelativeTime({ value, className }: RelativeTimeProps) {
     return () => clearInterval(interval);
   }, [date]);
 
-  const absoluteText = formatDate(date);
+  const isValid = !Number.isNaN(date.getTime());
+  const absoluteText = isValid ? formatDate(date) : "Unknown";
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <time
-          dateTime={date.toISOString()}
+          // date.toISOString() throws a RangeError on an invalid date, so only
+          // set dateTime when the value parsed to a real date.
+          {...(isValid ? { dateTime: date.toISOString() } : {})}
           className={className}
           style={{ cursor: "default" }}
         >

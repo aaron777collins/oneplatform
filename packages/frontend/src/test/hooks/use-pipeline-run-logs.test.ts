@@ -57,9 +57,9 @@ function dispatchLog(es: MockEventSource, line: LogLine): void {
   es.dispatchEvent(event);
 }
 
-/** Fire all "complete" event listeners on the given EventSource instance. */
+/** Fire all "done" event listeners on the given EventSource instance. */
 function dispatchComplete(es: MockEventSource): void {
-  const event = new MessageEvent("complete", { data: "" });
+  const event = new MessageEvent("done", { data: "" });
   es.dispatchEvent(event);
 }
 
@@ -81,7 +81,7 @@ describe("usePipelineRunLogs", () => {
     renderHook(() => usePipelineRunLogs("run-123"));
 
     expect(instances).toHaveLength(1);
-    expect(instances[0]!.url).toBe("/api/v1/pipeline-runs/run-123/logs/stream");
+    expect(instances[0]!.url).toBe("/api/v1/pipeline-runs/run-123/logs");
     expect(instances[0]!.withCredentials).toBe(true);
   });
 
@@ -111,7 +111,7 @@ describe("usePipelineRunLogs", () => {
     expect(result.current.logs[0]!.message).toBe("ok");
   });
 
-  it("sets isComplete=true and closes the EventSource when a 'complete' event fires", () => {
+  it("sets isComplete=true and closes the EventSource when a 'done' event fires", () => {
     const { result } = renderHook(() => usePipelineRunLogs("run-1"));
     const es = instances[0]!;
 

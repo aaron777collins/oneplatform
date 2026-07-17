@@ -33,6 +33,68 @@ interface RunDetail {
   error?: string;
 }
 
+// The pipeline service returns raw DB rows wrapped as
+// { data: { run, steps, durationMs } } with snake_case fields and DB-native
+// status values ("pending"/"completed"). Normalize that into the RunDetail
+// shape the UI renders. Tolerant of both wrapped and flat, snake and camel
+// payloads so the page never crashes on an unexpected response shape.
+const DB_STATUS_TO_UI: Record<string, RunStatus> = {
+  pending: "queued",
+  queued: "queued",
+  running: "running",
+  completed: "success",
+  success: "success",
+  failed: "failed",
+  cancelled: "cancelled",
+};
+
+function pick(obj: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
+function normalizeRunDetail(raw: unknown, fallbackId: string): RunDetail | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+
+  // Unwrap { run, steps, durationMs } if present, otherwise treat as the run itself.
+  const container = raw as Record<string, unknown>;
+  const source = (container["run"] && typeof container["run"] === "object"
+    ? container["run"]
+    : container) as Record<string, unknown>;
+
+  const rawStatus = String(pick(source, "status") ?? "pending").toLowerCase();
+  const status = DB_STATUS_TO_UI[rawStatus] ?? "queued";
+
+  // error may be a string or a structured object ({ message, code, ... }).
+  const rawError = pick(source, "error");
+  let error: string | undefined;
+  if (typeof rawError === "string" && rawError.length > 0) {
+    error = rawError;
+  } else if (rawError !== undefined && typeof rawError === "object") {
+    const message = (rawError as Record<string, unknown>)["message"];
+    error = typeof message === "string" ? message : JSON.stringify(rawError);
+  }
+
+  const completedAt = pick(source, "completedAt", "completed_at");
+  const pipelineName = pick(source, "pipelineName", "pipeline_name");
+
+  return {
+    id: String(pick(source, "id") ?? fallbackId),
+    pipelineId: String(pick(source, "pipelineId", "pipeline_id") ?? ""),
+    pipelineName: typeof pipelineName === "string" && pipelineName.length > 0
+      ? pipelineName
+      : "Pipeline",
+    status,
+    triggeredBy: String(pick(source, "triggeredBy", "triggered_by") ?? "manual"),
+    startedAt: String(pick(source, "startedAt", "started_at", "created_at") ?? ""),
+    ...(typeof completedAt === "string" ? { completedAt } : {}),
+    ...(error !== undefined ? { error } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Friendly trigger labels
 // ---------------------------------------------------------------------------
@@ -122,9 +184,11 @@ function formatRunNumber(runId: string): string {
 // ---------------------------------------------------------------------------
 
 function formatDuration(startedAt: string, completedAt?: string): string {
+  const start = new Date(startedAt).getTime();
+  if (Number.isNaN(start)) return "—";
   const end = completedAt !== undefined ? new Date(completedAt).getTime() : Date.now();
-  const diffMs = end - new Date(startedAt).getTime();
-  if (diffMs < 0) return "—";
+  const diffMs = end - start;
+  if (Number.isNaN(diffMs) || diffMs < 0) return "—";
 
   const seconds = Math.round(diffMs / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -148,11 +212,13 @@ export function RunDetailPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["pipeline-runs", runId],
-    queryFn: () => client.get<ApiResponse<RunDetail>>(`/v1/pipeline-runs/${runId}`),
+    queryFn: () =>
+      client
+        .get<ApiResponse<unknown>>(`/v1/pipeline-runs/${runId}`)
+        .then((res) => normalizeRunDetail(res.data, runId)),
     // Refresh every 5s while run is still active
     refetchInterval: (query) => {
-      const rawState = query.state.data;
-      const run = (rawState as unknown as { data?: ApiResponse<RunDetail> })?.data?.data ?? (rawState as ApiResponse<RunDetail> | undefined)?.data;
+      const run = query.state.data;
       if (run === undefined) return false;
       return run.status === "running" || run.status === "queued" ? 5000 : false;
     },
@@ -170,7 +236,7 @@ export function RunDetailPage() {
     },
   });
 
-  const run = (data as unknown as { data?: ApiResponse<RunDetail> })?.data?.data ?? (data as ApiResponse<RunDetail> | undefined)?.data;
+  const run = data;
 
   if (isError) {
     return (

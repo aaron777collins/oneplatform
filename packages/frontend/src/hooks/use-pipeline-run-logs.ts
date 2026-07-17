@@ -29,12 +29,12 @@ const MAX_LINES = 10_000;
 /**
  * Streams log lines from a pipeline run via SSE.
  *
- * Connects to GET /api/v1/pipeline-runs/:runId/logs/stream.
- * The stream emits "log" events with JSON LogLine payloads, and a
- * "complete" event when the run finishes (either success or failure).
+ * Connects to GET /api/v1/pipeline-runs/:runId/logs.
+ * The stream emits "log" events with JSON log payloads, and a
+ * "done" event when the run finishes (either success or failure).
  *
  * The connection is closed on unmount or when runId changes.
- * EventSource reconnects automatically on transient failures — the "complete"
+ * EventSource reconnects automatically on transient failures — the "done"
  * event is idempotent so duplicate delivery is safe.
  */
 export function usePipelineRunLogs(runId: string): UsePipelineRunLogsResult {
@@ -50,14 +50,30 @@ export function usePipelineRunLogs(runId: string): UsePipelineRunLogsResult {
     setError(null);
 
     const es = new EventSource(
-      `/api/v1/pipeline-runs/${runId}/logs/stream`,
+      `/api/v1/pipeline-runs/${runId}/logs`,
       { withCredentials: true },
     );
     esRef.current = es;
 
     es.addEventListener("log", (e) => {
       try {
-        const line = JSON.parse((e as MessageEvent<string>).data) as LogLine;
+        // The server emits records with a `createdAt` timestamp and may omit or
+        // send an unexpected `level`. Normalize into the LogLine shape the
+        // viewer renders so a stray field never crashes it.
+        const raw = JSON.parse((e as MessageEvent<string>).data) as Record<string, unknown>;
+        const rawLevel = String(raw["level"] ?? "info").toLowerCase();
+        const level: LogLine["level"] =
+          rawLevel === "debug" || rawLevel === "warn" || rawLevel === "error"
+            ? rawLevel
+            : "info";
+        const line: LogLine = {
+          timestamp: String(raw["timestamp"] ?? raw["createdAt"] ?? raw["created_at"] ?? ""),
+          level,
+          message: String(raw["message"] ?? ""),
+          ...(raw["details"] !== undefined && raw["details"] !== null
+            ? { fields: raw["details"] as Record<string, unknown> }
+            : {}),
+        };
         setLogs((prev) => {
           const next = [...prev, line];
           // Evict oldest lines when the buffer exceeds MAX_LINES to bound memory usage
@@ -68,7 +84,8 @@ export function usePipelineRunLogs(runId: string): UsePipelineRunLogsResult {
       }
     });
 
-    es.addEventListener("complete", () => {
+    // The server signals stream completion with a "done" event.
+    es.addEventListener("done", () => {
       setIsComplete(true);
       es.close();
       esRef.current = null;

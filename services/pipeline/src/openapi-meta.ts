@@ -401,6 +401,17 @@ export const meta: ServiceOpenApiMeta = {
     // -----------------------------------------------------------------------
     {
       method: "GET",
+      path: "/api/v1/pipeline-runs",
+      summary: "List pipeline runs",
+      description: "Lists runs across all pipelines for the tenant, newest first.",
+      tags: ["Pipeline Runs"],
+      query: { schema: ListRunsQuery },
+      response: {
+        200: runListResponse,
+      },
+    },
+    {
+      method: "GET",
       path: "/api/v1/pipeline-runs/{runId}",
       summary: "Get pipeline run",
       tags: ["Pipeline Runs"],

@@ -22,6 +22,8 @@ import {
   MigrationInProgressError,
 } from "./errors.js";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface EntityServiceDeps {
   db: pg.Pool;
   redis: Redis;
@@ -204,6 +206,22 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
     return refEntity.id;
   }
 
+  // Resolve an entity from a URL identifier that may be a slug, a UUID id, or a
+  // human-readable name. Slug is the canonical form; id and name are accepted so
+  // that links/bookmarks built from either still resolve. Returns null when no
+  // entity matches any interpretation.
+  async function resolveEntityRow(tenantId: string, identifier: string): Promise<EntityRow | null> {
+    const bySlug = await entityRepo.findBySlug(tenantId, identifier);
+    if (bySlug) return bySlug;
+
+    if (UUID_RE.test(identifier)) {
+      const byId = await entityRepo.findById(tenantId, identifier);
+      if (byId) return byId;
+    }
+
+    return entityRepo.findByName(tenantId, identifier);
+  }
+
   async function publishOntologyChanged(tenantId: string, newVersion: number, diff: Record<string, unknown>): Promise<void> {
     await redis.publish("ontology:changed", JSON.stringify({ tenantId, newVersion, diff }));
   }
@@ -338,7 +356,7 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
     },
 
     async getEntity(tenantId, entityType) {
-      const entity = await entityRepo.findBySlug(tenantId, entityType);
+      const entity = await resolveEntityRow(tenantId, entityType);
       if (!entity) throw new EntityNotFoundError(`Entity '${entityType}' not found.`);
       const fields = await fieldRepo.findByEntityId(entity.id);
       return toEntityDetail(entity, fields);

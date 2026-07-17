@@ -7,6 +7,7 @@ export interface EntityRepository {
   findByTenantId(tenantId: string, cursor?: string, limit?: number): Promise<EntityRow[]>;
   findBySlug(tenantId: string, slug: string): Promise<EntityRow | null>;
   findById(tenantId: string, id: string): Promise<EntityRow | null>;
+  findByName(tenantId: string, name: string): Promise<EntityRow | null>;
   updateOptimistic(id: string, tenantId: string, expectedVersion: number, data: UpdateEntityData): Promise<EntityRow | null>;
   bumpVersion(id: string): Promise<EntityRow | null>;
   softDelete(id: string, tenantId: string): Promise<boolean>;
@@ -60,6 +61,17 @@ export function createEntityRepository(db: pg.Pool): EntityRepository {
         `SELECT * FROM ontology.entities
          WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
         [tenantId, id],
+      );
+      return result.rows[0] ?? null;
+    },
+
+    async findByName(tenantId, name) {
+      const result = await db.query<EntityRow>(
+        `SELECT * FROM ontology.entities
+         WHERE tenant_id = $1 AND lower(name) = lower($2) AND deleted_at IS NULL
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        [tenantId, name],
       );
       return result.rows[0] ?? null;
     },

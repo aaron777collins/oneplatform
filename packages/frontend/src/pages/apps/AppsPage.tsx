@@ -7,7 +7,7 @@
  */
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Plus, Search, LayoutGrid, Sparkles, Code2 } from "lucide-react";
 
 // Cast Lucide icons to avoid exactOptionalPropertyTypes conflict on className
@@ -31,10 +31,12 @@ export function AppsPage() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  // `?new=true` (set when navigating to /apps/new) auto-opens the template picker.
+  const routeSearch = useSearch({ from: "/authenticated/apps" });
 
   const [search, setSearch] = React.useState("");
   const [accessFilter, setAccessFilter] = React.useState<AppAccessMode | "all">("all");
-  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = React.useState(routeSearch.new === true);
 
   const query = useQuery({
     queryKey: ["apps"],
@@ -160,7 +162,13 @@ export function AppsPage() {
       {/* Template picker dialog — G-075 */}
       <TemplatePickerDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          // Strip the ?new flag on close so a refresh doesn't reopen the dialog.
+          if (!open && routeSearch.new === true) {
+            void navigate({ to: "/apps", search: {}, replace: true });
+          }
+        }}
         onCreated={(app) => {
           void queryClient.invalidateQueries({ queryKey: ["apps"] });
           // Take the user directly into the visual builder — they just chose a

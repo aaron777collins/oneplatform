@@ -278,6 +278,26 @@ const pipelineBuilderRoute = createRoute({
   ),
 });
 
+// /pipelines/$id/builder is an alias for the editor — some links and bookmarks
+// use "builder" for the drag-and-drop pipeline editor. Redirect to /edit so the
+// canonical route owns a single implementation.
+const pipelineBuilderAliasRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/pipelines/$id/builder",
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: "/pipelines/$id/edit", params: { id: params.id } });
+  },
+});
+
+const pipelineRunsListRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/pipeline-runs",
+  component: lazyRouteComponent(
+    () => import("./pages/pipelines/PipelineRunsPage.js"),
+    "PipelineRunsPage",
+  ),
+});
+
 const runDetailRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/pipeline-runs/$runId",
@@ -291,10 +311,24 @@ const runDetailRoute = createRoute({
 const appsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/apps",
+  validateSearch: (search: Record<string, unknown>): { new?: boolean } =>
+    search["new"] === true || search["new"] === "true" ? { new: true } : {},
   component: lazyRouteComponent(
     () => import("./pages/apps/AppsPage.js"),
     "AppsPage",
   ),
+});
+
+// /apps/new must be registered before /apps/$id so the literal "new" segment
+// is matched as a dedicated route, not treated as an app ID (which fails UUID
+// validation and renders the "App not found" error). It lands on the Apps page
+// with the "New App" template picker dialog already open.
+const newAppRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/apps/new",
+  beforeLoad: () => {
+    throw redirect({ to: "/apps", search: { new: true } });
+  },
 });
 
 const appDetailRoute = createRoute({
@@ -327,6 +361,17 @@ const appBuilderRoute = createRoute({
     () => import("./pages/apps/AppBuilderPage.js"),
     "AppBuilderPage",
   ),
+});
+
+// /apps/$id/editor is an alias for the code editor — some links and bookmarks
+// use "editor" for the Monaco-based app editor. Redirect to /edit so the
+// canonical route owns a single implementation.
+const appEditorAliasRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/apps/$id/editor",
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: "/apps/$id/edit", params: { id: params.id } });
+  },
 });
 
 // --- Logs ---
@@ -521,11 +566,17 @@ const routeTree = rootRoute.addChildren([
     newPipelineRoute,
     pipelineDetailRoute,
     pipelineBuilderRoute,
+    pipelineBuilderAliasRoute,
+    // pipelineRunsListRoute (/pipeline-runs) before runDetailRoute (/pipeline-runs/$runId)
+    pipelineRunsListRoute,
     runDetailRoute,
     appsRoute,
+    // newAppRoute before $id so the literal "new" wins over the param wildcard
+    newAppRoute,
     appDetailRoute,
     appEditorRoute,
     appBuilderRoute,
+    appEditorAliasRoute,
     logsRoute,
     auditRoute,
     dlqRoute,

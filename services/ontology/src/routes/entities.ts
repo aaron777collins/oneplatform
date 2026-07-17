@@ -21,16 +21,19 @@ export interface EntityRouteDeps {
 const REQUIRED_READ_SCOPE = "ontology:read";
 const REQUIRED_WRITE_SCOPE = "ontology:write";
 
-// Entity type slugs are lowercase alphanumeric with hyphens and underscores.
-// Enforcing this allowlist at the route boundary prevents reflected-input in
-// error messages (SA-009) — the service layer re-uses the slug value verbatim
-// in NotFoundError text, which would otherwise echo arbitrary URL content.
-const ENTITY_TYPE_SLUG_RE = /^[a-z0-9_-]+$/i;
+// An entity type identifier in the URL may be a slug (student-grades), a UUID
+// id, or a human-readable name ("Student Grades"). This allowlist accepts all
+// three forms — alphanumerics, hyphens, underscores, and spaces — while still
+// preventing reflected-input in error messages (SA-009): the service layer
+// re-uses the value verbatim in NotFoundError text, so characters that could
+// enable HTML/script injection in a rendered error are rejected here, and the
+// length is capped.
+const ENTITY_TYPE_ID_RE = /^[a-z0-9 _-]{1,128}$/i;
 
 function validateEntityTypeParam(entityType: string): void {
-  if (!ENTITY_TYPE_SLUG_RE.test(entityType)) {
+  if (!ENTITY_TYPE_ID_RE.test(entityType)) {
     throw new ValidationError(
-      "entityType must contain only alphanumeric characters, hyphens, and underscores.",
+      "entityType must contain only alphanumeric characters, spaces, hyphens, and underscores.",
       [],
     );
   }
@@ -129,7 +132,10 @@ export function createEntityRoutes(deps: EntityRouteDeps): Hono<{ Variables: App
     const entityType = c.req.param("entityType");
     validateEntityTypeParam(entityType);
     const entity = await entityService.getEntity(user.tenantId, entityType);
-    const relationships = await relationshipService.getRelationships(user.tenantId, entityType);
+    // Relationships are keyed by the canonical slug, so resolve them from the
+    // entity we just looked up rather than the raw URL identifier (which may
+    // have been a name or id).
+    const relationships = await relationshipService.getRelationships(user.tenantId, entity.slug);
 
     return c.json({ ...entity, relationships });
   });

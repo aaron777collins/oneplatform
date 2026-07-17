@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppVariables } from "@oneplatform/core";
 import { UnauthorizedError } from "@oneplatform/core";
 import type { RunService } from "../services/run-service.js";
+import { ListRunsQuery } from "../schemas/index.js";
 
 // ---------------------------------------------------------------------------
 // Route dependencies
@@ -18,6 +19,34 @@ export interface RunRouteDeps {
 export function createRunRoutes(deps: RunRouteDeps): Hono<{ Variables: AppVariables }> {
   const routes = new Hono<{ Variables: AppVariables }>();
   const { runService } = deps;
+
+  // GET /api/v1/pipeline-runs — cross-pipeline run list, newest first.
+  // Powers the /pipeline-runs UI page and the gateway pipeline-throughput metric.
+  routes.get("/", async (c) => {
+    const user = c.var.user;
+    if (!user?.tenantId) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+
+    const parsed = ListRunsQuery.safeParse(c.req.query());
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: "Invalid query parameters.", details: parsed.error.flatten() } },
+        400,
+      );
+    }
+
+    const q = parsed.data;
+    const result = await runService.listRuns(user.tenantId, {
+      ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
+      limit: q.limit,
+      ...(q["filter[status][eq]"] !== undefined
+        ? { filterStatus: q["filter[status][eq]"] }
+        : {}),
+    });
+
+    return c.json(result);
+  });
 
   // GET /api/v1/pipeline-runs/:runId
   routes.get("/:runId", async (c) => {

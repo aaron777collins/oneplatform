@@ -182,7 +182,7 @@ export function EntityDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["ontology"] });
       const createdEntity = result.data;
       toast({ title: `Entity "${createdEntity.name}" created` });
-      void navigate({ to: "/ontology/$entityType", params: { entityType: createdEntity.name } });
+      void navigate({ to: "/ontology/$entityType", params: { entityType: createdEntity.slug } });
     },
     onError: (err) => {
       const message = err instanceof ApiError ? err.message : "Failed to create entity";

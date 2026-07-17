@@ -900,6 +900,62 @@ function JoinRow({ join, primaryFieldOptions, availableEntityTypes, joinedFieldO
   );
 }
 
+// ---------------------------------------------------------------------------
+// NCA-009: JoinRowContainer — fetches the joined entity's fields
+// ---------------------------------------------------------------------------
+
+interface JoinRowContainerProps {
+  join: JoinUI;
+  primaryFieldOptions: Array<{ slug: string; name: string }>;
+  availableEntityTypes: Array<{ slug: string; name: string }>;
+  onChange: (updated: JoinUI) => void;
+  onRemove: () => void;
+}
+
+/**
+ * Wraps JoinRow and owns the useQuery that loads the fields of the joined
+ * entity. Rendering this as a dedicated component (one per join row) keeps each
+ * hook call bound to a stable component instance, so the parent page's hook
+ * count never changes as joins are added or removed.
+ */
+function JoinRowContainer({ join, primaryFieldOptions, availableEntityTypes, onChange, onRemove }: JoinRowContainerProps) {
+  const client = useApiClient();
+
+  const { data: joinedEntityData } = useQuery({
+    queryKey: ["ontology", join.joinEntityType],
+    queryFn: () =>
+      client.get<{ data: EntityDetail }>(`/v1/ontology/${join.joinEntityType}`),
+    enabled: join.joinEntityType !== "",
+  });
+
+  const joinedEntity =
+    (joinedEntityData as unknown as { data?: { data: EntityDetail } })?.data?.data ??
+    (joinedEntityData as { data: EntityDetail } | undefined)?.data;
+
+  const joinedFieldOptions: Array<{ slug: string; name: string }> = joinedEntity
+    ? [
+        { slug: "_id", name: "_id (system)" },
+        { slug: "_created_at", name: "_created_at (system)" },
+        { slug: "_updated_at", name: "_updated_at (system)" },
+        ...joinedEntity.fields.map((f) => ({ slug: f.slug, name: f.name })),
+      ]
+    : [];
+
+  return (
+    <JoinRow
+      join={join}
+      primaryFieldOptions={primaryFieldOptions}
+      availableEntityTypes={availableEntityTypes}
+      onJoinEntityChange={(joinId, entitySlug) =>
+        onChange({ ...join, id: joinId, joinEntityType: entitySlug, rightField: "" })
+      }
+      joinedFieldOptions={joinedFieldOptions}
+      onChange={onChange}
+      onRemove={onRemove}
+    />
+  );
+}
+
 interface OrderByRowProps {
   orderBy: OrderByUI;
   fieldOptions: Array<{ slug: string; name: string }>;
@@ -2408,29 +2464,23 @@ export function QueryBuilderPage() {
                 <p className="text-sm text-[var(--color-muted-foreground)]">No joins configured.</p>
               ) : (
                 <div className="space-y-2">
-                  {joins.map((join) => {
-                    // Fetch fields for the joined entity so the right-field dropdown is populated.
-                    // We render a simple inline-query result here via a child component that
-                    // holds its own useQuery hook, keeping the parent hook count stable.
-                    return (
-                      <JoinRow
-                        key={join.id}
-                        join={join}
-                        primaryFieldOptions={fieldOptions}
-                        availableEntityTypes={entityList.flatMap((e) => {
-                          const ent = e as { slug?: string; name: string };
-                          if (!ent.slug) return [];
-                          return [{ slug: ent.slug, name: ent.name }];
-                        })}
-                        onJoinEntityChange={(joinId, entitySlug) =>
-                          updateJoin(joinId, { ...join, joinEntityType: entitySlug, rightField: "" })
-                        }
-                        joinedFieldOptions={[]}
-                        onChange={(updated) => updateJoin(join.id, updated)}
-                        onRemove={() => removeJoin(join.id)}
-                      />
-                    );
-                  })}
+                  {joins.map((join) => (
+                    // JoinRowContainer owns the useQuery that loads the joined
+                    // entity's fields so the right-side "ON" field dropdown is
+                    // populated once a join entity is selected.
+                    <JoinRowContainer
+                      key={join.id}
+                      join={join}
+                      primaryFieldOptions={fieldOptions}
+                      availableEntityTypes={entityList.flatMap((e) => {
+                        const ent = e as { slug?: string; name: string };
+                        if (!ent.slug) return [];
+                        return [{ slug: ent.slug, name: ent.name }];
+                      })}
+                      onChange={(updated) => updateJoin(join.id, updated)}
+                      onRemove={() => removeJoin(join.id)}
+                    />
+                  ))}
                 </div>
               )}
             </section>
