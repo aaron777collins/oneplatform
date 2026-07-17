@@ -214,6 +214,12 @@ export function createEntityService(deps: EntityServiceDeps): EntityService {
     const bySlug = await entityRepo.findBySlug(tenantId, identifier);
     if (bySlug) return bySlug;
 
+    const normalized = identifier.replace(/-/g, "_");
+    if (normalized !== identifier) {
+      const byNormalized = await entityRepo.findBySlug(tenantId, normalized);
+      if (byNormalized) return byNormalized;
+    }
+
     if (UUID_RE.test(identifier)) {
       const byId = await entityRepo.findById(tenantId, identifier);
       if (byId) return byId;
