@@ -152,16 +152,12 @@ export function PipelineRunsPage() {
     .filter((r): r is RunListRow => r !== undefined);
 
   const query = search.trim().toLowerCase();
-  const filtered =
-    query.length === 0
-      ? runs
-      : runs.filter((run) => {
-          const name = nameById.get(run.pipelineId) ?? "";
-          return (
-            name.toLowerCase().includes(query) ||
-            run.id.toLowerCase().includes(query)
-          );
-        });
+  const filtered = runs.filter((run) => {
+    if (statusFilter !== "all" && run.status !== statusFilter) return false;
+    if (query.length === 0) return true;
+    const name = nameById.get(run.pipelineId) ?? "";
+    return name.toLowerCase().includes(query) || run.id.toLowerCase().includes(query);
+  });
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -175,18 +171,35 @@ export function PipelineRunsPage() {
       />
 
       <div className="p-6 space-y-4">
-        <div className="relative max-w-sm">
-          <Search
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted-foreground)]"
-            aria-hidden
-          />
-          <Input
-            className="pl-9"
-            placeholder="Search runs…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search runs"
-          />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative max-w-sm flex-1 min-w-48">
+            <Search
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted-foreground)]"
+              aria-hidden
+            />
+            <Input
+              className="pl-9"
+              placeholder="Search runs…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search runs"
+            />
+          </div>
+          <Select
+            value={statusFilter}
+            onValueChange={(value) => setStatusFilter(value as RunStatus | "all")}
+          >
+            <SelectTrigger className="w-40" aria-label="Filter by status">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {runsQuery.isError ? (
@@ -203,11 +216,11 @@ export function PipelineRunsPage() {
           </div>
         ) : filtered.length === 0 ? (
           <EmptyState
-            title={runs.length === 0 ? "No pipeline runs yet" : "No runs match your search"}
+            title={runs.length === 0 ? "No pipeline runs yet" : "No runs match your filters"}
             description={
               runs.length === 0
                 ? "Runs appear here once you trigger a pipeline."
-                : "Try a different search term."
+                : "Try a different search term or status filter."
             }
           />
         ) : (
@@ -219,6 +232,7 @@ export function PipelineRunsPage() {
                   <th className="px-4 py-2.5 font-medium">Run</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 font-medium">Started</th>
+                  <th className="px-4 py-2.5 font-medium">Duration</th>
                 </tr>
               </thead>
               <tbody>
@@ -241,6 +255,9 @@ export function PipelineRunsPage() {
                     </td>
                     <td className="px-4 py-3 text-[var(--color-muted-foreground)]">
                       {run.startedAt ? <RelativeTime value={run.startedAt} /> : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-muted-foreground)]">
+                      {run.startedAt ? formatDuration(run.startedAt, run.completedAt) : "—"}
                     </td>
                   </tr>
                 ))}
